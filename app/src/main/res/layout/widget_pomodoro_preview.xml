@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Static picker preview for Pomodoro widget (API 31-34). Mirrors square tier. -->
+<!-- Static picker preview for Pomodoro widget (API 31-34). Mirrors minimal compact tier. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -28,15 +28,25 @@
         android:textSize="32sp"
         android:textStyle="bold"
         android:textColor="?attr/colorOnSurface"
-        android:layout_marginTop="8dp" />
+        android:layout_marginTop="6dp" />
 
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="3 of 8 sessions"
-        android:textSize="11sp"
+        android:text="SESSION 3 OF 8"
+        android:textSize="10sp"
         android:textColor="?attr/colorOnSurfaceVariant"
         android:layout_marginTop="2dp" />
+
+    <ProgressBar
+        android:layout_width="120dp"
+        android:layout_height="6dp"
+        android:layout_marginTop="8dp"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:progress="35"
+        android:max="100"
+        android:progressTint="?attr/colorPrimary"
+        android:progressBackgroundTint="?attr/colorSurfaceVariant" />
 
     <FrameLayout
         android:layout_width="52dp"

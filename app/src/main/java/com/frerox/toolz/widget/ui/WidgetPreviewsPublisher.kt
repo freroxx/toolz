@@ -68,7 +68,7 @@ object WidgetPreviewsPublisher {
             try {
                 manager.setWidgetPreviews(TimerWidgetReceiver::class)
             } catch (e: Exception) {
-                Log.w(TAG, "timer preview failed", e)
+                Log.w(TAG, "stopwatch preview failed", e)
             }
             try {
                 context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()

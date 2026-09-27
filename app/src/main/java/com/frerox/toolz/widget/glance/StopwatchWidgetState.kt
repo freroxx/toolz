@@ -18,23 +18,30 @@
 package com.frerox.toolz.widget.glance
 
 import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.glance.state.GlanceStateDefinition
 import androidx.glance.state.PreferencesGlanceStateDefinition
 
 // ---------------------------------------------------------------------------
-//  Timer widget state — written by ToolService, read by TimerGlanceWidget.
-//  Long millis + elapsedRealtime anchor so the widget interpolates live
-//  between pushes (same protocol as Pomodoro).
+//  Stopwatch widget state — written by ToolService, read by
+//  StopwatchGlanceWidget. Replaces the old Timer widget state (tw_* keys)
+//  in place: same provider component, fresh sw_* keys, stale timer state
+//  falls back to the idle defaults below.
+//  Live protocol: BASE_ELAPSED is the elapsedRealtime anchor the run
+//  started from (base = now - accumulated at start). While running the
+//  widget derives now = nowElapsed - base; while paused it shows
+//  ACCUMULATED verbatim. CAPTURED_AT stamps the push for drift math.
 // ---------------------------------------------------------------------------
 
-object TimerWidgetStateDefinition : GlanceStateDefinition<androidx.datastore.preferences.core.Preferences>
+object StopwatchWidgetStateDefinition : GlanceStateDefinition<androidx.datastore.preferences.core.Preferences>
 by PreferencesGlanceStateDefinition
 
-object TimerWidgetState {
-    val KEY_REMAINING_MS = longPreferencesKey("tw_remaining_ms")
-    val KEY_TOTAL_MS = longPreferencesKey("tw_total_ms")
-    val KEY_IS_RUNNING = booleanPreferencesKey("tw_is_running")
-    val KEY_IS_RINGING = booleanPreferencesKey("tw_is_ringing")
-    val KEY_CAPTURED_AT_ELAPSED_MS = longPreferencesKey("tw_captured_at_elapsed_ms")
+object StopwatchWidgetState {
+    val KEY_BASE_ELAPSED_MS = longPreferencesKey("sw_base_elapsed_ms")
+    val KEY_ACCUMULATED_MS = longPreferencesKey("sw_accumulated_ms")
+    val KEY_IS_RUNNING = booleanPreferencesKey("sw_is_running")
+    val KEY_CAPTURED_AT_ELAPSED_MS = longPreferencesKey("sw_captured_at_elapsed_ms")
+    val KEY_LAP_COUNT = intPreferencesKey("sw_lap_count")
+    val KEY_LAST_LAP_MS = longPreferencesKey("sw_last_lap_ms")
 }

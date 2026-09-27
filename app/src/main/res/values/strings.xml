@@ -746,11 +746,9 @@
     <string name="widget_pomodoro_label">Toolz Focus Timer</string>
     <string name="widget_pomodoro_desc">Pomodoro countdown with session goal and quick controls</string>
     <string name="widget_toolbar_label">Toolz Quick Actions</string>
-    <string name="widget_toolbar_desc">Search bar with customizable shortcuts to flashlight, QR and timer</string>
-    <string name="widget_screentime_label">Toolz Screen Time</string>
-    <string name="widget_screentime_desc">Daily usage ring with top apps and goal progress</string>
-    <string name="widget_timer_label">Toolz Timer</string>
-    <string name="widget_timer_desc">Countdown timer with live ring and quick controls</string>
+    <string name="widget_toolbar_desc">Search bar with customizable shortcuts to flashlight, QR and stopwatch</string>
+    <string name="widget_stopwatch_label">Toolz Stopwatch</string>
+    <string name="widget_stopwatch_desc">Count-up stopwatch with laps and quick controls</string>
 
     <!-- About Section -->
     <string name="st_About_Toolz">TOOLZ</string>

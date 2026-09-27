@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Explicitly keep the status-bar silhouette used as Notification small icon.
+     Release builds use shrinkResources; without this (and with the non-const
+     NotificationHelper.SMALL_ICON reference) the drawable could be stripped,
+     producing "Invalid notification (no valid small icon)" crashes in
+     SystemForegroundService. -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/ic_stat_toolz" />

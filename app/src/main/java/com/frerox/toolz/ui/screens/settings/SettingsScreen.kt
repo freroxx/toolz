@@ -1078,7 +1078,7 @@ fun SettingsScreen(
                                             "flashlight" to "Flashlight",
                                             "qr" to "QR",
                                             "pomodoro" to "Pomodoro",
-                                            "timer" to "Timer"
+                                            "stopwatch" to "Stopwatch"
                                         )
                                         allSlots.chunked(3).forEach { row ->
                                             Row(

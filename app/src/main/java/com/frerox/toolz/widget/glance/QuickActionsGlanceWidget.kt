@@ -98,7 +98,7 @@ class QuickActionsGlanceWidget : GlanceAppWidget() {
         }
         val qrIntent = widgetNavIntent(context, "qr_generator")
         val pomodoroIntent = widgetNavIntent(context, "pomodoro")
-        val timerIntent = widgetNavIntent(context, "timer")
+        val stopwatchIntent = widgetNavIntent(context, "stopwatch")
 
         val slots = try {
             readToolbarSlots(context)
@@ -118,7 +118,7 @@ class QuickActionsGlanceWidget : GlanceAppWidget() {
                     micIntent = voiceIntent,
                     qrIntent = qrIntent,
                     pomodoroIntent = pomodoroIntent,
-                    timerIntent = timerIntent
+                    stopwatchIntent = stopwatchIntent
                 )
             }
         }
@@ -132,8 +132,10 @@ private suspend fun readToolbarSlots(context: Context): List<String> {
             com.frerox.toolz.widget.ui.WidgetAppearanceEntryPoint::class.java
         ).settingsRepository()
         val slots = repo.widgetToolbarSlots.firstOrNull() ?: setOf("mic", "flashlight", "qr")
-        val order = listOf("mic", "flashlight", "qr", "pomodoro", "timer")
-        order.filter { slots.contains(it) }.take(3).ifEmpty { listOf("mic", "flashlight", "qr") }
+        // Legacy "timer" slot migrates to "stopwatch" (Timer widget retired).
+        val normalized = slots.map { if (it == "timer") "stopwatch" else it }.toSet()
+        val order = listOf("mic", "flashlight", "qr", "pomodoro", "stopwatch")
+        order.filter { normalized.contains(it) }.take(3).ifEmpty { listOf("mic", "flashlight", "qr") }
     } catch (_: Exception) {
         listOf("mic", "flashlight", "qr")
     }
@@ -147,7 +149,7 @@ private fun ToolbarContent(
     micIntent: Intent,
     qrIntent: Intent,
     pomodoroIntent: Intent,
-    timerIntent: Intent
+    stopwatchIntent: Intent
 ) {
     // Threshold tier — OneUI hands intermediates during drag; == would clip.
     val isExpanded = toolbarIsExpanded(LocalSize.current)
@@ -234,12 +236,12 @@ private fun ToolbarContent(
                             onContainer = GlanceTheme.colors.onSurfaceVariant,
                             intent = pomodoroIntent
                         )
-                        "timer" -> SlotButtonIntent(
-                            icon = R.drawable.ic_shortcut_timer,
-                            desc = "Timer",
+                        "timer", "stopwatch" -> SlotButtonIntent(
+                            icon = R.drawable.ic_shortcut_stopwatch,
+                            desc = "Stopwatch",
                             container = GlanceTheme.colors.surfaceVariant,
                             onContainer = GlanceTheme.colors.onSurfaceVariant,
-                            intent = timerIntent
+                            intent = stopwatchIntent
                         )
                         else -> SlotButtonIntent(
                             icon = R.drawable.ic_widget_mic,

@@ -136,16 +136,15 @@ class ToolService : Service() {
     val pomodoroFinishedCount: StateFlow<Int> = _pomodoroFinishedCount
     private var pomodoroJob: Job? = null
     private var pomodoroEndTimestamp: Long = 0L
-    // Widget live-push loop while a session runs: the Glance snapshot only
-    // re-renders on push, so without this the countdown text/ring freezes
-    // between state transitions. 5s keeps MM:SS live without the
-    // flicker/battery cost of per-second Glance re-renders.
+    // Widget live-push loop while a session runs: Glance snapshots only
+    // re-render on push, so a 1s tick keeps MM:SS live every second
+    // (accepted foreground-service push cost — only while running).
     private var pomodoroWidgetJob: Job? = null
-    private val POMODORO_WIDGET_PUSH_INTERVAL_MS = 5_000L
-    // Timer widget live-push loop (mirrors Pomodoro): Glance only re-renders
-    // on push, so a 5s tick keeps MM:SS live without per-second cost.
-    private var timerWidgetJob: Job? = null
-    private val TIMER_WIDGET_PUSH_INTERVAL_MS = 5_000L
+    private val POMODORO_WIDGET_PUSH_INTERVAL_MS = 1_000L
+    // Stopwatch widget live-push loop (replaces the old Timer loop): 1s tick
+    // while running so the count-up clock moves every second.
+    private var stopwatchWidgetJob: Job? = null
+    private val STOPWATCH_WIDGET_PUSH_INTERVAL_MS = 1_000L
     // P-P0-01: NO in-memory workSessionsCount — cadence derives purely from persisted
     // _pomodoroSessionsDone via nextModeAfterWork(). Never reintroduce a second counter.
 
@@ -208,6 +207,7 @@ class ToolService : Service() {
         when (intent?.action) {
             ACTION_STOPWATCH_TOGGLE -> if (_isStopwatchRunning.value) pauseStopwatch() else startStopwatch()
             ACTION_STOPWATCH_STOP -> resetStopwatch()
+            ACTION_STOPWATCH_LAP -> addStopwatchLap()
             ACTION_TIMER_TOGGLE -> {
                 if (_isTimerRunning.value) {
                     pauseTimer()
@@ -347,7 +347,7 @@ class ToolService : Service() {
                 Triple(running, mode, done)
             }.collect { _ ->
                 // P-P1-03: transition pushes carry running/mode/done; the 1s
-                // ticker below never pushes — the 15s widget loop owns that.
+                // ticker below never pushes — the 1s widget loop owns that.
                 pushPomodoroWidgetState()
             }
         }
@@ -614,6 +614,8 @@ class ToolService : Service() {
         // Fix dual-ID desync (S-P0-02): both start AND pause refresh FGS + ID_STOPWATCH.
         ensureForeground()
         updateStopwatchNotification()
+        serviceScope.launch { pushStopwatchWidgetState() }
+        startStopwatchWidgetLoop()
     }
 
     fun pauseStopwatch() {
@@ -626,13 +628,16 @@ class ToolService : Service() {
         _isStopwatchRunning.value = false
         stopwatchJob?.cancel()
         persistStopwatchState()
+        stopStopwatchWidgetLoop()
         ensureForeground()
         updateStopwatchNotification()
+        serviceScope.launch { pushStopwatchWidgetState() }
     }
 
     fun resetStopwatch() {
         _isStopwatchRunning.value = false
         stopwatchJob?.cancel()
+        stopStopwatchWidgetLoop()
         _stopwatchTime.value = 0L
         _stopwatchLaps.value = emptyList()
         lastStopwatchLapRealtime = 0L
@@ -645,6 +650,7 @@ class ToolService : Service() {
             getSystemService(NotificationManager::class.java).cancel(NotificationHelper.ID_STOPWATCH)
         } catch (_: Exception) {}
         ensureForeground()
+        serviceScope.launch { pushStopwatchWidgetState() }
         stopForegroundIfIdle()
     }
 
@@ -667,6 +673,7 @@ class ToolService : Service() {
         _stopwatchTime.value = total
         _stopwatchLaps.value = listOf(total) + current
         persistStopwatchState()
+        serviceScope.launch { pushStopwatchWidgetState() }
         return true
     }
 
@@ -743,6 +750,8 @@ class ToolService : Service() {
                 delay(if (stopwatchShowMsCached) 30L else 250L)
             }
         }
+        serviceScope.launch { pushStopwatchWidgetState() }
+        startStopwatchWidgetLoop()
         try {
             ensureForeground()
             updateStopwatchNotification()
@@ -800,8 +809,6 @@ class ToolService : Service() {
         }
         ensureForeground()
         updateTimerNotification()
-        serviceScope.launch { pushTimerWidgetState() }
-        startTimerWidgetLoop()
     }
 
     fun pauseTimer() {
@@ -815,13 +822,11 @@ class ToolService : Service() {
         timerJob?.cancel()
         cancelTimerWatchdog()
         releaseTimerWakeLock()
-        stopTimerWidgetLoop()
         serviceScope.launch(Dispatchers.IO) {
             try { persistTimerState() } catch (_: Exception) {}
         }
         ensureForeground()
         updateTimerNotification()
-        serviceScope.launch { pushTimerWidgetState() }
     }
 
     fun resetTimer() {
@@ -835,7 +840,7 @@ class ToolService : Service() {
         cancelTimerWatchdog()
         releaseTimerWakeLock()
         stopTimerAlarmOnly()
-        stopTimerWidgetLoop()
+        // (Timer no longer drives a widget — stopwatch owns the widget loop.)
         try {
             val manager = getSystemService(NotificationManager::class.java)
             manager.cancel(NotificationHelper.ID_TIMER)
@@ -843,7 +848,7 @@ class ToolService : Service() {
         serviceScope.launch(Dispatchers.IO) {
             try { persistTimerState() } catch (_: Exception) {}
         }
-        serviceScope.launch { pushTimerWidgetState() }
+        // (Timer no longer drives a widget.)
         // T-P0-02: stopForeground only when all idle — never demote timer while ringing (already stopped).
         maybeReleaseForegroundIfIdle()
     }
@@ -854,7 +859,7 @@ class ToolService : Service() {
         _timerInitial.value = safe
         _timerRemaining.value = safe
         timerEndTimestamp = 0L
-        serviceScope.launch { pushTimerWidgetState() }
+        // (Timer no longer drives a widget.)
     }
 
     /** Additive: update remaining while keeping initial immutable (paused addTime). */
@@ -864,7 +869,7 @@ class ToolService : Service() {
         serviceScope.launch(Dispatchers.IO) {
             try { persistTimerState() } catch (_: Exception) {}
         }
-        serviceScope.launch { pushTimerWidgetState() }
+        // (Timer no longer drives a widget.)
     }
 
     /** Dismiss == reset (clear initial unless repeat). Timer-only stop, never touches Pomodoro. */
@@ -877,7 +882,7 @@ class ToolService : Service() {
         timerRingStopJob?.cancel()
         cancelTimerWatchdog()
         releaseTimerWakeLock()
-        stopTimerWidgetLoop()
+        // (Timer no longer drives a widget — stopwatch owns the widget loop.)
         try {
             val manager = getSystemService(NotificationManager::class.java)
             manager.cancel(NotificationHelper.ID_TIMER_ALARM)
@@ -897,7 +902,7 @@ class ToolService : Service() {
                 }
             } catch (_: Exception) {}
         }
-        serviceScope.launch { pushTimerWidgetState() }
+        // (Timer no longer drives a widget.)
         maybeReleaseForegroundIfIdle()
     }
 
@@ -920,7 +925,7 @@ class ToolService : Service() {
         _isTimerRunning.value = false
         timerJob?.cancel()
         cancelTimerWatchdog()
-        stopTimerWidgetLoop()
+        // (Timer no longer drives a widget — stopwatch owns the widget loop.)
         // T-P1-01: Always vibrate + post visual even if sound off (respect channel importance).
         try { vibrateFinish() } catch (_: Exception) {}
         try {
@@ -941,7 +946,7 @@ class ToolService : Service() {
         serviceScope.launch(Dispatchers.IO) {
             try { persistTimerState() } catch (_: Exception) {}
         }
-        serviceScope.launch { pushTimerWidgetState() }
+        // (Timer no longer drives a widget.)
         ensureForeground()
     }
 
@@ -1349,7 +1354,7 @@ class ToolService : Service() {
 
     // --- Pomodoro Logic (P-P0-01/02/03 + P-P1-03 + P-P2-02) ---
     // DataStore is truth for sessions/goal/durations. Service owns auto-start + sound.
-    // Widget pushes on running/mode/done transitions plus a throttled 15s loop
+    // Widget pushes on running/mode/done transitions plus a 1s loop
     // while running (Glance snapshots only re-render on push).
     fun startPomodoro(durationMillis: Long, mode: String) {
         val safeMode = when (mode) {
@@ -2415,35 +2420,41 @@ class ToolService : Service() {
         } catch (_: Exception) {}
     }
 
-    private suspend fun pushTimerWidgetState() {
+    private suspend fun pushStopwatchWidgetState() {
         try {
-            widgetUpdateManager.updateTimerWidget(
-                remainingMs = _timerRemaining.value.coerceAtLeast(0L),
-                totalMs = _timerInitial.value.coerceAtLeast(1L).coerceAtLeast(_timerRemaining.value.coerceAtLeast(1L)),
-                isRunning = _isTimerRunning.value,
-                isRinging = _isTimerRinging.value,
+            val running = _isStopwatchRunning.value
+            val accumulated = if (running) {
+                (SystemClock.elapsedRealtime() - stopwatchBase).coerceAtLeast(0L)
+            } else {
+                _stopwatchTime.value.coerceAtLeast(0L)
+            }
+            val laps = _stopwatchLaps.value
+            widgetUpdateManager.updateStopwatchWidget(
+                baseElapsedMs = stopwatchBase,
+                accumulatedMs = accumulated,
+                isRunning = running,
+                lapCount = laps.size,
+                lastLapMs = laps.firstOrNull() ?: 0L,
             )
         } catch (_: Exception) {}
     }
 
-    private fun startTimerWidgetLoop() {
-        timerWidgetJob?.cancel()
-        timerWidgetJob = serviceScope.launch {
-            while (_isTimerRunning.value) {
-                delay(TIMER_WIDGET_PUSH_INTERVAL_MS)
-                if (!_isTimerRunning.value) break
+    private fun startStopwatchWidgetLoop() {
+        stopwatchWidgetJob?.cancel()
+        stopwatchWidgetJob = serviceScope.launch {
+            while (_isStopwatchRunning.value) {
+                delay(STOPWATCH_WIDGET_PUSH_INTERVAL_MS)
+                if (!_isStopwatchRunning.value) break
                 try {
-                    _timerRemaining.value =
-                        (timerEndTimestamp - SystemClock.elapsedRealtime()).coerceAtLeast(0L)
-                    pushTimerWidgetState()
+                    pushStopwatchWidgetState()
                 } catch (_: Exception) {}
             }
         }
     }
 
-    private fun stopTimerWidgetLoop() {
-        timerWidgetJob?.cancel()
-        timerWidgetJob = null
+    private fun stopStopwatchWidgetLoop() {
+        stopwatchWidgetJob?.cancel()
+        stopwatchWidgetJob = null
     }
 
     // ── Vibration ─────────────────────────────────────────────────────────
@@ -2467,6 +2478,7 @@ class ToolService : Service() {
     companion object {
         const val ACTION_STOPWATCH_TOGGLE = "com.frerox.toolz.STOPWATCH_TOGGLE"
         const val ACTION_STOPWATCH_STOP = "com.frerox.toolz.STOPWATCH_STOP"
+        const val ACTION_STOPWATCH_LAP = "com.frerox.toolz.STOPWATCH_LAP"
         const val ACTION_TIMER_TOGGLE = "com.frerox.toolz.TIMER_TOGGLE"
         const val ACTION_TIMER_STOP = "com.frerox.toolz.TIMER_STOP"
         const val ACTION_TIMER_FINISH = "com.frerox.toolz.TIMER_FINISH"

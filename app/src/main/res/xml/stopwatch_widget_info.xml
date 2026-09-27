@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:initialLayout="@layout/glance_default_loading_layout"
-    android:previewLayout="@layout/widget_timer_preview"
-    android:label="@string/widget_timer_label"
+    android:previewLayout="@layout/widget_stopwatch_preview"
+    android:label="@string/widget_stopwatch_label"
     android:minWidth="150dp"
     android:minHeight="150dp"
     android:minResizeWidth="150dp"
@@ -14,4 +14,4 @@
     android:updatePeriodMillis="0"
     android:resizeMode="horizontal|vertical"
     android:widgetCategory="home_screen"
-    android:description="@string/widget_timer_desc" />
+    android:description="@string/widget_stopwatch_desc" />

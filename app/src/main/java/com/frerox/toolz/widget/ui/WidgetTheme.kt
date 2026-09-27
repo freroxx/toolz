@@ -35,6 +35,7 @@ import androidx.glance.appwidget.cornerRadius
 import androidx.glance.background
 import androidx.glance.layout.Alignment
 import androidx.glance.layout.Box
+import androidx.glance.layout.padding
 import androidx.glance.layout.size
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
@@ -82,9 +83,9 @@ object WidgetSizes {
     // Toolbar: single-row pill, narrow 2 slots / wide 3 slots
     val ToolbarCompact = androidx.compose.ui.unit.DpSize(200.dp, 72.dp)
     val ToolbarExpanded = androidx.compose.ui.unit.DpSize(320.dp, 72.dp)
-    // Timer: square 2x2, wide 4x2
-    val TimerSquare = androidx.compose.ui.unit.DpSize(150.dp, 150.dp)
-    val TimerWide = androidx.compose.ui.unit.DpSize(300.dp, 160.dp)
+    // Stopwatch: square 2x2, wide 4x2 (replaces the old Timer widget in place)
+    val StopwatchSquare = androidx.compose.ui.unit.DpSize(150.dp, 150.dp)
+    val StopwatchWide = androidx.compose.ui.unit.DpSize(300.dp, 160.dp)
 }
 
 // ---------------------------------------------------------------------------
@@ -108,7 +109,7 @@ fun pomoTier(size: androidx.compose.ui.unit.DpSize): Int = when {
     else -> 0 // square fallback
 }
 
-fun timerIsWide(size: androidx.compose.ui.unit.DpSize): Boolean =
+fun stopwatchIsWide(size: androidx.compose.ui.unit.DpSize): Boolean =
     size.width >= 250.dp && size.width > size.height
 
 fun toolbarIsExpanded(size: androidx.compose.ui.unit.DpSize): Boolean =
@@ -201,6 +202,20 @@ fun formatWidgetClock(ms: Long): String {
     val m = total / 60
     val s = total % 60
     return "%02d:%02d".format(m.toInt(), s.toInt())
+}
+
+/**
+ * Count-up stopwatch format: MM:SS under an hour, H:MM:SS beyond.
+ * Ceils like [formatWidgetClock] so a running stopwatch never shows a
+ * second twice and 0 stays 00:00.
+ */
+fun formatStopwatch(ms: Long): String {
+    val total = ((ms + 999) / 1000).coerceAtLeast(0)
+    val h = total / 3600
+    val m = (total % 3600) / 60
+    val s = total % 60
+    return if (h > 0) "%d:%02d:%02d".format(h.toInt(), m.toInt(), s.toInt())
+    else "%02d:%02d".format(m.toInt(), s.toInt())
 }
 
 /** Downsampled art decode — never OOM on large album files. Returns null on failure. */
@@ -386,4 +401,36 @@ fun WidgetTimeLabel(text: String) {
         ),
         maxLines = 1
     )
+}
+
+// ---------------------------------------------------------------------------
+//  Minimal eyebrow — single shared pill for Pomodoro + Stopwatch.
+//  Small-caps status label on a tonal container; the only chrome above
+//  the clock in the minimal redesign. Never nest clickables inside.
+// ---------------------------------------------------------------------------
+
+@Composable
+fun WidgetEyebrow(
+    text: String,
+    container: ColorProvider = GlanceTheme.colors.primaryContainer,
+    content: ColorProvider = GlanceTheme.colors.onPrimaryContainer
+) {
+    Box(
+        modifier = GlanceModifier
+            .cornerRadius(14.dp)
+            .background(container)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text,
+            style = TextStyle(
+                color = content,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = androidx.glance.text.TextAlign.Center
+            ),
+            maxLines = 1
+        )
+    }
 }

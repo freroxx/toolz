@@ -603,17 +603,18 @@
                 android:resource="@xml/search_bar_widget_info" />
         </receiver>
 
-        <!-- Timer (Glance) -->
+        <!-- Stopwatch (Glance — replaces Timer in place, same component) -->
         <receiver android:name=".widget.glance.TimerWidgetReceiver"
             android:exported="true"
-            android:label="@string/widget_timer_label">
+            android:label="@string/widget_stopwatch_label">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-                <action android:name="com.frerox.toolz.WIDGET_TIMER_TOGGLE" />
-                <action android:name="com.frerox.toolz.WIDGET_TIMER_RESET" />
+                <action android:name="com.frerox.toolz.WIDGET_STOPWATCH_TOGGLE" />
+                <action android:name="com.frerox.toolz.WIDGET_STOPWATCH_RESET" />
+                <action android:name="com.frerox.toolz.WIDGET_STOPWATCH_LAP" />
             </intent-filter>
             <meta-data android:name="android.appwidget.provider"
-                android:resource="@xml/timer_widget_info" />
+                android:resource="@xml/stopwatch_widget_info" />
         </receiver>
 
         <provider
