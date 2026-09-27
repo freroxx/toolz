@@ -142,14 +142,33 @@ class TimerViewModel @Inject constructor(
                 .collect { snap ->
                     _uiState.update { cur ->
                         val idle = !cur.isRunning && !cur.isRinging && cur.remainingTime <= 0L && !cur.isStarted
-                        cur.copy(
-                            selectedHours = if (idle) snap.hr.coerceIn(0, 99) else cur.selectedHours,
-                            selectedMinutes = if (idle) snap.min.coerceIn(0, 59) else cur.selectedMinutes,
-                            selectedSeconds = if (idle) snap.sec.coerceIn(0, 59) else cur.selectedSeconds,
-                            keepScreenOn = snap.keepScreenOn,
-                            gradualVolume = snap.gradual,
-                            alarmsEnabled = snap.alarms,
-                        )
+                        if (!idle) {
+                            cur.copy(
+                                keepScreenOn = snap.keepScreenOn,
+                                gradualVolume = snap.gradual,
+                                alarmsEnabled = snap.alarms,
+                            )
+                        } else {
+                            val hr = snap.hr.coerceIn(0, 99)
+                            val min = snap.min.coerceIn(0, 59)
+                            val sec = snap.sec.coerceIn(0, 59)
+                            // Idle with a remembered duration: seed the readout
+                            // from the wheels so dial and set-duration match on
+                            // cold start (remembered data), like fresh staging.
+                            val remembered = durationMillis(hr, min, sec)
+                            cur.copy(
+                                selectedHours = hr,
+                                selectedMinutes = min,
+                                selectedSeconds = sec,
+                                remainingTime = if (remembered > 0L) remembered else cur.remainingTime,
+                                initialTime = if (remembered > 0L) remembered else cur.initialTime,
+                                isPaused = if (remembered > 0L) true else cur.isPaused,
+                                isStarted = if (remembered > 0L) true else cur.isStarted,
+                                keepScreenOn = snap.keepScreenOn,
+                                gradualVolume = snap.gradual,
+                                alarmsEnabled = snap.alarms,
+                            )
+                        }
                     }
                 }
         }
@@ -265,25 +284,35 @@ class TimerViewModel @Inject constructor(
                 .distinctUntilChanged()
                 .collect { snap ->
                     _uiState.update { cur ->
+                        // Single truth for the readout: when the service holds no
+                        // session (fully idle snapshot) the dial shows the staged
+                        // wheel duration, so wheel and precision text always agree
+                        // at rest. Staged H/M/S persist via lastTimer* ("remember").
+                        val idleSnap = !snap.running && !snap.ringing &&
+                            snap.remaining <= 0L && snap.initial <= 0L
+                        val staged = durationMillis(cur.selectedHours, cur.selectedMinutes, cur.selectedSeconds)
+                        val showStaged = idleSnap && staged > 0L
+                        val effRemaining = if (showStaged) staged else snap.remaining
+                        val effInitial = if (showStaged) staged else snap.initial
                         // Started latches on, but a fully-zero snapshot is
-                        // authoritative: without the snap.initial clause the
+                        // authoritative: without the effInitial clause the
                         // flag re-latched true from intermediate emissions and
                         // reset could never return to true idle.
-                        val started = snap.running || snap.ringing || snap.remaining > 0L ||
-                            (cur.isStarted && snap.initial > 0L)
+                        val started = snap.running || snap.ringing || effRemaining > 0L ||
+                            (cur.isStarted && effInitial > 0L)
                         // T-P1-03: derive isPaused = !running && remaining>0 && started (never-started => Ready).
-                        val paused = !snap.running && !snap.ringing && snap.remaining > 0L && started
+                        val paused = !snap.running && !snap.ringing && effRemaining > 0L && started
                         cur.copy(
-                            remainingTime = snap.remaining,
-                            initialTime = snap.initial,
+                            remainingTime = effRemaining,
+                            initialTime = effInitial,
                             isRunning = snap.running,
                             isRinging = snap.ringing,
                             isFinished = snap.ringing,
                             isPaused = paused,
                             isStarted = started,
-                            // Latch: once the service reports running, this
-                            // timer counts as "has run" until reset/re-staged.
-                            hasRun = cur.hasRun || snap.running,
+                            // A fully-idle service means nothing has run; staged
+                            // edits stay free (no replace-confirm) until a run.
+                            hasRun = if (idleSnap) false else cur.hasRun || snap.running,
                         )
                     }
                 }
@@ -644,18 +673,22 @@ class TimerViewModel @Inject constructor(
     fun stopRingtone() {
         val repeat = _uiState.value.repeatLastDuration
         robustStopRingtone()
-        // T-P1-03: clear initial on dismiss if not repeat.
-        _uiState.update {
-            it.copy(
+        // T-P1-03: dismiss returns to the staged wheel duration (repeat keeps
+        // initial, which equals staged) — the dial never drops to 00:00.
+        _uiState.update { cur ->
+            val staged = durationMillis(cur.selectedHours, cur.selectedMinutes, cur.selectedSeconds)
+            val restore = if (repeat) cur.initialTime else staged
+            val restoreInitial = if (repeat) cur.initialTime else staged
+            cur.copy(
                 isFinished = false,
                 isRinging = false,
-                remainingTime = if (repeat) it.initialTime else 0L,
-                initialTime = if (repeat) it.initialTime else 0L,
-                isPaused = repeat && it.initialTime > 0L,
-                isStarted = repeat && it.initialTime > 0L,
+                remainingTime = restore,
+                initialTime = restoreInitial,
+                isPaused = restore > 0L,
+                isStarted = restore > 0L,
                 // Dismissed without repeat = fresh timer; with repeat the
                 // staged duration keeps its ran history (edits need confirm).
-                hasRun = if (repeat) it.hasRun else false,
+                hasRun = if (repeat) cur.hasRun else false,
             )
         }
     }
@@ -667,20 +700,18 @@ class TimerViewModel @Inject constructor(
         try { toolService?.dismissTimerAlarm() } catch (_: Exception) {}
         // A queued staging/start must not resurrect the timer after reset.
         pendingAction = null
-        _uiState.update {
-            it.copy(
-                // Full clear: the dial reads 00:00 AND the wheels return to
-                // 00:00:00, so staged state can't disagree with the readout.
-                selectedHours = 0,
-                selectedMinutes = 0,
-                selectedSeconds = 0,
-                remainingTime = 0L,
-                initialTime = 0L,
+        _uiState.update { cur ->
+            // Stop and return to the staged wheel duration: the dial shows the
+            // set duration (wheels keep their values), never 00:00.
+            val staged = durationMillis(cur.selectedHours, cur.selectedMinutes, cur.selectedSeconds)
+            cur.copy(
+                remainingTime = staged,
+                initialTime = staged,
                 isRunning = false,
                 isFinished = false,
                 isRinging = false,
-                isPaused = false,
-                isStarted = false,
+                isPaused = staged > 0L,
+                isStarted = staged > 0L,
                 hasRun = false,
             )
         }

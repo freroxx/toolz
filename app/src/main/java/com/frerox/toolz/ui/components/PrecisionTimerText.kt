@@ -17,11 +17,13 @@
 
 package com.frerox.toolz.ui.components
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
@@ -90,10 +92,12 @@ fun formatPreciseTimeParts(
  * - One Row, children aligned by FIRST BASELINE — whole + fraction share the
  *   same baseline at any size pairing, so `.cc` never floats.
  * - Tabular numerals (`tnum`) so `00↔99` never reflows the dial.
- * - ZERO per-tick motion: whole + fraction swap instantly like a real clock.
- *   Motion exists only where it means something — the ms toggle
- *   (fade + width morph, user-initiated) and the running/paused/error color
- *   crossfade (state transitions, never per tick).
+ * - Whole-second rollover crossfades (fade-only, 150ms, ~1/sec) so the dial
+ *   feels smooth without per-tick churn: the centisecond fraction still swaps
+ *   instantly (33 swaps/sec must never animate). Motion exists elsewhere only
+ *   where it means something — the ms toggle (fade + width morph,
+ *   user-initiated) and the running/paused/error color crossfade (state
+ *   transitions, never per tick).
  * - Whole stays `onSurface` for readability; only the fraction signals state
  *   (accent while running, muted while paused). Error color only when the
  *   passed accent is the theme error (ringing / finished).
@@ -144,19 +148,41 @@ fun PrecisionTimerText(
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // No per-tick animation — digits swap instantly. The only motion here
-        // is the ms toggle below (user-initiated) and the color crossfade
-        // above (state transitions).
-        Text(
-            text = parts.whole,
-            style = wholeStyle,
-            color = wholeColor,
-            textAlign = TextAlign.Center,
-            maxLines = 1,
-            softWrap = false,
-            overflow = TextOverflow.Clip,
-            modifier = Modifier.alignByBaseline(),
-        )
+        // Whole-second rollover: fade-only crossfade (~1/sec, 150ms). Fade only —
+        // no slide/scale/spring — so it stays calm at any dial size. The
+        // fraction below swaps instantly (33/sec must never animate).
+        // Performance mode skips the animation and swaps instantly.
+        if (performanceMode) {
+            Text(
+                text = parts.whole,
+                style = wholeStyle,
+                color = wholeColor,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Clip,
+                modifier = Modifier.alignByBaseline(),
+            )
+        } else {
+            AnimatedContent(
+                targetState = parts.whole,
+                transitionSpec = {
+                    fadeIn(tween(150)) togetherWith fadeOut(tween(150))
+                },
+                label = "preciseWhole",
+                modifier = Modifier.alignByBaseline(),
+            ) { whole ->
+                Text(
+                    text = whole,
+                    style = wholeStyle,
+                    color = wholeColor,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Clip,
+                )
+            }
+        }
         if (performanceMode) {
             if (parts.fraction != null) {
                 Text(

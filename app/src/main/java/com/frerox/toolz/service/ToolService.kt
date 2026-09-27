@@ -629,9 +629,14 @@ class ToolService : Service() {
         stopwatchJob?.cancel()
         persistStopwatchState()
         stopStopwatchWidgetLoop()
-        ensureForeground()
-        updateStopwatchNotification()
-        serviceScope.launch { pushStopwatchWidgetState() }
+        // Notification + FGS posts do bitmap work + binder IPC: run them off the
+        // caller (Main) thread so pause feels instant. State above is already
+        // flipped, so the UI reflects the pause immediately.
+        serviceScope.launch(Dispatchers.IO) {
+            ensureForeground()
+            updateStopwatchNotification()
+            pushStopwatchWidgetState()
+        }
     }
 
     fun resetStopwatch() {
@@ -822,11 +827,13 @@ class ToolService : Service() {
         timerJob?.cancel()
         cancelTimerWatchdog()
         releaseTimerWakeLock()
+        // Persist + notification/FGS posts off the caller (Main) thread so pause
+        // feels instant. State above is already flipped for an instant UI.
         serviceScope.launch(Dispatchers.IO) {
             try { persistTimerState() } catch (_: Exception) {}
+            ensureForeground()
+            updateTimerNotification()
         }
-        ensureForeground()
-        updateTimerNotification()
     }
 
     fun resetTimer() {
@@ -1517,12 +1524,14 @@ class ToolService : Service() {
         pomodoroJob?.cancel()
         stopPomodoroWidgetLoop()
         cancelPomodoroWatchdog()
+        // Persist + widget + notification/FGS posts off the caller (Main) thread
+        // so pause feels instant. State above is already flipped for an instant UI.
         serviceScope.launch(Dispatchers.IO) {
             try { persistPomodoroState() } catch (_: Exception) {}
+            pushPomodoroWidgetState()
+            updatePomodoroNotification("Paused")
+            ensureForeground()
         }
-        serviceScope.launch { pushPomodoroWidgetState() }
-        updatePomodoroNotification("Paused")
-        ensureForeground()
     }
 
     fun resetPomodoro() {
@@ -2168,16 +2177,19 @@ class ToolService : Service() {
             .setSmallIcon(R.drawable.ic_stat_toolz)
             .setOngoing(_isStopwatchRunning.value)
             .setContentIntent(pendingIntent)
-            .setShowWhen(false)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
             .addAction(if (_isStopwatchRunning.value) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play, if (_isStopwatchRunning.value) "Pause" else "Resume", togglePI)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopPI)
 
         if (_isStopwatchRunning.value) {
+            // Chronometer only ticks in the shade when shown: setShowWhen(true).
+            // Content text carries a snapshot too, for launchers that hide it.
             builder.setUsesChronometer(true)
+            builder.setShowWhen(true)
             builder.setWhen(System.currentTimeMillis() - _stopwatchTime.value)
-            builder.setContentText("Stopwatch is running")
+            builder.setContentText("${formatStopwatchElapsed(_stopwatchTime.value)} elapsed")
         } else {
+            builder.setShowWhen(false)
             builder.setContentText("Paused: ${formatStopwatchElapsed(_stopwatchTime.value)}")
         }
         return builder.build()
@@ -2186,8 +2198,11 @@ class ToolService : Service() {
     private fun updateStopwatchNotification() {
         // Gate on global && background (S-P0-02); refreshNotifications() cancels instead.
         if (!isGlobalNotificationsEnabled || !isBackgroundNotificationsEnabled) return
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.notify(NotificationHelper.ID_STOPWATCH, createStopwatchNotification())
+        try {
+            val manager = getSystemService(NotificationManager::class.java)
+            manager.notify(NotificationHelper.ID_STOPWATCH, createStopwatchNotification())
+        } catch (_: SecurityException) {
+        } catch (_: Exception) {}
     }
 
     /**
@@ -2222,18 +2237,21 @@ class ToolService : Service() {
             .setSmallIcon(R.drawable.ic_shortcut_timer)
             .setOngoing(_isTimerRunning.value || _isTimerRinging.value)
             .setContentIntent(pendingIntent)
-            .setShowWhen(false)
             .setOnlyAlertOnce(true)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .addAction(if (_isTimerRunning.value) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play, if (_isTimerRunning.value) "Pause" else "Resume", togglePI)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopPI)
         
         if (_isTimerRunning.value) {
+            // Chronometer only ticks in the shade when shown: setShowWhen(true).
+            // Content text carries a snapshot too, for launchers that hide it.
             builder.setUsesChronometer(true)
+            builder.setShowWhen(true)
             builder.setWhen(System.currentTimeMillis() + _timerRemaining.value)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) builder.setChronometerCountDown(true)
-            builder.setContentText("Timer is running")
+            builder.setContentText("${formatTime(_timerRemaining.value)} left")
         } else {
+            builder.setShowWhen(false)
             builder.setContentText(text ?: formatTime(_timerRemaining.value))
         }
         return builder.build()
@@ -2278,7 +2296,6 @@ class ToolService : Service() {
             .setSmallIcon(if (_pomodoroMode.value == "WORK") R.drawable.ic_stat_toolz else R.drawable.ic_stat_toolz)
             .setOngoing(_isPomodoroRunning.value)
             .setContentIntent(pendingIntent)
-            .setShowWhen(false)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
             .addAction(
                 if (_isPomodoroRunning.value) R.drawable.ic_widget_pause else R.drawable.ic_widget_play,
@@ -2292,7 +2309,9 @@ class ToolService : Service() {
         val remainingMs = _pomodoroRemaining.value.coerceIn(0L, totalMs)
 
         if (_isPomodoroRunning.value) {
+            // Chronometer only ticks in the shade when shown: setShowWhen(true).
             builder.setUsesChronometer(true)
+            builder.setShowWhen(true)
             builder.setWhen(System.currentTimeMillis() + remainingMs)
             // P-P1-03: SDK guard (Timer path already guards; Pomodoro must match).
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) builder.setChronometerCountDown(true)
@@ -2304,6 +2323,7 @@ class ToolService : Service() {
                 false,
             )
         } else {
+            builder.setShowWhen(false)
             builder.setContentText(text ?: "Paused • ${formatTime(remainingMs)} left")
             builder.setProgress(
                 totalMs.coerceAtMost(Int.MAX_VALUE.toLong()).toInt().coerceAtLeast(1),

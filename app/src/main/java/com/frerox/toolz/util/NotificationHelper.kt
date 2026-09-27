@@ -399,7 +399,17 @@ object NotificationHelper {
     @Volatile private var largeIconCache: android.graphics.Bitmap? = null
     @Volatile private var largeIconKey: String? = null
 
-    fun toolzLargeIcon(context: Context): android.graphics.Bitmap? = try {
+    fun toolzLargeIcon(context: Context): android.graphics.Bitmap? {
+        // Cache-first: the launcher mark never changes at runtime, so return the
+        // cached bitmap without re-decoding. Decoding on every notification build
+        // (pause/start posts run on the caller thread) caused visible pause lag.
+        largeIconCache?.let { return it }
+        return try {
+            buildToolzLargeIcon(context)
+        } catch (_: Exception) { null }
+    }
+
+    private fun buildToolzLargeIcon(context: Context): android.graphics.Bitmap? = try {
         val raw = android.graphics.BitmapFactory.decodeResource(context.resources, R.drawable.ic_launcher_logo)
             ?: android.graphics.BitmapFactory.decodeResource(context.resources, R.drawable.ic_launcher_foreground)
             ?: return null
