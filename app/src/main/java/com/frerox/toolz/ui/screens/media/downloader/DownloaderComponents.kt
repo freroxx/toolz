@@ -428,10 +428,35 @@ private fun rememberShimmerBrush(delayMs: Int): Brush {
     )
 }
 
+/** Expected skeleton rows derived from settings so the placeholder matches reality. */
+fun expectedSkeletonRows(
+    vertical: Boolean,
+    mode: MediaDownloaderViewModel.DownloadMode,
+    ladderAudio: Int,
+    favConfigured: Int,
+): Triple<Int, Int, Int> {
+    val fav = favConfigured.coerceIn(0, 3)
+    val audioCap = ladderAudio.coerceIn(1, 5)
+    val video = when (mode) {
+        MediaDownloaderViewModel.DownloadMode.VIDEO -> if (vertical) 2 else 5
+        MediaDownloaderViewModel.DownloadMode.AUDIO -> 0
+        MediaDownloaderViewModel.DownloadMode.BOTH -> if (vertical) 2 else 4
+    }
+    val audio = when (mode) {
+        MediaDownloaderViewModel.DownloadMode.VIDEO -> 0
+        MediaDownloaderViewModel.DownloadMode.AUDIO -> audioCap
+        MediaDownloaderViewModel.DownloadMode.BOTH -> if (vertical) minOf(audioCap, 3) else audioCap
+    }
+    return Triple(fav, video, audio)
+}
+
 @Composable
 fun FetchingSkeletonCard(
     vertical: Boolean = false,
     mode: MediaDownloaderViewModel.DownloadMode = MediaDownloaderViewModel.DownloadMode.BOTH,
+    favRows: Int = 0,
+    videoRows: Int = -1,
+    audioRows: Int = -1,
     modifier: Modifier = Modifier,
 ) {
     // One shared shimmer loop for the whole card — previously every placeholder
@@ -455,6 +480,19 @@ fun FetchingSkeletonCard(
         startX = progress * 900f,
         endX = progress * 900f + 500f,
     )
+    // Geometry mirrors ResultCard exactly: same card, padding 16, spacing 14,
+    // title Column spacing 6, 64dp rows, 58dp CTA — so skeleton→result never shifts.
+    val fav = favRows.coerceIn(0, 3)
+    val video = if (videoRows >= 0) videoRows else when (mode) {
+        MediaDownloaderViewModel.DownloadMode.VIDEO -> if (vertical) 2 else 5
+        MediaDownloaderViewModel.DownloadMode.AUDIO -> 0
+        MediaDownloaderViewModel.DownloadMode.BOTH -> if (vertical) 2 else 4
+    }
+    val audio = if (audioRows >= 0) audioRows else when (mode) {
+        MediaDownloaderViewModel.DownloadMode.VIDEO -> 0
+        MediaDownloaderViewModel.DownloadMode.AUDIO -> 5
+        MediaDownloaderViewModel.DownloadMode.BOTH -> if (vertical) 3 else 5
+    }
     ExpressiveCard(
         onClick = {},
         enabled = false,
@@ -465,8 +503,7 @@ fun FetchingSkeletonCard(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            // Thumbnail first — no "Preview" label to match ResultCard.
-            // Thumbnail: 16:9 for YouTube, fixed portrait height for TikTok/Reels.
+            // Thumbnail slot — identical modifiers to ResultCard.
             if (vertical) {
                 Box(
                     modifier = Modifier
@@ -484,90 +521,101 @@ fun FetchingSkeletonCard(
                         .background(shimmer),
                 )
             }
-            // Title (2 lines) + uploader line, same widths as real text.
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(0.85f)
-                    .height(17.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(shimmer),
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(0.58f)
-                    .height(17.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(shimmer),
-            )
-            Box(
-                modifier = Modifier
-                    .width(110.dp)
-                    .height(13.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(shimmer),
-            )
-            // Stats row placeholders (views + likes pills).
-            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            // Title/uploader/stats — same Column(spacing 6) structure as ResultCard.
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Box(
                     modifier = Modifier
-                        .width(64.dp)
-                        .height(15.dp)
-                        .clip(RoundedCornerShape(7.dp))
+                        .fillMaxWidth(0.92f)
+                        .height(24.dp)
+                        .clip(RoundedCornerShape(8.dp))
                         .background(shimmer),
                 )
                 Box(
                     modifier = Modifier
-                        .width(64.dp)
-                        .height(15.dp)
-                        .clip(RoundedCornerShape(7.dp))
+                        .fillMaxWidth(0.6f)
+                        .height(20.dp)
+                        .clip(RoundedCornerShape(8.dp))
                         .background(shimmer),
                 )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .clip(CircleShape)
+                            .background(shimmer),
+                    )
+                    Box(
+                        modifier = Modifier
+                            .width(120.dp)
+                            .height(14.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(shimmer),
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .width(76.dp)
+                            .height(28.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(shimmer),
+                    )
+                    Box(
+                        modifier = Modifier
+                            .width(76.dp)
+                            .height(28.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(shimmer),
+                    )
+                }
             }
-            // Section label placeholder ("Choose quality").
+            // Section label ("Choose quality").
             Box(
                 modifier = Modifier
-                    .width(120.dp)
-                    .height(14.dp)
+                    .width(150.dp)
+                    .height(18.dp)
                     .clip(RoundedCornerShape(7.dp))
                     .background(shimmer),
             )
-            // Quality rows mirror the result structure for the active mode, with
-            // representative counts: BOTH typically shows 4+ video and 3+ audio
-            // (direct + converted), AUDIO up to 5, VIDEO up to 5. Capped so the
-            // skeleton never flashes taller than the real card.
-            val videoRows = when (mode) {
-                MediaDownloaderViewModel.DownloadMode.VIDEO -> 5
-                MediaDownloaderViewModel.DownloadMode.AUDIO -> 0
-                MediaDownloaderViewModel.DownloadMode.BOTH -> 4
-            }
-            val audioRows = when (mode) {
-                MediaDownloaderViewModel.DownloadMode.VIDEO -> 0
-                MediaDownloaderViewModel.DownloadMode.AUDIO -> 5
-                MediaDownloaderViewModel.DownloadMode.BOTH -> 3
-            }
-            if (mode == MediaDownloaderViewModel.DownloadMode.BOTH) {
+            // Favorites section mirror (star header + pinned rows).
+            if (fav > 0) {
                 Box(
                     modifier = Modifier
-                        .width(60.dp)
-                        .height(13.dp)
+                        .width(110.dp)
+                        .height(14.dp)
                         .clip(RoundedCornerShape(6.dp))
                         .background(shimmer),
                 )
+                repeat(fav) {
+                    SkeletonQualityRow(brush = shimmer)
+                }
             }
-            repeat(videoRows) {
-                SkeletonQualityRow(brush = shimmer)
-            }
-            if (mode != MediaDownloaderViewModel.DownloadMode.VIDEO) {
-                if (mode == MediaDownloaderViewModel.DownloadMode.BOTH) {
+            if (video > 0) {
+                if (audio > 0 || fav > 0) {
                     Box(
                         modifier = Modifier
-                            .width(60.dp)
+                            .width(70.dp)
                             .height(13.dp)
                             .clip(RoundedCornerShape(6.dp))
                             .background(shimmer),
                     )
                 }
-                repeat(audioRows) {
+                repeat(video) {
+                    SkeletonQualityRow(brush = shimmer)
+                }
+            }
+            if (audio > 0) {
+                Box(
+                    modifier = Modifier
+                        .width(70.dp)
+                        .height(13.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(shimmer),
+                )
+                repeat(audio) {
                     SkeletonQualityRow(brush = shimmer)
                 }
             }
@@ -579,12 +627,12 @@ fun FetchingSkeletonCard(
                     .clip(RoundedCornerShape(26.dp))
                     .background(shimmer),
             )
-            // "New link" action placeholder, mirroring ResultCard.
+            // "New link" action placeholder — 40dp to match the real text button.
             Box(
                 modifier = Modifier
                     .align(Alignment.CenterHorizontally)
                     .width(96.dp)
-                    .height(20.dp)
+                    .height(40.dp)
                     .clip(RoundedCornerShape(10.dp))
                     .background(shimmer),
             )

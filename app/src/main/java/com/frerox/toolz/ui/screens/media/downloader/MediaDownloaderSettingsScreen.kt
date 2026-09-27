@@ -278,8 +278,30 @@ private fun PlatformPrefsCard(
                     platformDisplayName(platform),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f),
                 )
             }
+            // Live effect summary so every toggle reads as working instantly.
+            val summaryBits = buildList {
+                if (prefs.favorites.isNotEmpty()) add("${prefs.favorites.size} pinned")
+                if (prefs.hidden.isNotEmpty()) add("${prefs.hidden.size} hidden")
+                prefs.autoSelect?.let { add("auto ${it.uppercase()}") }
+                prefs.defaultMode?.let {
+                    add(
+                        when (it) {
+                            MediaDownloaderViewModel.DownloadMode.VIDEO -> "video default"
+                            MediaDownloaderViewModel.DownloadMode.AUDIO -> "audio default"
+                            MediaDownloaderViewModel.DownloadMode.BOTH -> "both default"
+                        },
+                    )
+                }
+            }
+            Text(
+                if (summaryBits.isEmpty()) "Using defaults" else summaryBits.joinToString(" • "),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold,
+            )
 
             PrefGroupLabel(stringResource(R.string.st_MediaDownloader_DefaultMode))
             val customMode = prefs.defaultMode != null
@@ -368,7 +390,7 @@ private fun PlatformPrefsCard(
                 // them, so they are not offered here to avoid dead toggles.
                 exts.filter { it != "mp3" && it != "mp4" }.forEach { ext ->
                     ExpressiveFilterChip(
-                        selected = ext in prefs.hidden,
+                        selected = prefs.hidden.any { it.equals(ext, ignoreCase = true) },
                         onClick = { onToggleHidden(ext) },
                         label = {
                             Text(

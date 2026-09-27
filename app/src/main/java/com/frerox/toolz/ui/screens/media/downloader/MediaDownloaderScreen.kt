@@ -7,6 +7,7 @@ package com.frerox.toolz.ui.screens.media.downloader
 import android.content.Context
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
@@ -53,8 +54,10 @@ import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.HighQuality
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Movie
+import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -94,7 +97,6 @@ import com.frerox.toolz.shortcuts.ToolShortcutDefinitions
 import com.frerox.toolz.shortcuts.ToolShortcutManager
 import com.frerox.toolz.ui.components.ExpressiveCard
 import com.frerox.toolz.ui.components.ExpressiveContainedLoadingIndicator
-import com.frerox.toolz.ui.components.ExpressiveSplitButton
 import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.components.LargeExpressiveShape
 import com.frerox.toolz.ui.components.SquircleShape
@@ -123,6 +125,7 @@ fun MediaDownloaderScreen(
     val downloads by viewModel.downloads.collectAsState()
     val labels by viewModel.labels.collectAsState()
     val history by viewModel.history.collectAsState()
+    val prefs by viewModel.formatPrefs.collectAsState()
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
     val haptic = rememberToolzHapticFeedback()
@@ -217,19 +220,51 @@ fun MediaDownloaderScreen(
                 }
             }
 
-            item(key = "fetching") {
-                AnimatedVisibility(
-                    visible = isBusy,
-                    enter = enterMotion,
-                    exit = exitMotion,
-                ) {
+            // Unified preview slot: skeleton and result share one Lazy item and one
+            // card geometry, so loading never moves the card — it crossfades in place.
+            item(key = "preview") {
+                val showSkeleton = isBusy
+                val showResult = hasResult && !isBusy
+                if (showSkeleton || showResult) {
+                    val previewPlatform = resolvePlatform(ui.detectedPlatform, ui.remote?.platform)
                     val skeletonMode = ui.detectedPlatform?.let {
                         viewModel.effectiveModeForUi(it)
                     } ?: ui.mode
-                    FetchingSkeletonCard(
-                        vertical = isVerticalVideo(ui.detectedPlatform),
-                        mode = skeletonMode,
-                    )
+                    val skeletonVertical = isVerticalVideo(ui.detectedPlatform)
+                    val (favR, videoR, audioR) = remember(skeletonVertical, skeletonMode, prefs, previewPlatform) {
+                        val platKey = previewPlatform?.name
+                        val favConfigured = platKey?.let { prefs.perPlatform[it]?.favorites?.size } ?: 0
+                        expectedSkeletonRows(
+                            vertical = skeletonVertical,
+                            mode = skeletonMode,
+                            ladderAudio = prefs.ladderExts.size,
+                            favConfigured = favConfigured,
+                        )
+                    }
+                    AnimatedContent(
+                        targetState = showSkeleton,
+                        transitionSpec = {
+                            (fadeIn(spring(stiffness = Spring.StiffnessMediumLow)) togetherWith
+                                fadeOut(spring(stiffness = Spring.StiffnessMedium))) using
+                                SizeTransform(clip = false)
+                        },
+                        label = "previewSwap",
+                    ) { skeleton ->
+                        if (skeleton) {
+                            FetchingSkeletonCard(
+                                vertical = skeletonVertical,
+                                mode = skeletonMode,
+                                favRows = favR,
+                                videoRows = videoR,
+                                audioRows = audioR,
+                            )
+                        } else {
+                            ResultCard(
+                                viewModel = viewModel,
+                                onDownload = { viewModel.downloadSelected(context) },
+                            )
+                        }
+                    }
                 }
             }
 
@@ -262,21 +297,6 @@ fun MediaDownloaderScreen(
                             icon = Icons.Rounded.Warning,
                             containerColor = MaterialTheme.colorScheme.tertiaryContainer,
                             contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
-                        )
-                    }
-                }
-            }
-
-            item(key = "result") {
-                AnimatedVisibility(
-                    visible = hasResult && !isBusy,
-                    enter = enterMotion,
-                    exit = exitMotion,
-                ) {
-                    if (hasResult) {
-                        ResultCard(
-                            viewModel = viewModel,
-                            onDownload = { viewModel.downloadSelected(context) },
                         )
                     }
                 }
@@ -342,7 +362,7 @@ private fun InputCard(
     val haptic = rememberToolzHapticFeedback()
 
     ExpressiveCard(onClick = {}, enabled = false, shape = LargeExpressiveShape) {
-        Column {
+        Column(Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -441,19 +461,30 @@ private fun InputCard(
             )
             } // close padded content column
 
-            // Wide CTA: card-level insets (12dp) instead of the 16dp content
-            // padding, so the primary action spans visibly wider.
-            Box(
+            // Full-bleed CTA: explicit Row with weighted main action so it truly
+            // spans the card. M3 SplitButtonLayout sizes to content, which left
+            // the dead gap on the right.
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 12.dp),
+                    .padding(horizontal = 8.dp, vertical = 12.dp)
+                    .height(66.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                ExpressiveSplitButton(
+                ToolzExpressiveButton(
                     onClick = viewModel::extract,
-                    onMenuClick = onNavigateToSettings,
                     enabled = !isBusy,
-                    modifier = Modifier.fillMaxWidth().height(66.dp),
-                    leadingIcon = {
+                    modifier = Modifier.weight(1f).fillMaxSize(),
+                    shape = RoundedCornerShape(
+                        topStart = 28.dp, topEnd = 12.dp,
+                        bottomEnd = 12.dp, bottomStart = 28.dp,
+                    ),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
                         if (isBusy) {
                             ExpressiveContainedLoadingIndicator(
                                 modifier = Modifier.size(26.dp),
@@ -467,8 +498,6 @@ private fun InputCard(
                                 modifier = Modifier.size(24.dp),
                             )
                         }
-                    },
-                    label = {
                         AnimatedContent(
                             targetState = isBusy,
                             transitionSpec = {
@@ -487,8 +516,26 @@ private fun InputCard(
                                 maxLines = 1,
                             )
                         }
-                    },
-                )
+                    }
+                }
+                ToolzExpressiveButton(
+                    onClick = onNavigateToSettings,
+                    enabled = !isBusy,
+                    modifier = Modifier.width(60.dp).fillMaxSize(),
+                    shape = RoundedCornerShape(
+                        topStart = 12.dp, topEnd = 28.dp,
+                        bottomEnd = 28.dp, bottomStart = 12.dp,
+                    ),
+                    contentPadding = PaddingValues(0.dp),
+                ) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Rounded.KeyboardArrowDown,
+                            contentDescription = stringResource(R.string.st_MediaDownloader_Settings),
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
+                }
             }
 
             if (!ui.apiConfigured && ui.enabledPlatforms.any {
@@ -569,6 +616,7 @@ private fun ResultCard(
     onDownload: () -> Unit,
 ) {
     val ui by viewModel.ui.collectAsState()
+    val prefs by viewModel.formatPrefs.collectAsState()
     val remote = ui.remote
     val title = remote?.title ?: ui.localTitle ?: "Media"
     val thumb = remote?.thumbnail ?: ui.localThumbnail
@@ -576,10 +624,15 @@ private fun ResultCard(
     val duration = remote?.duration ?: 0L
     val views = formatCount(remote?.stats?.view_count)
     val likes = formatCount(remote?.stats?.like_count)
+    val platform = resolvePlatform(ui.detectedPlatform, remote?.platform)
 
-    val videoOpts = remember(ui.options) { ui.options.filter { it.kind == "video" } }
-    val audioOpts = remember(ui.options) { ui.options.filter { it.kind == "audio" } }
-    val imageOpts = remember(ui.options) { ui.options.filter { it.kind == "image" } }
+    // Favorites get their own pinned section; the kind groups below show the rest.
+    val (favOpts, restOpts) = remember(ui.options, prefs, platform) {
+        viewModel.partitionFavorites(platform, ui.options)
+    }
+    val videoOpts = remember(restOpts) { restOpts.filter { it.kind == "video" } }
+    val audioOpts = remember(restOpts) { restOpts.filter { it.kind == "audio" } }
+    val imageOpts = remember(restOpts) { restOpts.filter { it.kind == "image" } }
     val selected = ui.options.firstOrNull { it.id == ui.selectedId }
 
     ExpressiveCard(
@@ -592,7 +645,9 @@ private fun ResultCard(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            val verticalThumb = imageOpts.isEmpty() && isVerticalVideo(resolvePlatform(ui.detectedPlatform, remote?.platform))
+            // Portrait slot for TikTok/Reels, 16:9 otherwise. Platform-only (same
+            // rule as the skeleton) so the card never changes shape on load.
+            val verticalThumb = isVerticalVideo(platform)
             val thumbModifier = if (verticalThumb) {
                 Modifier
                     .fillMaxWidth()
@@ -686,7 +741,7 @@ private fun ResultCard(
 
             if (ui.options.isNotEmpty()) {
                 Text(
-                    if (imageOpts.isNotEmpty() && videoOpts.isEmpty() && audioOpts.isEmpty()) {
+                    if (imageOpts.isNotEmpty() && videoOpts.isEmpty() && audioOpts.isEmpty() && favOpts.isEmpty()) {
                         stringResource(R.string.st_MediaDownloader_Photos)
                     } else {
                         stringResource(R.string.st_MediaDownloader_ChooseQuality)
@@ -695,6 +750,33 @@ private fun ResultCard(
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.Bold,
                 )
+                // Pinned favorites: dedicated section so settings pins are visible.
+                if (favOpts.isNotEmpty()) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Icon(
+                            Icons.Rounded.Star,
+                            null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                        Text(
+                            stringResource(R.string.st_MediaDownloader_Favorites),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                    favOpts.forEach { opt ->
+                        QualityOptionRow(
+                            option = opt,
+                            selected = ui.selectedId == opt.id,
+                            onSelect = { viewModel.selectOption(opt.id) },
+                        )
+                    }
+                }
                 if (imageOpts.isNotEmpty()) {
                     Text(
                         stringResource(R.string.st_MediaDownloader_PhotosHint),

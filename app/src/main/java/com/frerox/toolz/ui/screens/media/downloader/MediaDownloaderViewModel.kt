@@ -190,7 +190,13 @@ class MediaDownloaderViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 dataStore.data.map { prefs -> decodePrefs(prefs[FORMAT_PREFS_KEY]) }
-                    .collect { _formatPrefs.value = it }
+                    .collect {
+                        _formatPrefs.value = it
+                        // Cross-instance live update: settings may run on a different
+                        // ViewModel instance than the main screen. Rebuild visible
+                        // options here so prefs always apply without re-extract.
+                        if (_ui.value.options.isNotEmpty()) refreshVisibleOptions()
+                    }
             } catch (_: Exception) { }
         }
         viewModelScope.launch {
@@ -477,14 +483,24 @@ class MediaDownloaderViewModel @Inject constructor(
     }
 
     fun toggleHidden(platform: MediaDownloaderRepository.Platform, ext: String) {
-        if (ext == "mp3" || ext == "mp4") return
+        val norm = ext.lowercase()
+        if (norm == "mp3" || norm == "mp4") return
         val key = platform.name
         updatePrefs { prefs ->
             val cur = prefs.perPlatform[key] ?: PlatformFormatPrefs()
-            val next = if (ext in cur.hidden) cur.hidden - ext else cur.hidden + ext
+            val next = if (cur.hidden.any { it.lowercase() == norm }) {
+                cur.hidden.filterNot { it.lowercase() == norm }.toSet()
+            } else {
+                cur.hidden + norm
+            }
             prefs.copy(
                 perPlatform = prefs.perPlatform + (
-                    key to cur.copy(hidden = next, favorites = cur.favorites - ext)
+                    key to cur.copy(
+                        hidden = next,
+                        favorites = cur.favorites.filterNot {
+                            it.uppercase() == norm.uppercase() || it.lowercase() == norm
+                        },
+                    )
                     ),
             )
         }
@@ -515,9 +531,10 @@ class MediaDownloaderViewModel @Inject constructor(
     }
 
     fun setLadderExt(ext: String, enabled: Boolean) {
-        if (ext == "mp3") return
+        val norm = ext.lowercase()
+        if (norm == "mp3") return
         updatePrefs { prefs ->
-            val next = if (enabled) prefs.ladderExts + ext else prefs.ladderExts - ext
+            val next = if (enabled) prefs.ladderExts + norm else prefs.ladderExts - norm
             prefs.copy(ladderExts = next)
         }
         refreshVisibleOptions()
@@ -601,10 +618,11 @@ class MediaDownloaderViewModel @Inject constructor(
                     val obj = pp.optJSONObject(key) ?: continue
                     perPlatform[key] = PlatformFormatPrefs(
                         favorites = obj.optJSONArray("favorites")?.let { arr ->
-                            (0 until arr.length()).map { arr.optString(it) }.filter { it.isNotBlank() }
+                            (0 until arr.length()).map { arr.optString(it).trim() }.filter { it.isNotBlank() }
                         } ?: emptyList(),
+                        // Normalize to lowercase so old mixed-case saves keep working.
                         hidden = obj.optJSONArray("hidden")?.let { arr ->
-                            (0 until arr.length()).map { arr.optString(it) }.filter { it.isNotBlank() }.toSet()
+                            (0 until arr.length()).map { arr.optString(it).trim().lowercase() }.filter { it.isNotBlank() }.toSet()
                         } ?: emptySet(),
                         autoSelect = obj.optString("autoSelect").ifBlank { null },
                         defaultMode = obj.optString("defaultMode").ifBlank { null }?.let {
@@ -614,7 +632,7 @@ class MediaDownloaderViewModel @Inject constructor(
                 }
             }
             val ladder = root.optJSONArray("ladderExts")?.let { arr ->
-                (0 until arr.length()).map { arr.optString(it) }.filter { it.isNotBlank() }.toSet()
+                (0 until arr.length()).map { arr.optString(it).trim().lowercase() }.filter { it.isNotBlank() }.toSet()
             } ?: DEFAULT_LADDER_EXTS
             DownloaderPrefs(perPlatform = perPlatform, ladderExts = ladder + "mp3")
         } catch (_: Exception) {
@@ -625,6 +643,33 @@ class MediaDownloaderViewModel @Inject constructor(
     /** Per-platform default mode override, falling back to the global switch. */
     private fun effectiveMode(platform: MediaDownloaderRepository.Platform?): DownloadMode =
         platform?.let { _formatPrefs.value.perPlatform[it.name]?.defaultMode } ?: _ui.value.mode
+
+    /** True when this option matches a pinned favorite (id → label → ext). */
+    fun isFavorite(platform: MediaDownloaderRepository.Platform?, opt: QualityOption): Boolean {
+        if (platform == null) return false
+        val favs = prefsFor(platform).favorites
+        if (favs.isEmpty()) return false
+        val idUp = opt.id.uppercase()
+        val labelUp = opt.label.uppercase()
+        val extUp = opt.ext.uppercase()
+        return favs.any { fav ->
+            val f = fav.uppercase()
+            f == idUp || f == labelUp || f == extUp
+        }
+    }
+
+    /** Favorites first (in option order), then everything else. No duplication. */
+    fun partitionFavorites(
+        platform: MediaDownloaderRepository.Platform?,
+        options: List<QualityOption>,
+    ): Pair<List<QualityOption>, List<QualityOption>> {
+        if (platform == null) return emptyList<QualityOption>() to options
+        if (prefsFor(platform).favorites.isEmpty()) return emptyList<QualityOption>() to options
+        val favs = options.filter { isFavorite(platform, it) }
+        if (favs.isEmpty()) return emptyList<QualityOption>() to options
+        val rest = options.filterNot { opt -> favs.any { it.id == opt.id } }
+        return favs to rest
+    }
 
     /** Effective mode for UI display (global switch + platform override). */
     fun effectiveModeForUi(platform: MediaDownloaderRepository.Platform): DownloadMode =
@@ -644,10 +689,12 @@ class MediaDownloaderViewModel @Inject constructor(
     ): List<QualityOption> {
         val prefs = prefsFor(platform)
         if (prefs.hidden.isEmpty() && prefs.favorites.isEmpty()) return options
+        // Hidden is stored lowercase; compare case-insensitively so "M4A" hides m4a.
         var list = if (prefs.hidden.isEmpty()) {
             options
         } else {
-            options.filter { it.ext.isBlank() || it.ext == "mp4" || it.ext !in prefs.hidden }
+            val hiddenNorm = prefs.hidden.map { it.lowercase() }.toSet()
+            options.filter { it.ext.isBlank() || it.ext.lowercase() == "mp4" || it.ext.lowercase() !in hiddenNorm }
         }
         if (list.isEmpty()) list = options
         if (prefs.favorites.isNotEmpty()) {
