@@ -74,6 +74,51 @@ class SocialDownloadWorker @AssistedInject constructor(
     @Volatile private var lastFgPct = -1
 
     /**
+     * Expedited workers MUST supply an initial foreground notification here.
+     * Shares CHANNEL_VIDEO_DOWNLOADS with VideoDownloadWorker — the channel in
+     * the 2026-09-26 "no valid small icon" crash — so the icon is validated
+     * before it can reach SystemForegroundService.
+     */
+    override suspend fun getForegroundInfo(): ForegroundInfo {
+        try {
+            createNotificationChannel()
+        } catch (_: Exception) {}
+        val notificationId = try {
+            val e = inputData.getString(KEY_EXTRACTION_ID) ?: "media"
+            val a = inputData.getString(KEY_ASSET_ID) ?: "asset"
+            NotificationHelper.downloadId(NOTIFICATION_ID_BASE, "$e|$a")
+        } catch (_: Exception) {
+            NOTIFICATION_ID_BASE
+        }
+        val title = try {
+            val t = inputData.getString(KEY_TITLE)?.take(60) ?: "media"
+            "Preparing $t..."
+        } catch (_: Exception) {
+            "Preparing download..."
+        }
+        val notification = try {
+            createNotification(notificationId, title, 0)
+        } catch (_: Exception) {
+            NotificationHelper.safeForegroundNotification(
+                applicationContext, CHANNEL_ID, title, null, 0
+            )
+        }
+        val hasIcon = try {
+            notification.smallIcon != null
+        } catch (_: Exception) {
+            false
+        }
+        val safe = if (hasIcon) notification else NotificationHelper.safeForegroundNotification(
+            applicationContext, CHANNEL_ID, title, null, 0
+        )
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ForegroundInfo(notificationId, safe, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        } else {
+            ForegroundInfo(notificationId, safe)
+        }
+    }
+
+    /**
      * Retain only opaque asset identifiers and harmless display metadata in the
      * failed work output. WorkManager does not surface a completed request's
      * input, so this allows a retry after process recreation without saving a

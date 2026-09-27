@@ -232,6 +232,49 @@ class MusicDownloadWorker @AssistedInject constructor(
     @Volatile private var lastFgAt = 0L
     @Volatile private var lastFgPct = -1
 
+    /**
+     * Expedited workers MUST supply an initial foreground notification.
+     * Same hardening as the video workers (validated small icon) so a stripped
+     * drawable can never crash SystemForegroundService.
+     */
+    override suspend fun getForegroundInfo(): ForegroundInfo {
+        try {
+            createNotificationChannel()
+        } catch (_: Exception) {}
+        val notificationId = try {
+            val trackId = inputData.getString(KEY_TRACK_ID) ?: "audio"
+            com.frerox.toolz.util.NotificationHelper.downloadId(NOTIFICATION_ID_BASE, trackId)
+        } catch (_: Exception) {
+            NOTIFICATION_ID_BASE
+        }
+        val title = try {
+            val t = inputData.getString(KEY_TRACK_TITLE)?.take(60) ?: "audio"
+            "Preparing $t..."
+        } catch (_: Exception) {
+            "Preparing download..."
+        }
+        val notification = try {
+            createNotification(notificationId, title, 0)
+        } catch (_: Exception) {
+            com.frerox.toolz.util.NotificationHelper.safeForegroundNotification(
+                applicationContext, CHANNEL_ID, title, null, 0
+            )
+        }
+        val hasIcon = try {
+            notification.smallIcon != null
+        } catch (_: Exception) {
+            false
+        }
+        val safe = if (hasIcon) notification else com.frerox.toolz.util.NotificationHelper.safeForegroundNotification(
+            applicationContext, CHANNEL_ID, title, null, 0
+        )
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ForegroundInfo(notificationId, safe, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        } else {
+            ForegroundInfo(notificationId, safe)
+        }
+    }
+
     private suspend fun publishProgress(notificationId: Int, contentTitle: String, progress: Float) {
         val clamped = progress.coerceIn(0f, 1f)
         // Always emit WorkData progress so the WorkInfo observer can read it

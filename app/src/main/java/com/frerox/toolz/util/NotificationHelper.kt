@@ -28,7 +28,17 @@ object NotificationHelper {
 
     // Small icon: monochrome silhouette only. Never use ic_launcher_foreground
     // (opaque adaptive foreground renders as a white square on API 26+).
-    const val SMALL_ICON = R.drawable.ic_stat_toolz
+    // NOTE: intentionally NOT `const val`. A `const` drawable ID is inlined as a
+    // raw int at every call site at compile time, so the resource shrinker
+    // (isShrinkResources=true in release) can no longer see the reference, remap
+    // the ID, or keep the drawable — the inlined int then points at the wrong
+    // resource at runtime and the system rejects the notification with
+    // "Invalid notification (no valid small icon)", crashing
+    // SystemForegroundService (see 2026-09-26 video-download crash).
+    // A plain `val` keeps a real field reference the shrinker can track.
+    @androidx.annotation.DrawableRes
+    @JvmField
+    val SMALL_ICON = R.drawable.ic_stat_toolz
 
     // Accent applied to all Toolz notifications for a consistent brand tint.
     const val ACCENT_COLOR = 0xFFFF6D00.toInt()
@@ -202,11 +212,70 @@ object NotificationHelper {
 
     fun baseBuilder(context: Context, channelId: String): NotificationCompat.Builder {
         return NotificationCompat.Builder(context, channelId)
-            .setSmallIcon(SMALL_ICON)
+            .setSmallIcon(safeSmallIcon(context))
             .setLargeIcon(toolzLargeIcon(context))
             .setColor(ACCENT_COLOR)
             .setOnlyAlertOnce(true)
             .setAutoCancel(true)
+    }
+
+    /**
+     * System-guaranteed small icon. Returns [SMALL_ICON] when it resolves and
+     * inflates, otherwise a framework icon that always exists. This is the last
+     * line of defence against `IllegalArgumentException: Invalid notification
+     * (no valid small icon)` which fatally crashes SystemForegroundService.
+     */
+    fun safeSmallIcon(context: Context): Int = try {
+        context.resources.getResourceName(SMALL_ICON)
+        val drawable = androidx.core.content.ContextCompat.getDrawable(context, SMALL_ICON)
+        if (drawable != null) SMALL_ICON else android.R.drawable.stat_sys_download
+    } catch (_: Exception) {
+        android.R.drawable.stat_sys_download
+    }
+
+    /**
+     * Foreground-service notification with a validated small icon. Ensures the
+     * channel exists first, then builds via [progressBuilder] and verifies the
+     * built [android.app.Notification] actually carries a small icon — if not,
+     * rebuilds once with the framework fallback icon instead of letting the
+     * invalid notification reach SystemForegroundService and crash the app.
+     */
+    fun safeForegroundNotification(
+        context: Context,
+        channelId: String,
+        title: String,
+        text: String?,
+        progress: Int
+    ): android.app.Notification {
+        try {
+            createAllChannels(context)
+        } catch (_: Exception) {}
+        val first = try {
+            progressBuilder(context, channelId, title, text, progress).build()
+        } catch (_: Exception) {
+            null
+        }
+        if (first != null) {
+            val hasIcon = try {
+                first.smallIcon != null
+            } catch (_: Exception) {
+                false
+            }
+            if (hasIcon) return first
+        }
+        return NotificationCompat.Builder(context, channelId)
+            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setColor(ACCENT_COLOR)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setOngoing(progress in 1..99)
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .setAutoCancel(false)
+            .setProgress(100, progress.coerceIn(0, 100), progress == 0)
+            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
     }
 
     /**
@@ -221,7 +290,7 @@ object NotificationHelper {
         progress: Int
     ): NotificationCompat.Builder {
         return NotificationCompat.Builder(context, channelId)
-            .setSmallIcon(SMALL_ICON)
+            .setSmallIcon(safeSmallIcon(context))
             .setLargeIcon(toolzLargeIcon(context))
             .setColor(ACCENT_COLOR)
             .setContentTitle(title)
@@ -244,7 +313,7 @@ object NotificationHelper {
         highPriority: Boolean = false
     ): NotificationCompat.Builder {
         return NotificationCompat.Builder(context, channelId)
-            .setSmallIcon(SMALL_ICON)
+            .setSmallIcon(safeSmallIcon(context))
             .setLargeIcon(toolzLargeIcon(context))
             .setColor(ACCENT_COLOR)
             .setContentTitle(title)

@@ -72,6 +72,53 @@ class VideoDownloadWorker @AssistedInject constructor(
     @Volatile private var lastFgAt = 0L
     @Volatile private var lastFgPct = -1
 
+    /**
+     * Expedited workers MUST supply an initial foreground notification here.
+     * WorkManager calls this before [doWork] (often before any setForeground);
+     * without it the SystemForegroundService window can open with no valid
+     * notification. Builds via the same safe path so the small icon is always
+     * valid — a missing small icon fatally crashes the app with
+     * "Invalid notification (no valid small icon)".
+     */
+    override suspend fun getForegroundInfo(): ForegroundInfo {
+        try {
+            createNotificationChannel()
+        } catch (_: Exception) {}
+        val notificationId = try {
+            val url = inputData.getString(KEY_SOURCE_URL) ?: "video"
+            val q = inputData.getString(KEY_QUALITY) ?: "720p"
+            NotificationHelper.downloadId(NOTIFICATION_ID_BASE, "$url|$q")
+        } catch (_: Exception) {
+            NOTIFICATION_ID_BASE
+        }
+        val title = try {
+            val t = inputData.getString(KEY_TITLE)?.take(60) ?: "video"
+            "Preparing $t..."
+        } catch (_: Exception) {
+            "Preparing download..."
+        }
+        val notification = try {
+            createNotification(notificationId, title, 0)
+        } catch (_: Exception) {
+            NotificationHelper.safeForegroundNotification(
+                applicationContext, CHANNEL_ID, title, null, 0
+            )
+        }
+        val hasIcon = try {
+            notification.smallIcon != null
+        } catch (_: Exception) {
+            false
+        }
+        val safe = if (hasIcon) notification else NotificationHelper.safeForegroundNotification(
+            applicationContext, CHANNEL_ID, title, null, 0
+        )
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ForegroundInfo(notificationId, safe, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        } else {
+            ForegroundInfo(notificationId, safe)
+        }
+    }
+
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         val sourceUrl = inputData.getString(KEY_SOURCE_URL) ?: return@withContext Result.failure()
         val title = inputData.getString(KEY_TITLE) ?: "video"
