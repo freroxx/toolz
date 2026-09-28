@@ -25,6 +25,7 @@ import com.frerox.toolz.data.music.MusicRepository
 import com.frerox.toolz.data.music.MusicTrack
 import com.frerox.toolz.data.music.toMediaItem
 import com.frerox.toolz.data.settings.SettingsRepository
+import com.frerox.toolz.service.MusicEventLog
 import com.frerox.toolz.service.MusicFocusState
 import com.frerox.toolz.service.MusicPlayerService
 import com.frerox.toolz.ui.screens.media.MusicUiState
@@ -434,6 +435,7 @@ class PlaybackTransport(
     fun togglePlayPause() {
         onStartService()
         val p: Player = playerOrController()
+        MusicEventLog.add("ui", "togglePlayPause playing=${p.isPlaying} items=${p.mediaItemCount}")
         runCatching {
             if (p.mediaItemCount == 0) {
                 // Empty after process death: rebuild from the visible library so
@@ -468,6 +470,7 @@ class PlaybackTransport(
     fun play() {
         onStartService()
         val p: Player = playerOrController()
+        MusicEventLog.add("ui", "play playing=${p.isPlaying} items=${p.mediaItemCount}")
         runCatching {
             if (p.mediaItemCount == 0) {
                 if (!repository.hasAudioPermission()) {
@@ -505,6 +508,7 @@ class PlaybackTransport(
 
     fun pause() {
         val p: Player = playerOrController()
+        MusicEventLog.add("ui", "pause playing=${p.isPlaying}")
         if (p.isPlaying) {
             p.pause()
             if (!uiState.value.isMutedByAi) {

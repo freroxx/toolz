@@ -169,18 +169,19 @@ class VibrationManager @Inject constructor(
     private fun dispatchEffect(effect: VibrationEffect) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             // HyperOS logs "attributionTag not declared in manifest" (empty tag)
-            // for vibrate(effect, attrs) on some builds. App context is already
-            // the base package; if the attributed call throws, fall back to the
-            // plain call so haptics never break playback taps.
+            // for vibrate(effect, attrs) on some builds — one error pair per tap,
+            // which is exactly the logcat spam seen on music pause/resume/skip
+            // (every transport tap vibrates). Prefer the plain call; fall back
+            // to the attributed one only if plain throws, so haptics never break.
             try {
-                val attrs = VibrationAttributes.Builder()
-                    .setUsage(VibrationAttributes.USAGE_TOUCH)
-                    .build()
-                vibrator.vibrate(effect, attrs)
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(effect)
             } catch (_: Exception) {
                 try {
-                    @Suppress("DEPRECATION")
-                    vibrator.vibrate(effect)
+                    val attrs = VibrationAttributes.Builder()
+                        .setUsage(VibrationAttributes.USAGE_TOUCH)
+                        .build()
+                    vibrator.vibrate(effect, attrs)
                 } catch (_: Exception) {}
             }
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
