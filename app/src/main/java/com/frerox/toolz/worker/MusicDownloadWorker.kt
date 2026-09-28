@@ -584,6 +584,12 @@ class MusicDownloadWorker @AssistedInject constructor(
         )
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Cancel", cancelPendingIntent)
             .build()
+            .let {
+                // Crash guard: never hand an icon-less notification to setForeground.
+                com.frerox.toolz.util.NotificationHelper.withValidatedIcon(
+                    applicationContext, CHANNEL_ID, contentTitle, "$progress%", progress, it
+                )
+            }
     }
 
     private fun showCompletedNotification(id: Int, title: String) {

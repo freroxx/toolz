@@ -623,6 +623,13 @@ class VideoDownloadWorker @AssistedInject constructor(
         )
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Cancel", cancelPendingIntent)
             .build()
+            .let {
+                // Crash guard: never hand an icon-less notification to setForeground.
+                NotificationHelper.withValidatedIcon(
+                    applicationContext, CHANNEL_ID, contentTitle,
+                    if (progress in 1..99) "$progress%" else null, progress, it
+                )
+            }
     }
 
     private fun showCompletedNotification(id: Int, title: String, isMp3: Boolean = false, requestedQuality: String? = null, actualHeight: Int? = null) {

@@ -234,6 +234,32 @@ object NotificationHelper {
     }
 
     /**
+     * Returns [built] when it actually carries a small icon, else rebuilds via
+     * [safeForegroundNotification]. Last line of defence before any
+     * setForeground call: an icon-less notification fatally crashes
+     * SystemForegroundService with `IllegalArgumentException: Invalid
+     * notification (no valid small icon)` (seen 2026-09-27 on the downloads
+     * channel). Never throws.
+     */
+    fun withValidatedIcon(
+        context: Context,
+        channelId: String,
+        title: String,
+        text: String?,
+        progress: Int,
+        built: android.app.Notification
+    ): android.app.Notification = try {
+        if (built.smallIcon != null) built
+        else safeForegroundNotification(context, channelId, title, text, progress)
+    } catch (_: Exception) {
+        try {
+            safeForegroundNotification(context, channelId, title, text, progress)
+        } catch (_: Exception) {
+            built
+        }
+    }
+
+    /**
      * Foreground-service notification with a validated small icon. Ensures the
      * channel exists first, then builds via [progressBuilder] and verifies the
      * built [android.app.Notification] actually carries a small icon — if not,
@@ -338,14 +364,14 @@ object NotificationHelper {
             .setAutoCancel(true)
     }
 
-    /** Throttle gate for foreground progress: at most one post per interval or 5% delta. */
+    /** Throttle gate for foreground progress: at most one post per interval or 4% delta. */
     fun shouldPublishProgress(
         lastAt: Long,
         lastPct: Int,
         now: Long,
         pct: Int,
-        minIntervalMs: Long = 800L,
-        minDeltaPct: Int = 2
+        minIntervalMs: Long = 1500L,
+        minDeltaPct: Int = 4
     ): Boolean {
         if (pct >= 100 || pct <= 0) return true
         if (pct - lastPct >= minDeltaPct) return true

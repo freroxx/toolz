@@ -326,9 +326,13 @@ class YouTubeMp3DownloadWorker @AssistedInject constructor(
     }
 
     private fun createNotification(id: Int, title: String, progress: Int): android.app.Notification {
-        return com.frerox.toolz.util.NotificationHelper.progressBuilder(
+        val built = com.frerox.toolz.util.NotificationHelper.progressBuilder(
             applicationContext, CHANNEL_ID, title, "$progress%", progress
         ).build()
+        // Crash guard: never hand an icon-less notification to setForeground.
+        return com.frerox.toolz.util.NotificationHelper.withValidatedIcon(
+            applicationContext, CHANNEL_ID, title, "$progress%", progress, built
+        )
     }
 
     private fun showCompletedNotification(id: Int, title: String) {
