@@ -132,6 +132,26 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         private const val NOISY_DEBOUNCE_MS = 1_500L
         const val DUCK_VOLUME = 0.2f
 
+        /**
+         * Process-wide single-flight audio-focus ownership.
+         *
+         * Proved necessary by a 24h stall dump: two live service objects each
+         * built their own AudioFocusRequest and stole focus back and forth at
+         * ~10ms intervals (alternating req ids, alternating steal counters,
+         * denials=0 throughout). One shared holder makes a rival request
+         * structurally impossible: concurrent owners reuse-or-return instead
+         * of building competing requests.
+         */
+        private object FocusGate {
+            @Volatile var request: AudioFocusRequest? = null
+            @Volatile var hasFocus: Boolean = false
+            @Volatile var lastRequestMs: Long = 0L
+            @Volatile var ownerGeneration: Int = -1
+            @Volatile var duckPrefOfRequest: Boolean = false
+        }
+        /** Bumped in onCreate; callbacks from older generations self-skip. */
+        @Volatile private var activeGeneration: Int = 0
+
         // How many upcoming tracks the widget's "Up Next" queue shows.
         // Bounded deliberately: Glance's RemoteViews-backed LazyColumn has
         // real per-row overhead, and nobody scans an 40-deep widget queue
@@ -184,14 +204,16 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
     private var audioFocusDucking = false
     private var isDucking = false
     private var shouldResumeOnFocusGain = false
-    private var audioFocusRequest: AudioFocusRequest? = null
-    private var hasAudioFocus = false
+    // Instance identity + generation for the multi-owner defence (see FocusGate).
+    // Logged on every focus/route line so the next dump proves 1 vs N instances.
+    private val svcId: Int = System.identityHashCode(this)
+    private var myGeneration: Int = -1
+    private fun isActiveGeneration(): Boolean = myGeneration != -1 && myGeneration == activeGeneration
     // Consecutive playback-error guard: prevents an error-skip storm from
     // walking the whole queue in milliseconds when every item shares the same
     // root cause (permission revoked, MediaStore re-index, dead cache).
     // Timestamps (elapsedRealtime) of recent onPlayerError calls.
     private val recentPlaybackErrors = ArrayDeque<Long>()
-    private var lastFocusRequestMs = 0L
     private var lastAudioLossMs = 0L
     private var lastManualResumeMs = 0L
     private var lastNoisyPauseMs = 0L
@@ -217,11 +239,16 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         val playing = runCatching { player.isPlaying }.getOrDefault(false)
         val playWhenReady = runCatching { player.playWhenReady }.getOrDefault(false)
         val playbackState = runCatching { player.playbackState }.getOrDefault(-1)
-        MusicEventLog.add("focus", "change=$focusChange playing=$playing pwr=$playWhenReady state=$playbackState hasFocus=$hasAudioFocus resume=$shouldResumeOnFocusGain duck=$isDucking denials=$consecutiveFocusDenials")
-        Log.i("MusicPlayerService", "onAudioFocusChange=$focusChange isPlaying=$playing playWhenReady=$playWhenReady state=$playbackState hasFocus=$hasAudioFocus shouldResume=$shouldResumeOnFocusGain ducking=$isDucking prefDuck=$audioFocusDucking denials=$consecutiveFocusDenials fight=${MusicFocusState.fightActive}")
+        if (!isActiveGeneration()) {
+            MusicEventLog.add("focus", "change=$focusChange svc=$svcId STALE gen=$myGeneration active=$activeGeneration — ignored")
+            Log.i("MusicPlayerService", "onAudioFocusChange=$focusChange svc=$svcId STALE — ignored")
+            return@OnAudioFocusChangeListener
+        }
+        MusicEventLog.add("focus", "change=$focusChange svc=$svcId playing=$playing pwr=$playWhenReady state=$playbackState hasFocus=${FocusGate.hasFocus} resume=$shouldResumeOnFocusGain duck=$isDucking denials=$consecutiveFocusDenials")
+        Log.i("MusicPlayerService", "onAudioFocusChange=$focusChange svc=$svcId isPlaying=$playing playWhenReady=$playWhenReady state=$playbackState hasFocus=${FocusGate.hasFocus} shouldResume=$shouldResumeOnFocusGain ducking=$isDucking prefDuck=$audioFocusDucking denials=$consecutiveFocusDenials fight=${MusicFocusState.fightActive}")
         when (focusChange) {
             AudioManager.AUDIOFOCUS_GAIN -> {
-                hasAudioFocus = true
+                synchronized(FocusGate) { FocusGate.hasFocus = true }
                 consecutiveFocusDenials = 0
                 if (MusicFocusState.fightActive) {
                     MusicFocusState.fightActive = false
@@ -239,7 +266,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                 }
             }
             AudioManager.AUDIOFOCUS_LOSS -> {
-                hasAudioFocus = false
+                synchronized(FocusGate) { FocusGate.hasFocus = false }
                 lastAudioLossMs = now
                 // Burst-tolerant steal-back: a permanent LOSS inside the manual
                 // resume window is usually stale HyperOS redelivery (bursts of
@@ -255,7 +282,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                         Log.w("MusicPlayerService", "LOSS in fight backoff, pausing without steal")
                     } else if (stealAttempts.size < MAX_STEALS_PER_WINDOW) {
                         stealAttempts.addLast(now)
-                        lastFocusRequestMs = 0L
+                        FocusGate.lastRequestMs = 0L
                         MusicEventLog.add("focus", "LOSS in grace, steal #${stealAttempts.size}/$MAX_STEALS_PER_WINDOW")
                         Log.i("MusicPlayerService", "LOSS in manual-resume grace, attempting steal-back #${stealAttempts.size}")
                         if (requestAudioFocus("steal")) {
@@ -317,37 +344,66 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
     private fun requestAudioFocus(caller: String = "unknown"): Boolean {
         if (!audioFocusEnabled) return false
         val am = audioManager ?: return false
-        // Don't flap focus: if we already hold a request, keep it. The old code
-        // abandoned + re-requested on every onIsPlayingChanged(true), which could
+        if (!isActiveGeneration()) {
+            MusicEventLog.add("focus", "request[$caller] svc=$svcId STALE gen=$myGeneration active=$activeGeneration — skipped")
+            return FocusGate.hasFocus
+        }
+        // Don't flap focus: if the process-wide holder already has it, keep it.
+        // Abandoning + re-requesting on every onIsPlayingChanged(true) could
         // dispatch LOSS to our own listener and instantly pause the fresh play().
-        if (audioFocusRequest != null && hasAudioFocus) return true
+        synchronized(FocusGate) {
+            if (FocusGate.request != null && FocusGate.hasFocus) return true
+        }
         // Throttle rapid re-requests (resume spam) to one per 500ms.
         val now = SystemClock.elapsedRealtime()
-        if (now - lastFocusRequestMs < 500 && audioFocusRequest != null) return hasAudioFocus
-        lastFocusRequestMs = now
+        synchronized(FocusGate) {
+            if (now - FocusGate.lastRequestMs < 500 && FocusGate.request != null) return FocusGate.hasFocus
+            FocusGate.lastRequestMs = now
+        }
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val frameworkAttrs = android.media.AudioAttributes.Builder()
                 .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
                 .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
                 .build()
-            // Reuse existing request if present; only build once.
-            val req = audioFocusRequest ?: AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
-                .setAudioAttributes(frameworkAttrs)
-                .setWillPauseWhenDucked(!audioFocusDucking)
-                // Explicit Main handler: callbacks on a known thread, no binder-thread race
-                // with player.play()/pause() and no AppOps attribution surprises.
-                .setOnAudioFocusChangeListener(audioFocusListener, Handler(Looper.getMainLooper()))
-                .build().also { audioFocusRequest = it }
+            // Single-flight: reuse the process-wide request when it is ours and
+            // matches the ducking pref; otherwise abandon the stale holder and
+            // take over (logs the takeover so rival builders are visible).
+            val req = synchronized(FocusGate) {
+                val cur = FocusGate.request
+                if (cur != null && FocusGate.ownerGeneration == myGeneration &&
+                    FocusGate.duckPrefOfRequest == audioFocusDucking
+                ) {
+                    cur
+                } else {
+                    if (cur != null) {
+                        MusicEventLog.add("focus", "takeover svc=$svcId gen=$myGeneration (prev owner=${FocusGate.ownerGeneration})")
+                        Log.i("MusicPlayerService", "audio focus takeover svc=$svcId gen=$myGeneration prevOwner=${FocusGate.ownerGeneration}")
+                        runCatching { am.abandonAudioFocusRequest(cur) }
+                    }
+                    AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                        .setAudioAttributes(frameworkAttrs)
+                        .setWillPauseWhenDucked(!audioFocusDucking)
+                        // Explicit Main handler: callbacks on a known thread, no binder-thread race
+                        // with player.play()/pause() and no AppOps attribution surprises.
+                        .setOnAudioFocusChangeListener(audioFocusListener, Handler(Looper.getMainLooper()))
+                        .build().also {
+                            FocusGate.request = it
+                            FocusGate.ownerGeneration = myGeneration
+                            FocusGate.duckPrefOfRequest = audioFocusDucking
+                        }
+                }
+            }
             val res = try {
                 am.requestAudioFocus(req)
             } catch (e: Exception) {
                 Log.w("MusicPlayerService", "requestAudioFocus threw", e)
                 AudioManager.AUDIOFOCUS_REQUEST_FAILED
             }
-            hasAudioFocus = res == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+            val granted = res == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+            synchronized(FocusGate) { FocusGate.hasFocus = granted }
             val reqId = System.identityHashCode(req)
-            MusicEventLog.add("focus", "request[$caller] req=$reqId res=$res granted=$hasAudioFocus duckPref=$audioFocusDucking")
-            if (hasAudioFocus) {
+            MusicEventLog.add("focus", "request[$caller] svc=$svcId req=$reqId res=$res granted=$granted duckPref=$audioFocusDucking")
+            if (granted) {
                 consecutiveFocusDenials = 0
                 if (MusicFocusState.stallReason == "FOCUS_BLOCKED") MusicFocusState.stallReason = null
             } else {
@@ -355,7 +411,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                 MusicFocusState.stallReason = "FOCUS_BLOCKED"
                 Log.w("MusicPlayerService", "audio focus not granted res=$res denials=$consecutiveFocusDenials, continuing playback (pause only on LOSS callback)")
             }
-            hasAudioFocus
+            granted
         } else {
             @Suppress("DEPRECATION")
             val res = try {
@@ -364,14 +420,15 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                 Log.w("MusicPlayerService", "legacy requestAudioFocus threw", e)
                 AudioManager.AUDIOFOCUS_REQUEST_FAILED
             }
-            hasAudioFocus = res == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
-            if (!hasAudioFocus) {
+            val granted = res == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+            synchronized(FocusGate) { FocusGate.hasFocus = granted }
+            if (!granted) {
                 consecutiveFocusDenials++
                 Log.w("MusicPlayerService", "legacy audio focus not granted res=$res denials=$consecutiveFocusDenials")
             } else {
                 consecutiveFocusDenials = 0
             }
-            hasAudioFocus
+            granted
         }
     }
 
@@ -385,7 +442,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
      */
     private fun forceResume() {
         markManualResume()
-        lastFocusRequestMs = 0L
+        FocusGate.lastRequestMs = 0L
         // Fresh burst window: an explicit force-resume must NOT self-block its
         // own steal-back (old code stamped lastStealRetryMs=now, so the very
         // LOSS following a force-resume skipped the steal and latched paused).
@@ -412,7 +469,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         runCatching { abandonAudioFocus("reset") }
         shouldResumeOnFocusGain = false
         consecutiveFocusDenials = 0
-        lastFocusRequestMs = 0L
+        FocusGate.lastRequestMs = 0L
         stealAttempts.clear()
         fightBackoffUntilMs = 0L
         MusicFocusState.fightActive = false
@@ -432,12 +489,24 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
 
     private fun abandonAudioFocus(caller: String = "unknown") {
         val am = audioManager ?: return
-        hasAudioFocus = false
+        if (!isActiveGeneration()) {
+            MusicEventLog.add("focus", "abandon[$caller] svc=$svcId STALE gen=$myGeneration — skipped, gate untouched")
+            return
+        }
+        synchronized(FocusGate) { FocusGate.hasFocus = false }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            audioFocusRequest?.let {
-                MusicEventLog.add("focus", "abandon[$caller] req=${System.identityHashCode(it)}")
-                runCatching { am.abandonAudioFocusRequest(it) }
-                audioFocusRequest = null
+            val cur = synchronized(FocusGate) { FocusGate.request }
+            if (cur != null) {
+                // Only abandon what this generation owns; a rival holder's
+                // request is left alone (its owner manages it).
+                val owned = synchronized(FocusGate) { FocusGate.ownerGeneration == myGeneration }
+                if (owned) {
+                    MusicEventLog.add("focus", "abandon[$caller] svc=$svcId req=${System.identityHashCode(cur)}")
+                    runCatching { am.abandonAudioFocusRequest(cur) }
+                    synchronized(FocusGate) { FocusGate.request = null }
+                } else {
+                    MusicEventLog.add("focus", "abandon[$caller] svc=$svcId not owner (owner=${FocusGate.ownerGeneration}) — skipped")
+                }
             }
         } else {
             @Suppress("DEPRECATION")
@@ -488,7 +557,11 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
     private val headsetReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val action = intent?.action
-            MusicEventLog.add("route", "broadcast $action")
+            if (!isActiveGeneration()) {
+                MusicEventLog.add("route", "broadcast $action svc=$svcId STALE — ignored")
+                return
+            }
+            MusicEventLog.add("route", "broadcast $action svc=$svcId")
             runCatching {
                 when (action) {
                     Intent.ACTION_HEADSET_PLUG -> {
@@ -740,6 +813,12 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
 
     override fun onCreate() {
         super.onCreate()
+        // Generation fencing (see FocusGate): if a previous service object was
+        // leaked without onDestroy, it becomes stale here and its focus/route
+        // callbacks self-skip instead of fighting this instance for focus.
+        myGeneration = ++activeGeneration
+        MusicEventLog.add("svc", "onCreate svc=$svcId gen=$myGeneration items=${runCatching { player.mediaItemCount }.getOrDefault(-1)}")
+        Log.i("MusicPlayerService", "onCreate svc=$svcId gen=$myGeneration")
 
         // Use applicationContext for system services so AudioManager / sensors /
         // vibrator attribution stays on the base package (avoids empty
@@ -944,7 +1023,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         } else {
             if (player.isPlaying) player.pause()
             else {
-                lastFocusRequestMs = 0L
+                FocusGate.lastRequestMs = 0L
                 requestAudioFocus("pocketResume")
                 player.play()
             }
@@ -959,7 +1038,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             } else {
                 if (player.isPlaying) player.pause()
                 else {
-                    lastFocusRequestMs = 0L
+                    FocusGate.lastRequestMs = 0L
                     requestAudioFocus("mediaButton")
                     player.play()
                 }
@@ -977,7 +1056,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             } else if (player.repeatMode == Player.REPEAT_MODE_ALL) {
                 player.seekTo(0, 0L)
             } else {
-                lastFocusRequestMs = 0L
+                FocusGate.lastRequestMs = 0L
                 requestAudioFocus("mediaButtonNext")
                 player.play()
             }
@@ -996,7 +1075,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             } else if (player.repeatMode == Player.REPEAT_MODE_ALL && player.mediaItemCount > 0) {
                 player.seekTo(player.mediaItemCount - 1, 0L)
             } else {
-                lastFocusRequestMs = 0L
+                FocusGate.lastRequestMs = 0L
                 requestAudioFocus("mediaButtonPrev")
                 player.play()
             }
@@ -1063,16 +1142,27 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                     // willPauseWhenDucked is immutable per AudioFocusRequest: drop the
                     // cached request so the next requestAudioFocus() rebuilds it with
                     // the new ducking preference instead of reusing a stale one.
-                    if (oldDucking != ducking) {
+                    // Gated: a stale instance must never drop the live owner's request.
+                    if (oldDucking != ducking && isActiveGeneration()) {
+                        MusicEventLog.add("focus", "duck pref $oldDucking->$ducking svc=$svcId — dropping cached request")
                         runCatching {
-                            audioFocusRequest?.let {
-                                (applicationContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager)
-                                    ?.abandonAudioFocusRequest(it)
+                            synchronized(FocusGate) {
+                                FocusGate.request?.let {
+                                    (applicationContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager)
+                                        ?.abandonAudioFocusRequest(it)
+                                }
+                                FocusGate.request = null
+                                FocusGate.hasFocus = false
                             }
                         }
-                        audioFocusRequest = null
-                        hasAudioFocus = false
                     }
+                }
+
+                // Stale generations keep pref fields fresh but perform no side
+                // effects (no pause/play/volume/request) on the shared player.
+                if (!isActiveGeneration()) {
+                    MusicEventLog.add("focus", "settings change svc=$svcId STALE — prefs updated, no action")
+                    return@collect
                 }
 
                 if (!enabled) {
@@ -1265,7 +1355,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         // ANR fix: promote synchronously BEFORE any async restore/widget work,
         // but only when a real action needs it (see helper — warm-ups skip).
         val action = intent?.action
-        if (action != null) MusicEventLog.add("cmd", "onStartCommand $action")
+        if (action != null) MusicEventLog.add("cmd", "onStartCommand $action svc=$svcId")
         ensureForegroundForStartCommand(action)
         try {
             when (action) {
@@ -1278,7 +1368,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                         // instant-pause), then play regardless — a genuine LOSS
                         // (call) will pause again with a clear log.
                         markManualResume()
-                        lastFocusRequestMs = 0L
+                        FocusGate.lastRequestMs = 0L
                         requestAudioFocus("toggle")
                         player.play()
                     }
@@ -1301,7 +1391,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                         markManualResume()
                         player.seekTo(index, 0L)
                         if (!player.isPlaying) {
-                            lastFocusRequestMs = 0L
+                            FocusGate.lastRequestMs = 0L
                             requestAudioFocus("seekIndex")
                             player.play()
                         }
@@ -1816,6 +1906,11 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         runCatching { unregisterReceiver(headsetReceiver) }
         unregisterShakeListener()
         abandonAudioFocus("destroy")
+        // Detach our player listener so a leaked service object can't keep
+        // pausing/stealing on the shared singleton player after death.
+        runCatching { player.removeListener(playerListener) }
+        MusicEventLog.add("svc", "onDestroy svc=$svcId gen=$myGeneration")
+        Log.i("MusicPlayerService", "onDestroy svc=$svcId gen=$myGeneration")
         try { player.volume = 1.0f } catch (_: Exception) {}
         placeholderDemoteJob?.cancel()
         isPlaceholderActive = false
