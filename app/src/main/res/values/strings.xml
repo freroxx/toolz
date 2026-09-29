@@ -3686,4 +3686,52 @@
     <string name="st_Manifest_CaffeinateTile">Toolz: Caffeinate</string>
     <string name="st_Manifest_QuickAccessTile">Toolz: Quick Access</string>
     <string name="st_Manifest_AutofillService">Toolz Autofill</string>
+
+    <!-- Speedometer stuff yuh -->
+    <string name="speedometer_title">Speedometer</string>
+    <string name="speedometer_subtitle">Live GPS speed</string>
+    <string name="speedometer_back">Back</string>
+    <string name="speedometer_hud_enter">Enter HUD mode</string>
+    <string name="speedometer_hud_exit">Exit HUD mode</string>
+
+    <string name="speedometer_trip_start">Start trip</string>
+    <string name="speedometer_trip_pause">Pause trip</string>
+    <string name="speedometer_trip_resume">Resume trip</string>
+    <string name="speedometer_trip_recording">Recording</string>
+    <string name="speedometer_trip_paused">Paused</string>
+    <string name="speedometer_reset">Reset</string>
+    <string name="speedometer_trip_reset">Trip reset</string>
+    <string name="speedometer_undo">Undo</string>
+    <string name="speedometer_settings">Settings</string>
+    <string name="speedometer_change_unit">Change unit</string>
+
+    <string name="speedometer_gps_searching">Searching for GPS…</string>
+    <string name="speedometer_gps_off">GPS off</string>
+    <string name="speedometer_gps_accuracy">GPS ±%1$d m</string>
+    <string name="speedometer_satellites">%1$d of %2$d satellites</string>
+    <string name="speedometer_limit_pill">Limit %1$d</string>
+    <string name="speedometer_gps_disabled_message">Location is turned off, so there\'s no speed reading.</string>
+    <string name="speedometer_open_location_settings">Turn on</string>
+
+    <string name="speedometer_trend_title">Last 60 seconds</string>
+    <string name="speedometer_stat_distance">Distance</string>
+    <string name="speedometer_stat_duration">Duration</string>
+    <string name="speedometer_stat_top_speed">Top speed</string>
+    <string name="speedometer_stat_average">Average</string>
+    <string name="speedometer_stat_altitude">Altitude</string>
+    <string name="speedometer_stat_heading">Heading</string>
+    <string name="speedometer_stat_position">Position</string>
+    <string name="speedometer_moving_time">Moving %1$s</string>
+
+    <string name="speedometer_settings_units">Units</string>
+    <string name="speedometer_settings_limit">Speed limit alert</string>
+    <string name="speedometer_settings_limit_desc">The gauge turns red when you go over</string>
+    <string name="speedometer_settings_keep_on">Keep screen on</string>
+    <string name="speedometer_settings_hud_mirror">HUD mirroring</string>
+    <string name="speedometer_hud_flip_vertical">Vertical</string>
+    <string name="speedometer_hud_flip_horizontal">Horizontal</string>
+
+    <string name="speedometer_permission_title">Location access needed</string>
+    <string name="speedometer_permission_body">Speed is measured with GPS. Location is only used while this screen is open.</string>
+    <string name="speedometer_permission_grant">Allow location</string>
 </resources>
