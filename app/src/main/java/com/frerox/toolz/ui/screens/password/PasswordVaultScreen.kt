@@ -47,9 +47,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -61,10 +59,15 @@ import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
 import androidx.fragment.app.FragmentActivity
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.runtime.saveable.rememberSaveable
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
 import androidx.compose.ui.res.stringResource
+import kotlinx.coroutines.withContext
 import com.frerox.toolz.R
 import com.frerox.toolz.data.password.PasswordEntity
 import com.frerox.toolz.ui.components.*
@@ -73,6 +76,7 @@ import com.frerox.toolz.ui.theme.ToolzTheme
 import com.frerox.toolz.ui.theme.toolzBackground
 import com.frerox.toolz.util.password.PasswordGenerator
 import com.frerox.toolz.util.password.PasswordUtils
+import com.frerox.toolz.util.password.VaultClipboard
 import com.frerox.toolz.util.security.BiometricPromptUtils
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -92,16 +96,42 @@ fun PasswordVaultScreen(
     val searchQuery by viewModel.searchQuery.collectAsState()
     val isScanning by viewModel.isScanning.collectAsState()
     val vaultStats by viewModel.vaultStats.collectAsState()
+    val importMessage by viewModel.importMessage.collectAsState()
 
-    var isUnlocked by remember { mutableStateOf(false) }
+    var isUnlocked by rememberSaveable { mutableStateOf(false) }
     var showAddDialog by remember { mutableStateOf(false) }
     var editingPassword by remember { mutableStateOf<PasswordEntity?>(null) }
     var passwordToDelete by remember { mutableStateOf<PasswordEntity?>(null) }
     var showGenerator by remember { mutableStateOf(false) }
 
+    // Auto-lock when the app goes to background so recent-apps/trailing
+    // composition never exposes secrets.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) isUnlocked = false
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    LaunchedEffect(importMessage) {
+        importMessage?.let {
+            Toast.makeText(
+                context,
+                context.getString(
+                    R.string.st_PasswordVaultScreen_import_result,
+                    it.imported, it.skipped
+                ),
+                Toast.LENGTH_LONG
+            ).show()
+            viewModel.consumeImportMessage()
+        }
+    }
+
     val csvPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
-    ) { uri -> uri?.let { viewModel.importCsv(context, it) } }
+    ) { uri -> uri?.let { viewModel.importCsv(it, context) } }
 
     Box(
         modifier = Modifier
@@ -138,7 +168,7 @@ fun PasswordVaultScreen(
                     onEditPassword = { editingPassword = it },
                     onDeletePassword = { passwordToDelete = it },
                     onBackClick = onBackClick,
-                    onCsvImport = { csvPicker.launch("text/*") },
+                    onCsvImport = { csvPicker.launch("*/*") },
                 )
             } else {
                 BiometricGate(onSuccess = { isUnlocked = true })
@@ -348,7 +378,7 @@ private fun VaultMainContent(
                             value = vaultStats.weak.toString(),
                             icon = Icons.Rounded.Password,
                             accentColor = if (vaultStats.weak > 0)
-                                Color(0xFFFF9800)
+                                MaterialTheme.colorScheme.tertiary
                             else
                                 MaterialTheme.colorScheme.outline,
                         )
@@ -372,10 +402,7 @@ private fun VaultMainContent(
                 ) {
                     ExpressiveSearchField(
                         query = searchQuery,
-                        onQueryChange = {
-                            vibrationManager?.vibrateTick()
-                            viewModel.onSearchQueryChange(it)
-                        },
+                        onQueryChange = { viewModel.onSearchQueryChange(it) },
                         placeholder = { Text(stringResource(R.string.st_PasswordVaultScreen_u1v2)) },
                         leadingIcon = {
                             Icon(
@@ -415,19 +442,16 @@ private fun VaultMainContent(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     categorizedPasswords.forEach { (category, list) ->
-                        item(key = "header_$category") {
+                        item(key = "header_$category", contentType = "header") {
                             CategoryHeader(name = category)
                         }
-                        items(list, key = { it.id }) { password ->
-                            val itemIndex = list.indexOf(password)
-                            StaggeredEntrance(index = itemIndex) {
-                                CredentialCard(
+                        items(list, key = { it.id }, contentType = { "credential" }) { password ->
+                            CredentialCard(
                                     password = password,
                                     onDelete = { onDeletePassword(password) },
                                     onCheckPwned = { viewModel.checkPwned(password) },
                                     onEdit = onEditPassword,
                                 )
-                            }
                         }
                     }
 
@@ -476,10 +500,12 @@ fun BiometricGate(onSuccess: () -> Unit) {
                 Surface(
                     onClick = {
                         vibrationManager?.vibrateClick()
-                        BiometricPromptUtils.showBiometricPrompt(
-                            activity = context as FragmentActivity,
-                            onSuccess = { onSuccess() },
-                        )
+                        (context as? FragmentActivity)?.let {
+                            BiometricPromptUtils.showBiometricPrompt(
+                                activity = it,
+                                onSuccess = { onSuccess() },
+                            )
+                        }
                     },
                     modifier = Modifier.size(116.dp),
                     shape = ExtraLargeExpressiveShape,
@@ -519,10 +545,12 @@ fun BiometricGate(onSuccess: () -> Unit) {
             ToolzExpressiveButton(
                 onClick = {
                     vibrationManager?.vibrateClick()
-                    BiometricPromptUtils.showBiometricPrompt(
-                        activity = context as FragmentActivity,
-                        onSuccess = { onSuccess() },
-                    )
+                    (context as? FragmentActivity)?.let {
+                        BiometricPromptUtils.showBiometricPrompt(
+                            activity = it,
+                            onSuccess = { onSuccess() },
+                        )
+                    }
                 },
                 shape = LargeExpressiveShape,
                 contentPadding = PaddingValues(horizontal = 40.dp, vertical = 18.dp),
@@ -656,7 +684,7 @@ fun ScanButton(isScanning: Boolean, onClick: () -> Unit) {
 fun CategoryHeader(name: String) {
     val categoryColor = when (name) {
         "MUST CHANGE" -> MaterialTheme.colorScheme.error
-        "WEAK"        -> Color(0xFFFF9800)
+        "WEAK"        -> MaterialTheme.colorScheme.tertiary
         "INCOMPLETE"  -> MaterialTheme.colorScheme.tertiary
         else          -> MaterialTheme.colorScheme.primary
     }
@@ -781,11 +809,11 @@ fun CredentialCard(
     onCheckPwned: () -> Unit,
     onEdit: (PasswordEntity) -> Unit,
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    var revealed by remember { mutableStateOf(false) }
+    var expanded by rememberSaveable(password.id) { mutableStateOf(false) }
+    var revealed by rememberSaveable(password.id) { mutableStateOf(false) }
     val vibrationManager = LocalVibrationManager.current
-    val clipboardManager = LocalClipboardManager.current
     val context = LocalContext.current
+    val copyMessage = stringResource(R.string.st_PasswordVaultScreen_q3r4)
 
     val smartName = remember(password.name, password.url) {
         PasswordUtils.getSmartName(password.url, password.name)
@@ -871,10 +899,11 @@ fun CredentialCard(
         },
     ) {
         // ── Card background animated by state ─────────────────────────────
+        val whisperTint = MaterialTheme.colorScheme.secondary
         val cardBg by animateColorAsState(
             targetValue = when {
                 isBreached  -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.18f)
-                isWhisper   -> if (expanded) Color(0xFF6750A4).copy(alpha = 0.18f) else Color(0xFF6750A4).copy(alpha = 0.08f)
+                isWhisper   -> if (expanded) whisperTint.copy(alpha = 0.18f) else whisperTint.copy(alpha = 0.08f)
                 expanded    -> MaterialTheme.colorScheme.surfaceContainerHighest
                 else        -> MaterialTheme.colorScheme.surfaceContainerHigh
             },
@@ -884,7 +913,7 @@ fun CredentialCard(
         val cardBorder by animateColorAsState(
             targetValue = when {
                 isBreached -> MaterialTheme.colorScheme.error.copy(alpha = 0.28f)
-                isWhisper  -> if (expanded) Color(0xFF8E24AA).copy(alpha = 0.55f) else Color(0xFF8E24AA).copy(alpha = 0.30f)
+                isWhisper  -> if (expanded) whisperTint.copy(alpha = 0.55f) else whisperTint.copy(alpha = 0.30f)
                 expanded   -> MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
                 else       -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.14f)
             },
@@ -933,8 +962,8 @@ fun CredentialCard(
                                 Spacer(Modifier.width(6.dp))
                                 Surface(
                                     shape = RoundedCornerShape(6.dp),
-                                    color = Color(0xFF8E24AA).copy(alpha = 0.18f),
-                                    border = BorderStroke(1.dp, Color(0xFF8E24AA).copy(alpha = 0.35f)),
+                                    color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.18f),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.35f)),
                                 ) {
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
@@ -943,7 +972,7 @@ fun CredentialCard(
                                         Icon(
                                             Icons.Rounded.Lock,
                                             contentDescription = null,
-                                            tint = Color(0xFFAB47BC),
+                                            tint = MaterialTheme.colorScheme.secondary,
                                             modifier = Modifier.size(10.dp),
                                         )
                                         Spacer(Modifier.width(3.dp))
@@ -951,7 +980,7 @@ fun CredentialCard(
                                             if (isTokenAccount) "Whisper Token" else "Whisper E2EE",
                                             style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
                                             fontWeight = FontWeight.Bold,
-                                            color = Color(0xFFAB47BC),
+                                            color = MaterialTheme.colorScheme.secondary,
                                         )
                                     }
                                 }
@@ -977,8 +1006,8 @@ fun CredentialCard(
                         ToolzExpressiveIconButton(
                             onClick = {
                                 vibrationManager?.vibrateClick()
-                                clipboardManager.setText(AnnotatedString(password.password))
-                                Toast.makeText(context, "Password copied", Toast.LENGTH_SHORT).show()
+                                VaultClipboard.copySecret(context, password.password)
+                                Toast.makeText(context, copyMessage, Toast.LENGTH_SHORT).show()
                             },
                             colors = IconButtonDefaults.filledIconButtonColors(
                                 containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
@@ -989,7 +1018,7 @@ fun CredentialCard(
                         ) {
                             Icon(
                                 Icons.Rounded.ContentCopy,
-                                contentDescription = "Copy password",
+                                contentDescription = stringResource(R.string.st_PasswordVaultScreen_s5t6),
                                 modifier = Modifier.size(18.dp),
                             )
                         }
@@ -1004,7 +1033,7 @@ fun CredentialCard(
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     Icons.Rounded.WarningAmber,
-                                    contentDescription = "No password set",
+                                    contentDescription = stringResource(R.string.st_PasswordVaultScreen_u7v8),
                                     tint = MaterialTheme.colorScheme.tertiary,
                                     modifier = Modifier.size(20.dp),
                                 )
@@ -1066,13 +1095,13 @@ fun CredentialCard(
                             WavyStrengthIndicator(strength = password.strength)
                         }
 
-                        // Password history
-                        if (password.passwordHistory.isNotEmpty()) {
+                        // Password history (only after reveal, capped at 5)
+                        if (password.passwordHistory.isNotEmpty() && revealed) {
                             PasswordHistorySection(
                                 history = password.passwordHistory,
                                 onCopy = { old ->
                                     vibrationManager?.vibrateClick()
-                                    clipboardManager.setText(AnnotatedString(old))
+                                    VaultClipboard.copySecret(context, old)
                                     Toast.makeText(context, context.getString(R.string.st_PasswordVaultScreen_g9h1), Toast.LENGTH_SHORT).show()
                                 },
                             )
@@ -1167,8 +1196,10 @@ private fun AppIconAvatar(
     val isApp = password.url?.startsWith("android://") == true
     val packageName = if (isApp) password.url?.removePrefix("android://") else null
 
+    val secondary = MaterialTheme.colorScheme.secondary
+    val onSecondary = MaterialTheme.colorScheme.onSecondary
     val bgColor = when {
-        isWhisper -> Color(0xFF8E24AA)
+        isWhisper -> secondary
         isIncomplete -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.8f)
         else -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f)
     }
@@ -1188,17 +1219,13 @@ private fun AppIconAvatar(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(
-                            Brush.linearGradient(
-                                listOf(Color(0xFF8E24AA), Color(0xFF6750A4))
-                            )
-                        ),
+                        .background(secondary),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
                         Icons.Rounded.Shield,
-                        contentDescription = "Whisper E2EE Account",
-                        tint = Color.White,
+                        contentDescription = smartName,
+                        tint = onSecondary,
                         modifier = Modifier.size(28.dp),
                     )
                 }
@@ -1302,7 +1329,7 @@ private fun PasswordRevealSurface(
             ) { show ->
                 Text(
                     text = if (show) password
-                    else "•".repeat(password.length.coerceIn(8, 20)),
+                    else "••••••••••••",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = if (show) 0.sp else 3.sp,
@@ -1332,7 +1359,7 @@ private fun PasswordHistorySection(history: List<String>, onCopy: (String) -> Un
             color = MaterialTheme.colorScheme.primary,
             letterSpacing = 1.sp,
         )
-        history.take(10).forEach { oldPass ->
+        history.take(PasswordEntity.MAX_HISTORY).forEach { oldPass ->
             Surface(
                 color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
                 shape = SmallExpressiveShape,
@@ -1351,12 +1378,12 @@ private fun PasswordHistorySection(history: List<String>, onCopy: (String) -> Un
                     )
                     IconButton(
                         onClick = { onCopy(oldPass) },
-                        modifier = Modifier.size(28.dp),
+                        modifier = Modifier.size(40.dp),
                     ) {
                         Icon(
                             Icons.Rounded.ContentCopy,
                             contentDescription = stringResource(R.string.st_PasswordVaultScreen_i1j3),
-                            modifier = Modifier.size(14.dp),
+                            modifier = Modifier.size(16.dp),
                             tint = MaterialTheme.colorScheme.primary,
                         )
                     }
@@ -1379,9 +1406,9 @@ private fun BreachStatusBanner(pwnedCount: Int) {
         MaterialTheme.colorScheme.secondary
     val icon = if (isBreached) Icons.Rounded.GppBad else Icons.Rounded.Verified
     val text = if (isBreached)
-        "Breached in $pwnedCount leak${if (pwnedCount > 1) "s" else ""}!"
+        stringResource(R.string.st_PasswordVaultScreen_breach_count, pwnedCount)
     else
-        "Identity safe from known leaks"
+        stringResource(R.string.st_PasswordVaultScreen_breach_safe)
 
     Surface(
         color = bannerColor,
@@ -1410,8 +1437,9 @@ private fun BreachStatusBanner(pwnedCount: Int) {
 
 @Composable
 fun WavyStrengthIndicator(strength: Int, modifier: Modifier = Modifier) {
-    val targetColor = rememberStrengthColor(strength)
-    val targetProgress = (strength + 1) / 5f
+    val safeStrength = strength.coerceIn(0, 4)
+    val targetColor = rememberStrengthColor(safeStrength)
+    val targetProgress = (safeStrength + 1) / 5f
 
     val animatedProgress by animateFloatAsState(
         targetValue = targetProgress,
@@ -1441,7 +1469,7 @@ fun WavyStrengthIndicator(strength: Int, modifier: Modifier = Modifier) {
                 letterSpacing = 1.sp,
             )
             AnimatedContent(
-                targetState = strengthLabel(strength),
+                targetState = strengthLabel(safeStrength),
                 transitionSpec = {
                     slideInVertically { -it } + fadeIn() togetherWith
                             slideOutVertically { it } + fadeOut()
@@ -1480,7 +1508,6 @@ fun GeneratorBottomSheet(
     onDismiss: () -> Unit,
 ) {
     val vibrationManager = LocalVibrationManager.current
-    val clipboardManager = LocalClipboardManager.current
     val context = LocalContext.current
     val settings by viewModel.generatorSettings.collectAsState()
 
@@ -1508,7 +1535,7 @@ fun GeneratorBottomSheet(
     val generatedStrength = remember(generatedPassword) {
         if (generatedPassword.isNotEmpty()) PasswordGenerator.calculateStrength(generatedPassword) else 0
     }
-    val isStrong = settings.length >= 14 && settings.includeSymbols && settings.includeNumbers
+    val isStrong = generatedStrength >= 3
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1718,7 +1745,7 @@ fun GeneratorBottomSheet(
             ToolzExpressiveButton(
                 onClick = {
                     vibrationManager?.vibrateClick()
-                    clipboardManager.setText(AnnotatedString(generatedPassword))
+                    VaultClipboard.copySecret(context, generatedPassword)
                     Toast.makeText(context, context.getString(R.string.st_PasswordVaultScreen_w5x7), Toast.LENGTH_SHORT).show()
                     onDismiss()
                 },
@@ -1779,7 +1806,7 @@ fun DeleteConfirmDialog(
         },
         text = {
             Text(
-                "Permanently delete credentials for \"$name\"? This cannot be undone.",
+                stringResource(R.string.st_PasswordVaultScreen_delete_message, name),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -1823,10 +1850,10 @@ fun AddPasswordDialog(
     onConfirm: (String, String?, String, String) -> Unit,
 ) {
     val vibrationManager = LocalVibrationManager.current
-    var name by remember { mutableStateOf(initialEntity?.name ?: "") }
-    var url by remember { mutableStateOf(initialEntity?.url ?: "") }
-    var username by remember { mutableStateOf(initialEntity?.username ?: "") }
-    var password by remember { mutableStateOf(initialEntity?.password ?: "") }
+    var name by remember(initialEntity?.id) { mutableStateOf(initialEntity?.name ?: "") }
+    var url by remember(initialEntity?.id) { mutableStateOf(initialEntity?.url ?: "") }
+    var username by remember(initialEntity?.id) { mutableStateOf(initialEntity?.username ?: "") }
+    var password by remember(initialEntity?.id) { mutableStateOf(initialEntity?.password ?: "") }
     var passwordVisible by remember { mutableStateOf(false) }
     var showAppPicker by remember { mutableStateOf(false) }
 
@@ -2030,10 +2057,28 @@ fun AppPickerDialog(
 ) {
     val context = LocalContext.current
     val pm = context.packageManager
-    val apps = remember {
-        pm.getInstalledApplications(PackageManager.GET_META_DATA)
-            .filter { it.flags and ApplicationInfo.FLAG_SYSTEM == 0 }
-            .sortedBy { pm.getApplicationLabel(it).toString() }
+    var query by remember { mutableStateOf("") }
+    var apps by remember { mutableStateOf<List<ApplicationInfo>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+
+    LaunchedEffect(Unit) {
+        loading = true
+        apps = withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                pm.getInstalledApplications(PackageManager.GET_META_DATA)
+                    .filter { it.flags and ApplicationInfo.FLAG_SYSTEM == 0 }
+                    .sortedBy { pm.getApplicationLabel(it).toString().lowercase() }
+            }.getOrDefault(emptyList())
+        }
+        loading = false
+    }
+
+    val filtered = remember(apps, query) {
+        if (query.isBlank()) apps
+        else apps.filter {
+            pm.getApplicationLabel(it).toString().contains(query, ignoreCase = true) ||
+                it.packageName.contains(query, ignoreCase = true)
+        }
     }
 
     AlertDialog(
@@ -2041,15 +2086,34 @@ fun AppPickerDialog(
         shape = ExtraLargeExpressiveShape,
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         title = {
-            Text(
-                stringResource(R.string.st_PasswordVaultScreen_c7d9),
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Black,
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    stringResource(R.string.st_PasswordVaultScreen_c7d9),
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Black,
+                )
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    label = { Text(stringResource(R.string.st_PasswordVaultScreen_u1v2)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         },
         text = {
-            LazyColumn(modifier = Modifier.height(420.dp)) {
-                items(apps) { app ->
+            if (loading) {
+                Box(
+                    modifier = Modifier
+                        .height(200.dp)
+                        .fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator()
+                }
+            } else {
+                LazyColumn(modifier = Modifier.height(360.dp)) {
+                    items(filtered, key = { it.packageName }) { app ->
                     val appName = pm.getApplicationLabel(app).toString()
                     val packageName = app.packageName
                     Row(
@@ -2088,6 +2152,7 @@ fun AppPickerDialog(
                             )
                         }
                     }
+                    }
                 }
             }
         },
@@ -2104,11 +2169,11 @@ fun AppPickerDialog(
 // ═══════════════════════════════════════════════════════════════════════════════
 
 @Composable
-private fun rememberStrengthColor(strength: Int): Color = when (strength) {
+private fun rememberStrengthColor(strength: Int): Color = when (strength.coerceIn(0, 4)) {
     0    -> MaterialTheme.colorScheme.error
-    1    -> Color(0xFFFB8C00)
-    2    -> Color(0xFFFDD835)
-    3    -> Color(0xFF7CB342)
+    1    -> MaterialTheme.colorScheme.tertiary
+    2    -> MaterialTheme.colorScheme.secondary
+    3    -> MaterialTheme.colorScheme.primary
     else -> MaterialTheme.colorScheme.primary
 }
 
@@ -2213,9 +2278,9 @@ private fun StatCardsLightPreview() {
             modifier = Modifier.padding(16.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            VaultStatCard("Total", "24", Icons.Rounded.Inventory2, Color(0xFF6750A4), Modifier.weight(1f))
-            VaultStatCard("Breached", "2", Icons.Rounded.GppBad, Color(0xFFB00020), Modifier.weight(1f))
-            VaultStatCard("Weak", "5", Icons.Rounded.Password, Color(0xFFFF9800), Modifier.weight(1f))
+            VaultStatCard("Total", "24", Icons.Rounded.Inventory2, MaterialTheme.colorScheme.primary, Modifier.weight(1f))
+            VaultStatCard("Breached", "2", Icons.Rounded.GppBad, MaterialTheme.colorScheme.error, Modifier.weight(1f))
+            VaultStatCard("Weak", "5", Icons.Rounded.Password, MaterialTheme.colorScheme.tertiary, Modifier.weight(1f))
         }
     }
 }
@@ -2228,9 +2293,9 @@ private fun StatCardsDarkPreview() {
             modifier = Modifier.padding(16.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            VaultStatCard("Total", "24", Icons.Rounded.Inventory2, Color(0xFFD0BCFF), Modifier.weight(1f))
-            VaultStatCard("Breached", "0", Icons.Rounded.GppBad, Color(0xFFCCC2DC), Modifier.weight(1f))
-            VaultStatCard("Weak", "3", Icons.Rounded.Password, Color(0xFFFF9800), Modifier.weight(1f))
+            VaultStatCard("Total", "24", Icons.Rounded.Inventory2, MaterialTheme.colorScheme.primary, Modifier.weight(1f))
+            VaultStatCard("Breached", "0", Icons.Rounded.GppBad, MaterialTheme.colorScheme.outline, Modifier.weight(1f))
+            VaultStatCard("Weak", "3", Icons.Rounded.Password, MaterialTheme.colorScheme.tertiary, Modifier.weight(1f))
         }
     }
 }

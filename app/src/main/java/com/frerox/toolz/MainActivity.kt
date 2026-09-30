@@ -1341,7 +1341,8 @@ fun ToolzNavHost(
             route = Screen.Notepad.route + "?initialNoteId={initialNoteId}",
             arguments = listOf(navArgument("initialNoteId") { type = NavType.IntType; defaultValue = -1 })
         ) { backStackEntry ->
-            val initialNoteId = backStackEntry.arguments?.getInt("initialNoteId").takeIf { it != -1 }
+            val rawId = backStackEntry.arguments?.getInt("initialNoteId") ?: -1
+            val initialNoteId = rawId.takeIf { it > 0 }
             val musicViewModel: MusicPlayerViewModel = hiltViewModel()
             NotepadScreen(
                 viewModel = hiltViewModel(),
@@ -1367,8 +1368,18 @@ fun ToolzNavHost(
                     }
                 },
                 onViewPdf = { uri, page ->
-                    pdfViewModel.openPdfAtPage(Uri.parse(uri), "Document", page)
-                    navController.navigate(Screen.PdfReader.route)
+                    val parsed = try { Uri.parse(uri) } catch (_: Exception) { null }
+                    if (parsed != null) {
+                        val title = try {
+                            parsed.lastPathSegment?.substringAfterLast('/')?.let {
+                                java.net.URLDecoder.decode(it, "UTF-8")
+                            }?.take(80)
+                        } catch (_: Exception) { null } ?: "Document"
+                        pdfViewModel.openPdfAtPage(parsed, title, page.coerceAtLeast(0))
+                        navController.navigate(Screen.PdfReader.route) {
+                            launchSingleTop = true
+                        }
+                    }
                 },
                 initialNoteId = initialNoteId
             )
@@ -1393,7 +1404,11 @@ fun ToolzNavHost(
                 viewModel = pdfViewModel,
                 onNavigateBack = { toolOnBack() },
                 onNavigateToNote = { noteId ->
-                    navController.navigate(Screen.Notepad.route + "?initialNoteId=$noteId")
+                    if (noteId > 0) {
+                        navController.navigate(Screen.Notepad.route + "?initialNoteId=$noteId") {
+                            launchSingleTop = true
+                        }
+                    }
                 },
                 onNavigateToConverter = { uri, title ->
                     navController.navigate(Screen.FileConverter.createRoute(uri, title))

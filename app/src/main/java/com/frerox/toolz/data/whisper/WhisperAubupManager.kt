@@ -132,7 +132,7 @@ class WhisperAubupManager @Inject constructor(
                 )
                 passwordDao.insertPassword(newEntity)
             }
-        }
+        }.map { }
     }
 
     // P0-3 FIX: Q+ scoped storage — public Downloads via MediaStore is the only

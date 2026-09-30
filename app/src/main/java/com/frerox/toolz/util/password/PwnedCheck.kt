@@ -17,42 +17,83 @@
 
 package com.frerox.toolz.util.password
 
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.security.MessageDigest
 import java.net.HttpURLConnection
 import java.net.URL
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import java.util.Locale
 
 object PwnedCheck {
-    suspend fun isPwned(password: String): Int = withContext(Dispatchers.IO) {
+    private const val TAG = "PwnedCheck"
+    private const val CONNECT_TIMEOUT_MS = 8000
+    private const val READ_TIMEOUT_MS = 8000
+
+    sealed interface PwnedResult {
+        data class Checked(val count: Int) : PwnedResult
+        data class Failed(val reason: String) : PwnedResult
+    }
+
+    /**
+     * K-anonymity breach check. Returns a [PwnedResult] so callers can
+     * distinguish "not breached" from "network failed".
+     */
+    suspend fun checkPwned(password: String): PwnedResult = withContext(Dispatchers.IO) {
+        var connection: HttpURLConnection? = null
         try {
             val hash = sha1(password)
             val prefix = hash.substring(0, 5)
             val suffix = hash.substring(5)
 
-            val url = URL("https://api.pwnedpasswords.com/range/$prefix")
-            val connection = url.openConnection() as HttpURLConnection
-            connection.requestMethod = "GET"
+            connection = (URL("https://api.pwnedpasswords.com/range/$prefix").openConnection()
+                as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = CONNECT_TIMEOUT_MS
+                readTimeout = READ_TIMEOUT_MS
+                setRequestProperty("Add-Padding", "true")
+                setRequestProperty("User-Agent", "Toolz-Password-Vault")
+            }
 
-            if (connection.responseCode == 200) {
-                connection.inputStream.bufferedReader().useLines { lines ->
-                    for (line in lines) {
-                        val (pwnedSuffix, count) = line.split(":")
-                        if (pwnedSuffix.equals(suffix, ignoreCase = true)) {
-                            return@withContext count.toInt()
+            when (connection.responseCode) {
+                200 -> {
+                    connection.inputStream.bufferedReader(StandardCharsets.UTF_8).useLines { lines ->
+                        for (line in lines) {
+                            val sep = line.indexOf(':')
+                            if (sep <= 0) continue
+                            val pwnedSuffix = line.substring(0, sep).trim()
+                            val count = line.substring(sep + 1).trim().toIntOrNull() ?: continue
+                            if (pwnedSuffix.equals(suffix, ignoreCase = true)) {
+                                return@withContext PwnedResult.Checked(count)
+                            }
                         }
                     }
+                    PwnedResult.Checked(0)
                 }
+                429 -> PwnedResult.Failed("rate-limited")
+                else -> PwnedResult.Failed("http-${connection.responseCode}")
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.w(TAG, "Breach check failed", e)
+            PwnedResult.Failed(e.javaClass.simpleName)
+        } finally {
+            connection?.disconnect()
         }
-        0
     }
 
+    /**
+     * Legacy helper kept for existing call sites: returns the breach count,
+     * or 0 when the check fails. Prefer [checkPwned] for new code.
+     */
+    suspend fun isPwned(password: String): Int =
+        when (val r = checkPwned(password)) {
+            is PwnedResult.Checked -> r.count
+            is PwnedResult.Failed -> 0
+        }
+
     private fun sha1(input: String): String {
-        val bytes = MessageDigest.getInstance("SHA-1").digest(input.toByteArray())
+        val bytes = MessageDigest.getInstance("SHA-1").digest(input.toByteArray(StandardCharsets.UTF_8))
         return bytes.joinToString("") { "%02X".format(it) }.uppercase(Locale.ROOT)
     }
 }

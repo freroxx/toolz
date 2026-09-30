@@ -19,8 +19,10 @@ package com.frerox.toolz.service
 
 import android.app.Activity
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.service.autofill.Dataset
+import android.view.WindowManager
 import android.view.autofill.AutofillId
 import android.view.autofill.AutofillManager
 import android.view.autofill.AutofillValue
@@ -50,9 +52,12 @@ import androidx.compose.ui.unit.sp
 import com.frerox.toolz.R
 import com.frerox.toolz.data.password.PasswordDao
 import com.frerox.toolz.data.password.PasswordEntity
+import com.frerox.toolz.data.password.escapeLike
 import com.frerox.toolz.ui.theme.ToolzTheme
 import com.frerox.toolz.util.security.BiometricPromptUtils
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -65,9 +70,13 @@ class AutofillActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.setFlags(
+            WindowManager.LayoutParams.FLAG_SECURE,
+            WindowManager.LayoutParams.FLAG_SECURE
+        )
 
-        val userFieldId = intent.getParcelableExtra<AutofillId>("user_field_id")
-        val passFieldId = intent.getParcelableExtra<AutofillId>("pass_field_id")
+        val userFieldId = getAutofillId("user_field_id")
+        val passFieldId = getAutofillId("pass_field_id")
         val domain = intent.getStringExtra("domain")
         val targetPackage = intent.getStringExtra("package_name")
 
@@ -90,6 +99,15 @@ class AutofillActivity : AppCompatActivity() {
             onError = { _, _ -> finish() },
             onFailed = { finish() }
         )
+    }
+
+    private fun getAutofillId(key: String): AutofillId? {
+        return if (Build.VERSION.SDK_INT >= 33) {
+            intent.getParcelableExtra(key, AutofillId::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableExtra(key)
+        }
     }
 
     private fun returnResult(credential: PasswordEntity, userFieldId: AutofillId?, passFieldId: AutofillId?) {
@@ -116,6 +134,11 @@ class AutofillActivity : AppCompatActivity() {
                 putExtra(AutofillManager.EXTRA_AUTHENTICATION_RESULT, datasetBuilder.build())
             }
             setResult(Activity.RESULT_OK, replyIntent)
+            runCatching {
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                    runCatching { passwordDao.updateLastUsed(credential.id, System.currentTimeMillis()) }
+                }
+            }
         } else {
             setResult(Activity.RESULT_CANCELED)
         }
@@ -133,13 +156,26 @@ class AutofillActivity : AppCompatActivity() {
         val scope = rememberCoroutineScope()
         var searchResults by remember { mutableStateOf<List<PasswordEntity>>(emptyList()) }
         var query by remember { mutableStateOf("") }
+        var searchJob by remember { mutableStateOf<Job?>(null) }
+
+        suspend fun loadInitial(): List<PasswordEntity> {
+            val initial = mutableListOf<PasswordEntity>()
+            if (!domain.isNullOrBlank()) initial.addAll(passwordDao.getPasswordsByDomain(domain.escapeLike()))
+            if (initial.isEmpty() && !packageName.isNullOrBlank()) {
+                initial.addAll(passwordDao.getPasswordsByDomain(packageName.escapeLike()))
+            }
+            if (initial.isEmpty()) {
+                initial.addAll(
+                    passwordDao.getAllPasswords().first()
+                        .sortedByDescending { it.lastUsedAt }
+                        .take(15)
+                )
+            }
+            return initial.distinctBy { it.id }
+        }
 
         LaunchedEffect(Unit) {
-            val initial = mutableListOf<PasswordEntity>()
-            if (!domain.isNullOrBlank()) initial.addAll(passwordDao.getPasswordsByDomain(domain))
-            if (initial.isEmpty() && !packageName.isNullOrBlank()) initial.addAll(passwordDao.getPasswordsByDomain(packageName))
-            if (initial.isEmpty()) initial.addAll(passwordDao.getAllPasswords().first().take(15))
-            searchResults = initial.distinctBy { it.id }
+            searchResults = loadInitial()
         }
 
         ModalBottomSheet(
@@ -175,17 +211,15 @@ class AutofillActivity : AppCompatActivity() {
 
                 TextField(
                     value = query,
-                    onValueChange = { 
+                    onValueChange = {
                         query = it
-                        scope.launch {
+                        searchJob?.cancel()
+                        searchJob = scope.launch {
+                            delay(250)
                             searchResults = if (it.isBlank()) {
-                                val initial = mutableListOf<PasswordEntity>()
-                                if (!domain.isNullOrBlank()) initial.addAll(passwordDao.getPasswordsByDomain(domain))
-                                if (initial.isEmpty() && !packageName.isNullOrBlank()) initial.addAll(passwordDao.getPasswordsByDomain(packageName))
-                                if (initial.isEmpty()) initial.addAll(passwordDao.getAllPasswords().first().take(15))
-                                initial.distinctBy { it.id }
+                                loadInitial()
                             } else {
-                                passwordDao.searchPasswords(it)
+                                passwordDao.searchPasswords(it.escapeLike())
                             }
                         }
                     },
@@ -194,7 +228,11 @@ class AutofillActivity : AppCompatActivity() {
                     leadingIcon = { Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.primary) },
                     trailingIcon = {
                         if (query.isNotEmpty()) {
-                            IconButton(onClick = { query = "" }) {
+                            IconButton(onClick = {
+                                query = ""
+                                searchJob?.cancel()
+                                searchJob = scope.launch { searchResults = loadInitial() }
+                            }) {
                                 Icon(Icons.Rounded.Close, null)
                             }
                         }

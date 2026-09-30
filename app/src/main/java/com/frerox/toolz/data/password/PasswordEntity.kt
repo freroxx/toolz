@@ -28,7 +28,7 @@ data class PasswordEntity(
     val url: String?,
     val username: String,
     val password: String,
-    val strength: Int, // 0-4
+    val strength: Int, // 0-4, see PasswordGenerator.calculateStrength
     val pwnedCount: Int? = null,
     // V3-FIX: for Whisper vault entries records whether the credential is a 64-char
     // anon token; null = unknown/legacy.
@@ -37,5 +37,10 @@ data class PasswordEntity(
     val lastUsedAt: Long = System.currentTimeMillis(),
     val passwordHistory: List<String> = emptyList()
 ) {
-    val isComplete: Boolean get() = username.isNotBlank() && password.isNotBlank()
+    val isComplete: Boolean
+        get() = name.isNotBlank() && username.isNotBlank() && password.isNotBlank()
+
+    companion object {
+        const val MAX_HISTORY = 5
+    }
 }

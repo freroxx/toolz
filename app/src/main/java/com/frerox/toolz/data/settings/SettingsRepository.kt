@@ -407,6 +407,9 @@ class SettingsRepository @Inject constructor(
     private val STEP_SENSITIVITY = intPreferencesKey("step_sensitivity")
     private val STEP_ENGINE_MODE = stringPreferencesKey("step_engine_mode")
     private val LAST_OS_STEP_COUNT = longPreferencesKey("last_os_step_count")
+    private val STEP_SESSION_BASE = longPreferencesKey("step_session_base")
+    private val STEP_SESSION_FORWARDED = longPreferencesKey("step_session_forwarded")
+    private val STEP_SESSION_DATE = stringPreferencesKey("step_session_date")
 
     // Universal Pill
     private val SHOW_TOOLZ_PILL = booleanPreferencesKey("show_toolz_pill")
@@ -935,6 +938,9 @@ class SettingsRepository @Inject constructor(
     }
     val stepEngineMode: Flow<String> = dataStore.data.map { it[STEP_ENGINE_MODE] ?: "SIMPLE" }
     val lastOsStepCount: Flow<Long> = dataStore.data.map { it[LAST_OS_STEP_COUNT] ?: -1L }
+    val stepSessionBase: Flow<Long> = dataStore.data.map { it[STEP_SESSION_BASE] ?: -1L }
+    val stepSessionForwarded: Flow<Long> = dataStore.data.map { it[STEP_SESSION_FORWARDED] ?: 0L }
+    val stepSessionDate: Flow<String> = dataStore.data.map { it[STEP_SESSION_DATE] ?: "" }
 
     val showToolzPill: Flow<Boolean> = dataStore.data.map { it[SHOW_TOOLZ_PILL] ?: true }
     val fillThePillEnabled: Flow<Boolean> = dataStore.data.map { it[FILL_THE_PILL_ENABLED] ?: false }
@@ -1445,6 +1451,13 @@ class SettingsRepository @Inject constructor(
     suspend fun setStepSensitivity(sensitivity: Int) { dataStore.edit { it[STEP_SENSITIVITY] = sensitivity } }
     suspend fun setStepEngineMode(mode: String) { dataStore.edit { it[STEP_ENGINE_MODE] = mode } }
     suspend fun setLastOsStepCount(count: Long) { dataStore.edit { it[LAST_OS_STEP_COUNT] = count } }
+    suspend fun setStepSession(base: Long, forwarded: Long, date: String) {
+        dataStore.edit {
+            it[STEP_SESSION_BASE] = base
+            it[STEP_SESSION_FORWARDED] = forwarded
+            it[STEP_SESSION_DATE] = date
+        }
+    }
 
     suspend fun setShowToolzPill(enabled: Boolean) { dataStore.edit { it[SHOW_TOOLZ_PILL] = enabled } }
     suspend fun setFillThePillEnabled(enabled: Boolean) { dataStore.edit { it[FILL_THE_PILL_ENABLED] = enabled } }

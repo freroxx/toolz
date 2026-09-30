@@ -308,7 +308,7 @@ fun RandomGeneratorScreen(
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         Button(
                             onClick = { viewModel.pickItem() },
-                            modifier = Modifier.weight(1f).height(50.dp).bouncyClick(onClick = { viewModel.pickItem() }),
+                            modifier = Modifier.weight(1f).height(50.dp),
                             enabled = !state.isGenerating,
                             shape = RoundedCornerShape(14.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
@@ -323,7 +323,7 @@ fun RandomGeneratorScreen(
                         }
                         Button(
                             onClick = { viewModel.shuffleList() },
-                            modifier = Modifier.weight(1f).height(50.dp).bouncyClick(onClick = { viewModel.shuffleList() }),
+                            modifier = Modifier.weight(1f).height(50.dp),
                             shape = RoundedCornerShape(14.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
                         ) {

@@ -18,43 +18,58 @@
 package com.frerox.toolz.util.security
 
 import android.content.Context
+import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import java.nio.charset.StandardCharsets
 import java.security.SecureRandom
 
 object KeyManager {
+    private const val TAG = "KeyManager"
     private const val PREFS_NAME = "toolz_vault_prefs"
     private const val KEY_PASSPHRASE = "vault_passphrase"
+    private const val HEX_LENGTH = 64
 
+    @Synchronized
     fun getOrCreateMasterKey(context: Context): ByteArray {
-        return getOrCreateMasterKeyString(context).toByteArray()
+        return getOrCreateMasterKeyString(context).toByteArray(StandardCharsets.UTF_8)
     }
 
+    /**
+     * Fail-closed: if the Keystore/EncryptedSharedPreferences stack is broken,
+     * throw instead of returning a hardcoded passphrase shared by every device.
+     */
+    @Synchronized
     fun getOrCreateMasterKeyString(context: Context): String {
-        return try {
-            val sharedPreferences = openPrefs(context)
-
-            var passphrase = sharedPreferences.getString(KEY_PASSPHRASE, null)
-            if (passphrase == null) {
-                val random = SecureRandom()
-                val bytes = ByteArray(32)
-                random.nextBytes(bytes)
-                // Use hex string as passphrase for SQLCipher
-                passphrase = bytes.joinToString("") { "%02x".format(it) }
-                sharedPreferences.edit().putString(KEY_PASSPHRASE, passphrase).apply()
-            }
-            passphrase
-        } catch (e: Exception) {
-            // Fallback for extreme cases, though ideally we should handle Keystore issues better
-            "fallback_secure_key_for_sqlcipher_32_chars"
+        val sharedPreferences = openPrefs(context)
+        val existing = sharedPreferences.getString(KEY_PASSPHRASE, null)
+        if (existing != null) {
+            require(isValidPassphrase(existing)) { "Stored vault passphrase has invalid format" }
+            return existing
         }
+        val random = SecureRandom()
+        val bytes = ByteArray(32)
+        random.nextBytes(bytes)
+        val passphrase = bytes.joinToString("") { "%02x".format(it) }
+        val committed = sharedPreferences.edit().putString(KEY_PASSPHRASE, passphrase).commit()
+        if (!committed) {
+            Log.e(TAG, "Failed to persist vault passphrase")
+            throw IllegalStateException("Could not persist vault passphrase")
+        }
+        return passphrase
     }
 
     fun restoreMasterKey(context: Context, passphrase: String) {
-        require(passphrase.isNotBlank()) { "SQLCipher passphrase cannot be blank" }
-        openPrefs(context).edit()
-            .putString(KEY_PASSPHRASE, passphrase)
+        require(isValidPassphrase(passphrase.trim())) { "SQLCipher passphrase must be 64 hex chars" }
+        val committed = openPrefs(context).edit()
+            .putString(KEY_PASSPHRASE, passphrase.trim())
             .commit()
+        if (!committed) throw IllegalStateException("Could not restore vault passphrase")
+    }
+
+    private fun isValidPassphrase(value: String): Boolean {
+        if (value.length != HEX_LENGTH) return false
+        return value.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }
     }
 
     private fun openPrefs(context: Context) = EncryptedSharedPreferences.create(

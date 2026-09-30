@@ -38,6 +38,7 @@ import com.frerox.toolz.data.math.MathHistory
 import com.frerox.toolz.data.music.MusicTrack
 import com.frerox.toolz.data.music.Playlist
 import com.frerox.toolz.data.notepad.Note
+import com.frerox.toolz.data.notepad.NoteAttachment
 import com.frerox.toolz.data.notifications.NotificationEntry
 import com.frerox.toolz.data.password.PasswordEntity
 import com.frerox.toolz.data.pdf.PdfMetadata
@@ -104,13 +105,26 @@ class LocalBackupManager @Inject constructor(
         val entryHashes = linkedMapOf<String, String>()
 
         ZipOutputStream(FileOutputStream(tempZip)).use { zip ->
-            // 1. Security (Always included if any encryption needed)
-            addTextEntry(
-                zip = zip,
-                path = "security/sqlcipher_passphrase.txt",
-                text = KeyManager.getOrCreateMasterKeyString(context),
-                entryHashes = entryHashes
-            )
+            // Security: only bundle the SQLCipher passphrase when the backup
+            // actually contains database content. It is plaintext inside the
+            // zip, so including it unconditionally exfiltrates the vault key
+            // even for settings-only backups.
+            val needsPassphrase = items.any {
+                it == BackupItem.NOTES || it == BackupItem.TASKS || it == BackupItem.AI_HISTORY ||
+                    it == BackupItem.PASSWORDS || it == BackupItem.SEARCH_HISTORY ||
+                    it == BackupItem.NOTIFICATIONS || it == BackupItem.CALENDAR ||
+                    it == BackupItem.CLIPBOARD || it == BackupItem.STEPS ||
+                    it == BackupItem.MATH_HISTORY || it == BackupItem.PDF_METADATA ||
+                    it == BackupItem.CATALOG_DATA || it == BackupItem.OTHERS
+            }
+            if (needsPassphrase) {
+                addTextEntry(
+                    zip = zip,
+                    path = "security/sqlcipher_passphrase.txt",
+                    text = KeyManager.getOrCreateMasterKeyString(context),
+                    entryHashes = entryHashes
+                )
+            }
 
             // 2. AI Settings
             if (items.contains(BackupItem.AI_KEYS)) {
@@ -202,7 +216,8 @@ class LocalBackupManager @Inject constructor(
                 notes = listOf(
                     "reason=$reason",
                     "Selective backup enabled.",
-                    "EncryptedSharedPreferences are exported as portable decrypted sections when needed."
+                    "EncryptedSharedPreferences are exported as portable decrypted sections when needed.",
+                    "WARNING: this archive contains plaintext secrets (passwords + SQLCipher passphrase when database items are included). Store it securely."
                 )
             )
             addTextEntry(zip, "manifest.json", manifestAdapter.toJson(manifest), entryHashes = null)
@@ -233,6 +248,14 @@ class LocalBackupManager @Inject constructor(
         if (items.contains(BackupItem.NOTES)) {
             _progress.value = context.getString(R.string.st_Backup_Progress_Notes)
             addTextEntry(zip, "data/notes.json", listAdapter<Note>().toJson(database.noteDao().getAllNotesSync()), entryHashes)
+            // V2 attachments ride along; files themselves stay on device (URIs re-validated on open).
+            try {
+                val allAtt = mutableListOf<NoteAttachment>()
+                database.noteDao().getAllNotesSync().take(2000).forEach { n ->
+                    try { allAtt += database.noteAttachmentDao().listForNote(n.id) } catch (_: Exception) { }
+                }
+                addTextEntry(zip, "data/note_attachments.json", listAdapter<NoteAttachment>().toJson(allAtt), entryHashes)
+            } catch (_: Exception) { }
         }
         if (items.contains(BackupItem.TASKS)) {
             _progress.value = context.getString(R.string.st_Backup_Progress_Tasks)
@@ -317,8 +340,11 @@ class LocalBackupManager @Inject constructor(
         var rescheduledTaskAlarms = 0
 
         ZipFile(stagingFile).use { zipFile ->
-            val passphrase = zipFile.getInputStream(zipFile.getEntry("security/sqlcipher_passphrase.txt")).bufferedReader().use { it.readText() }
-            KeyManager.restoreMasterKey(context, passphrase.trim())
+            // Passphrase entry is optional now (settings-only backups skip it).
+            zipFile.getEntry("security/sqlcipher_passphrase.txt")?.let { entry ->
+                val passphrase = zipFile.getInputStream(entry).bufferedReader().use { it.readText() }
+                KeyManager.restoreMasterKey(context, passphrase.trim())
+            }
 
             zipFile.entries().asSequence().forEach { entry ->
                 if (entry.isDirectory || entry.name == "manifest.json" || entry.name == "security/sqlcipher_passphrase.txt") {
@@ -447,7 +473,34 @@ class LocalBackupManager @Inject constructor(
         _progress.value = context.getString(R.string.st_Backup_Progress_Restoring, entry.name.substringAfterLast("/").substringBefore("."))
         return when (entry.name) {
             "data/notes.json" -> if (itemsToRestore.contains(BackupItem.NOTES)) {
-                database.noteDao().insertNotes(listAdapter<Note>().fromJson(json).orEmpty())
+                // Dedup on (title, content-hash, createdAt); force-insert so
+                // restore never clobbers live rows or collides on id.
+                val incoming = listAdapter<Note>().fromJson(json).orEmpty()
+                val existingKeys = try {
+                    database.noteDao().getAllNotesSync()
+                        .map { Triple(it.title.trim(), it.content.hashCode(), it.createdAt) }.toSet()
+                } catch (_: Exception) { emptySet() }
+                val fresh = incoming
+                    .filterNot { Triple(it.title.trim(), it.content.hashCode(), it.createdAt) in existingKeys }
+                    .map { it.copy(id = 0) }
+                if (fresh.isNotEmpty()) database.noteDao().insertNotes(fresh)
+                true
+            } else false
+            "data/note_attachments.json" -> if (itemsToRestore.contains(BackupItem.NOTES)) {
+                // Re-attach only to notes whose legacy slot or title still exists;
+                // dangling rows (fresh IDs) are skipped instead of FK-violating.
+                try {
+                    val incoming = listAdapter<NoteAttachment>().fromJson(json).orEmpty().take(5000)
+                    if (incoming.isNotEmpty()) {
+                        val liveIds = try {
+                            database.noteDao().getAllNotesSync().map { it.id }.toSet()
+                        } catch (_: Exception) { emptySet() }
+                        val valid = incoming.filter { it.noteId in liveIds && it.uri.isNotBlank() }
+                        valid.chunked(200).forEach { chunk ->
+                            try { database.noteAttachmentDao().insertAll(chunk) } catch (_: Exception) { }
+                        }
+                    }
+                } catch (_: Exception) { }
                 true
             } else false
             "data/tasks.json" -> if (itemsToRestore.contains(BackupItem.TASKS)) {
@@ -472,7 +525,27 @@ class LocalBackupManager @Inject constructor(
                 true
             } else false
             "data/passwords.json" -> if (itemsToRestore.contains(BackupItem.PASSWORDS)) {
-                database.passwordDao().insertPasswords(listAdapter<PasswordEntity>().fromJson(json).orEmpty())
+                // Dedup on (name, username, url) and force-insert so restore
+                // never overwrites live rows or collides on id.
+                val incoming = listAdapter<PasswordEntity>().fromJson(json).orEmpty()
+                val existingKeys = database.passwordDao().getAllPasswordsSync()
+                    .map {
+                        Triple(
+                            it.name.trim().lowercase(),
+                            it.username.trim().lowercase(),
+                            it.url?.trim()?.lowercase()
+                        )
+                    }.toSet()
+                val fresh = incoming
+                    .filterNot {
+                        Triple(
+                            it.name.trim().lowercase(),
+                            it.username.trim().lowercase(),
+                            it.url?.trim()?.lowercase()
+                        ) in existingKeys
+                    }
+                    .map { it.copy(id = 0) }
+                if (fresh.isNotEmpty()) database.passwordDao().insertPasswordsTx(fresh)
                 true
             } else false
             "data/search_history.json" -> if (itemsToRestore.contains(BackupItem.SEARCH_HISTORY)) {

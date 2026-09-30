@@ -335,6 +335,30 @@ object DatabaseModule {
         }
     }
 
+    // Notepad V3 60->61: createdAt/updatedAt + query indices; attachment
+    // metadata + lookup indices. Purely additive, backfills from timestamp.
+    private val MIGRATION_60_61 = object : Migration(60, 61) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE notes ADD COLUMN createdAt INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE notes ADD COLUMN updatedAt INTEGER NOT NULL DEFAULT 0")
+            try {
+                db.execSQL("UPDATE notes SET createdAt = timestamp WHERE createdAt = 0")
+            } catch (_: Exception) { }
+            try {
+                db.execSQL("UPDATE notes SET updatedAt = timestamp WHERE updatedAt = 0")
+            } catch (_: Exception) { }
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_notes_isDeleted` ON `notes` (`isDeleted`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_notes_isPinned_timestamp` ON `notes` (`isPinned`, `timestamp`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_notes_deletedTimestamp` ON `notes` (`deletedTimestamp`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_notes_updatedAt` ON `notes` (`updatedAt`)")
+            db.execSQL("ALTER TABLE note_attachments ADD COLUMN mimeType TEXT DEFAULT NULL")
+            db.execSQL("ALTER TABLE note_attachments ADD COLUMN durationMs INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_note_attachments_noteId_kind` ON `note_attachments` (`noteId`, `kind`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_note_attachments_uri` ON `note_attachments` (`uri`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_note_attachments_noteId_uri` ON `note_attachments` (`noteId`, `uri`)")
+        }
+    }
+
     @Provides
     @Singleton
     fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase {
@@ -356,7 +380,7 @@ object DatabaseModule {
         .openHelperFactory(factory)
         // V2-FIX (reviewwhisper.md) H-10: explicit migrations only — every version bump
         // must ship one (see AppDatabase comment).
-        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56, MIGRATION_56_57, MIGRATION_57_58, MIGRATION_58_59, MIGRATION_59_60)
+        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56, MIGRATION_56_57, MIGRATION_57_58, MIGRATION_58_59, MIGRATION_59_60, MIGRATION_60_61)
         .fallbackToDestructiveMigrationOnDowngrade()
         // NOTE: Add explicit Migration objects here when schema changes. Schemas are now
         // EXPORTED to app/schemas (H-10 fix) so diffs are reviewable — never re-introduce
@@ -401,14 +425,26 @@ object DatabaseModule {
                 android.util.Log.e(
                     "DatabaseModule",
                     "Unopenable database (${e.javaClass.simpleName}: ${e.message}). " +
-                        "Deleting '$dbName' and rebuilding from scratch.",
+                        "Preserving a .corrupt backup and rebuilding from scratch.",
                     e
                 )
+                // Preserve evidence before wiping: copy the unreadable file so a
+                // vault is never silently destroyed without a recovery artifact.
+                runCatching {
+                    val dbFile = context.getDatabasePath(dbName)
+                    if (dbFile.exists()) {
+                        val backup = java.io.File(
+                            dbFile.parent,
+                            "$dbName.corrupt.${System.currentTimeMillis()}.bak"
+                        )
+                        dbFile.copyTo(backup, overwrite = false)
+                    }
+                }
                 context.deleteDatabase(dbName)
                 // Fresh builder avoids leaking the first helper's connection.
                 return Room.databaseBuilder(context, AppDatabase::class.java, dbName)
                     .openHelperFactory(factory)
-        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56, MIGRATION_56_57, MIGRATION_57_58, MIGRATION_58_59, MIGRATION_59_60)
+        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56, MIGRATION_56_57, MIGRATION_57_58, MIGRATION_58_59, MIGRATION_59_60, MIGRATION_60_61)
                     .fallbackToDestructiveMigrationOnDowngrade()
                     .build()
             }

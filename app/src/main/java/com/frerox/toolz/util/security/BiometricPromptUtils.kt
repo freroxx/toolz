@@ -17,7 +17,6 @@
 
 package com.frerox.toolz.util.security
 
-import android.os.Build
 import androidx.annotation.StringRes
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
@@ -26,10 +25,17 @@ import androidx.core.content.ContextCompat
 import com.frerox.toolz.R
 
 object BiometricPromptUtils {
+    fun canAuthenticate(activity: FragmentActivity): Boolean {
+        val manager = BiometricManager.from(activity)
+        return manager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG) ==
+            BiometricManager.BIOMETRIC_SUCCESS
+    }
+
     fun showBiometricPrompt(
         activity: FragmentActivity,
         @StringRes title: Int = R.string.st_BiometricPromptUtils_title,
         @StringRes subtitle: Int = R.string.st_BiometricPromptUtils_subtitle,
+        allowDeviceCredential: Boolean = true,
         onSuccess: (BiometricPrompt.AuthenticationResult) -> Unit,
         onError: (Int, CharSequence) -> Unit = { _, _ -> },
         onFailed: () -> Unit = {}
@@ -53,10 +59,15 @@ object BiometricPromptUtils {
                 }
             })
 
+        val authenticators = if (allowDeviceCredential) {
+            BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL
+        } else {
+            BiometricManager.Authenticators.BIOMETRIC_STRONG
+        }
         val promptInfo = BiometricPrompt.PromptInfo.Builder()
             .setTitle(activity.getString(title))
             .setSubtitle(activity.getString(subtitle))
-            .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL)
+            .setAllowedAuthenticators(authenticators)
             .build()
 
         biometricPrompt.authenticate(promptInfo)

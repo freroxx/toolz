@@ -20,44 +20,56 @@ package com.frerox.toolz.data.password
 import androidx.room.*
 import kotlinx.coroutines.flow.Flow
 
+/** Escape SQLite LIKE wildcards so user input can't over-match. */
+fun String.escapeLike(): String =
+    replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
 @Dao
 interface PasswordDao {
-    @Query("SELECT * FROM passwords ORDER BY name ASC")
+    @Query("SELECT * FROM passwords ORDER BY name COLLATE NOCASE ASC")
     fun getAllPasswords(): Flow<List<PasswordEntity>>
 
     @Query("SELECT * FROM passwords WHERE id = :id")
     suspend fun getPasswordById(id: Int): PasswordEntity?
 
-    @Query("SELECT * FROM passwords WHERE url LIKE '%' || :domain || '%' OR name LIKE '%' || :domain || '%'")
+    @Query("SELECT * FROM passwords WHERE url LIKE '%' || :domain || '%' ESCAPE '\\' OR name LIKE '%' || :domain || '%' ESCAPE '\\'")
     suspend fun getPasswordsByDomain(domain: String): List<PasswordEntity>
 
-    @Query("SELECT * FROM passwords WHERE lower(url) = lower(:host) OR lower(url) LIKE '%://' || lower(:host) || '/%' OR lower(url) LIKE '%://' || lower(:host)")
+    @Query("SELECT * FROM passwords WHERE lower(url) = lower(:host) OR lower(url) LIKE '%://' || lower(:host) || '/%' ESCAPE '\\' OR lower(url) LIKE '%://' || lower(:host) ESCAPE '\\' OR lower(url) LIKE '%://' || lower(:host) || ':%' ESCAPE '\\'")
     suspend fun getPasswordsByExactHost(host: String): List<PasswordEntity>
 
-    @Query("SELECT * FROM passwords WHERE lower(url) LIKE '%://' || lower(:registrable) || '/%' OR lower(url) LIKE '%://' || lower(:registrable) ")
+    @Query("SELECT * FROM passwords WHERE lower(url) LIKE '%://' || lower(:registrable) || '/%' ESCAPE '\\' OR lower(url) LIKE '%://' || lower(:registrable) ESCAPE '\\' OR lower(url) LIKE '%://' || lower(:registrable) || ':%' ESCAPE '\\'")
     suspend fun getByRegistrableDomain(registrable: String): List<PasswordEntity>
 
     @Query("UPDATE passwords SET lastUsedAt = :ts WHERE id = :id")
     suspend fun updateLastUsed(id: Int, ts: Long)
 
-    @Query("SELECT * FROM passwords WHERE name LIKE '%' || :query || '%' OR username LIKE '%' || :query || '%' OR url LIKE '%' || :query || '%'")
+    @Query("SELECT * FROM passwords WHERE name LIKE '%' || :query || '%' ESCAPE '\\' COLLATE NOCASE OR username LIKE '%' || :query || '%' ESCAPE '\\' COLLATE NOCASE OR url LIKE '%' || :query || '%' ESCAPE '\\' COLLATE NOCASE")
     suspend fun searchPasswords(query: String): List<PasswordEntity>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertPassword(password: PasswordEntity)
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertPassword(password: PasswordEntity): Long
 
     @Update
     suspend fun updatePassword(password: PasswordEntity)
 
     @Query("UPDATE passwords SET pwnedCount = :count WHERE id = :id")
-    suspend fun updatePwnedCount(id: Int, count: Int)
+    suspend fun updatePwnedCount(id: Int, count: Int?)
 
     @Delete
     suspend fun deletePassword(password: PasswordEntity)
 
+    @Query("SELECT COUNT(*) FROM passwords")
+    suspend fun getPasswordCount(): Int
+
     @Query("SELECT * FROM passwords")
     suspend fun getAllPasswordsSync(): List<PasswordEntity>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertPasswords(passwords: List<PasswordEntity>)
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertPasswords(passwords: List<PasswordEntity>): List<Long>
+
+    @Transaction
+    suspend fun insertPasswordsTx(passwords: List<PasswordEntity>) {
+        passwords.forEach { insertPassword(it.copy(id = 0)) }
+    }
 }

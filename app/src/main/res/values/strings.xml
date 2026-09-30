@@ -2030,6 +2030,12 @@
     <string name="st_NotepadScreen_t48">TRASH</string>
     <string name="st_NotepadScreen_et49">EMPTY TRASH</string>
     <string name="st_NotepadScreen_tie50">Trash is empty</string>
+    <string name="notepad_copied">Copied</string>
+    <string name="notepad_pdf_attached">PDF attached</string>
+    <string name="notepad_pdf_capped">Note already has 10 PDFs</string>
+    <string name="notepad_pdf_unreadable">Couldn\'t open that PDF on this device</string>
+    <string name="notepad_attach_failed">Couldn\'t attach — try again</string>
+    <string name="notepad_pdf_preview_failed">Couldn\'t open PDF</string>
 
     <!-- NotificationVaultScreen -->
     <string name="st_NotificationVaultScreen_v1">Vault</string>
@@ -2107,6 +2113,10 @@
     <string name="st_PasswordVaultScreen_a5b7">Update Credentials</string>
     <string name="st_PasswordVaultScreen_c7d9">Select Source App</string>
     <string name="st_PasswordVaultScreen_m7n9">Close</string>
+    <string name="st_PasswordVaultScreen_import_result">Imported %1$d, skipped %2$d</string>
+    <string name="st_PasswordVaultScreen_breach_count">Breached in %1$d leaks!</string>
+    <string name="st_PasswordVaultScreen_breach_safe">Identity safe from known leaks</string>
+    <string name="st_PasswordVaultScreen_delete_message">Permanently delete credentials for \"%1$s\"? This cannot be undone.</string>
 
     <!-- ToolzPdfScreen -->
     <string name="st_ToolzPdfScreen_v1w2">VIEWER</string>
