@@ -36,16 +36,29 @@ interface NoteAttachmentDao {
     suspend fun getById(id: Long): NoteAttachment?
 
     @Query("SELECT * FROM note_attachments WHERE uri = :uri LIMIT 20")
+    suspend fun findAttachmentsByUri(uri: String): List<NoteAttachment>
+
+    /** Kept for back-compat; prefer [findAttachmentsByUri]. */
+    @Query("SELECT * FROM note_attachments WHERE uri = :uri LIMIT 20")
     suspend fun findNotesWithUri(uri: String): List<NoteAttachment>
 
     @Query("SELECT COUNT(*) FROM note_attachments WHERE noteId = :noteId AND kind = :kind")
     suspend fun countByKind(noteId: Int, kind: String): Int
 
+    @Query("SELECT COUNT(*) FROM note_attachments WHERE noteId = :noteId")
+    suspend fun countForNote(noteId: Int): Int
+
+    @Query("SELECT * FROM note_attachments WHERE noteId = :noteId AND uri = :uri LIMIT 5")
+    suspend fun findForNoteByUri(noteId: Int, uri: String): List<NoteAttachment>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIgnore(attachment: NoteAttachment): Long
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(attachment: NoteAttachment): Long
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertAll(items: List<NoteAttachment>)
+    suspend fun insertAll(items: List<NoteAttachment>): List<Long>
 
     @Delete
     suspend fun delete(attachment: NoteAttachment)
@@ -55,6 +68,9 @@ interface NoteAttachmentDao {
 
     @Query("DELETE FROM note_attachments WHERE noteId = :noteId")
     suspend fun deleteForNote(noteId: Int)
+
+    @Query("DELETE FROM note_attachments WHERE noteId = :noteId AND uri = :uri")
+    suspend fun deleteForNoteByUri(noteId: Int, uri: String): Int
 
     @Query("UPDATE note_attachments SET pageHint = :page WHERE id = :id")
     suspend fun updatePageHint(id: Long, page: Int)

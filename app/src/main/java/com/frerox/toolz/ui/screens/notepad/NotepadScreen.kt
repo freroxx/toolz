@@ -377,11 +377,10 @@ fun NotepadScreen(
     val notes           by viewModel.notes.collectAsStateWithLifecycle()
     val deletedNotes     by viewModel.deletedNotes.collectAsStateWithLifecycle()
     val availablePdfs    by viewModel.availablePdfs.collectAsStateWithLifecycle()
-    val musicState      by musicViewModel.uiState.collectAsState()
-    // Live ticker position for attachment pills. uiState.playbackPosition only
-    // moves on seek/stop — the 10 Hz transport flow is what the full player
-    // follows, and pills need the same or their slider/progress sits frozen.
-    val liveAudioPosition by musicViewModel.playbackPosition.collectAsStateWithLifecycle(initialValue = 0L)
+    val musicState      by musicViewModel.uiState.collectAsStateWithLifecycle()
+    // Perf: never collect playbackPosition here — it ticks ~10 Hz and would
+    // recompose the whole screen + grid. Playing cards collect it in
+    // isolation via CurrentTrackProgress below.
     val offlineMode     by viewModel.offlineModeEnabled.collectAsStateWithLifecycle(false)
     val notepadAiEnabled by viewModel.notepadAiEnabled.collectAsStateWithLifecycle(true)
     val performanceMode = LocalPerformanceMode.current
@@ -403,8 +402,8 @@ fun NotepadScreen(
     var actionState      by rememberSaveable { mutableStateOf(NotepadActionState.TOOLBAR) }
     var showTrashSheet   by rememberSaveable { mutableStateOf(false) }
     
-    // Track if a note is currently being deleted for animation
-    var deletingNoteId by remember { mutableStateOf<Int?>(null) }
+    // Deleting animation set — single-slot caused rapid-delete races.
+    var deletingNoteIds by remember { mutableStateOf(setOf<Int>()) }
 
     LaunchedEffect(viewedNoteId) {
         if (viewedNoteId != null) {
@@ -496,15 +495,22 @@ fun NotepadScreen(
         }
     }
 
-    LaunchedEffect(initialNoteId, notes) {
-        if (initialNoteId != null && notes.isNotEmpty())
-            notes.find { it.id == initialNoteId }?.let { viewedNoteId = it.id }
+    var initialNoteConsumed by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(initialNoteId) {
+        if (!initialNoteConsumed && initialNoteId != null) {
+            viewedNoteId = initialNoteId
+            initialNoteConsumed = true
+        }
     }
-    LaunchedEffect(viewedNoteId, viewedNote) {
-        if (viewedNoteId != null && viewedNote == null) viewedNoteId = null
+    // Only clear when the DB has loaded (non-empty at some point) and the
+    // note is genuinely gone — never on transient empty during refresh.
+    var notesEverLoaded by remember { mutableStateOf(false) }
+    LaunchedEffect(notes) { if (notes.isNotEmpty()) notesEverLoaded = true }
+    LaunchedEffect(viewedNoteId, viewedNote, notesEverLoaded) {
+        if (viewedNoteId != null && viewedNote == null && notesEverLoaded) viewedNoteId = null
     }
-    LaunchedEffect(editedNoteId, editedExistingNote) {
-        if (editedNoteId != null && editedExistingNote == null) editedNoteId = null
+    LaunchedEffect(editedNoteId, editedExistingNote, notesEverLoaded) {
+        if (editedNoteId != null && editedExistingNote == null && notesEverLoaded) editedNoteId = null
     }
 
     var selectedCategory by remember { mutableStateOf("All") }
@@ -529,10 +535,14 @@ fun NotepadScreen(
         )
     }
 
-    val filteredNotes = remember(notes, searchQuery, selectedCategory, noteSort) {
+    val trimmedQuery = remember(searchQuery) { searchQuery.trim() }
+    // Attachment-aware category counts: V2 rows or legacy slots count.
+    val attachmentNoteIds = remember(notes) { emptySet<Int>() } // filled per-card via V2; legacy fallback below
+    val filteredNotes = remember(notes, trimmedQuery, selectedCategory, noteSort) {
+        val q = trimmedQuery
         notes
             .filter {
-                (it.title.contains(searchQuery, true) || it.content.contains(searchQuery, true)) &&
+                (q.isEmpty() || it.title.contains(q, true) || it.content.contains(q, true)) &&
                         when (selectedCategory) {
                             "Pinned" -> it.isPinned
                             "Audio"  -> it.attachedAudioUri != null
@@ -542,8 +552,8 @@ fun NotepadScreen(
                         }
             }
             .sortedWith(when (noteSort) {
-                NoteSort.DATE  -> compareByDescending<Note> { it.isPinned }.thenByDescending { it.timestamp }
-                NoteSort.TITLE -> compareByDescending<Note> { it.isPinned }.thenBy { it.title.lowercase() }
+                NoteSort.DATE  -> compareByDescending<Note> { it.isPinned }.thenByDescending { it.updatedAt.takeIf { u -> u != 0L } ?: it.timestamp }
+                NoteSort.TITLE -> compareByDescending<Note> { it.isPinned }.thenBy { it.title.lowercase(java.util.Locale.ROOT) }
                 NoteSort.COLOR -> compareByDescending<Note> { it.isPinned }.thenBy { it.color }
             })
     }
@@ -595,7 +605,7 @@ fun NotepadScreen(
                         viewModel.addNote(
                             title = it.title,
                             content = it.content,
-                            color = android.graphics.Color.parseColor(it.colorHex),
+                            color = com.frerox.toolz.data.notepad.NoteColors.parseHexOrNull(it.colorHex)?.let { c -> c } ?: android.graphics.Color.parseColor(com.frerox.toolz.data.notepad.NoteColors.FALLBACK_HEX),
                             fontSize = it.fontSize,
                             isBold = it.isBold,
                             isItalic = it.isItalic
@@ -607,7 +617,7 @@ fun NotepadScreen(
                         viewModel.updateNote(original.copy(
                             title = it.title,
                             content = it.content,
-                            color = android.graphics.Color.parseColor(it.colorHex),
+                            color = com.frerox.toolz.data.notepad.NoteColors.parseHexOrNull(it.colorHex)?.let { c -> c } ?: android.graphics.Color.parseColor(com.frerox.toolz.data.notepad.NoteColors.FALLBACK_HEX),
                             fontSize = it.fontSize,
                             isBold = it.isBold,
                             isItalic = it.isItalic,
@@ -617,12 +627,15 @@ fun NotepadScreen(
                 },
                 onDeleteRequest = { note ->
                     haptic.longClick()
-                    deletingNoteId = note.id
+                    deletingNoteIds = deletingNoteIds + note.id
                     viewedNoteId = null
                     scope.launch {
                         delay(400)
                         viewModel.deleteNote(note)
-                        deletingNoteId = null
+                        // Keep undo snackbar consistent with card path.
+                        val res = snackbar.showSnackbar(noteDeletedMsg, undoLabel, duration = SnackbarDuration.Short)
+                        if (res == SnackbarResult.ActionPerformed) viewModel.undoDelete()
+                        deletingNoteIds = deletingNoteIds - note.id
                     }
                 },
                 availableTracks = musicState.tracks,
@@ -937,7 +950,7 @@ fun NotepadScreen(
                 ) { targetCategory ->
                     if (filteredNotes.isEmpty()) {
                         NotesEmptyState(
-                            isSearching      = searchQuery.isNotEmpty(),
+                            isSearching      = searchQuery.isNotBlank(),
                             selectedCategory = targetCategory,
                         )
                     } else {
@@ -966,14 +979,16 @@ fun NotepadScreen(
                                 },
                             ) { index, note ->
                                 val isCurrentTrack = note.attachedAudioUri?.let { isCurrentNoteTrack(musicState.currentTrack, it) } == true
-                                val inlineProgress = if (isCurrentTrack && musicState.duration > 0L) {
-                                    (liveAudioPosition.toFloat() / musicState.duration.toFloat()).coerceIn(0f, 1f)
-                                } else 0f
                                 val cardStyle = resolveNoteCardStyle(
                                     note      = note,
                                     imageHint = note.attachedImageUri?.let(imageHints::get),
                                 )
                                 StaggeredEntrance(index = index) {
+                                    CurrentTrackProgress(
+                                        isCurrent = isCurrentTrack,
+                                        durationMs = musicState.duration,
+                                        flow = musicViewModel.playbackPosition,
+                                    ) { inlineProgress, livePos ->
                                     NoteCard(
                                         note                  = note,
                                         cardStyle             = cardStyle,
@@ -984,12 +999,13 @@ fun NotepadScreen(
                                         isCurrentTrack        = isCurrentTrack,
                                         currentTrackThumbnail = musicState.currentTrack?.thumbnailUri,
                                         inlineProgress        = inlineProgress,
-                                        audioPositionMs       = if (isCurrentTrack) liveAudioPosition else 0L,
+                                        audioPositionMs       = livePos,
                                         audioDurationMs       = musicState.duration,
                                         onSeekAudio           = { frac ->
-                                            musicViewModel.seekTo((frac * musicState.duration).toLong())
+                                            val d = musicViewModel.uiState.value.duration
+                                            if (d > 0L) musicViewModel.seekTo((frac * d).toLong())
                                         },
-                                        isDeleting            = note.id == deletingNoteId,
+                                        isDeleting            = note.id in deletingNoteIds,
                                         onClick = {
                                             haptic.click()
                                             if (isSelectionMode) {
@@ -1014,11 +1030,11 @@ fun NotepadScreen(
                                         onDelete = {
                                             if (!isSelectionMode) {
                                                 haptic.longClick()
-                                                deletingNoteId = note.id
+                                                deletingNoteIds = deletingNoteIds + note.id
                                                 scope.launch {
                                                     delay(400)
                                                     viewModel.deleteNote(note)
-                                                    deletingNoteId = null
+                                                    deletingNoteIds = deletingNoteIds - note.id
                                                     val r = snackbar.showSnackbar(
                                                         noteDeletedMsg,
                                                         actionLabel = undoLabel,
@@ -1059,6 +1075,7 @@ fun NotepadScreen(
                                                 ) else snap(),
                                             ),
                                     )
+                                    } // CurrentTrackProgress
                                 }
                             }
                         }
@@ -1130,7 +1147,7 @@ fun NotepadScreen(
                             ) {
                                 Text(
                                     SimpleDateFormat("MMMM d, yyyy · HH:mm", Locale.getDefault())
-                                        .format(Date(note.timestamp)).uppercase(),
+                                        .format(Date(note.timestamp)).uppercase(java.util.Locale.ROOT),
                                     style         = MaterialTheme.typography.labelSmall,
                                     color         = onColor.copy(0.38f),
                                     fontWeight    = FontWeight.Black,
@@ -1179,7 +1196,7 @@ fun NotepadScreen(
                                             AsyncImage(
                                                 model = uri,
                                                 contentDescription = "Note image",
-                                                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)),
+                                                modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp).clip(RoundedCornerShape(16.dp)),
                                                 contentScale = ContentScale.FillWidth
                                             )
                                         }
@@ -1190,9 +1207,11 @@ fun NotepadScreen(
                                             val track = musicState.tracks.find { it.uri == uri }
                                             val isCurrent = isCurrentNoteTrack(musicState.currentTrack, uri)
                                             val playing = musicState.isPlaying && isCurrent
-                                            val prog = if (isCurrent && musicState.duration > 0L) {
-                                                (liveAudioPosition.toFloat() / musicState.duration.toFloat()).coerceIn(0f, 1f)
-                                            } else 0f
+                                            CurrentTrackProgress(
+                                                isCurrent = isCurrent,
+                                                durationMs = musicState.duration,
+                                                flow = musicViewModel.playbackPosition,
+                                            ) { prog, livePos ->
                                             // Inline preview — taps toggle play/pause here, no navigation.
                                             MusicPill(
                                                 title = note.attachedAudioName ?: stringResource(R.string.st_NotepadScreen_ma38),
@@ -1204,14 +1223,16 @@ fun NotepadScreen(
                                                 contentColor = onColor,
                                                 onClick = { onPlayAudio(uri) },
                                                 progress = prog,
-                                                positionMs = if (isCurrent) liveAudioPosition else 0L,
+                                                positionMs = livePos,
                                                 durationMs = musicState.duration,
                                                 onSeek = { frac ->
-                                                    musicViewModel.seekTo((frac * musicState.duration).toLong())
+                                                    val d = musicViewModel.uiState.value.duration
+                                                    if (d > 0L) musicViewModel.seekTo((frac * d).toLong())
                                                 },
                                                 compact = false,
                                                 modifier = Modifier.fillMaxWidth()
                                             )
+                                            }
                                         }
                                     }
                                 }
@@ -1230,10 +1251,10 @@ fun NotepadScreen(
                                     Text(
                                         note.content,
                                         style = MaterialTheme.typography.bodyLarge.copy(
-                                            fontSize = note.fontSize.sp,
+                                            fontSize = note.fontSize.coerceIn(12f, 28f).sp,
                                             fontWeight = if (note.isBold) FontWeight.Bold else FontWeight.Normal,
                                             fontStyle = if (note.isItalic) FontStyle.Italic else FontStyle.Normal,
-                                            lineHeight = 24.sp
+                                            lineHeight = (note.fontSize.coerceIn(12f, 28f) * 1.4f).sp
                                         ),
                                         color = onColor.copy(0.88f)
                                     )
@@ -1296,6 +1317,7 @@ fun NotepadScreen(
                     showNoteOptions = false
                 },
                 onDuplicate = {
+                    val srcId = note.id
                     viewModel.addNote(
                         title             = note.title,
                         content           = note.content,
@@ -1308,7 +1330,31 @@ fun NotepadScreen(
                         attachedAudioUri  = note.attachedAudioUri,
                         attachedAudioName = note.attachedAudioName,
                         attachedImageUri  = note.attachedImageUri,
-                    )
+                    ) { newId ->
+                        if (newId > 0) {
+                            scope.launch {
+                                try {
+                                    // Copy V2 multi-attachments + card size (legacy copy lost them).
+                                    val rows = viewModel.listAttachments(srcId)
+                                    rows.forEach { r ->
+                                        when (r.kind) {
+                                            com.frerox.toolz.data.notepad.NoteAttachment.KIND_PDF ->
+                                                viewModel.attachPdf(newId, android.net.Uri.parse(r.uri), r.pageHint)
+                                            com.frerox.toolz.data.notepad.NoteAttachment.KIND_IMAGE ->
+                                                viewModel.attachImage(newId, android.net.Uri.parse(r.uri))
+                                            else ->
+                                                viewModel.attachAudio(newId, r.uri, r.displayName)
+                                        }
+                                    }
+                                    if (note.cardSize != "AUTO") {
+                                        viewModel.getNoteById(newId)?.let { created ->
+                                            viewModel.updateNoteCardSize(created, note.cardSize)
+                                        }
+                                    }
+                                } catch (_: Exception) { }
+                            }
+                        }
+                    }
                     noteOptionsId = null
                     showNoteOptions = false
                 },
@@ -1388,6 +1434,27 @@ private fun NotesEmptyState(isSearching: Boolean, selectedCategory: String) {
 //  Note card
 // ─────────────────────────────────────────────────────────────
 
+/**
+ * Isolates the ~10 Hz playback ticker: only the currently-playing card
+ * subscribes. Non-playing cards call [content] with zeros and never
+ * collect, so the grid doesn't recompose 10x/sec.
+ */
+@Composable
+private fun CurrentTrackProgress(
+    isCurrent: Boolean,
+    durationMs: Long,
+    flow: kotlinx.coroutines.flow.Flow<Long>,
+    content: @Composable (progress: Float, positionMs: Long) -> Unit,
+) {
+    if (!isCurrent) {
+        content(0f, 0L)
+        return
+    }
+    val live by flow.collectAsStateWithLifecycle(initialValue = 0L)
+    val progress = if (durationMs > 0L) (live.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) else 0f
+    content(progress, live)
+}
+
 @Composable
 private fun NoteCard(
     note                  : Note,
@@ -1416,7 +1483,7 @@ private fun NoteCard(
     val onColor      = noteContentColor(noteColor)
     val performanceMode = LocalPerformanceMode.current
 
-    val cardScale = remember { Animatable(1f) }
+    val cardScale = remember(note.id) { Animatable(1f) }
     LaunchedEffect(note.cardSize) {
         if (!performanceMode) {
             cardScale.snapTo(0.96f)
@@ -1433,9 +1500,7 @@ private fun NoteCard(
         label         = "selectionScale",
     )
 
-    val wordCount = remember(note.content) {
-        note.content.split(Regex("""\s+""")).count { it.isNotBlank() }
-    }
+    val wordCount = remember(note.content) { com.frerox.toolz.data.notepad.NoteText.wordCount(note.content) }
 
     val deleteColor by animateColorAsState(
         targetValue = if (isDeleting) Color.Red.copy(0.6f) else noteColor,
@@ -1476,7 +1541,10 @@ private fun NoteCard(
 
                 // ── Zone A: opens the viewer ──────────────────────────────
                 Box(
-                    Modifier.bouncyClick(onClick = onClick, onLongClick = onLongClick)
+                    Modifier.then(
+                        if (isDeleting || isHidden) Modifier
+                        else Modifier.bouncyClick(onClick = onClick, onLongClick = onLongClick)
+                    )
                 ) {
                     Column {
                         // ── Top accent strip ────────────────────────────────
@@ -1636,7 +1704,7 @@ private fun NoteCard(
                                     Text(
                                         SimpleDateFormat("MMMM d", Locale.getDefault())
                                             .format(Date(note.timestamp))
-                                            .uppercase(),
+                                            .uppercase(java.util.Locale.ROOT),
                                         style         = MaterialTheme.typography.labelSmall,
                                         fontWeight    = FontWeight.ExtraBold,
                                         color         = onColor.copy(0.5f),
@@ -1671,10 +1739,10 @@ private fun NoteCard(
 
                         // Pin + delete: independent targets, siblings of every
                         // viewer-opening zone — they can never open the viewer.
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             ToolzExpressiveIconButton(
                                 onClick = onTogglePin,
-                                modifier = Modifier.size(38.dp),
+                                modifier = Modifier.size(48.dp),
                                 colors = IconButtonDefaults.filledIconButtonColors(
                                     containerColor = if (note.isPinned) onColor.copy(0.18f) else onColor.copy(0.08f),
                                     contentColor = onColor.copy(if (note.isPinned) 0.95f else 0.45f)
@@ -1687,7 +1755,7 @@ private fun NoteCard(
                             }
                             ToolzExpressiveIconButton(
                                 onClick = onDelete,
-                                modifier = Modifier.size(38.dp),
+                                modifier = Modifier.size(48.dp),
                                 colors = IconButtonDefaults.filledIconButtonColors(
                                     containerColor = onColor.copy(0.08f),
                                     contentColor = onColor.copy(0.45f)
@@ -1763,14 +1831,15 @@ fun NoteViewerSheet(
     val scope           = rememberCoroutineScope()
     val noteColor       = Color(note.color)
     val onColor         = noteContentColor(noteColor)
-    val aiSummary       by viewModel.aiSummary.collectAsState()
-    val isSummarizing   by viewModel.isAiSummarizing.collectAsState()
+    val aiSummary       by viewModel.aiSummary.collectAsStateWithLifecycle()
+    val aiSummaryNoteId by viewModel.aiSummaryNoteId.collectAsStateWithLifecycle()
+    val isSummarizing   by viewModel.isAiSummarizing.collectAsStateWithLifecycle()
     val offlineMode     by viewModel.offlineModeEnabled.collectAsStateWithLifecycle(false)
-    val musicState      by musicViewModel.uiState.collectAsState()
+    val musicState      by musicViewModel.uiState.collectAsStateWithLifecycle()
+    val visibleSummary = if (aiSummaryNoteId == null || aiSummaryNoteId == note.id) aiSummary else null
     val inlineProgress  = if (isCurrentTrack && musicState.duration > 0L) {
         (musicState.playbackPosition.toFloat() / musicState.duration.toFloat()).coerceIn(0f, 1f)
     } else 0f
-    var showSummary     by remember { mutableStateOf(false) }
     var contentReady    by remember(note.id) { mutableStateOf(false) }
 
     val contentEntrance by animateFloatAsState(
@@ -1794,19 +1863,10 @@ fun NoteViewerSheet(
                 Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                val inf = rememberInfiniteTransition(label = "handlePulse")
-                val handleWidth by inf.animateFloat(
-                    36f, 48f,
-                    infiniteRepeatable(
-                        tween(2200, easing = FastOutSlowInEasing),
-                        RepeatMode.Reverse,
-                    ),
-                    label = "handleWidth",
-                )
                 Box(
                     Modifier
-                        .size(if (performanceMode) 36.dp else handleWidth.dp, 4.dp)
-                        .background(onColor.copy(0.28f), CircleShape)
+                        .size(40.dp, 4.dp)
+                        .background(onColor.copy(alpha = 0.28f), CircleShape)
                 )
             }
         },
@@ -1833,7 +1893,7 @@ fun NoteViewerSheet(
                     // ── Header: date + timestamp ─────────────────────────
                     Text(
                         SimpleDateFormat("MMMM d, yyyy · HH:mm", Locale.getDefault())
-                            .format(Date(note.timestamp)).uppercase(),
+                            .format(Date(note.timestamp)).uppercase(java.util.Locale.ROOT),
                         style         = MaterialTheme.typography.labelSmall,
                         color         = onColor.copy(0.38f),
                         fontWeight    = FontWeight.Black,
@@ -1879,17 +1939,23 @@ fun NoteViewerSheet(
                             ToolzExpressiveIconButton(
                                 onClick = {
                                     haptic.click()
-                                    val cb = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
-                                            as android.content.ClipboardManager
-                                    cb.setPrimaryClip(android.content.ClipData.newPlainText("Note", note.content))
+                                    val body = if (note.title.isBlank()) note.content
+                                    else "${note.title}\n\n${note.content}"
+                                    try {
+                                        val cb = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                                                as android.content.ClipboardManager
+                                        cb.setPrimaryClip(android.content.ClipData.newPlainText("Note", body))
+                                        android.widget.Toast.makeText(context, context.getString(R.string.notepad_copied), android.widget.Toast.LENGTH_SHORT).show()
+                                    } catch (_: Exception) { }
                                 },
-                                modifier = Modifier.size(32.dp),
+                                modifier = Modifier.size(48.dp),
+                                shapes = IconButtonDefaults.shapes(),
                                 colors = IconButtonDefaults.filledIconButtonColors(
-                                    containerColor = onColor.copy(0.1f),
+                                    containerColor = onColor.copy(alpha = 0.1f),
                                     contentColor = onColor
                                 )
                             ) {
-                                Icon(Icons.Rounded.ContentCopy, null, Modifier.size(16.dp))
+                                Icon(Icons.Rounded.ContentCopy, contentDescription = "Copy note", Modifier.size(20.dp))
                             }
                             // Share action
                             ToolzExpressiveIconButton(
@@ -1900,15 +1966,17 @@ fun NoteViewerSheet(
                                         putExtra(android.content.Intent.EXTRA_SUBJECT, note.title.ifEmpty { "Note" })
                                         putExtra(android.content.Intent.EXTRA_TEXT, "${note.title.ifEmpty { "Note" }}\n\n${note.content}")
                                     }
-                                    context.startActivity(android.content.Intent.createChooser(intent, "Share note"))
+                                    try {
+                                        context.startActivity(android.content.Intent.createChooser(intent, "Share note"))
+                                    } catch (_: Exception) { }
                                 },
-                                modifier = Modifier.size(32.dp),
+                                modifier = Modifier.size(48.dp),
                                 colors = IconButtonDefaults.filledIconButtonColors(
                                     containerColor = onColor.copy(0.1f),
                                     contentColor = onColor
                                 )
                             ) {
-                                Icon(Icons.Rounded.Share, null, Modifier.size(16.dp))
+                                Icon(Icons.Rounded.Share, contentDescription = "Share note", Modifier.size(20.dp))
                             }
                         }
                     }
@@ -1929,7 +1997,7 @@ fun NoteViewerSheet(
                                     title          = note.attachedAudioName ?: "Audio",
                                     isPlaying      = isPlaying,
                                     isCurrentTrack = isCurrentTrack,
-                                    thumbnail      = track?.thumbnailUri ?: currentTrackThumbnail,
+                                    thumbnail      = track?.thumbnailUri ?: currentTrackThumbnail?.takeIf { isCurrentTrack },
                                     artist         = track?.artist,
                                     containerColor = onColor.copy(0.12f),
                                     contentColor   = onColor,
@@ -2021,12 +2089,7 @@ fun NoteViewerSheet(
                     noteColor = noteColor,
                     onColor = onColor,
                     onEdit = onEdit,
-                    onDismiss = {
-                        scope.launch {
-                            viewedNoteSheetState.hide()
-                            onDismiss()
-                        }
-                    },
+                    onDismiss = onDismiss,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(bottom = 28.dp)
@@ -2035,17 +2098,17 @@ fun NoteViewerSheet(
         }
     }
 
-    if (showSummary) {
+    // Summary sheet is driven by VM state (keyed per-note), not a dead local flag.
+    val summaryVisible = isSummarizing || visibleSummary != null
+    if (summaryVisible) {
         AiSummarySheet(
-            summary     = aiSummary,
+            summary     = visibleSummary,
             isLoading   = isSummarizing,
             accentColor = onColor,
             bgColor     = noteColor,
-            onDismiss   = { showSummary = false; viewModel.clearAiSummary() },
-            onRegenerate = { 
-                // Clear the cached summary in the note object manually to force regeneration
-                viewModel.updateNote(note.copy(summary = null))
-                viewModel.summarizeNote(note.copy(summary = null)) 
+            onDismiss   = { viewModel.clearAiSummary() },
+            onRegenerate = {
+                viewModel.summarizeNote(note, forceRegenerate = true)
             }
         )
     }
@@ -2511,7 +2574,7 @@ fun AttachmentPickerDialog(
     browseLabel   : String? = null,
     onBrowse      : (() -> Unit)? = null,
 ) {
-    val musicState by musicViewModel.uiState.collectAsState()
+    val musicState by musicViewModel.uiState.collectAsStateWithLifecycle()
     val haptic     = rememberToolzHapticFeedback()
 
     Dialog(
@@ -2725,9 +2788,9 @@ fun MusicPill(
     val shownPositionMs = if (scrubFraction != null) (scrubFraction!! * durationMs).toLong() else positionMs
 
     val secondaryLabel = when {
-        isPlaying -> if (isRealSong && artist != null) "${artist.uppercase()} • PLAYING" else "PLAYING • TAP TO PAUSE"
+        isPlaying -> if (isRealSong && artist != null) "${artist.uppercase(java.util.Locale.ROOT)} • PLAYING" else "PLAYING • TAP TO PAUSE"
         isCurrentTrack -> "PAUSED • TAP TO RESUME"
-        isRealSong -> (artist?.uppercase() ?: "AUDIO") + " • TAP TO PLAY"
+        isRealSong -> (artist?.uppercase(java.util.Locale.ROOT) ?: "AUDIO") + " • TAP TO PLAY"
         else -> "ATTACHMENT • TAP TO PLAY"
     }
 
@@ -2978,44 +3041,61 @@ fun PdfPreview(uri: String, onClick: () -> Unit = {}, modifier: Modifier = Modif
         modifier = modifier.fillMaxWidth()
     ) {
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-            var bitmap by remember(uri, constraints.maxWidth, constraints.maxHeight) { mutableStateOf<Bitmap?>(null) }
-            LaunchedEffect(uri, constraints.maxWidth, constraints.maxHeight) {
+            var bitmap by remember(uri) { mutableStateOf<Bitmap?>(null) }
+            var loadFailed by remember(uri) { mutableStateOf(false) }
+            val targetWidth = remember(constraints.maxWidth) {
+                // Cap at ~900px wide: enough for a thumbnail, ~3MB max.
+                constraints.maxWidth.coerceIn(320, 900)
+            }
+            LaunchedEffect(uri, targetWidth) {
+                loadFailed = false
                 bitmap = withContext(Dispatchers.IO) {
+                    var renderer: PdfRenderer? = null
+                    var page: PdfRenderer.Page? = null
                     try {
-                        val parsed = Uri.parse(uri)
-                        val pfd = if (parsed.scheme == "file") {
-                            val f = java.io.File(parsed.path ?: return@withContext null)
-                            if (!f.isFile || !f.canRead()) return@withContext null
-                            android.os.ParcelFileDescriptor.open(
-                                f, android.os.ParcelFileDescriptor.MODE_READ_ONLY
-                            )
-                        } else {
+                        val parsed = try { Uri.parse(uri) } catch (_: Exception) { return@withContext null }
+                        val pfd = try {
                             context.contentResolver.openFileDescriptor(parsed, "r")
-                        } ?: return@withContext null
+                        } catch (_: Exception) { null } ?: return@withContext null
                         pfd.use {
-                            val renderer = PdfRenderer(it)
-                            if (renderer.pageCount <= 0) { renderer.close(); return@withContext null }
-                            val page         = renderer.openPage(0)
-                            val reqWidth     = (constraints.maxWidth.coerceAtLeast(320) * 2).coerceAtMost(2200)
-                            val aspectRatio  = if (page.width == 0) 1f else page.height.toFloat() / page.width.toFloat()
-                            val reqHeight    = ((reqWidth * aspectRatio).toInt()).coerceAtLeast(constraints.maxHeight.coerceAtLeast(240)).coerceAtMost(3200)
+                            renderer = PdfRenderer(it)
+                            val r = renderer ?: return@withContext null
+                            if (r.pageCount <= 0) return@withContext null
+                            page = r.openPage(0)
+                            val pg = page ?: return@withContext null
+                            val aspectRatio = if (pg.width == 0) 1f else pg.height.toFloat() / pg.width.toFloat()
+                            val reqWidth = targetWidth
+                            val reqHeight = ((reqWidth * aspectRatio).toInt()).coerceIn(240, 1200)
                             // NB: PdfRenderer only supports ARGB_8888 (RGB_565 throws).
-                            val bmp          = Bitmap.createBitmap(reqWidth, reqHeight, Bitmap.Config.ARGB_8888)
+                            val bmp = Bitmap.createBitmap(reqWidth, reqHeight, Bitmap.Config.ARGB_8888)
                             bmp.eraseColor(android.graphics.Color.WHITE)
-                            page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                            page.close(); renderer.close(); bmp
+                            pg.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                            bmp
                         }
-                    } catch (_: Exception) { null }
+                    } catch (_: Error) {
+                        // OOM and friends: report failure instead of crashing.
+                        null
+                    } catch (_: Exception) { null } finally {
+                        try { page?.close() } catch (_: Exception) { }
+                        try { renderer?.close() } catch (_: Exception) { }
+                    }
+                }
+                if (bitmap == null) loadFailed = true
+            }
+            DisposableEffect(uri) {
+                onDispose {
+                    try { bitmap?.recycle() } catch (_: Exception) { }
                 }
             }
 
-            if (bitmap != null) {
+            val currentBitmap = bitmap
+            if (currentBitmap != null) {
                 Box {
                     Image(
-                        bitmap!!.asImageBitmap(),
-                        null,
+                        currentBitmap.asImageBitmap(),
+                        contentDescription = stringResource(R.string.st_NotepadScreen_d29),
                         Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
+                        contentScale = ContentScale.Fit
                     )
                     Surface(
                         Modifier
@@ -3037,9 +3117,9 @@ fun PdfPreview(uri: String, onClick: () -> Unit = {}, modifier: Modifier = Modif
                                 tint = MaterialTheme.colorScheme.primary
                             )
                             Text(
-                                "DOCUMENT",
+                                stringResource(R.string.st_NotepadScreen_d29),
                                 style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Black,
+                                fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.onSurface,
                                 letterSpacing = 0.5.sp
                             )
@@ -3064,7 +3144,7 @@ fun PdfPreview(uri: String, onClick: () -> Unit = {}, modifier: Modifier = Modif
                             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
                         )
                         Text(
-                            "Loading PDF...",
+                            if (loadFailed) context.resources.getString(R.string.notepad_pdf_preview_failed) else "Loading PDF...",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                         )
@@ -3093,15 +3173,17 @@ fun NotePdfAttachmentStrip(
     excludeUris: Set<String> = emptySet()
 ) {
     val noteId = note.id
-    if (noteId == 0) return
     val scope = rememberCoroutineScope()
-    val all by viewModel.attachmentsFor(noteId).collectAsStateWithLifecycle(initialValue = emptyList())
-    val items = remember(all, excludeUris) { all.filter { a -> a.kind == "PDF" && a.uri !in excludeUris } }
+    val haptic = rememberToolzHapticFeedback()
+    val flow = remember(noteId) { viewModel.attachmentsFor(noteId) }
+    val all by flow.collectAsStateWithLifecycle(initialValue = emptyList())
+    val items = remember(all, excludeUris) {
+        all.filter { a -> a.kind == com.frerox.toolz.data.notepad.NoteAttachment.KIND_PDF && a.uri !in excludeUris }
+    }
     LaunchedEffect(noteId) {
         try { viewModel.ensureLegacyAttachments(note) } catch (_: Exception) { }
     }
-    if (items.isEmpty()) return
-    val haptic = rememberToolzHapticFeedback()
+    if (noteId == 0 || items.isEmpty()) return
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         items.forEach { att ->
             androidx.compose.material3.Surface(
@@ -3115,7 +3197,7 @@ fun NotePdfAttachmentStrip(
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
                         Text(
-                            (att.displayName?.takeIf { it.isNotBlank() } ?: att.uri.substringAfterLast('/')).take(48),
+                            com.frerox.toolz.data.notepad.NoteText.displayFileName(att.displayName, att.uri),
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
@@ -3240,7 +3322,7 @@ fun ViewerActionButton(icon: ImageVector, tint: Color, bgAlpha: Float, bgColor: 
 fun NoteStatChip(text: String, icon: ImageVector, color: Color) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
         Icon(icon, null, Modifier.size(13.dp), tint = color.copy(0.45f))
-        Text(text.uppercase(), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = color.copy(0.65f), letterSpacing = 0.3.sp)
+        Text(text.uppercase(java.util.Locale.ROOT), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = color.copy(0.65f), letterSpacing = 0.3.sp)
     }
 }
 
@@ -3386,7 +3468,7 @@ fun CustomColorDialog(
                 ) {}
                 OutlinedTextField(
                     value         = hex,
-                    onValueChange = { if (it.length <= 6) hex = it.uppercase().filter { c -> c in "0123456789ABCDEF" } },
+                    onValueChange = { if (it.length <= 6) hex = it.uppercase(java.util.Locale.ROOT).filter { c -> c in "0123456789ABCDEF" } },
                     label         = { Text(stringResource(R.string.st_NotepadScreen_hc33)) },
                     prefix        = { Text("#") },
                     modifier      = Modifier.fillMaxWidth(),
@@ -3904,19 +3986,16 @@ private fun FullExpressiveEditor(
     musicViewModel: MusicPlayerViewModel = hiltViewModel(),
 ) {
     val haptic = rememberToolzHapticFeedback()
-    val isFocusMode by viewModel.isFocusMode.collectAsState()
-    val aiStyle by viewModel.aiStyle.collectAsState()
-    val isAiStyling by viewModel.isAiStyling.collectAsState()
-    val offlineMode by viewModel.offlineModeEnabled.collectAsState()
-    val notepadAiEnabled by viewModel.notepadAiEnabled.collectAsState()
-    val musicState by musicViewModel.uiState.collectAsState()
-    // Same live-ticker rationale as the library screen above: the editor
-    // pill slider must follow transport position, not the seek-only uiState.
-    val liveEditorPosition by musicViewModel.playbackPosition.collectAsStateWithLifecycle(initialValue = 0L)
+    val isFocusMode by viewModel.isFocusMode.collectAsStateWithLifecycle()
+    val aiStyle by viewModel.aiStyle.collectAsStateWithLifecycle()
+    val isAiStyling by viewModel.isAiStyling.collectAsStateWithLifecycle()
+    val offlineMode by viewModel.offlineModeEnabled.collectAsStateWithLifecycle(false)
+    val notepadAiEnabled by viewModel.notepadAiEnabled.collectAsStateWithLifecycle(true)
+    val musicState by musicViewModel.uiState.collectAsStateWithLifecycle()
     val context = androidx.compose.ui.platform.LocalContext.current
-    
-    // Editor State
-    var currentNote by remember { mutableStateOf(note) }
+
+    // Editor State — keyed on note id so switching notes never shows stale content.
+    var currentNote by remember(note.id) { mutableStateOf(note) }
     var showColorGrid by remember { mutableStateOf(false) }
     var showAiStyleBanner by remember { mutableStateOf(false) }
     var showCustomColorDialog by remember { mutableStateOf(false) }
@@ -3932,8 +4011,8 @@ private fun FullExpressiveEditor(
     val pdfBrowseLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
+        isBrowsingPdf = false
         if (uri == null) {
-            isBrowsingPdf = false
             return@rememberLauncherForActivityResult
         }
         editorScope.launch {
@@ -3948,10 +4027,10 @@ private fun FullExpressiveEditor(
                         )
                     }
                     val msg = when (result) {
-                        is PdfAttachResult.Attached -> "PDF attached"
-                        PdfAttachResult.Capped -> "Note already has 10 PDFs"
-                        PdfAttachResult.Unreadable -> "Couldn't open that PDF on this device"
-                        is PdfAttachResult.Failed -> "Couldn't attach — try again"
+                        is PdfAttachResult.Attached -> context.getString(R.string.notepad_pdf_attached)
+                        PdfAttachResult.Capped -> context.getString(R.string.notepad_pdf_capped)
+                        PdfAttachResult.Unreadable -> context.getString(R.string.notepad_pdf_unreadable)
+                        is PdfAttachResult.Failed -> context.getString(R.string.notepad_attach_failed)
                     }
                     android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
                     viewModel.refreshPdfs()
@@ -3963,7 +4042,7 @@ private fun FullExpressiveEditor(
                     } else {
                         android.widget.Toast.makeText(
                             context,
-                            "Couldn't open that PDF on this device",
+                            context.getString(R.string.notepad_pdf_unreadable),
                             android.widget.Toast.LENGTH_SHORT
                         ).show()
                     }
@@ -3989,9 +4068,9 @@ private fun FullExpressiveEditor(
     val noteColor = if (currentNote.color == 0) MaterialTheme.colorScheme.surfaceContainerHigh else Color(currentNote.color)
     val onColor = if (currentNote.color == 0) MaterialTheme.colorScheme.onSurface else noteContentColor(noteColor)
 
-    val words = remember(currentNote.content) { currentNote.content.split(Regex("\\s+")).filter { it.isNotBlank() }.size }
+    val words = remember(currentNote.content) { com.frerox.toolz.data.notepad.NoteText.wordCount(currentNote.content) }
     val chars = currentNote.content.length
-    val readingTime = (words / 200).coerceAtLeast(1)
+    val readingTime = remember(currentNote.content) { com.frerox.toolz.data.notepad.NoteText.readingMinutes(currentNote.content) }
 
     val optionsAlpha by animateFloatAsState(
         targetValue = if (isFocusMode) 0f else 1f,
@@ -4337,9 +4416,11 @@ private fun FullExpressiveEditor(
                                 ?: musicState.tracks.find { it.uri == uri }
                             val editorIsCurrent = isCurrentNoteTrack(musicState.currentTrack, uri)
                             val editorIsPlaying = musicState.isPlaying && editorIsCurrent
-                            val editorProgress = if (editorIsCurrent && musicState.duration > 0L) {
-                                (liveEditorPosition.toFloat() / musicState.duration.toFloat()).coerceIn(0f, 1f)
-                            } else 0f
+                            CurrentTrackProgress(
+                                isCurrent = editorIsCurrent,
+                                durationMs = musicState.duration,
+                                flow = musicViewModel.playbackPosition,
+                            ) { editorProgress, editorLivePos ->
                             Box {
                                 MusicPill(
                                     title = currentNote.attachedAudioName ?: editorTrack?.title ?: "Audio",
@@ -4347,10 +4428,10 @@ private fun FullExpressiveEditor(
                                     isCurrentTrack = editorIsCurrent,
                                     thumbnail = editorTrack?.thumbnailUri,
                                     artist = editorTrack?.artist,
-                                    containerColor = onColor.copy(0.1f),
+                                    containerColor = onColor.copy(alpha = 0.1f),
                                     contentColor = onColor,
                                     onClick = {
-                                        // Inline preview — no navigation, loops the track.
+                                        // Inline preview — no navigation.
                                         if (editorIsCurrent) {
                                             musicViewModel.togglePlayPause()
                                         } else {
@@ -4364,28 +4445,39 @@ private fun FullExpressiveEditor(
                                                     )
                                                 } catch (_: Exception) { }
                                             }
-                                            musicViewModel.setRepeatMode(androidx.media3.common.Player.REPEAT_MODE_ONE)
                                         }
                                     },
                                     progress = editorProgress,
-                                    positionMs = if (editorIsCurrent) liveEditorPosition else 0L,
+                                    positionMs = editorLivePos,
                                     durationMs = musicState.duration,
                                     onSeek = { frac ->
-                                        musicViewModel.seekTo((frac * musicState.duration).toLong())
+                                        val d = musicViewModel.uiState.value.duration
+                                        if (editorIsCurrent && d > 0L) {
+                                            musicViewModel.seekTo((frac * d).toLong())
+                                        }
                                     },
                                     modifier = Modifier.fillMaxWidth().padding(end = 40.dp)
                                 )
                                 ToolzExpressiveIconButton(
-                                    onClick = { currentNote = currentNote.copy(attachedAudioUri = null, attachedAudioName = null) },
-                                    modifier = Modifier.align(Alignment.TopEnd).size(32.dp),
+                                    onClick = {
+                                        val doomed = currentNote
+                                        currentNote = currentNote.copy(attachedAudioUri = null, attachedAudioName = null)
+                                        if (doomed.id != 0 && doomed.attachedAudioUri != null) {
+                                            editorScope.launch {
+                                                try { viewModel.removeAttachmentByUri(doomed.id, doomed.attachedAudioUri!!) } catch (_: Exception) { }
+                                            }
+                                        }
+                                    },
+                                    modifier = Modifier.align(Alignment.TopEnd).size(48.dp),
                                     colors = IconButtonDefaults.filledIconButtonColors(
-                                        containerColor = Color.Black.copy(0.4f),
+                                        containerColor = Color.Black.copy(alpha = 0.4f),
                                         contentColor = Color.White
                                     )
                                 ) {
                                     Icon(Icons.Rounded.Close, contentDescription = "Remove audio", modifier = Modifier.size(18.dp))
                                 }
                             }
+                            } // CurrentTrackProgress
                         }
                     }
                 }
@@ -4445,10 +4537,11 @@ private fun FullExpressiveEditor(
         if (showPdfPicker) viewModel.refreshPdfs()
     }
 
+    val pdfPickerItems = remember(availablePdfs) { availablePdfs.map { it.name to it.uri.toString() } }
     if (showPdfPicker) {
         AttachmentPickerDialog(
             title = "ATTACH PDF",
-            items = availablePdfs.map { it.name to it.uri.toString() },
+            items = pdfPickerItems,
             onDismiss = { showPdfPicker = false },
             emptyText = "No PDFs found — import one from the PDF tool first",
             browseLabel = if (isBrowsingPdf) "Opening…" else "Browse files…",
@@ -4464,20 +4557,24 @@ private fun FullExpressiveEditor(
             },
             onSelect = { name, uri ->
                 showPdfPicker = false
-                if (currentNote.id != 0) {
+                val noteId = currentNote.id
+                val parsed = try { Uri.parse(uri) } catch (_: Exception) { null }
+                if (parsed == null) {
+                    android.widget.Toast.makeText(context, context.getString(R.string.notepad_pdf_unreadable), android.widget.Toast.LENGTH_SHORT).show()
+                } else if (noteId != 0) {
                     // Saved note: persist into multi-attach table (grant verified).
-                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
-                        val result = viewModel.attachPdf(currentNote.id, Uri.parse(uri))
+                    editorScope.launch {
+                        val result = viewModel.attachPdf(noteId, parsed)
                         if (result is PdfAttachResult.Attached && result.uri.isNotBlank()) {
                             currentNote = currentNote.copy(
                                 attachedPdfUri = currentNote.attachedPdfUri ?: result.uri
                             )
                         }
                         val msg = when (result) {
-                            is PdfAttachResult.Attached -> "PDF attached"
-                            PdfAttachResult.Capped -> "Note already has 10 PDFs"
-                            PdfAttachResult.Unreadable -> "Couldn't open that PDF on this device"
-                            is PdfAttachResult.Failed -> "Couldn't attach — try again"
+                            is PdfAttachResult.Attached -> context.getString(R.string.notepad_pdf_attached)
+                            PdfAttachResult.Capped -> context.getString(R.string.notepad_pdf_capped)
+                            PdfAttachResult.Unreadable -> context.getString(R.string.notepad_pdf_unreadable)
+                            is PdfAttachResult.Failed -> context.getString(R.string.notepad_attach_failed)
                         }
                         android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
                     }
@@ -4496,7 +4593,7 @@ private fun FullExpressiveEditor(
                         } else {
                             android.widget.Toast.makeText(
                                 context,
-                                "Couldn't open that PDF on this device",
+                                context.getString(R.string.notepad_pdf_unreadable),
                                 android.widget.Toast.LENGTH_SHORT
                             ).show()
                         }
@@ -4520,9 +4617,7 @@ private fun FullExpressiveEditor(
     
     DisposableEffect(Unit) {
         onDispose {
-            if (viewModel.isFocusMode.value) {
-                viewModel.toggleFocusMode(context)
-            }
+            viewModel.setFocusMode(false)
         }
     }
 }
@@ -4756,28 +4851,38 @@ private fun AiToolsPopup(
         mutableIntStateOf(0) 
     }
     
-    var selectedNote by remember { 
+    var selectedNote by remember(state, initialNote, selectedNotes) {
         mutableStateOf(
-            if (state == NotepadActionState.VIEWER) initialNote 
+            if (state == NotepadActionState.VIEWER) initialNote
             else if (selectedNotes.size == 1) selectedNotes.first()
             else null
-        ) 
+        )
     }
-    
+
     var aiLoading by remember { mutableStateOf(false) }
     var aiPrompt by remember { mutableStateOf("") }
     var showModelSettings by remember { mutableStateOf(false) }
 
-    var aiMode by remember { 
+    var aiMode by remember {
         mutableIntStateOf(
             if (selectedNotes.isNotEmpty()) 1 // Default to Edit if selected
-            else 0 
-        ) 
+            else 0
+        )
     }
 
     val models by viewModel.availableModels.collectAsStateWithLifecycle()
     val selectedModel by viewModel.selectedAiModel.collectAsStateWithLifecycle()
     val aiSummary by viewModel.aiSummary.collectAsStateWithLifecycle()
+    // Publishing AI results must be a side-effect, never during composition.
+    LaunchedEffect(aiSummary) {
+        if (aiSummary != null) aiLoading = false
+    }
+    // Guard: entering summarize with no note must not spin forever.
+    LaunchedEffect(step, aiMode, selectedNote) {
+        if (step == 3 && aiMode == 2 && selectedNote == null && state != NotepadActionState.VIEWER) {
+            aiLoading = false
+        }
+    }
 
     BackHandler(enabled = step > 0) {
         when (step) {
@@ -4882,10 +4987,17 @@ private fun AiToolsPopup(
                             onSummarize = {
                                 aiMode = 2
                                 if (state == NotepadActionState.VIEWER || selectedNotes.size == 1) {
-                                    // already set selectedNote in remember
-                                    step = 3
-                                    aiLoading = true
-                                    selectedNote?.let { viewModel.summarizeNote(it) }
+                                    val target = selectedNote
+                                        ?: (if (selectedNotes.size == 1) selectedNotes.first() else initialNote)
+                                    if (target != null) {
+                                        selectedNote = target
+                                        step = 3
+                                        aiLoading = true
+                                        viewModel.onNoteFocused(target)
+                                        viewModel.summarizeNote(target)
+                                    } else {
+                                        aiLoading = false
+                                    }
                                 } else {
                                     step = 1
                                 }
@@ -4902,6 +5014,7 @@ private fun AiToolsPopup(
                                 } else {
                                     step = 3
                                     aiLoading = true
+                                    viewModel.onNoteFocused(it)
                                     viewModel.summarizeNote(it)
                                 }
                             },
@@ -4916,6 +5029,9 @@ private fun AiToolsPopup(
                             isGenerate = aiMode == 0,
                             onPromptChange = { aiPrompt = it },
                             onConfirm = {
+                                if (aiLoading) return@PromptInput
+                                if (aiPrompt.isBlank()) return@PromptInput
+                                if (aiMode != 0 && selectedNote == null) return@PromptInput
                                 aiLoading = true
                                 if (aiMode == 0) {
                                     viewModel.generateNoteAi(aiPrompt) { gen ->
@@ -4928,7 +5044,7 @@ private fun AiToolsPopup(
                                             aiLoading = false
                                             onEdit(note, gen)
                                         }
-                                    }
+                                    } ?: run { aiLoading = false }
                                 }
                             },
                             onBack = { 
@@ -4969,8 +5085,7 @@ private fun AiToolsPopup(
                                         onClick = {
                                             selectedNote?.let {
                                                 aiLoading = true
-                                                viewModel.updateNote(it.copy(summary = null))
-                                                viewModel.summarizeNote(it.copy(summary = null))
+                                                viewModel.summarizeNote(it, forceRegenerate = true)
                                             }
                                         },
                                         shapes = IconButtonDefaults.shapes(),
@@ -4985,7 +5100,6 @@ private fun AiToolsPopup(
                                 }
                             }
                             aiSummary?.let { summary ->
-                                aiLoading = false
                                 Surface(
                                     color = MaterialTheme.colorScheme.surfaceContainerHighest,
                                     shape = MediumExpressiveShape,
@@ -5170,7 +5284,10 @@ private fun TrashBottomSheet(
     onEmptyTrash: () -> Unit
 ) {
     val haptic = rememberToolzHapticFeedback()
-    
+    var confirmEmpty by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    var confirmDeleteId by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<Int?>(null) }
+    val trashDateFmt = androidx.compose.runtime.remember { java.text.SimpleDateFormat("MMM d, yyyy", java.util.Locale.getDefault()) }
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -5213,7 +5330,7 @@ private fun TrashBottomSheet(
                 
                 if (deletedNotes.isNotEmpty()) {
                     ToolzOutlinedExpressiveButton(
-                        onClick = { haptic.longClick(); onEmptyTrash() },
+                        onClick = { haptic.longClick(); confirmEmpty = true },
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(0.3f))
                     ) {
@@ -5237,7 +5354,7 @@ private fun TrashBottomSheet(
                     modifier = Modifier.heightIn(max = 400.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    lazyItems(deletedNotes) { note ->
+                    lazyItems(deletedNotes, key = { it.id }) { note ->
                         Surface(
                             modifier = Modifier.fillMaxWidth(),
                             color = Color(note.color).copy(0.1f).compositeOver(MaterialTheme.colorScheme.surfaceContainerHighest),
@@ -5261,7 +5378,8 @@ private fun TrashBottomSheet(
                                         overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
-                                        SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(note.deletedTimestamp)),
+                                        if (note.deletedTimestamp <= 0L) ""
+                                        else trashDateFmt.format(Date(note.deletedTimestamp)),
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.6f)
                                     )
@@ -5271,12 +5389,46 @@ private fun TrashBottomSheet(
                                     Icon(Icons.Rounded.Restore, stringResource(R.string.st_NotepadScreen_trash20), tint = MaterialTheme.colorScheme.primary)
                                 }
                                 
-                                IconButton(onClick = { haptic.click(); onDeletePermanently(note) }) {
+                                IconButton(onClick = { haptic.click(); confirmDeleteId = note.id }) {
                                     Icon(Icons.Rounded.DeleteForever, stringResource(R.string.st_NotepadScreen_d44), tint = MaterialTheme.colorScheme.error)
                                 }
                             }
                         }
                     }
+                }
+            }
+            if (confirmEmpty) {
+                androidx.compose.material3.AlertDialog(
+                    onDismissRequest = { confirmEmpty = false },
+                    confirmButton = {
+                        androidx.compose.material3.TextButton(onClick = { confirmEmpty = false; onEmptyTrash() }) {
+                            Text(stringResource(R.string.st_NotepadScreen_et49))
+                        }
+                    },
+                    dismissButton = {
+                        androidx.compose.material3.TextButton(onClick = { confirmEmpty = false }) {
+                            Text(stringResource(R.string.st_NotepadScreen_c31))
+                        }
+                    },
+                    title = { Text(stringResource(R.string.st_NotepadScreen_et49)) },
+                )
+            }
+            confirmDeleteId?.let { doomedId ->
+                deletedNotes.firstOrNull { it.id == doomedId }?.let { doomed ->
+                    androidx.compose.material3.AlertDialog(
+                        onDismissRequest = { confirmDeleteId = null },
+                        confirmButton = {
+                            androidx.compose.material3.TextButton(onClick = { confirmDeleteId = null; onDeletePermanently(doomed) }) {
+                                Text(stringResource(R.string.st_NotepadScreen_d44))
+                            }
+                        },
+                        dismissButton = {
+                            androidx.compose.material3.TextButton(onClick = { confirmDeleteId = null }) {
+                                Text(stringResource(R.string.st_NotepadScreen_c31))
+                            }
+                        },
+                        title = { Text(stringResource(R.string.st_NotepadScreen_d44)) },
+                    )
                 }
             }
         }

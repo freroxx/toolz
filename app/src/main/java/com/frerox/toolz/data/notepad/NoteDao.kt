@@ -28,8 +28,25 @@ interface NoteDao {
     @Query("SELECT * FROM notes WHERE isDeleted = 1 ORDER BY deletedTimestamp DESC")
     fun getDeletedNotes(): Flow<List<Note>>
 
+    /** DB-side search — replaces in-memory contains() filtering in the UI. */
+    @Query(
+        "SELECT * FROM notes WHERE isDeleted = 0 AND " +
+            "(title LIKE '%' || :query || '%' ESCAPE '\\' OR content LIKE '%' || :query || '%' ESCAPE '\\') " +
+            "ORDER BY isPinned DESC, timestamp DESC LIMIT :limit"
+    )
+    fun searchNotes(query: String, limit: Int = 200): Flow<List<Note>>
+
+    @Query("SELECT COUNT(*) FROM notes WHERE isDeleted = 0")
+    fun countActiveNotes(): Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM notes WHERE isDeleted = 1")
+    fun countTrashedNotes(): Flow<Int>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertNote(note: Note): Long
+
+    @Update
+    suspend fun updateNote(note: Note)
 
     @Delete
     suspend fun permanentlyDeleteNote(note: Note)
@@ -49,10 +66,14 @@ interface NoteDao {
     @Query("DELETE FROM notes WHERE isDeleted = 1")
     suspend fun emptyTrash()
 
-    @Query("UPDATE notes SET isPinned = :isPinned WHERE id = :noteId")
-    suspend fun updatePinned(noteId: Int, isPinned: Boolean)
+    /** Trash auto-expiry: permanently drops rows trashed before [before]. */
+    @Query("DELETE FROM notes WHERE isDeleted = 1 AND deletedTimestamp < :before AND deletedTimestamp != 0")
+    suspend fun deleteExpiredTrash(before: Long): Int
 
-    @Query("SELECT * FROM notes WHERE isDeleted = 0")
+    @Query("UPDATE notes SET isPinned = :isPinned, updatedAt = :updatedAt WHERE id = :noteId")
+    suspend fun updatePinned(noteId: Int, isPinned: Boolean, updatedAt: Long = System.currentTimeMillis())
+
+    @Query("SELECT * FROM notes WHERE isDeleted = 0 ORDER BY timestamp DESC")
     suspend fun getAllNotesSync(): List<Note>
 
     @Query("SELECT * FROM notes WHERE id = :noteId LIMIT 1")
@@ -60,6 +81,15 @@ interface NoteDao {
 
     @Query("UPDATE notes SET attachedPdfUri = :uri WHERE id = :noteId")
     suspend fun updateAttachedPdfUri(noteId: Int, uri: String?)
+
+    @Query("UPDATE notes SET attachedImageUri = :uri WHERE id = :noteId")
+    suspend fun updateAttachedImageUri(noteId: Int, uri: String?)
+
+    @Query("UPDATE notes SET attachedAudioUri = :uri, attachedAudioName = :name WHERE id = :noteId")
+    suspend fun updateAttachedAudio(noteId: Int, uri: String?, name: String?)
+
+    @Query("UPDATE notes SET summary = :summary WHERE id = :noteId")
+    suspend fun updateSummary(noteId: Int, summary: String?)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertNotes(notes: List<Note>)

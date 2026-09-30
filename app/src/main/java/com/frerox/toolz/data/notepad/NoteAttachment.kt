@@ -26,8 +26,10 @@ import androidx.room.PrimaryKey
  * Multi-attachment model (remake V2). Replaces the single-slot
  * attachedPdfUri/attachedImageUri/attachedAudioUri columns on [Note].
  *
- * kind: PDF | IMAGE | AUDIO
+ * kind: PDF | IMAGE | AUDIO | FILE. Use the KIND_* constants — raw strings
+ * are rejected by [NoteAttachmentKind].
  * pageHint: for PDFs — page to open at (0-based).
+ * mimeType/durationMs: optional metadata for honest UI (size, audio length).
  */
 @Entity(
     tableName = "note_attachments",
@@ -39,7 +41,15 @@ import androidx.room.PrimaryKey
             onDelete = ForeignKey.CASCADE
         )
     ],
-    indices = [Index("noteId"), Index("kind")]
+    indices = [
+        Index("noteId"),
+        Index("kind"),
+        Index(value = ["noteId", "kind"]),
+        Index("uri"),
+        // Not unique: legacy backfill + dual-write history may contain
+        // duplicates; dedup is enforced in code (see NoteRepository).
+        Index(value = ["noteId", "uri"]),
+    ]
 )
 data class NoteAttachment(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -49,11 +59,26 @@ data class NoteAttachment(
     val displayName: String? = null,
     val sizeBytes: Long = 0L,
     val pageHint: Int = 0,
+    val mimeType: String? = null,
+    val durationMs: Long = 0L,
     val createdAt: Long = System.currentTimeMillis()
 ) {
     companion object {
         const val KIND_PDF = "PDF"
         const val KIND_IMAGE = "IMAGE"
         const val KIND_AUDIO = "AUDIO"
+        /** Generic file (future-proof; UI treats like PDF row without preview). */
+        const val KIND_FILE = "FILE"
+        val ALL_KINDS = setOf(KIND_PDF, KIND_IMAGE, KIND_AUDIO, KIND_FILE)
     }
+}
+
+/** Validated attachment kind — rejects typo strings at the gate. */
+object NoteAttachmentKind {
+    fun requireValid(kind: String): String {
+        require(kind in NoteAttachment.ALL_KINDS) { "Unknown attachment kind: $kind" }
+        return kind
+    }
+
+    fun isValid(kind: String): Boolean = kind in NoteAttachment.ALL_KINDS
 }

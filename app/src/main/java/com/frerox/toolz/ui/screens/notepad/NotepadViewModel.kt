@@ -31,10 +31,14 @@ import com.frerox.toolz.data.ai.OpenAiMessage
 import com.frerox.toolz.data.ai.OpenAiRequest
 import com.frerox.toolz.data.ai.OpenAiService
 import com.frerox.toolz.data.music.MusicRepository
+import com.frerox.toolz.data.notepad.AttachmentFileJanitor
 import com.frerox.toolz.data.notepad.Note
 import com.frerox.toolz.data.notepad.NoteAttachment
 import com.frerox.toolz.data.notepad.NoteAttachmentDao
+import com.frerox.toolz.data.notepad.NoteColors
 import com.frerox.toolz.data.notepad.NoteDao
+import com.frerox.toolz.data.notepad.NoteLimits
+import com.frerox.toolz.data.notepad.NoteRepository
 import com.frerox.toolz.data.notepad.PdfAttachResult
 import com.frerox.toolz.data.pdf.PdfRepository
 import com.frerox.toolz.data.settings.SettingsRepository
@@ -90,6 +94,8 @@ data class AiNoteStyle(
 class NotepadViewModel @Inject constructor(
     private val noteDao          : NoteDao,
     private val attachmentDao    : NoteAttachmentDao,
+    private val noteRepository   : NoteRepository,
+    private val fileJanitor      : AttachmentFileJanitor,
     private val musicRepository  : MusicRepository,
     private val pdfRepository    : PdfRepository,
     private val openAiService    : OpenAiService,
@@ -102,6 +108,30 @@ class NotepadViewModel @Inject constructor(
 
     val notes: StateFlow<List<Note>> = noteDao.getAllNotes()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val trashCount: StateFlow<Int> = noteDao.countTrashedNotes()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    /** Debounced DB-side search; empty query falls back to full list. */
+    @OptIn(kotlinx.coroutines.FlowPreview::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val searchResults: StateFlow<List<Note>> = _searchQuery
+        .debounce(250)
+        .flatMapLatest { q ->
+            if (q.isBlank()) kotlinx.coroutines.flow.flowOf(emptyList())
+            else try {
+                noteDao.searchNotes(q.trim(), NoteLimits.SEARCH_LIMIT)
+            } catch (_: Exception) {
+                kotlinx.coroutines.flow.flowOf(emptyList())
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun setSearchQuery(q: String) {
+        _searchQuery.value = q.take(200)
+    }
 
     val offlineModeEnabled = settingsRepository.offlineModeEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
@@ -120,6 +150,10 @@ class NotepadViewModel @Inject constructor(
 
     private val _aiSummary       = MutableStateFlow<String?>(null)
     val aiSummary: StateFlow<String?> = _aiSummary.asStateFlow()
+
+    /** Which note the cached summary/style belongs to — prevents cross-note leaks. */
+    private val _aiSummaryNoteId = MutableStateFlow<Int?>(null)
+    val aiSummaryNoteId: StateFlow<Int?> = _aiSummaryNoteId.asStateFlow()
 
     private val _isAiSummarizing = MutableStateFlow(false)
     val isAiSummarizing: StateFlow<Boolean> = _isAiSummarizing.asStateFlow()
@@ -152,29 +186,41 @@ class NotepadViewModel @Inject constructor(
     }
 
     /**
-     * One-shot repair for notes attached before legacy dual-write existed:
-     * any note with V2 PDF rows but a blank legacy attachedPdfUri gets the
-     * legacy slot backfilled from its first V2 row, so card badges, the PDFs
-     * filter/counts and card tap-to-open work again.
+     * One-shot bounded repair for pre-dual-write notes. Caps work at 200
+     * notes (ordered by recency) so a huge library can't stall startup;
+     * remaining rows heal lazily via [ensureLegacyAttachments] on open.
      */
     private fun healAllLegacyColumns() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val all = try {
-                    noteDao.getAllNotesSync()
+                    noteDao.getAllNotesSync().take(200)
                 } catch (_: Exception) {
                     return@launch
                 }
                 for (n in all) {
-                    if (!n.attachedPdfUri.isNullOrBlank()) continue
                     try {
-                        val first = attachmentDao.listForNote(n.id)
-                            .firstOrNull { it.kind == NoteAttachment.KIND_PDF }
-                            ?: continue
-                        noteDao.updateAttachedPdfUri(n.id, first.uri)
+                        noteRepository.healForward(n)
+                        // Reverse-heal legacy PDF slot so old card badges keep working.
+                        if (n.attachedPdfUri.isNullOrBlank()) {
+                            val first = attachmentDao.listForNote(n.id)
+                                .firstOrNull { it.kind == NoteAttachment.KIND_PDF }
+                            if (first != null) noteDao.updateAttachedPdfUri(n.id, first.uri)
+                        }
                     } catch (_: Exception) { }
                 }
             } catch (_: Exception) { }
+        }
+    }
+
+    fun expireOldTrash() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val cutoff = System.currentTimeMillis() - NoteLimits.TRASH_RETENTION_DAYS * 24L * 60L * 60L * 1000L
+                noteDao.deleteExpiredTrash(cutoff)
+            } catch (e: Exception) {
+                Log.w(TAG, "expireOldTrash failed", e)
+            }
         }
     }
 
@@ -247,7 +293,11 @@ class NotepadViewModel @Inject constructor(
     }
 
     fun setSelectedModel(model: String) {
-        _selectedAiModel.value = model
+        val clean = model.trim()
+        if (clean.isEmpty()) return
+        // Accept known models or provider/model ids; reject prompt-injection junk.
+        if (clean.length > 120 || clean.contains("\n") || clean.contains(" ")) return
+        _selectedAiModel.value = clean
     }
 
     // ── CRUD ───────────────────────────────────────────────────────────────
@@ -266,33 +316,66 @@ class NotepadViewModel @Inject constructor(
         attachedImageUri : String? = null,
         onInserted       : (Int) -> Unit = {},
     ) {
+        val safeTitle = title.trim().take(NoteLimits.MAX_TITLE_CHARS)
+        val safeContent = content.take(NoteLimits.MAX_CONTENT_CHARS)
+        if (safeTitle.isBlank() && safeContent.isBlank()
+            && attachedPdfUri.isNullOrBlank()
+            && attachedImageUri.isNullOrBlank()
+            && attachedAudioUri.isNullOrBlank()
+        ) return
         viewModelScope.launch {
+            val now = System.currentTimeMillis()
             val insertedId = noteDao.insertNote(
                 Note(
-                    title             = title.trim(),
-                    content           = content,
+                    title             = safeTitle,
+                    content           = safeContent,
                     color             = color,
                     fontStyle         = fontStyle,
-                    fontSize          = fontSize,
+                    fontSize          = NoteLimits.clampFontSize(fontSize),
                     isBold            = isBold,
                     isItalic          = isItalic,
                     attachedPdfUri    = attachedPdfUri,
                     attachedAudioUri  = attachedAudioUri,
-                    attachedAudioName = attachedAudioName,
+                    attachedAudioName = attachedAudioName?.take(200),
                     attachedImageUri  = attachedImageUri,
+                    timestamp         = now,
+                    createdAt         = now,
+                    updatedAt         = now,
                 )
             )
-            onInserted(insertedId.toInt())
+            if (insertedId > Int.MAX_VALUE) {
+                Log.e(TAG, "Row id exceeds Int range: $insertedId")
+                onInserted(-1)
+            } else {
+                onInserted(insertedId.toInt())
+            }
         }
     }
 
     fun updateNote(note: Note) {
-        viewModelScope.launch { noteDao.insertNote(note) }   // insert with REPLACE strategy
+        viewModelScope.launch {
+            try {
+                noteDao.insertNote(
+                    note.copy(
+                        title = note.title.take(NoteLimits.MAX_TITLE_CHARS),
+                        content = note.content.take(NoteLimits.MAX_CONTENT_CHARS),
+                        fontSize = NoteLimits.clampFontSize(note.fontSize),
+                        updatedAt = System.currentTimeMillis(),
+                    )
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "updateNote failed", e)
+            }
+        }
     }
 
     fun updateNoteCardSize(note: Note, cardSize: String) {
         viewModelScope.launch {
-            noteDao.insertNote(note.copy(cardSize = cardSize))
+            try {
+                noteDao.insertNote(note.copy(cardSize = cardSize, updatedAt = System.currentTimeMillis()))
+            } catch (e: Exception) {
+                Log.e(TAG, "updateNoteCardSize failed", e)
+            }
         }
     }
 
@@ -313,7 +396,30 @@ class NotepadViewModel @Inject constructor(
     }
 
     fun permanentlyDeleteNote(note: Note) {
-        viewModelScope.launch { noteDao.permanentlyDeleteNote(note) }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                // Delete children first so FK cascade never orphans, then clean files.
+                try { attachmentDao.deleteForNote(note.id) } catch (_: Exception) { }
+                noteDao.permanentlyDeleteNote(note)
+                fileJanitor.onNotePermanentlyDeleted(note)
+            } catch (e: Exception) {
+                Log.e(TAG, "permanentlyDeleteNote failed", e)
+            }
+        }
+    }
+
+    fun permanentlyDeleteNotes(notes: List<Note>) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                notes.forEach { n ->
+                    try { attachmentDao.deleteForNote(n.id) } catch (_: Exception) { }
+                }
+                noteDao.permanentlyDeleteNotes(notes)
+                notes.forEach { fileJanitor.onNotePermanentlyDeleted(it) }
+            } catch (e: Exception) {
+                Log.e(TAG, "permanentlyDeleteNotes failed", e)
+            }
+        }
     }
 
     fun restoreNote(note: Note) {
@@ -321,7 +427,16 @@ class NotepadViewModel @Inject constructor(
     }
 
     fun emptyTrash() {
-        viewModelScope.launch { noteDao.emptyTrash() }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val trashed = try { deletedNotes.value } catch (_: Exception) { emptyList<Note>() }
+                noteDao.emptyTrash()
+                trashed.forEach { fileJanitor.onNotePermanentlyDeleted(it) }
+                fileJanitor.sweepOrphans()
+            } catch (e: Exception) {
+                Log.e(TAG, "emptyTrash failed", e)
+            }
+        }
     }
 
     fun undoDelete() {
@@ -341,18 +456,49 @@ class NotepadViewModel @Inject constructor(
         viewModelScope.launch { noteDao.updatePinned(note.id, !note.isPinned) }
     }
 
+    /**
+     * Downsamples to max 2048px, rotates per EXIF, compresses q85 and serves
+     * via FileProvider (never file://). Returns a content:// string or null.
+     */
     suspend fun persistImage(context: Context, uri: Uri): String? = withContext(Dispatchers.IO) {
         try {
-            val contentResolver = context.contentResolver
-            val fileName = "note_img_${System.currentTimeMillis()}.jpg"
-            val file = java.io.File(context.filesDir, fileName)
-            
-            contentResolver.openInputStream(uri)?.use { input ->
-                file.outputStream().use { output ->
-                    input.copyTo(output)
+            val cr = context.contentResolver
+            val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            cr.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, bounds) }
+            val srcW = bounds.outWidth.takeIf { it > 0 } ?: 2048
+            val srcH = bounds.outHeight.takeIf { it > 0 } ?: 2048
+            var sample = 1
+            while (srcW / sample > 2048 || srcH / sample > 2048) sample *= 2
+            val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+            var bmp = cr.openInputStream(uri)?.use {
+                android.graphics.BitmapFactory.decodeStream(it, null, opts)
+            } ?: return@withContext null
+            // EXIF rotation.
+            try {
+                cr.openInputStream(uri)?.use { ins ->
+                    val exif = androidx.exifinterface.media.ExifInterface(ins)
+                    val o = exif.getAttributeInt(
+                        androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION,
+                        androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL,
+                    )
+                    val m = android.graphics.Matrix()
+                    when (o) {
+                        androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> m.postRotate(90f)
+                        androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> m.postRotate(180f)
+                        androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> m.postRotate(270f)
+                    }
+                    if (!m.isIdentity) {
+                        val rotated = android.graphics.Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
+                        if (rotated != bmp) { bmp.recycle(); bmp = rotated }
+                    }
                 }
-            }
-            Uri.fromFile(file).toString()
+            } catch (_: Exception) { }
+            val file = java.io.File(context.filesDir, "note_img_${System.currentTimeMillis()}.jpg")
+            file.outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, it) }
+            bmp.recycle()
+            androidx.core.content.FileProvider.getUriForFile(
+                context, "${context.packageName}.fileprovider", file,
+            ).toString()
         } catch (e: Exception) {
             Log.e(TAG, "Failed to persist image", e)
             null
@@ -363,6 +509,8 @@ class NotepadViewModel @Inject constructor(
 
     fun attachmentsFor(noteId: Int): Flow<List<NoteAttachment>> =
         attachmentDao.observeForNote(noteId)
+
+    suspend fun getNoteById(noteId: Int): Note? = noteRepository.get(noteId)
 
     suspend fun listAttachments(noteId: Int): List<NoteAttachment> = try {
         attachmentDao.listForNote(noteId)
@@ -384,6 +532,7 @@ class NotepadViewModel @Inject constructor(
     suspend fun ensureLegacyAttachments(note: Note) = withContext(Dispatchers.IO) {
         try {
             if (note.id == 0) return@withContext
+            noteRepository.healForward(note)
             val existing = try {
                 attachmentDao.listForNote(note.id)
             } catch (_: Exception) {
@@ -473,23 +622,17 @@ class NotepadViewModel @Inject constructor(
                 val usableStr = usable.toString()
                 val name = try { pdfRepository.queryDisplayName(usable) } catch (_: Exception) { null }
                 val size = try { pdfRepository.querySize(usable) } catch (_: Exception) { 0L }
-                attachmentDao.insert(
-                    NoteAttachment(
-                        noteId = noteId, kind = NoteAttachment.KIND_PDF, uri = usableStr,
-                        displayName = name, sizeBytes = size, pageHint = pageHint
-                    )
-                )
-                // Dual-write: keep the legacy single-slot column in sync so
-                // card badges, PDFs filter/counts and card tap-to-open (which
-                // read the legacy columns) light up for V2 attaches. Only
-                // fills when blank — never overwrites a user's existing slot.
-                try {
-                    val current = noteDao.getNoteById(noteId)
-                    if (current != null && current.attachedPdfUri.isNullOrBlank()) {
-                        noteDao.updateAttachedPdfUri(noteId, usableStr)
-                    }
-                } catch (_: Exception) { }
-                PdfAttachResult.Attached(usableStr)
+                val mime = try { appContext.contentResolver.getType(usable) } catch (_: Exception) { null }
+                when (val outcome = noteRepository.addAttachment(
+                    noteId, NoteAttachment.KIND_PDF, usableStr,
+                    displayName = name, sizeBytes = size, pageHint = pageHint, mimeType = mime,
+                )) {
+                    is NoteRepository.AttachOutcome.Capped -> return@withContext PdfAttachResult.Capped
+                    is NoteRepository.AttachOutcome.Duplicate ->
+                        return@withContext PdfAttachResult.Attached(outcome.existing.uri)
+                    is NoteRepository.AttachOutcome.Attached -> return@withContext PdfAttachResult.Attached(usableStr)
+                    else -> return@withContext PdfAttachResult.Failed("db")
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "attachPdf failed for note $noteId", e)
                 PdfAttachResult.Failed(e.message ?: e.javaClass.simpleName)
@@ -503,10 +646,25 @@ class NotepadViewModel @Inject constructor(
                     source, Intent.FLAG_GRANT_READ_URI_PERMISSION
                 )
             } catch (_: Exception) { }
-            attachmentDao.insert(
-                NoteAttachment(noteId = noteId, kind = NoteAttachment.KIND_IMAGE, uri = source.toString())
-            )
-            true
+            // Verify readability — never store a dead row.
+            try {
+                appContext.contentResolver.openInputStream(source)?.close()
+            } catch (e: Exception) {
+                Log.w(TAG, "attachImage unreadable: $source", e)
+                return@withContext false
+            }
+            val mime = try { appContext.contentResolver.getType(source) } catch (_: Exception) { null }
+            val size = try {
+                appContext.contentResolver.query(source, null, null, null, null)?.use { c ->
+                    val i = c.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                    if (c.moveToFirst() && i >= 0) c.getLong(i) else 0L
+                } ?: 0L
+            } catch (_: Exception) { 0L }
+            when (noteRepository.addAttachment(noteId, NoteAttachment.KIND_IMAGE, source.toString(), sizeBytes = size, mimeType = mime)) {
+                is NoteRepository.AttachOutcome.Attached,
+                is NoteRepository.AttachOutcome.Duplicate -> true
+                else -> false
+            }
         } catch (_: Exception) {
             false
         }
@@ -515,10 +673,36 @@ class NotepadViewModel @Inject constructor(
     suspend fun attachAudio(noteId: Int, uri: String, name: String?): Boolean =
         withContext(Dispatchers.IO) {
             try {
-                attachmentDao.insert(
-                    NoteAttachment(noteId = noteId, kind = NoteAttachment.KIND_AUDIO, uri = uri, displayName = name)
-                )
-                true
+                if (uri.isBlank()) return@withContext false
+                val parsed = try { Uri.parse(uri) } catch (_: Exception) { return@withContext false }
+                var durationMs = 0L
+                var sizeBytes = 0L
+                var mime: String? = null
+                try {
+                    mime = appContext.contentResolver.getType(parsed)
+                    val mmr = android.media.MediaMetadataRetriever()
+                    try {
+                        mmr.setDataSource(appContext, parsed)
+                        durationMs = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                    } finally {
+                        try { mmr.release() } catch (_: Exception) { }
+                    }
+                } catch (_: Exception) { }
+                try {
+                    appContext.contentResolver.query(parsed, null, null, null, null)?.use { c ->
+                        val i = c.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                        if (c.moveToFirst() && i >= 0) sizeBytes = c.getLong(i)
+                    }
+                } catch (_: Exception) { }
+                when (noteRepository.addAttachment(
+                    noteId, NoteAttachment.KIND_AUDIO, uri,
+                    displayName = name?.take(200), sizeBytes = sizeBytes,
+                    mimeType = mime, durationMs = durationMs,
+                )) {
+                    is NoteRepository.AttachOutcome.Attached,
+                    is NoteRepository.AttachOutcome.Duplicate -> true
+                    else -> false
+                }
             } catch (_: Exception) {
                 false
             }
@@ -527,7 +711,13 @@ class NotepadViewModel @Inject constructor(
     suspend fun removeAttachment(id: Long) {
         try {
             val row = try { attachmentDao.getById(id) } catch (_: Exception) { null }
-            try { attachmentDao.deleteById(id) } catch (_: Exception) { return }
+            val ok = try {
+                noteRepository.removeAttachment(id)
+            } catch (_: Exception) { false }
+            if (!ok) {
+                try { attachmentDao.deleteById(id) } catch (_: Exception) { return }
+            }
+            if (row != null) fileJanitor.onAttachmentRemoved(row.uri)
             if (row == null || row.kind != NoteAttachment.KIND_PDF) return
             // Keep the legacy slot consistent: if it pointed at the deleted
             // row, repoint to the first remaining PDF or clear it.
@@ -555,14 +745,29 @@ class NotepadViewModel @Inject constructor(
      */
     suspend fun removeAttachmentByUri(noteId: Int, uri: String) = withContext(Dispatchers.IO) {
         try {
-            val rows = try {
-                attachmentDao.listForNote(noteId).filter { it.uri == uri }
-            } catch (_: Exception) {
-                return@withContext
+            val removed = try {
+                noteRepository.removeAttachmentsByUri(noteId, uri)
+            } catch (_: Exception) { 0 }
+            if (removed == 0) {
+                // Fallback for legacy-only rows with no V2 entry.
+                try {
+                    val rows = attachmentDao.listForNote(noteId).filter { it.uri == uri }
+                    rows.forEach { row ->
+                        try { removeAttachment(row.id) } catch (_: Exception) { }
+                    }
+                } catch (_: Exception) { }
+            } else {
+                fileJanitor.onAttachmentRemoved(uri)
             }
-            rows.forEach { row ->
-                try { removeAttachment(row.id) } catch (_: Exception) { }
-            }
+            // Keep legacy slot consistent when the last V2 row is gone.
+            try {
+                val remaining = attachmentDao.listForNote(noteId)
+                    .filter { it.kind == NoteAttachment.KIND_PDF }
+                val note = noteDao.getNoteById(noteId)
+                if (note != null && note.attachedPdfUri == uri && remaining.none { it.uri == uri }) {
+                    noteDao.updateAttachedPdfUri(noteId, remaining.firstOrNull()?.uri)
+                }
+            } catch (_: Exception) { }
         } catch (_: Exception) { }
     }
 
@@ -572,21 +777,33 @@ class NotepadViewModel @Inject constructor(
      * Requests a concise summary of [note] from Groq's fast LLM.
      * The result is stored in [aiSummary] and cleared by [clearAiSummary].
      */
-    fun summarizeNote(note: Note) {
-        // Smart AI token saver: if summary exists and note hasn't changed, reuse it.
-        // Content change check is implicitly handled by addNote/updateNote resetting summary to null.
-        if (!note.summary.isNullOrBlank()) {
+    fun summarizeNote(note: Note, forceRegenerate: Boolean = false) {
+        // Per-note cache: reuse only when the cached value belongs to THIS note.
+        if (!forceRegenerate && !note.summary.isNullOrBlank()
+            && _aiSummaryNoteId.value == note.id && !_aiSummary.value.isNullOrBlank()
+        ) return
+        if (!forceRegenerate && !note.summary.isNullOrBlank()) {
+            _aiSummaryNoteId.value = note.id
             _aiSummary.value = note.summary
             return
         }
 
         viewModelScope.launch {
             _isAiSummarizing.value = true
-            _aiSummary.value       = null
+            // Keep the old value visible until the new one arrives (no flash).
+            if (_aiSummaryNoteId.value != note.id) {
+                _aiSummaryNoteId.value = note.id
+                _aiSummary.value = null
+            }
 
             val key = aiSettingsManager.getApiKey("Groq")
             if (key.isBlank()) {
                 _aiSummary.value = "⚠ Groq API key not configured. Go to AI Settings → Groq to add your key."
+                _isAiSummarizing.value = false
+                return@launch
+            }
+            if (offlineModeEnabled.value) {
+                _aiSummary.value = "Offline mode is on — AI summary unavailable."
                 _isAiSummarizing.value = false
                 return@launch
             }
@@ -615,27 +832,39 @@ class NotepadViewModel @Inject constructor(
                 )
 
                 val response = withContext(Dispatchers.IO) {
-                    runGroqRequest(key) { requestKey ->
-                        openAiService.getChatCompletion(
-                            url        = GROQ_URL,
-                            authHeader = "Bearer $requestKey",
-                            request    = request,
-                        )
+                    kotlinx.coroutines.withTimeout(60_000) {
+                        runGroqRequest(key) { requestKey ->
+                            openAiService.getChatCompletion(
+                                url        = GROQ_URL,
+                                authHeader = "Bearer $requestKey",
+                                request    = request,
+                            )
+                        }
                     }
                 }
                 val summaryResult = response.choices.firstOrNull()?.message?.content
+                    ?.trim()?.take(2000)
                     ?: "Could not generate a summary."
-                
-                _aiSummary.value = summaryResult
-                
-                // Cache the summary if successful
-                if (summaryResult != "Could not generate a summary.") {
-                    noteDao.insertNote(note.copy(summary = summaryResult))
+
+                // Only publish + cache when this request still belongs to this note.
+                if (_aiSummaryNoteId.value == note.id) {
+                    _aiSummary.value = summaryResult
+                }
+
+                // Partial update — never full-row REPLACE, never wipe on failure.
+                if (summaryResult != "Could not generate a summary." && note.id != 0) {
+                    try {
+                        noteDao.updateSummary(note.id, summaryResult)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "summary cache failed", e)
+                    }
                 }
 
             } catch (e: Exception) {
                 Log.e(TAG, "Summarize failed: ${e.message}")
-                _aiSummary.value = "Summary failed: ${e.message}"
+                if (_aiSummaryNoteId.value == note.id && _aiSummary.value.isNullOrBlank()) {
+                    _aiSummary.value = "Summary failed: ${e.message ?: e.javaClass.simpleName}"
+                }
             } finally {
                 _isAiSummarizing.value = false
             }
@@ -644,6 +873,21 @@ class NotepadViewModel @Inject constructor(
 
     fun clearAiSummary() {
         _aiSummary.value = null
+        _aiSummaryNoteId.value = null
+    }
+
+    /** Switch cached AI state when the viewer moves to another note. */
+    fun onNoteFocused(note: Note?) {
+        if (note == null) {
+            clearAiSummary()
+            clearAiStyle()
+            return
+        }
+        if (_aiSummaryNoteId.value != note.id) {
+            _aiSummaryNoteId.value = note.id
+            _aiSummary.value = note.summary
+            _aiStyle.value = null
+        }
     }
 
     // ── AI: Choose the Look ────────────────────────────────────────────────
@@ -660,7 +904,7 @@ class NotepadViewModel @Inject constructor(
             _aiStyle.value     = null
 
             val key = aiSettingsManager.getApiKey("Groq")
-            if (key.isBlank()) {
+            if (key.isBlank() || offlineModeEnabled.value) {
                 _isAiStyling.value = false
                 return@launch
             }
@@ -699,12 +943,14 @@ Examples:
                 )
 
                 val response = withContext(Dispatchers.IO) {
-                    runGroqRequest(key) { requestKey ->
-                        openAiService.getChatCompletion(
-                            url        = GROQ_URL,
-                            authHeader = "Bearer $requestKey",
-                            request    = request,
-                        )
+                    kotlinx.coroutines.withTimeout(60_000) {
+                        runGroqRequest(key) { requestKey ->
+                            openAiService.getChatCompletion(
+                                url        = GROQ_URL,
+                                authHeader = "Bearer $requestKey",
+                                request    = request,
+                            )
+                        }
                     }
                 }
 
@@ -723,20 +969,35 @@ Examples:
         _aiStyle.value = null
     }
 
+    /** Explicit setter — use from DisposableEffect onDispose (never toggle there). */
+    fun setFocusMode(enabled: Boolean) {
+        if (_isFocusMode.value == enabled) return
+        _isFocusMode.value = enabled
+        applyFocusModeService(enabled)
+    }
+
+    fun toggleFocusMode() {
+        setFocusMode(!_isFocusMode.value)
+    }
+
+    @Deprecated("Passing an Activity leaks it into the VM; uses appContext now.")
     fun toggleFocusMode(context: android.content.Context? = null) {
-        _isFocusMode.value = !_isFocusMode.value
-        
-        // Side effect: Toggle Caffeinate if context is provided
-        context?.let { ctx ->
-            val intent = Intent(ctx, com.frerox.toolz.service.CaffeinateService::class.java)
-            if (_isFocusMode.value) {
+        setFocusMode(!_isFocusMode.value)
+    }
+
+    private fun applyFocusModeService(enabled: Boolean) {
+        try {
+            val intent = Intent(appContext, com.frerox.toolz.service.CaffeinateService::class.java)
+            if (enabled) {
                 intent.action = com.frerox.toolz.service.CaffeinateService.ACTION_START
                 intent.putExtra(com.frerox.toolz.service.CaffeinateService.EXTRA_INFINITE, true)
-                ctx.startService(intent)
+                appContext.startService(intent)
             } else {
                 intent.action = com.frerox.toolz.service.CaffeinateService.ACTION_STOP
-                ctx.startService(intent)
+                appContext.startService(intent)
             }
+        } catch (e: Exception) {
+            Log.w(TAG, "focus service failed", e)
         }
     }
 
@@ -747,17 +1008,23 @@ Examples:
      */
     fun generateNoteAi(prompt: String?, onComplete: (AiGeneratedNote?) -> Unit) {
         viewModelScope.launch {
+            var done = false
+            val completeOnce: (AiGeneratedNote?) -> Unit = { v ->
+                if (!done) { done = true; onComplete(v) }
+            }
             val key = aiSettingsManager.getApiKey("Groq")
-            if (key.isBlank()) {
-                onComplete(null)
+            if (key.isBlank() || offlineModeEnabled.value) {
+                completeOnce(null)
                 return@launch
             }
+            val safePrompt = prompt?.trim()?.take(NoteLimits.MAX_PROMPT_CHARS)
 
             try {
                 val systemPrompt = """
 You are a creative note generation AI. Create a new note based on the user's prompt.
 If no prompt is given, create a high-quality random thought, quote, task list, or idea.
-Prompt: ${prompt ?: "None"}
+Prompt: ${safePrompt ?: "None"}
+Keep title <= 120 chars and content <= 1500 chars.
 
 Return ONLY a JSON object.
 JSON schema:
@@ -772,7 +1039,7 @@ JSON schema:
 }
                 """.trimIndent()
 
-                val userPrompt = prompt ?: "Create a new interesting note for me."
+                val userPrompt = safePrompt?.takeIf { it.isNotBlank() } ?: "Create a new interesting note for me."
 
                 val request = OpenAiRequest(
                     model = _selectedAiModel.value,
@@ -784,20 +1051,22 @@ JSON schema:
                 )
 
                 val response = withContext(Dispatchers.IO) {
-                    runGroqRequest(key) { requestKey ->
-                        openAiService.getChatCompletion(
-                            url = GROQ_URL,
-                            authHeader = "Bearer $requestKey",
-                            request = request,
-                        )
+                    kotlinx.coroutines.withTimeout(60_000) {
+                        runGroqRequest(key) { requestKey ->
+                            openAiService.getChatCompletion(
+                                url = GROQ_URL,
+                                authHeader = "Bearer $requestKey",
+                                request = request,
+                            )
+                        }
                     }
                 }
 
                 val raw = response.choices.firstOrNull()?.message?.content ?: ""
-                onComplete(parseAiGeneratedNote(raw))
+                completeOnce(parseAiGeneratedNote(raw))
             } catch (e: Exception) {
                 Log.e(TAG, "Generate note failed: ${e.message}")
-                onComplete(null)
+                completeOnce(null)
             }
         }
     }
@@ -807,9 +1076,18 @@ JSON schema:
      */
     fun editNoteWithPromptAi(note: Note, prompt: String, onComplete: (AiGeneratedNote?) -> Unit) {
         viewModelScope.launch {
+            var done = false
+            val completeOnce: (AiGeneratedNote?) -> Unit = { v ->
+                if (!done) { done = true; onComplete(v) }
+            }
             val key = aiSettingsManager.getApiKey("Groq")
-            if (key.isBlank()) {
-                onComplete(null)
+            if (key.isBlank() || offlineModeEnabled.value) {
+                completeOnce(null)
+                return@launch
+            }
+            val instruction = prompt.trim().take(NoteLimits.MAX_PROMPT_CHARS)
+            if (instruction.isBlank()) {
+                completeOnce(null)
                 return@launch
             }
 
@@ -817,7 +1095,8 @@ JSON schema:
                 val noteBody = "Current Title: ${note.title}\nCurrent Content: ${note.content}"
                 val systemPrompt = """
 You are a note editor AI. Modify the given note based on the user's instructions.
-Instruction: $prompt
+Instruction: $instruction
+Keep title <= 120 chars and content <= 1500 chars.
 
 Return ONLY a JSON object with the updated fields.
 JSON schema:
@@ -852,10 +1131,10 @@ JSON schema:
                 }
 
                 val raw = response.choices.firstOrNull()?.message?.content ?: ""
-                onComplete(parseAiGeneratedNote(raw))
+                completeOnce(parseAiGeneratedNote(raw))
             } catch (e: Exception) {
                 Log.e(TAG, "Edit note failed: ${e.message}")
-                onComplete(null)
+                completeOnce(null)
             }
         }
     }
@@ -870,11 +1149,12 @@ JSON schema:
             if (start == -1 || end <= start) return null
 
             val json = JSONObject(cleaned.substring(start, end + 1))
+            val hex = json.optString("colorHex", NoteColors.FALLBACK_HEX)
             AiGeneratedNote(
-                title = json.optString("title", "Untitled"),
-                content = json.optString("content", ""),
-                colorHex = json.optString("colorHex", "#FFF9C4"),
-                fontSize = json.optDouble("fontSize", 17.0).toFloat().coerceIn(12f, 28f),
+                title = json.optString("title", "Untitled").take(120),
+                content = json.optString("content", "").take(5000),
+                colorHex = if (NoteColors.parseHexOrNull(hex) != null) hex else NoteColors.FALLBACK_HEX,
+                fontSize = NoteLimits.clampFontSize(json.optDouble("fontSize", 17.0).toFloat()),
                 isBold = json.optBoolean("isBold", false),
                 isItalic = json.optBoolean("isItalic", false),
                 reasoning = json.optString("reasoning", "")
@@ -908,7 +1188,7 @@ JSON schema:
 
             AiNoteStyle(
                 colorHex  = colorHex,
-                fontSize  = json.optDouble("fontSize", 17.0).toFloat().coerceIn(12f, 28f),
+                fontSize  = NoteLimits.clampFontSize(json.optDouble("fontSize", 17.0).toFloat()),
                 isBold    = json.optBoolean("isBold",   false),
                 isItalic  = json.optBoolean("isItalic", false),
                 reasoning = json.optString("reasoning", "AI-generated style"),

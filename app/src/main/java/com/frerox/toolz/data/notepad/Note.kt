@@ -18,9 +18,18 @@
 package com.frerox.toolz.data.notepad
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "notes")
+@Entity(
+    tableName = "notes",
+    indices = [
+        Index("isDeleted"),
+        Index(value = ["isPinned", "timestamp"]),
+        Index("deletedTimestamp"),
+        Index("updatedAt"),
+    ],
+)
 data class Note(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
     val title: String,
@@ -28,6 +37,11 @@ data class Note(
     val color: Int, // ARGB format
     val isPinned: Boolean = false,
     val timestamp: Long = System.currentTimeMillis(),
+    // V3: true creation / modification times. timestamp is kept for
+    // back-compat ordering; new code should use createdAt/updatedAt.
+    // 0 = unknown (pre-migration row not yet backfilled — treat as timestamp).
+    val createdAt: Long = 0L,
+    val updatedAt: Long = 0L,
     val fontStyle: String = "SANS_SERIF", // "SANS_SERIF", "SERIF", "MONOSPACE", "ROBOTO", "CASUAL", "CURSIVE"
     val fontSize: Float = 16f,
     val isBold: Boolean = false,
