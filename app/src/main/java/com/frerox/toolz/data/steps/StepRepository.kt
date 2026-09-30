@@ -19,9 +19,9 @@ package com.frerox.toolz.data.steps
 
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
-import java.text.SimpleDateFormat
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import java.util.*
-import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -29,7 +29,7 @@ import javax.inject.Singleton
 class StepRepository @Inject constructor(
     private val stepDao: StepDao
 ) {
-    private val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+    private val dateFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
 
     // ---------------------------------------------------------------------------
     // Midnight-safe date flow
@@ -39,20 +39,18 @@ class StepRepository @Inject constructor(
     // ---------------------------------------------------------------------------
     private val _todayDate: Flow<String> = flow {
         while (true) {
-            val now = Calendar.getInstance()
-            val today = dateFormat.format(now.time)
-            emit(today)
+            emit(LocalDate.now().format(dateFormatter))
 
             // Sleep until just after midnight (+ 1 second buffer)
-            val midnight = Calendar.getInstance().apply {
+            val nowMs = System.currentTimeMillis()
+            val tomorrowMidnightMs = Calendar.getInstance().apply {
                 add(Calendar.DAY_OF_YEAR, 1)
                 set(Calendar.HOUR_OF_DAY, 0)
                 set(Calendar.MINUTE, 0)
                 set(Calendar.SECOND, 1)
                 set(Calendar.MILLISECOND, 0)
-            }
-            val msUntilMidnight = midnight.timeInMillis - System.currentTimeMillis()
-            delay(msUntilMidnight.coerceAtLeast(1_000L))
+            }.timeInMillis
+            delay((tomorrowMidnightMs - nowMs).coerceAtLeast(1_000L))
         }
     }.distinctUntilChanged()
 
@@ -65,19 +63,39 @@ class StepRepository @Inject constructor(
     val weeklySteps: Flow<List<StepEntry>> = stepDao.getRecentSteps()
 
     fun getStepsForLastNDays(days: Int): Flow<List<StepEntry>> {
-        val calendar = Calendar.getInstance()
-        val endDate = dateFormat.format(calendar.time)
-        calendar.add(Calendar.DAY_OF_YEAR, -(days - 1))
-        val startDate = dateFormat.format(calendar.time)
-        return stepDao.getStepsInRange(startDate, endDate)
+        val end = LocalDate.now()
+        val start = end.minusDays((days - 1).toLong())
+        return stepDao.getStepsInRange(start.format(dateFormatter), end.format(dateFormatter))
     }
 
     fun getStepsInRange(startDate: String, endDate: String): Flow<List<StepEntry>> =
         stepDao.getStepsInRange(startDate, endDate)
 
+    /**
+     * Hot-path delta insert. Uses true SQL atomic increment, safe under
+     * concurrent emissions. Creates the row if missing.
+     */
+    suspend fun addStepsDelta(date: String, delta: Int, rawSensorValue: Int) {
+        if (delta <= 0) return
+        val updated = stepDao.incrementSteps(date, delta, rawSensorValue)
+        if (updated == 0) {
+            // No row yet — insert. If a concurrent insert wins, fall back to increment.
+            try {
+                stepDao.insertOrUpdateSteps(StepEntry(date, delta, rawSensorValue))
+            } catch (_: Exception) {
+                stepDao.incrementSteps(date, delta, rawSensorValue)
+            }
+        }
+    }
+
+    /** Convenience overload that resolves today's date with a thread-safe formatter. */
+    suspend fun addStepsDeltaToday(delta: Int, rawSensorValue: Int) {
+        addStepsDelta(LocalDate.now().format(dateFormatter), delta, rawSensorValue)
+    }
+
     /** Called by the UI / ViewModel to update today's step count. */
     suspend fun updateSteps(steps: Int) {
-        val today = dateFormat.format(Date())
+        val today = LocalDate.now().format(dateFormatter)
         val exists = stepDao.countForDate(today) > 0
         if (exists) {
             stepDao.atomicUpdateSteps(today, steps, steps)
@@ -107,13 +125,11 @@ class StepRepository @Inject constructor(
     suspend fun cleanupOldSteps(retentionDays: Int) {
         if (retentionDays <= 0) return // 0 or less means "Forever"
         withContext(Dispatchers.IO) {
-            val calendar = Calendar.getInstance()
-            calendar.add(Calendar.DAY_OF_YEAR, -retentionDays)
-            val cutoffDate = dateFormat.format(calendar.time)
+            val cutoffDate = LocalDate.now().minusDays(retentionDays.toLong()).format(dateFormatter)
             stepDao.deleteStepsBeforeDate(cutoffDate)
         }
     }
 
     /** Convenience — the today date string used by calling code. */
-    val todayString: String get() = dateFormat.format(Date())
+    val todayString: String get() = LocalDate.now().format(dateFormatter)
 }

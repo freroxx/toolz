@@ -30,9 +30,15 @@ interface StepDao {
     suspend fun getStepsForDateSync(date: String): StepEntry?
 
     /**
-     * Atomic step increment.  Preferred over INSERT-REPLACE because it avoids
-     * the "read → compute → write" window where a concurrent coroutine could
-     * overwrite an intermediate value.
+     * True atomic increment. Returns number of rows updated (0 if no row yet).
+     * Preferred for sensor emissions to avoid read-modify-write races.
+     */
+    @Query("UPDATE steps SET steps = steps + :delta, lastSensorValue = :sensorVal WHERE date = :date")
+    suspend fun incrementSteps(date: String, delta: Int, sensorVal: Int): Int
+
+    /**
+     * Legacy absolute set. Kept for UI-initiated corrections only.
+     * Do NOT use from the sensor hot path — use [incrementSteps].
      */
     @Query("UPDATE steps SET steps = :steps, lastSensorValue = :sensorVal WHERE date = :date")
     suspend fun atomicUpdateSteps(date: String, steps: Int, sensorVal: Int)

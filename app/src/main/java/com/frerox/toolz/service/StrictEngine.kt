@@ -282,10 +282,17 @@ class StrictEngine(
     }
     
     fun onOsStepDetected(stepsDelta: Int) {
-        synchronized(lock) {
-            if (stepsDelta > 0) {
-                onLog("STRICT: OS Step +$stepsDelta received")
+        // Forward OS hardware steps so STRICT no longer discards the most
+        // reliable sensor. Respects driving suspension like accel path.
+        val toEmit = synchronized(lock) {
+            if (stepsDelta <= 0 || isGpsSuspended || state == EngineState.SUSPENDED) {
+                if (stepsDelta > 0) onLog("STRICT: OS Step +$stepsDelta suppressed (suspended)")
+                0
+            } else {
+                onLog("STRICT: OS Step +$stepsDelta forwarded")
+                stepsDelta
             }
         }
+        if (toEmit > 0) onStepEmitted(toEmit)
     }
 }

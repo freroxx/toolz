@@ -127,12 +127,11 @@ class SimpleStepEngine(
 
     fun onOsStepDetected(delta: Int) {
         synchronized(lock) {
-            if (delta > 0) {
-                stepCount += delta
-                val cadence = computeCadence()
-                onLog("SIMPLE: OS +$delta step counted (total=$stepCount)")
-                onStepDetected(delta, cadence)
-            }
+            if (delta <= 0 || isSuspended) return
+            stepCount += delta
+            val cadence = computeCadence()
+            onLog("SIMPLE: OS +$delta step counted (total=$stepCount)")
+            onStepDetected(delta, cadence)
         }
     }
 

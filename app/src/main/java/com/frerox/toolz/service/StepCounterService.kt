@@ -47,12 +47,14 @@ import android.location.LocationManager
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import java.text.SimpleDateFormat
-import java.util.*
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
+import java.util.Collections
+import java.util.Locale
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -60,7 +62,6 @@ class StepCounterService : Service(), SensorEventListener {
 
     @Inject lateinit var settingsRepository: SettingsRepository
     @Inject lateinit var stepRepository: StepRepository
-    @Inject lateinit var stepDao: com.frerox.toolz.data.steps.StepDao
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -117,12 +118,15 @@ class StepCounterService : Service(), SensorEventListener {
     private var isBatterySaveActive = true
     private var isCounterEnabled = true
 
-    private val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-    private val todayStr: String get() = dateFormat.format(Date())
+    private val dateFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
+    private val logTimeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss.SSS")
+    private val todayStr: String get() = LocalDate.now().format(dateFormatter)
+
+    private var settingsJob: Job? = null
 
     private val binder = LocalBinder()
 
-    // --- Engine Debug Logging ---
+    // Engine Debug Logging — buffer only when observed to avoid hot-path churn.
     private var debugCallback: com.frerox.toolz.IEngineDebugCallback? = null
     private val engineLogBuffer = Collections.synchronizedList(mutableListOf<String>())
 
@@ -131,8 +135,8 @@ class StepCounterService : Service(), SensorEventListener {
     }
 
     private fun logToDebug(message: String) {
-        val time = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault()).format(Date())
-        val entry = "[$time] $message"
+        if (debugCallback == null) return
+        val entry = "[${LocalTime.now().format(logTimeFormatter)}] $message"
         synchronized(engineLogBuffer) {
             engineLogBuffer.add(entry)
             if (engineLogBuffer.size > 100) engineLogBuffer.removeAt(0)
@@ -157,10 +161,12 @@ class StepCounterService : Service(), SensorEventListener {
 
     // ------------------------------------------------------------------
     // SENSOR RESET DETECTION & OFFLINE RECOVERY
+    // Persisted so reboot / process death / midnight don't stall counting.
     // ------------------------------------------------------------------
     private var lastRawStepCount = -1L
     private var sessionBaseSteps = -1L
     private var osStepsForwardedThisSession = 0L
+    private var sessionDateStr: String = ""
 
     // ------------------------------------------------------------------
     // Location listener
@@ -202,9 +208,40 @@ class StepCounterService : Service(), SensorEventListener {
         locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
 
         sensorThread = android.os.HandlerThread("SensorThread").apply { start() }
-        sensorHandler = android.os.Handler(sensorThread!!.looper)
+        sensorHandler = sensorThread?.looper?.let { android.os.Handler(it) }
+
+        sessionDateStr = LocalDate.now().format(dateFormatter)
+        // Restore persisted OS-counter session (reboot / process death safe).
+        serviceScope.launch {
+            try {
+                val savedBase = settingsRepository.stepSessionBase.first()
+                val savedForwarded = settingsRepository.stepSessionForwarded.first()
+                val savedDate = settingsRepository.stepSessionDate.first()
+                val savedRaw = settingsRepository.lastOsStepCount.first()
+                sensorMutex.withLock {
+                    if (savedDate == sessionDateStr && savedBase >= 0) {
+                        sessionBaseSteps = savedBase
+                        osStepsForwardedThisSession = savedForwarded.coerceAtLeast(0)
+                    }
+                    if (savedRaw >= 0) lastRawStepCount = savedRaw
+                }
+            } catch (_: Exception) { }
+        }
 
         initializeEngines()
+    }
+
+    private fun persistSession() {
+        val base = sessionBaseSteps
+        val forwarded = osStepsForwardedThisSession
+        val date = sessionDateStr
+        val raw = lastRawStepCount
+        serviceScope.launch {
+            try {
+                settingsRepository.setStepSession(base, forwarded, date)
+                if (raw >= 0) settingsRepository.setLastOsStepCount(raw)
+            } catch (_: Exception) { }
+        }
     }
 
     private fun initializeEngines() {
@@ -216,9 +253,8 @@ class StepCounterService : Service(), SensorEventListener {
                     logToDebug("STRICT: Emitted $delta steps")
                     serviceScope.launch {
                         val today = todayStr
-                        val existing = stepDao.getStepsForDateSync(today)?.steps ?: 0
-                        val newTotal = (existing + delta).coerceAtLeast(0)
-                        stepRepository.updateSteps(newTotal)
+                        stepRepository.addStepsDelta(today, delta, delta)
+                        markStepActivity(delta)
                         updateNotification()
                     }
                 },
@@ -232,9 +268,8 @@ class StepCounterService : Service(), SensorEventListener {
                     logToDebug("SIMPLE: Emitted $countDelta steps")
                     serviceScope.launch {
                         val today = todayStr
-                        val existing = stepDao.getStepsForDateSync(today)?.steps ?: 0
-                        val newTotal = (existing + countDelta).coerceAtLeast(0)
-                        stepRepository.updateSteps(newTotal)
+                        stepRepository.addStepsDelta(today, countDelta, countDelta)
+                        markStepActivity(countDelta)
                         updateNotification()
                     }
                 },
@@ -242,6 +277,16 @@ class StepCounterService : Service(), SensorEventListener {
                 useHardwareStepCounter = (stepSensor != null)
             )
             dspEngine = null
+        }
+    }
+
+    private fun markStepActivity(delta: Int) {
+        if (delta <= 0) return
+        lastStepActivityTimeMs = SystemClock.elapsedRealtime()
+        lastStepCountForGpsGate += delta
+        // Wake GPS when movement resumes after deep sleep.
+        if (isGpsEnabled && !gpsCurrentlyActive && isCounterEnabled) {
+            startGpsTracking(highAccuracy = !isBatterySaveActive)
         }
     }
 
@@ -256,8 +301,10 @@ class StepCounterService : Service(), SensorEventListener {
         // Start foreground with correct type — Android 14+ requires ACTIVITY_RECOGNITION
         startForegroundWithCorrectType(steps = 0)
 
-        // Observe settings changes and update engine/location accordingly
-        serviceScope.launch {
+        // Observe settings changes and update engine/location accordingly.
+        // Single collector — cancelled and restarted on re-entry to avoid leaks.
+        settingsJob?.cancel()
+        settingsJob = serviceScope.launch {
             combine(
                 combine(settingsRepository.stepGoal, settingsRepository.notificationsEnabled, settingsRepository.stepNotifications) { g: Int, n: Boolean, s: Boolean -> Triple(g, n, s) },
                 combine(settingsRepository.stepCounterEnabled, settingsRepository.stepUseGps, settingsRepository.stepBatterySave) { c: Boolean, u: Boolean, b: Boolean -> Triple(c, u, b) },
@@ -293,6 +340,8 @@ class StepCounterService : Service(), SensorEventListener {
                 val batterySaveChanged = batterySave != isBatterySaveActive
                 isBatterySaveActive = batterySave
 
+                // GPS is strictly opt-in. STRICT mode no longer forces it on —
+                // the engine works without GPS, GPS only adds distance validation.
                 val wantsGps = useGps
                 if (wantsGps != isGpsEnabled || (batterySaveChanged && isGpsEnabled)) {
                     isGpsEnabled = wantsGps
@@ -305,12 +354,6 @@ class StepCounterService : Service(), SensorEventListener {
                     currentEngineMode = engineMode
                     initializeEngines()
                     registerSensor()
-                    
-                    // Enforce mandatory GPS for STRICT mode
-                    if (currentEngineMode == "STRICT") {
-                        isGpsEnabled = true
-                        startGpsTracking(highAccuracy = true)
-                    }
                 }
 
                 dspEngine?.setSensitivity(sensitivity)
@@ -332,20 +375,25 @@ class StepCounterService : Service(), SensorEventListener {
             return
         }
 
-        val delay = SensorManager.SENSOR_DELAY_GAME
-        logToDebug("Registering sensors ($currentEngineMode): GAME delay (~20ms/50Hz)")
+        // Battery tiers: saver = NORMAL (~5Hz), full = GAME (~50Hz).
+        val accelDelay = if (isBatterySaveActive) SensorManager.SENSOR_DELAY_NORMAL
+            else SensorManager.SENSOR_DELAY_GAME
+        logToDebug("Registering sensors ($currentEngineMode): accelDelay=$accelDelay batterySave=$isBatterySaveActive")
         sensorManager?.unregisterListener(this)
 
         accelSensor?.let { sensor ->
-            sensorManager?.registerListener(this, sensor, delay, sensorHandler)
+            sensorManager?.registerListener(this, sensor, accelDelay, sensorHandler)
+        }
+
+        // OS hardware counter is the source of truth in BOTH modes (when present).
+        // STRICT previously ignored it entirely, wasting battery on accel DSP.
+        stepSensor?.let { sensor ->
+            sensorManager?.registerListener(this, sensor, SensorManager.SENSOR_DELAY_NORMAL, sensorHandler)
         }
 
         if (currentEngineMode == "SIMPLE") {
             gyroSensor?.let { sensor ->
-                sensorManager?.registerListener(this, sensor, delay, sensorHandler)
-            }
-            stepSensor?.let { sensor ->
-                sensorManager?.registerListener(this, sensor, SensorManager.SENSOR_DELAY_NORMAL, sensorHandler)
+                sensorManager?.registerListener(this, sensor, accelDelay, sensorHandler)
             }
         }
     }
@@ -353,6 +401,16 @@ class StepCounterService : Service(), SensorEventListener {
     // ------------------------------------------------------------------
     // Sensor Events
     // ------------------------------------------------------------------
+    private fun sensorEventTimeMs(event: SensorEvent): Long {
+        // event.timestamp = nanos since boot (same base as elapsedRealtimeNanos).
+        // Wall-clock currentTimeMillis jumps with NTP/timezone — never use it here.
+        return try {
+            (event.timestamp / 1_000_000L).coerceAtLeast(0L)
+        } catch (_: Exception) {
+            SystemClock.elapsedRealtime()
+        }
+    }
+
     override fun onSensorChanged(event: SensorEvent) {
         if (!isCounterEnabled) return
 
@@ -361,7 +419,7 @@ class StepCounterService : Service(), SensorEventListener {
                 onStepCounterEvent(event.values[0].toLong())
             }
             Sensor.TYPE_ACCELEROMETER -> {
-                val timeMs = System.currentTimeMillis()
+                val timeMs = sensorEventTimeMs(event)
                 if (currentEngineMode == "STRICT") {
                     dspEngine?.processAccelerometer(event.values, timeMs)
                 } else {
@@ -369,7 +427,7 @@ class StepCounterService : Service(), SensorEventListener {
                 }
             }
             Sensor.TYPE_GYROSCOPE -> {
-                val timeMs = System.currentTimeMillis()
+                val timeMs = sensorEventTimeMs(event)
                 val wx = event.values[0]
                 val wy = event.values[1]
                 val wz = event.values[2]
@@ -389,73 +447,92 @@ class StepCounterService : Service(), SensorEventListener {
 
     /**
      * Handles raw step-counter values from the OS.
-     * Uses session-based deltas and offline recovery to avoid DB amplification.
+     * Session deltas + midnight + reboot safe. Emits via atomic DB deltas.
      */
     private fun onStepCounterEvent(rawStepCount: Long) {
         serviceScope.launch {
+            // Capture engine callbacks outside the mutex (they do DB I/O).
+            var toForward = 0
+            var isReboot = false
+            var isFreshSession = false
             sensorMutex.withLock {
-                if (sessionBaseSteps < 0) {
+                val today = LocalDate.now().format(dateFormatter)
+                // Midnight rollover: new day = new session base.
+                if (sessionDateStr != today) {
+                    sessionDateStr = today
                     sessionBaseSteps = rawStepCount
-                    
-                    // Offline Recovery: Recover steps taken while service was dead
-                    val lastSavedOsCount = settingsRepository.lastOsStepCount.first()
-                    if (lastSavedOsCount in 0 until rawStepCount) {
-                        val offlineSteps = (rawStepCount - lastSavedOsCount).toInt()
-                        logToDebug("OFFLINE RECOVERY: Recovered $offlineSteps steps taken while service was dead.")
-                        
-                        if (currentEngineMode == "STRICT") {
-                            dspEngine?.onOsStepDetected(offlineSteps)
-                        } else {
-                            simpleEngine?.onOsStepDetected(offlineSteps)
-                        }
-                    }
-                    
-                    settingsRepository.setLastOsStepCount(rawStepCount)
+                    osStepsForwardedThisSession = 0L
                     lastRawStepCount = rawStepCount
+                    persistSession()
                     return@withLock
                 }
 
-                // Detect OS Counter reset (device reboot or sensor restart)
-                if (rawStepCount < lastRawStepCount) {
+                if (sessionBaseSteps < 0) {
                     sessionBaseSteps = rawStepCount
+                    isFreshSession = true
+                    // Offline recovery: steps taken while service was dead.
+                    // DataStore read on fresh session only (not hot path).
+                    val lastSavedOsCount = try {
+                        settingsRepository.lastOsStepCount.first()
+                    } catch (_: Exception) { -1L }
+                    if (lastSavedOsCount in 0 until rawStepCount) {
+                        val offline = (rawStepCount - lastSavedOsCount).coerceAtMost(50_000L).toInt()
+                        if (offline > 0) {
+                            logToDebug("OFFLINE RECOVERY: +$offline steps while dead")
+                            toForward = offline
+                        }
+                    }
                     lastRawStepCount = rawStepCount
-                    settingsRepository.setLastOsStepCount(rawStepCount)
-                    
-                    // Re-calculate sessionSteps based on new base
-                    // osStepsForwardedThisSession is NOT reset to prevent double-counting
-                }
-
-                val sessionSteps = rawStepCount - sessionBaseSteps
-                val deltaToForward = (sessionSteps - osStepsForwardedThisSession).toInt().coerceAtLeast(0)
-
-                if (deltaToForward > 0) {
-                    osStepsForwardedThisSession += deltaToForward
-                    
-                    if (currentEngineMode == "STRICT") {
-                        dspEngine?.onOsStepDetected(deltaToForward)
-                    } else {
-                        simpleEngine?.onOsStepDetected(deltaToForward)
+                    persistSession()
+                } else {
+                    // Reboot / sensor reset: OS counter went backwards.
+                    // Old code kept forwarded count -> permanent stall (delta <= 0 forever).
+                    // Correct: start a new boot session, forwarded resets to 0.
+                    if (lastRawStepCount >= 0 && rawStepCount < lastRawStepCount) {
+                        isReboot = true
+                        sessionBaseSteps = rawStepCount
+                        osStepsForwardedThisSession = 0L
+                        lastRawStepCount = rawStepCount
+                        logToDebug("OS COUNTER RESET (reboot): base=$rawStepCount")
+                        persistSession()
+                        return@withLock
                     }
-                    
-                    lastStepActivityTimeMs = SystemClock.elapsedRealtime()
-                    lastStepCountForGpsGate += deltaToForward
-                }
 
-                if (rawStepCount != lastRawStepCount) {
-                    settingsRepository.setLastOsStepCount(rawStepCount)
-                    lastRawStepCount = rawStepCount
-                }
+                    val sessionSteps = (rawStepCount - sessionBaseSteps).coerceAtLeast(0L)
+                    val delta = (sessionSteps - osStepsForwardedThisSession).coerceAtLeast(0L)
+                        .coerceAtMost(50_000L).toInt()
+                    if (delta > 0) {
+                        osStepsForwardedThisSession += delta
+                        toForward = delta
+                    }
+                    if (rawStepCount != lastRawStepCount) {
+                        lastRawStepCount = rawStepCount
+                        persistSession()
+                    }
 
-                // Adaptive GPS management
-                if (isGpsEnabled) {
-                    val idleTime = SystemClock.elapsedRealtime() - lastStepActivityTimeMs
-                    if (idleTime > GPS_SLEEP_AFTER_STATIC_MS && gpsCurrentlyActive && !gpsInLowPowerMode) {
-                        startGpsTracking(highAccuracy = false)
-                    }
-                    if (idleTime > GPS_DEEP_SLEEP_AFTER_MS && gpsCurrentlyActive) {
-                        stopGpsTracking()
+                    // Adaptive GPS management
+                    if (isGpsEnabled && toForward == 0) {
+                        val idleTime = SystemClock.elapsedRealtime() - lastStepActivityTimeMs
+                        if (idleTime > GPS_SLEEP_AFTER_STATIC_MS && gpsCurrentlyActive && !gpsInLowPowerMode) {
+                            startGpsTracking(highAccuracy = false)
+                        }
+                        if (idleTime > GPS_DEEP_SLEEP_AFTER_MS && gpsCurrentlyActive) {
+                            stopGpsTracking()
+                        }
                     }
                 }
+            }
+
+            if (toForward > 0 && !isReboot && isCounterEnabled) {
+                if (currentEngineMode == "STRICT") {
+                    dspEngine?.onOsStepDetected(toForward)
+                } else {
+                    simpleEngine?.onOsStepDetected(toForward)
+                }
+                // Engines emit via onStepEmitted -> addStepsDelta + markStepActivity.
+                // If no hardware-gated engine path exists (shouldn't happen now),
+                // fall back is handled by engine callbacks themselves.
+                if (isFreshSession) logToDebug("Fresh session base=$rawStepCount")
             }
         }
     }
@@ -612,9 +689,13 @@ class StepCounterService : Service(), SensorEventListener {
     override fun onBind(intent: Intent): IBinder = binder
 
     override fun onDestroy() {
+        settingsJob?.cancel()
+        settingsJob = null
+        debugCallback = null
         super.onDestroy()
         sensorManager?.unregisterListener(this)
         sensorThread?.quitSafely()
+        sensorHandler = null
         stopGpsTracking()
         serviceScope.cancel()
     }

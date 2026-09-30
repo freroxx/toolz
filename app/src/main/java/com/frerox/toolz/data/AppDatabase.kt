@@ -135,7 +135,10 @@ import com.frerox.toolz.data.purgeshot.PurgeShotEntity
     // NOTE (shared-file protocol §7): Todo agent also needs 59->60 for its indices.
     // If Todo lands in the same release, APPEND its CREATE INDEX statements to the
     // SAME MIGRATION_59_60 object instead of bumping to 61 — never fork versions.
-    version = 60,
+    // Notepad V3 (61): notes gains createdAt/updatedAt + query indices;
+    // note_attachments gains mimeType/durationMs + (noteId,kind)/(uri)/
+    // (noteId,uri) indices (see MIGRATION_60_61).
+    version = 61,
     // H-10 FIX (reviewwhisper.md): schemas are now exported to app/schemas (see
     // build.gradle.kts room.schemaLocation). Every future bump MUST ship a Migration —
     // the DatabaseModule comment documents this contract too.
