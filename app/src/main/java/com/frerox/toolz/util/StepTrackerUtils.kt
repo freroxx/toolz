@@ -173,6 +173,7 @@ object StepTrackerUtils {
         private val q: Double = 0.0001,
         private var r: Double = 0.01
     ) {
+        private val baseR: Double = r
         /** Estimated state value, or `null` before the first measurement. */
         private var x: Double? = null
 
@@ -190,9 +191,8 @@ object StepTrackerUtils {
 
         /**
          * Filters a new noisy measurement and returns the updated state estimate.
-         * R is automatically inflated (persisted to the instance field) when a spike
-         * is detected, so subsequent measurements continue to be treated with extra
-         * scepticism until [reset] is called.
+         * R inflates temporarily on spikes then decays back toward [baseR],
+         * so one GPS glitch can't desensitize the filter forever.
          *
          * @param measurement Raw sensor / GPS reading.
          * @return Smoothed estimate.
@@ -207,15 +207,17 @@ object StepTrackerUtils {
             // division overflow (e.g. near a sensor cold-start).
             val absX = kotlin.math.abs(x!!)
             val spikeThreshold = if (absX > MIN_ESTIMATE_FOR_SPIKE_DETECTION) {
-                x!! * SPIKE_MULTIPLIER
+                absX * SPIKE_MULTIPLIER
             } else {
                 Double.POSITIVE_INFINITY  // treat all readings as normal when x ≈ 0
             }
 
-            // Adaptive R: inflate measurement noise when a large jump is detected.
-            // The inflated value is PERSISTED back into r so it affects subsequent calls.
+            // Adaptive R: inflate once on spike, otherwise decay toward base.
             if (kotlin.math.abs(measurement - x!!) > spikeThreshold) {
-                r *= R_INFLATION_FACTOR
+                r = (r * R_INFLATION_FACTOR).coerceAtMost(baseR * R_INFLATION_FACTOR)
+            } else {
+                // Exponential decay back to base so normal motion re-weights quickly.
+                r += (baseR - r) * 0.2
             }
 
             // Prediction step.
@@ -230,14 +232,13 @@ object StepTrackerUtils {
         }
 
         /**
-         * Resets internal state to construction defaults.
-         * Note: r is intentionally NOT reset so that R inflation learned from
-         * recent spikes persists across pauses (avoids re-learning on every restart).
+         * Resets internal state to construction defaults, including R.
          */
         fun reset() {
             x = null
             p = 1.0
             k = 0.0
+            r = baseR
         }
     }
 

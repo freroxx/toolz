@@ -3496,8 +3496,26 @@
     <string name="st_PasswordVaultScreen_strength_critical">CRITICAL</string>
     <string name="st_PasswordVaultScreen_strength_weak">WEAK</string>
     <string name="st_PasswordVaultScreen_strength_medium">MEDIUM</string>
+    <string name="st_PasswordVaultScreen_strength_mid">MID</string>
     <string name="st_PasswordVaultScreen_strength_strong">STRONG</string>
     <string name="st_PasswordVaultScreen_strength_elite">ELITE</string>
+    <string name="st_PasswordVaultScreen_bits">%1$d bits</string>
+    <string name="st_PasswordVaultScreen_crack_time">Cracks in: %1$s</string>
+    <string name="st_PasswordVaultScreen_show_details">Details</string>
+    <string name="st_PasswordVaultScreen_hide_details">Hide</string>
+    <string name="st_PasswordVaultScreen_reason_short">Too short — add length</string>
+    <string name="st_PasswordVaultScreen_reason_repeats">Repeating characters weaken it</string>
+    <string name="st_PasswordVaultScreen_reason_sequence">Contains a sequence (abc, 123)</string>
+    <string name="st_PasswordVaultScreen_reason_common">Contains a common password pattern</string>
+    <string name="st_PasswordVaultScreen_reason_good_length">Good length</string>
+    <string name="st_PasswordVaultScreen_reason_good_mix">Good character mix</string>
+    <string name="st_PasswordVaultScreen_gen_title">Password Engine</string>
+    <string name="st_PasswordVaultScreen_gen_exclude_ambiguous">Skip Il1O0</string>
+    <string name="st_PasswordVaultScreen_gen_pin">PIN</string>
+    <string name="st_PasswordVaultScreen_gen_memorable">Memorable</string>
+    <string name="st_PasswordVaultScreen_gen_custom_symbols">Custom symbols</string>
+    <string name="st_PasswordVaultScreen_gen_empty_pool">Enable at least one character class</string>
+    <string name="st_PasswordVaultScreen_gen_use_password">Use password</string>
 
     <!-- BiometricPromptUtils -->
     <string name="st_BiometricPromptUtils_title">Biometric Authentication</string>

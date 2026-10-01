@@ -71,6 +71,15 @@ class StepRepository @Inject constructor(
     fun getStepsInRange(startDate: String, endDate: String): Flow<List<StepEntry>> =
         stepDao.getStepsInRange(startDate, endDate)
 
+    fun getStepsInRangeAsc(startDate: String, endDate: String): Flow<List<StepEntry>> =
+        stepDao.getStepsInRangeAsc(startDate, endDate)
+
+    suspend fun getStatsForLastNDays(days: Int): StepStats {
+        val end = LocalDate.now()
+        val start = end.minusDays((days - 1).toLong())
+        return stepDao.getStatsInRange(start.format(dateFormatter), end.format(dateFormatter))
+    }
+
     /**
      * Hot-path delta insert. Uses true SQL atomic increment, safe under
      * concurrent emissions. Creates the row if missing.
@@ -105,10 +114,10 @@ class StepRepository @Inject constructor(
     }
 
     /**
-     * Called by [StepCounterService] sensor handler with the raw cumulative
-     * sensor value and the already-computed step delta for today.
-     * Uses the atomic UPDATE path when the row already exists.
+     * Legacy absolute sensor write. No callers — kept only to avoid breaking
+     * external callers. New code must use [addStepsDelta].
      */
+    @Deprecated("Use addStepsDelta for atomic increments", ReplaceWith("addStepsDelta(date, delta, rawSensorValue)"))
     suspend fun updateStepsFromSensor(date: String, newStepCount: Int, rawSensorValue: Int) {
         val exists = stepDao.countForDate(date) > 0
         if (exists) {

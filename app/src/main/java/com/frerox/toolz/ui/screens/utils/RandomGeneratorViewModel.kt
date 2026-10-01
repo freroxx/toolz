@@ -19,6 +19,7 @@ package com.frerox.toolz.ui.screens.utils
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.frerox.toolz.util.password.VaultPasswordEngine
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -49,7 +50,12 @@ data class RandomGeneratorState(
     val includeSymbols: Boolean = true,
     val includeLower: Boolean = true,
     val customSymbols: String = "",
+    val excludeAmbiguous: Boolean = false,
+    val pinMode: Boolean = false,
     val passwordStrength: Float = 0f,
+    val passwordTier: Int = 0,
+    val passwordBits: Double = 0.0,
+    val passwordError: Boolean = false,
     
     val diceCount: Float = 1f,
     val diceSides: Float = 6f,
@@ -159,41 +165,69 @@ class RandomGeneratorViewModel @Inject constructor() : ViewModel() {
     fun onToggleNumbers(v: Boolean) = _uiState.update { it.copy(includeNumbers = v) }
     fun onToggleSymbols(v: Boolean) = _uiState.update { it.copy(includeSymbols = v) }
     fun onCustomSymbolsChange(v: String) = _uiState.update { it.copy(customSymbols = v) }
+    fun onToggleExcludeAmbiguous(v: Boolean) = _uiState.update { it.copy(excludeAmbiguous = v) }
+    fun onTogglePinMode(v: Boolean) = _uiState.update { it.copy(pinMode = v) }
 
-    fun generatePassword() {
-        val lower = "abcdefghijklmnopqrstuvwxyz"
-        val upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        val numbers = "0123456789"
-        val symbols = if (_uiState.value.customSymbols.isNotEmpty()) _uiState.value.customSymbols else "!@#$%^&*()_+-=[]{}|;:,.<>?"
-        
-        var pool = ""
-        if (_uiState.value.includeLower) pool += lower
-        if (_uiState.value.includeUpper) pool += upper
-        if (_uiState.value.includeNumbers) pool += numbers
-        if (_uiState.value.includeSymbols) pool += symbols
-        
-        if (pool.isEmpty()) return
-        
-        val len = _uiState.value.passwordLength.toInt()
-        val pwd = (1..len).map { pool[secureRandom.nextInt(pool.length)] }.joinToString("")
-        
-        _uiState.update { 
+    fun applySpec(spec: VaultPasswordEngine.PasswordSpec) {
+        _uiState.update {
             it.copy(
-                password = pwd, 
-                passwordStrength = calculateStrength(pwd, len), 
+                passwordLength = spec.length.toFloat(),
+                includeLower = spec.includeLowercase,
+                includeUpper = spec.includeUppercase,
+                includeNumbers = spec.includeNumbers,
+                includeSymbols = spec.includeSymbols,
+                customSymbols = spec.customSymbols,
+                excludeAmbiguous = spec.excludeAmbiguous,
+                pinMode = spec.pinMode
+            )
+        }
+        generatePassword()
+    }
+
+    fun useMemorable() {
+        val pwd = VaultPasswordEngine.generateMemorable()
+        val report = VaultPasswordEngine.assess(pwd)
+        _uiState.update {
+            it.copy(
+                password = pwd,
+                passwordStrength = (report.tierIndex + 1) / 5f,
+                passwordTier = report.tierIndex,
+                passwordBits = report.bits,
+                passwordError = false,
                 history = (listOf(RandomResult("Password", "****")) + it.history).take(50)
-            ) 
+            )
         }
     }
 
-    private fun calculateStrength(p: String, l: Int): Float {
-        var s = 0f
-        if (l >= 8) s += 0.2f
-        if (l >= 16) s += 0.2f
-        if (p.any { it.isDigit() }) s += 0.2f
-        if (p.any { it.isUpperCase() }) s += 0.2f
-        if (p.any { !it.isLetterOrDigit() }) s += 0.2f
-        return s.coerceIn(0f, 1f)
+    fun generatePassword() {
+        val s = _uiState.value
+        val spec = VaultPasswordEngine.PasswordSpec(
+            length = s.passwordLength.toInt().coerceIn(1, VaultPasswordEngine.MAX_LENGTH),
+            includeLowercase = if (s.pinMode) false else s.includeLower,
+            includeUppercase = if (s.pinMode) false else s.includeUpper,
+            includeNumbers = true,
+            includeSymbols = if (s.pinMode) false else s.includeSymbols,
+            customSymbols = if (s.pinMode) "" else s.customSymbols,
+            excludeAmbiguous = s.excludeAmbiguous,
+            pinMode = s.pinMode
+        )
+        val result = VaultPasswordEngine.generate(spec)
+        val pwd = result.getOrNull()
+        if (pwd == null) {
+            _uiState.update { it.copy(passwordError = true) }
+            return
+        }
+        val report = VaultPasswordEngine.assess(pwd)
+        _uiState.update {
+            it.copy(
+                password = pwd,
+                passwordStrength = (report.tierIndex + 1) / 5f,
+                passwordTier = report.tierIndex,
+                passwordBits = report.bits,
+                passwordError = false,
+                history = (listOf(RandomResult("Password", "****")) + it.history).take(50)
+            )
+        }
     }
 
     fun onDiceCountChange(c: Float) = _uiState.update { it.copy(diceCount = c) }

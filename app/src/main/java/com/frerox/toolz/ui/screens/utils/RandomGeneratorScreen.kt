@@ -44,6 +44,7 @@ import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -53,8 +54,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.screens.password.components.GeneratorCard
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.toolzBackground
+import com.frerox.toolz.util.password.VaultClipboard
+import com.frerox.toolz.util.password.VaultPasswordEngine
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -234,58 +238,42 @@ fun RandomGeneratorScreen(
                     }
                 }
 
-                // --- SECURE KEYGEN ---
+                // --- SECURE KEYGEN (shared card with the vault engine) ---
                 RandomSection(title = stringResource(R.string.st_RandomGeneratorScreen_k7l8), icon = Icons.Rounded.Lock) {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(stringResource(R.string.st_RandomGeneratorScreen_m9n0), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                            Spacer(Modifier.weight(1f))
-                            Text(state.passwordLength.toInt().toString(), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
-                        }
-                        Slider(value = state.passwordLength, onValueChange = { viewModel.onPasswordLengthChange(it) }, valueRange = 4f..128f)
+                    val keygenContext = LocalContext.current
+                    val keygenSpec = remember(
+                        state.passwordLength, state.includeLower, state.includeUpper,
+                        state.includeNumbers, state.includeSymbols, state.customSymbols,
+                        state.excludeAmbiguous, state.pinMode
+                    ) {
+                        VaultPasswordEngine.PasswordSpec(
+                            length = state.passwordLength.toInt()
+                                .coerceIn(1, VaultPasswordEngine.MAX_LENGTH),
+                            includeLowercase = if (state.pinMode) false else state.includeLower,
+                            includeUppercase = if (state.pinMode) false else state.includeUpper,
+                            includeNumbers = true,
+                            includeSymbols = if (state.pinMode) false else state.includeSymbols,
+                            customSymbols = if (state.pinMode) "" else state.customSymbols,
+                            excludeAmbiguous = state.excludeAmbiguous,
+                            pinMode = state.pinMode
+                        )
                     }
-
-                    FlowRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        SmallToggle(stringResource(R.string.st_RandomGeneratorScreen_o1p2), state.includeLower) { viewModel.onToggleLower(it) }
-                        SmallToggle(stringResource(R.string.st_RandomGeneratorScreen_q3r4), state.includeUpper) { viewModel.onToggleUpper(it) }
-                        SmallToggle(stringResource(R.string.st_RandomGeneratorScreen_s5t6), state.includeNumbers) { viewModel.onToggleNumbers(it) }
-                        SmallToggle(stringResource(R.string.st_RandomGeneratorScreen_u7v8), state.includeSymbols) { viewModel.onToggleSymbols(it) }
+                    val keygenReport = remember(state.password) {
+                        VaultPasswordEngine.assess(state.password.ifEmpty { "x" })
                     }
-                    
-                    Spacer(modifier = Modifier.height(16.dp))
-                    
-                    EntropyButton(
-                        text = stringResource(R.string.st_RandomGeneratorScreen_w9x0),
-                        icon = Icons.Rounded.Security,
-                        onClick = { viewModel.generatePassword() }
+                    GeneratorCard(
+                        spec = keygenSpec,
+                        password = state.password,
+                        report = keygenReport,
+                        emptyPool = state.passwordError,
+                        onSpecChange = { viewModel.applySpec(it) },
+                        onRegenerate = { viewModel.generatePassword() },
+                        onCopy = {
+                            VaultClipboard.copySecret(keygenContext, state.password)
+                        },
+                        onPreset = { viewModel.applySpec(it) },
+                        onMemorable = { viewModel.useMemorable() }
                     )
-
-                    AnimatedVisibility(visible = state.password.isNotEmpty(), enter = expandVertically() + fadeIn()) {
-                        Surface(
-                            modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                            shape = RoundedCornerShape(16.dp)
-                        ) {
-                            Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(state.password, style = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace), fontWeight = FontWeight.Bold, overflow = TextOverflow.Ellipsis)
-                                    Spacer(Modifier.height(8.dp))
-                                    com.frerox.toolz.ui.components.ExpressiveLinearProgressIndicator(
-                                        progress = { state.passwordStrength },
-                                        modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
-                                        color = when {
-                                            state.passwordStrength < 0.4f -> Color(0xFFEF5350)
-                                            state.passwordStrength < 0.7f -> Color(0xFFFFCA28)
-                                            else -> Color(0xFF66BB6A)
-                                        }
-                                    )
-                                }
-                                IconButton(onClick = { clipboardManager.setText(AnnotatedString(state.password)) }) {
-                                    Icon(Icons.Rounded.ContentCopy, null, tint = MaterialTheme.colorScheme.primary)
-                                }
-                            }
-                        }
-                    }
                 }
 
                 // --- LIST ANALYTICS ---

@@ -48,8 +48,9 @@ import com.frerox.toolz.data.steps.StepEntry
 import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.ui.theme.toolzBackground
-import java.text.SimpleDateFormat
-import java.util.*
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -78,7 +79,15 @@ fun StepTrendsScreen(
         "Active Time" -> rawHistory.sumOf { com.frerox.toolz.util.StepTrackerUtils.calculateMoveMinutes(it.steps) }.toDouble()
         else -> rawHistory.sumOf { it.steps }.toDouble()
     }
-    val avgVal = if (rawHistory.isNotEmpty()) totalVal / rawHistory.size else 0.0
+    // Divide by window size, not rows present. Sparse histories (missing days
+    // have no row) otherwise inflate the average.
+    val windowDays = when (selectedRange) {
+        "Week" -> 7
+        "Month" -> 30
+        "Year" -> 365
+        else -> 7
+    }.coerceAtLeast(1)
+    val avgVal = totalVal / windowDays
 
     val formattedTotal = when (selectedMetric) {
         "Distance" -> {
@@ -391,11 +400,11 @@ private fun ChartCard(
                 selectedEntry?.let { entry ->
                     val pct = if (goal > 0) (entry.steps * 100 / goal) else 0
                     val goalMet = entry.steps >= goal
-                    val dayLabel = try {
-                        SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH).parse(entry.date)?.let {
-                            SimpleDateFormat("EEE, MMM d", Locale.ENGLISH).format(it)
-                        } ?: entry.date
-                    } catch (e: Exception) { entry.date }
+                    val dayLabel = runCatching {
+                        LocalDate.parse(entry.date, DateTimeFormatter.ISO_LOCAL_DATE).format(
+                            DateTimeFormatter.ofPattern("EEE, MMM d", java.util.Locale.ENGLISH)
+                        )
+                    }.getOrDefault(entry.date)
 
                     val formattedValue = when (metric) {
                         "Steps" -> "%,d steps".format(entry.steps)
@@ -515,6 +524,11 @@ private fun SummaryStat(
     }
 }
 
+private fun isIsoDate(value: String): Boolean {
+    if (value.length != 10 || value[4] != '-' || value[7] != '-') return false
+    return runCatching { LocalDate.parse(value, DateTimeFormatter.ISO_LOCAL_DATE) }.isSuccess
+}
+
 @Composable
 private fun DayListRow(
     entry: StepEntry,
@@ -556,41 +570,22 @@ private fun DayListRow(
         else -> "%,d steps".format(entry.steps)
     }
 
-    // Determine if it's an aggregated week/month label or a specific date.
-    // Keep this strict to avoid mis-detecting daily ISO dates as "aggregated".
-    val isAggregated = entry.date.startsWith("Week ")
+    // Aggregated buckets are "Mon"/"Sep W2"-style labels, never ISO dates.
+    // Match both weekly ("Mon") short labels and monthly ("Sep W2") labels.
+    val isAggregated = !isIsoDate(entry.date)
 
-    val dayLabel = try {
-        if (isAggregated) entry.date else {
-            SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH).parse(entry.date)?.let {
-                "${SimpleDateFormat("EEE", Locale.ENGLISH).format(it)} ${SimpleDateFormat("d", Locale.ENGLISH).format(it)}"
-            } ?: entry.date
-        }
-    } catch (e: Exception) { entry.date }
+    val parsedDate: LocalDate? = if (isAggregated) null else runCatching {
+        LocalDate.parse(entry.date, DateTimeFormatter.ISO_LOCAL_DATE)
+    }.getOrNull()
 
-    val monthLabel = try {
-        if (isAggregated) "" else {
-            SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH).parse(entry.date)?.let {
-                SimpleDateFormat("MMM", Locale.ENGLISH).format(it)
-            } ?: ""
-        }
-    } catch (e: Exception) { "" }
-
-    val weekdayShort = try {
-        if (isAggregated) "" else {
-            SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH).parse(entry.date)?.let {
-                SimpleDateFormat("EEE", Locale.ENGLISH).format(it)
-            } ?: ""
-        }
-    } catch (e: Exception) { "" }
-
-    val dayOfMonthShort = try {
-        if (isAggregated) "" else {
-            SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH).parse(entry.date)?.let {
-                SimpleDateFormat("d", Locale.ENGLISH).format(it)
-            } ?: ""
-        }
-    } catch (e: Exception) { "" }
+    val weekdayShort = parsedDate?.dayOfWeek?.getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.ENGLISH).orEmpty()
+    val dayOfMonthShort = parsedDate?.dayOfMonth?.toString().orEmpty()
+    val monthLabel = parsedDate?.month?.getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.ENGLISH).orEmpty()
+    val dayLabel = when {
+        isAggregated -> entry.date
+        parsedDate != null -> "$weekdayShort $dayOfMonthShort"
+        else -> entry.date
+    }
 
     val primaryColor = MaterialTheme.colorScheme.primary
     val animatedProgress by animateFloatAsState(

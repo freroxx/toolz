@@ -20,6 +20,13 @@ package com.frerox.toolz.data.steps
 import androidx.room.*
 import kotlinx.coroutines.flow.Flow
 
+data class StepStats(
+    val total: Long,
+    val max: Int,
+    val count: Int,
+    val avg: Double
+)
+
 @Dao
 interface StepDao {
     @Query("SELECT * FROM steps WHERE date = :date")
@@ -55,6 +62,12 @@ interface StepDao {
 
     @Query("SELECT * FROM steps WHERE date >= :startDate AND date <= :endDate ORDER BY date DESC")
     fun getStepsInRange(startDate: String, endDate: String): Flow<List<StepEntry>>
+
+    @Query("SELECT * FROM steps WHERE date >= :startDate AND date <= :endDate ORDER BY date ASC")
+    fun getStepsInRangeAsc(startDate: String, endDate: String): Flow<List<StepEntry>>
+
+    @Query("SELECT COALESCE(SUM(steps),0) AS total, COALESCE(MAX(steps),0) AS max, COUNT(*) AS count, COALESCE(AVG(steps),0.0) AS avg FROM steps WHERE date >= :startDate AND date <= :endDate")
+    suspend fun getStatsInRange(startDate: String, endDate: String): StepStats
 
     @Query("DELETE FROM steps WHERE date < :date")
     suspend fun deleteStepsBeforeDate(date: String)

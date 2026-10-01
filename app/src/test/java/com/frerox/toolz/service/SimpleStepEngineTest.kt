@@ -68,7 +68,7 @@ class SimpleStepEngineTest {
     fun `SimpleStepEngine gyro gate suppression`() {
         var steps = 0
         val engine = SimpleStepEngine(
-            onStepDetected = { count, _ -> steps = count },
+            onStepDetected = { count, _ -> steps += count },
             useHardwareStepCounter = false
         )
 
@@ -83,6 +83,9 @@ class SimpleStepEngineTest {
             }
         }
 
+        // Warm up gravity filter — first pulse pollutes the baseline by design.
+        s()
+        steps = 0
         s()
         val initial = steps
         assertTrue("Initial step failed", initial > 0)

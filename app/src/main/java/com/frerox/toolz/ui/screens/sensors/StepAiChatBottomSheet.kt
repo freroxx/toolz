@@ -250,7 +250,7 @@ fun StepAiChatBottomSheet(
                                 val msg = state.aiChatHistory[index]
                                 SharedChatBubble(
                                     message = msg,
-                                    isCoach = true,
+                                    isCoach = !msg.isUser,
                                     onLinkClick = { /* Handle if needed */ },
                                     onLongPress = { /* Handle copy if needed */ }
                                 )
