@@ -26,6 +26,7 @@ import com.frerox.toolz.util.password.CsvEngine
 import com.frerox.toolz.util.password.PasswordGenerator
 import com.frerox.toolz.util.password.PasswordUtils
 import com.frerox.toolz.util.password.PwnedCheck
+import com.frerox.toolz.util.password.VaultPasswordEngine
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
@@ -57,16 +58,21 @@ class PasswordVaultViewModel @Inject constructor(
 
     data class GeneratorSettings(
         val length: Float = 16f,
+        val includeLowercase: Boolean = true,
         val includeSymbols: Boolean = true,
         val includeNumbers: Boolean = true,
-        val includeUppercase: Boolean = true
+        val includeUppercase: Boolean = true,
+        val excludeAmbiguous: Boolean = false,
+        val customSymbols: String = "",
+        val pinMode: Boolean = false
     )
 
     data class VaultStats(
         val total: Int = 0,
         val breached: Int = 0,
         val weak: Int = 0,
-        val averageStrength: Float = 0f
+        val averageStrength: Float = 0f,
+        val tierCounts: List<Int> = listOf(0, 0, 0, 0, 0)
     )
 
     data class ImportMessage(
@@ -104,13 +110,18 @@ class PasswordVaultViewModel @Inject constructor(
     val vaultStats: StateFlow<VaultStats> = allPasswords.map { list ->
         if (list.isEmpty()) VaultStats()
         else {
+            val tiers = IntArray(5)
+            list.filter { it.password.isNotEmpty() }.forEach {
+                tiers[it.strength.coerceIn(0, 4)]++
+            }
             VaultStats(
                 total = list.size,
                 breached = list.count { (it.pwnedCount ?: 0) > 0 },
-                weak = list.count { it.password.isNotEmpty() && it.strength < 3 },
+                weak = list.count { it.password.isNotEmpty() && it.strength < 2 },
                 averageStrength = list.filter { it.password.isNotEmpty() }
                     .map { it.strength }.average()
-                    .let { if (it.isNaN()) 0f else it.toFloat() }
+                    .let { if (it.isNaN()) 0f else it.toFloat() },
+                tierCounts = tiers.toList()
             )
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), VaultStats())
@@ -133,7 +144,7 @@ class PasswordVaultViewModel @Inject constructor(
             when {
                 password.password.isEmpty() -> incomplete.add(password)
                 (password.pwnedCount ?: 0) > 0 -> mustChange.add(password)
-                password.strength < 3 -> weak.add(password)
+                password.strength < 2 -> weak.add(password)
                 else -> safe.add(password)
             }
         }
@@ -156,9 +167,24 @@ class PasswordVaultViewModel @Inject constructor(
 
     fun updateGeneratorSettings(settings: GeneratorSettings) {
         _generatorSettings.value = settings.copy(
-            length = settings.length.coerceIn(8f, 64f)
+            length = settings.length.coerceIn(
+                VaultPasswordEngine.MIN_LENGTH.toFloat(),
+                VaultPasswordEngine.MAX_LENGTH.toFloat()
+            )
         )
     }
+
+    fun specFromSettings(s: GeneratorSettings = _generatorSettings.value): VaultPasswordEngine.PasswordSpec =
+        VaultPasswordEngine.PasswordSpec(
+            length = s.length.toInt(),
+            includeLowercase = if (s.pinMode) false else s.includeLowercase,
+            includeUppercase = if (s.pinMode) false else s.includeUppercase,
+            includeNumbers = true,
+            includeSymbols = if (s.pinMode) false else s.includeSymbols,
+            customSymbols = if (s.pinMode) "" else s.customSymbols,
+            excludeAmbiguous = s.excludeAmbiguous,
+            pinMode = s.pinMode
+        )
 
     fun addPassword(name: String, url: String?, user: String, pass: String) {
         val cleanName = name.trim()

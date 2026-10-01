@@ -30,6 +30,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -71,12 +73,14 @@ import kotlinx.coroutines.withContext
 import com.frerox.toolz.R
 import com.frerox.toolz.data.password.PasswordEntity
 import com.frerox.toolz.ui.components.*
+import com.frerox.toolz.ui.screens.password.components.GeneratorCard
 import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.ui.theme.ToolzTheme
 import com.frerox.toolz.ui.theme.toolzBackground
 import com.frerox.toolz.util.password.PasswordGenerator
 import com.frerox.toolz.util.password.PasswordUtils
 import com.frerox.toolz.util.password.VaultClipboard
+import com.frerox.toolz.util.password.VaultPasswordEngine
 import com.frerox.toolz.util.security.BiometricPromptUtils
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -103,6 +107,7 @@ fun PasswordVaultScreen(
     var editingPassword by remember { mutableStateOf<PasswordEntity?>(null) }
     var passwordToDelete by remember { mutableStateOf<PasswordEntity?>(null) }
     var showGenerator by remember { mutableStateOf(false) }
+    var prefillPassword by remember { mutableStateOf("") }
 
     // Auto-lock when the app goes to background so recent-apps/trailing
     // composition never exposes secrets.
@@ -180,11 +185,17 @@ fun PasswordVaultScreen(
 
     if (showAddDialog) {
         AddPasswordDialog(
-            onDismiss = { showAddDialog = false },
+            prefillPassword = prefillPassword,
+            onDismiss = {
+                showAddDialog = false
+                prefillPassword = ""
+            },
             onConfirm = { name, url, user, pass ->
                 viewModel.addPassword(name, url, user, pass)
                 showAddDialog = false
+                prefillPassword = ""
             },
+            onGeneratorClick = { showGenerator = true }
         )
     }
 
@@ -198,6 +209,7 @@ fun PasswordVaultScreen(
                 )
                 editingPassword = null
             },
+            onGeneratorClick = { showGenerator = true }
         )
     }
 
@@ -216,6 +228,15 @@ fun PasswordVaultScreen(
         GeneratorBottomSheet(
             viewModel = viewModel,
             onDismiss = { showGenerator = false },
+            onUsePassword = { generated ->
+                showGenerator = false
+                if (editingPassword == null && !showAddDialog) {
+                    prefillPassword = generated
+                    showAddDialog = true
+                } else {
+                    prefillPassword = generated
+                }
+            }
         )
     }
 }
@@ -347,6 +368,7 @@ private fun VaultMainContent(
                     spring(Spring.DampingRatioNoBouncy, Spring.StiffnessMedium),
                 ) + fadeOut(tween(200)),
             ) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -383,6 +405,13 @@ private fun VaultMainContent(
                                 MaterialTheme.colorScheme.outline,
                         )
                     }
+                }
+                if (vaultStats.total > 0) {
+                    TierDistributionBar(
+                        tierCounts = vaultStats.tierCounts,
+                        modifier = Modifier.padding(horizontal = 20.dp)
+                    )
+                }
                 }
             }
 
@@ -619,6 +648,47 @@ fun VaultStatCard(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontWeight = FontWeight.Bold,
+            )
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TIER DISTRIBUTION BAR (critical/weak/mid/strong/elite)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+@Composable
+fun TierDistributionBar(tierCounts: List<Int>, modifier: Modifier = Modifier) {
+    val colors = listOf(
+        MaterialTheme.colorScheme.error,
+        MaterialTheme.colorScheme.tertiary,
+        MaterialTheme.colorScheme.secondary,
+        MaterialTheme.colorScheme.primary,
+        MaterialTheme.colorScheme.primary
+    )
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(8.dp)
+            .clip(SmallExpressiveShape),
+        horizontalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        tierCounts.forEachIndexed { index, count ->
+            if (count > 0) {
+                Box(
+                    modifier = Modifier
+                        .weight(count.toFloat())
+                        .fillMaxHeight()
+                        .background(colors[index.coerceIn(colors.indices)])
+                )
+            }
+        }
+        if (tierCounts.sum() == 0) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             )
         }
     }
@@ -1092,7 +1162,10 @@ fun CredentialCard(
 
                         // Wavy strength bar
                         if (!isIncomplete) {
-                            WavyStrengthIndicator(strength = password.strength)
+                            WavyStrengthIndicator(
+                                strength = password.strength,
+                                passwordForDetails = password.password
+                            )
                         }
 
                         // Password history (only after reveal, capped at 5)
@@ -1436,10 +1509,18 @@ private fun BreachStatusBanner(pwnedCount: Int) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 @Composable
-fun WavyStrengthIndicator(strength: Int, modifier: Modifier = Modifier) {
+fun WavyStrengthIndicator(
+    strength: Int,
+    modifier: Modifier = Modifier,
+    passwordForDetails: String? = null
+) {
     val safeStrength = strength.coerceIn(0, 4)
     val targetColor = rememberStrengthColor(safeStrength)
     val targetProgress = (safeStrength + 1) / 5f
+    var detailsExpanded by rememberSaveable(passwordForDetails) { mutableStateOf(false) }
+    val report = remember(passwordForDetails, safeStrength) {
+        passwordForDetails?.let { VaultPasswordEngine.assess(it) }
+    }
 
     val animatedProgress by animateFloatAsState(
         targetValue = targetProgress,
@@ -1494,7 +1575,74 @@ fun WavyStrengthIndicator(strength: Int, modifier: Modifier = Modifier) {
             color = animatedColor,
             trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
         )
+        // Collapsible details: bits, crack time, reasons.
+        if (report != null) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    stringResource(
+                        R.string.st_PasswordVaultScreen_bits,
+                        report.bits.toInt()
+                    ) + " · " + stringResource(
+                        R.string.st_PasswordVaultScreen_crack_time,
+                        report.crackTimeLabel
+                    ),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(
+                    onClick = { detailsExpanded = !detailsExpanded },
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Icon(
+                        if (detailsExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                        contentDescription = stringResource(
+                            if (detailsExpanded) R.string.st_PasswordVaultScreen_hide_details
+                            else R.string.st_PasswordVaultScreen_show_details
+                        ),
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+            AnimatedVisibility(
+                visible = detailsExpanded,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    report.reasons.forEach { reason ->
+                        Text(
+                            "• ${stringResource(reasonString(reason))}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    report.suggestions.forEach { suggestion ->
+                        Text(
+                            "→ $suggestion",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
     }
+}
+
+@StringRes
+private fun reasonString(reason: VaultPasswordEngine.Reason): Int = when (reason) {
+    VaultPasswordEngine.Reason.TOO_SHORT -> R.string.st_PasswordVaultScreen_reason_short
+    VaultPasswordEngine.Reason.REPEATS -> R.string.st_PasswordVaultScreen_reason_repeats
+    VaultPasswordEngine.Reason.SEQUENCE -> R.string.st_PasswordVaultScreen_reason_sequence
+    VaultPasswordEngine.Reason.COMMON -> R.string.st_PasswordVaultScreen_reason_common
+    VaultPasswordEngine.Reason.GOOD_LENGTH -> R.string.st_PasswordVaultScreen_reason_good_length
+    VaultPasswordEngine.Reason.GOOD_MIX -> R.string.st_PasswordVaultScreen_reason_good_mix
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1506,36 +1654,33 @@ fun WavyStrengthIndicator(strength: Int, modifier: Modifier = Modifier) {
 fun GeneratorBottomSheet(
     viewModel: PasswordVaultViewModel = hiltViewModel(),
     onDismiss: () -> Unit,
+    onUsePassword: ((String) -> Unit)? = null
 ) {
     val vibrationManager = LocalVibrationManager.current
     val context = LocalContext.current
     val settings by viewModel.generatorSettings.collectAsState()
+    val spec = remember(settings) { viewModel.specFromSettings(settings) }
 
-    var generatedPassword by remember {
-        mutableStateOf(
-            PasswordGenerator.generate(
-                length = settings.length.toInt(),
-                includeSymbols = settings.includeSymbols,
-                includeNumbers = settings.includeNumbers,
-                includeUppercase = settings.includeUppercase,
-            ),
-        )
+    var generatedPassword by remember { mutableStateOf("") }
+    var specError by remember { mutableStateOf(false) }
+
+    fun regenerate(current: VaultPasswordEngine.PasswordSpec = spec) {
+        val result = VaultPasswordEngine.generate(current)
+        val pwd = result.getOrNull()
+        specError = pwd == null
+        if (pwd != null) generatedPassword = pwd
     }
 
-    // Regenerate when settings change
-    LaunchedEffect(settings) {
-        generatedPassword = PasswordGenerator.generate(
-            length = settings.length.toInt(),
-            includeSymbols = settings.includeSymbols,
-            includeNumbers = settings.includeNumbers,
-            includeUppercase = settings.includeUppercase,
-        )
+    // Initial password only — spec edits regen on release / button, never on
+    // every slider tick (that discarded manual refreshes).
+    LaunchedEffect(Unit) {
+        regenerate(viewModel.specFromSettings())
     }
 
-    val generatedStrength = remember(generatedPassword) {
-        if (generatedPassword.isNotEmpty()) PasswordGenerator.calculateStrength(generatedPassword) else 0
+    val report = remember(generatedPassword) {
+        VaultPasswordEngine.assess(generatedPassword.ifEmpty { "x" })
     }
-    val isStrong = generatedStrength >= 3
+    val emptyPool = specError || VaultPasswordEngine.buildPool(spec).isEmpty()
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1553,6 +1698,7 @@ fun GeneratorBottomSheet(
             modifier = Modifier
                 .padding(horizontal = 24.dp)
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .navigationBarsPadding()
                 .padding(bottom = 28.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -1567,197 +1713,78 @@ fun GeneratorBottomSheet(
                 color = MaterialTheme.colorScheme.onSurface,
             )
 
-            // Generated password card
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = LargeExpressiveShape,
-                color = if (isStrong)
-                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
-                else
-                    MaterialTheme.colorScheme.surfaceContainerHigh,
-                border = BorderStroke(
-                    width = if (isStrong) 2.dp else 1.dp,
-                    color = if (isStrong)
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.40f)
-                    else
-                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f),
-                ),
-            ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        AnimatedContent(
-                            targetState = generatedPassword,
-                            transitionSpec = {
-                                (scaleIn(
-                                    initialScale = 0.82f,
-                                    animationSpec = spring(
-                                        Spring.DampingRatioLowBouncy,
-                                        Spring.StiffnessMediumLow,
-                                    ),
-                                ) + fadeIn()).togetherWith(
-                                    scaleOut(targetScale = 0.82f) + fadeOut(),
-                                )
-                            },
-                            modifier = Modifier.weight(1f),
-                            label = "gen_password_anim",
-                        ) { pw ->
-                            Text(
-                                pw,
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Black,
-                                color = if (isStrong) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onSurface,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                        Spacer(Modifier.width(12.dp))
-                        ToolzExpressiveIconButton(
-                            onClick = {
-                                vibrationManager?.vibrateClick()
-                                generatedPassword = PasswordGenerator.generate(
-                                    length = settings.length.toInt(),
-                                    includeSymbols = settings.includeSymbols,
-                                    includeNumbers = settings.includeNumbers,
-                                    includeUppercase = settings.includeUppercase,
-                                )
-                            },
-                            colors = IconButtonDefaults.filledIconButtonColors(
-                                containerColor = MaterialTheme.colorScheme.primary,
-                                contentColor = MaterialTheme.colorScheme.onPrimary,
-                            ),
-                            shape = MediumExpressiveShape,
-                            modifier = Modifier.size(48.dp),
-                        ) {
-                            Icon(
-                                Icons.Rounded.Refresh,
-                                contentDescription = stringResource(R.string.st_PasswordVaultScreen_s1t3),
-                                modifier = Modifier.size(24.dp),
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(14.dp))
-                    // Inline wavy strength indicator
-                    WavyStrengthIndicator(strength = generatedStrength)
-                }
-            }
-
-            // Length slider section
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(
-                        stringResource(R.string.st_PasswordVaultScreen_u3v5),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.weight(1f),
+            GeneratorCard(
+                spec = spec,
+                password = generatedPassword,
+                report = report,
+                emptyPool = emptyPool,
+                onSpecChange = { newSpec ->
+                    viewModel.updateGeneratorSettings(
+                        settings.copy(
+                            length = newSpec.length.toFloat(),
+                            includeLowercase = newSpec.includeLowercase,
+                            includeUppercase = newSpec.includeUppercase,
+                            includeNumbers = newSpec.includeNumbers,
+                            includeSymbols = newSpec.includeSymbols,
+                            excludeAmbiguous = newSpec.excludeAmbiguous,
+                            customSymbols = newSpec.customSymbols,
+                            pinMode = newSpec.pinMode
+                        )
                     )
-                    AnimatedContent(
-                        targetState = settings.length.toInt(),
-                        transitionSpec = {
-                            slideInVertically { -it } + fadeIn() togetherWith
-                                    slideOutVertically { it } + fadeOut()
-                        },
-                        label = "length_display",
-                    ) { len ->
-                        Text(
-                            len.toString(),
-                            style = MaterialTheme.typography.displaySmall,
-                            fontWeight = FontWeight.Black,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                }
-                // ExpressiveSlider with physics-based thumb from ExpressiveInputs.kt
-                ExpressiveSlider(
-                    value = settings.length,
-                    onValueChange = { newVal ->
-                        if (newVal.toInt() != settings.length.toInt()) {
-                            vibrationManager?.vibrateTick()
-                        }
-                        viewModel.updateGeneratorSettings(settings.copy(length = newVal))
-                    },
-                    valueRange = 8f..64f,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = SliderDefaults.colors(
-                        thumbColor = MaterialTheme.colorScheme.primary,
-                        activeTrackColor = MaterialTheme.colorScheme.primary,
-                        inactiveTrackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    ),
-                )
-            }
-
-            // Options row — ExpressiveFilterChips from ExpressiveButtons.kt
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                ExpressiveFilterChip(
-                    selected = settings.includeUppercase,
-                    onClick = {
-                        viewModel.updateGeneratorSettings(
-                            settings.copy(includeUppercase = !settings.includeUppercase),
-                        )
-                    },
-                    label = { Text("A-Z", fontWeight = FontWeight.Black) },
-                    leadingIcon = {
-                        Icon(Icons.Rounded.TextFields, null, modifier = Modifier.size(16.dp))
-                    },
-                    modifier = Modifier.weight(1f),
-                    shape = MediumExpressiveShape,
-                )
-                ExpressiveFilterChip(
-                    selected = settings.includeNumbers,
-                    onClick = {
-                        viewModel.updateGeneratorSettings(
-                            settings.copy(includeNumbers = !settings.includeNumbers),
-                        )
-                    },
-                    label = { Text("1-9", fontWeight = FontWeight.Black) },
-                    leadingIcon = {
-                        Icon(Icons.Rounded.Numbers, null, modifier = Modifier.size(16.dp))
-                    },
-                    modifier = Modifier.weight(1f),
-                    shape = MediumExpressiveShape,
-                )
-                ExpressiveFilterChip(
-                    selected = settings.includeSymbols,
-                    onClick = {
-                        viewModel.updateGeneratorSettings(
-                            settings.copy(includeSymbols = !settings.includeSymbols),
-                        )
-                    },
-                    label = { Text("@#!", fontWeight = FontWeight.Black) },
-                    leadingIcon = {
-                        Icon(Icons.Rounded.AlternateEmail, null, modifier = Modifier.size(16.dp))
-                    },
-                    modifier = Modifier.weight(1f),
-                    shape = MediumExpressiveShape,
-                )
-            }
-
-            // Copy password CTA
-            ToolzExpressiveButton(
-                onClick = {
+                    regenerate(newSpec)
+                },
+                onRegenerate = { regenerate() },
+                onCopy = {
                     vibrationManager?.vibrateClick()
                     VaultClipboard.copySecret(context, generatedPassword)
                     Toast.makeText(context, context.getString(R.string.st_PasswordVaultScreen_w5x7), Toast.LENGTH_SHORT).show()
+                },
+                onPreset = { preset ->
+                    viewModel.updateGeneratorSettings(
+                        settings.copy(
+                            length = preset.length.toFloat(),
+                            includeLowercase = preset.includeLowercase,
+                            includeUppercase = preset.includeUppercase,
+                            includeNumbers = preset.includeNumbers,
+                            includeSymbols = preset.includeSymbols,
+                            excludeAmbiguous = preset.excludeAmbiguous,
+                            customSymbols = preset.customSymbols,
+                            pinMode = preset.pinMode
+                        )
+                    )
+                    regenerate(preset)
+                },
+                onMemorable = {
+                    vibrationManager?.vibrateClick()
+                    generatedPassword = VaultPasswordEngine.generateMemorable()
+                }
+            )
+
+            // Use password CTA
+            ToolzExpressiveButton(
+                onClick = {
+                    vibrationManager?.vibrateClick()
+                    if (onUsePassword != null) {
+                        onUsePassword(generatedPassword)
+                    } else {
+                        VaultClipboard.copySecret(context, generatedPassword)
+                        Toast.makeText(context, context.getString(R.string.st_PasswordVaultScreen_w5x7), Toast.LENGTH_SHORT).show()
+                    }
                     onDismiss()
                 },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(64.dp),
                 shape = LargeExpressiveShape,
+                enabled = generatedPassword.isNotEmpty() && !emptyPool
             ) {
                 Icon(Icons.Rounded.ContentPaste, contentDescription = null)
                 Spacer(Modifier.width(12.dp))
                 Text(
-                    stringResource(R.string.st_PasswordVaultScreen_y7z9),
+                    stringResource(
+                        if (onUsePassword != null) R.string.st_PasswordVaultScreen_gen_use_password
+                        else R.string.st_PasswordVaultScreen_y7z9
+                    ),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Black,
                 )
@@ -1846,16 +1873,25 @@ fun DeleteConfirmDialog(
 @Composable
 fun AddPasswordDialog(
     initialEntity: PasswordEntity? = null,
+    prefillPassword: String = "",
     onDismiss: () -> Unit,
     onConfirm: (String, String?, String, String) -> Unit,
+    onGeneratorClick: (() -> Unit)? = null
 ) {
     val vibrationManager = LocalVibrationManager.current
     var name by remember(initialEntity?.id) { mutableStateOf(initialEntity?.name ?: "") }
     var url by remember(initialEntity?.id) { mutableStateOf(initialEntity?.url ?: "") }
     var username by remember(initialEntity?.id) { mutableStateOf(initialEntity?.username ?: "") }
-    var password by remember(initialEntity?.id) { mutableStateOf(initialEntity?.password ?: "") }
+    var password by remember(initialEntity?.id) { mutableStateOf(initialEntity?.password ?: prefillPassword) }
     var passwordVisible by remember { mutableStateOf(false) }
     var showAppPicker by remember { mutableStateOf(false) }
+
+    // Generator handoff: sheet produces a password while this dialog stays open.
+    LaunchedEffect(prefillPassword) {
+        if (prefillPassword.isNotEmpty() && prefillPassword != password) {
+            password = prefillPassword
+        }
+    }
 
     val liveStrength = remember(password) {
         if (password.isNotEmpty()) PasswordGenerator.calculateStrength(password) else -1
@@ -1907,6 +1943,22 @@ fun AddPasswordDialog(
                     shape = SmallExpressiveShape,
                 ) {
                     Icon(Icons.Rounded.Apps, contentDescription = stringResource(R.string.st_PasswordVaultScreen_k9l1))
+                }
+                if (onGeneratorClick != null) {
+                    Spacer(Modifier.width(8.dp))
+                    ToolzExpressiveIconButton(
+                        onClick = {
+                            vibrationManager?.vibrateTick()
+                            onGeneratorClick()
+                        },
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                        ),
+                        shape = SmallExpressiveShape,
+                    ) {
+                        Icon(Icons.Rounded.AutoAwesome, contentDescription = stringResource(R.string.st_PasswordVaultScreen_k1l2))
+                    }
                 }
             }
         },
@@ -2005,6 +2057,7 @@ fun AddPasswordDialog(
                         WavyStrengthIndicator(
                             strength = liveStrength,
                             modifier = Modifier.fillMaxWidth(),
+                            passwordForDetails = password
                         )
                     }
                 }
@@ -2173,15 +2226,14 @@ private fun rememberStrengthColor(strength: Int): Color = when (strength.coerceI
     0    -> MaterialTheme.colorScheme.error
     1    -> MaterialTheme.colorScheme.tertiary
     2    -> MaterialTheme.colorScheme.secondary
-    3    -> MaterialTheme.colorScheme.primary
     else -> MaterialTheme.colorScheme.primary
 }
 
 @StringRes
-private fun strengthLabel(strength: Int): Int = when (strength) {
+private fun strengthLabel(strength: Int): Int = when (strength.coerceIn(0, 4)) {
     0    -> R.string.st_PasswordVaultScreen_strength_critical
     1    -> R.string.st_PasswordVaultScreen_strength_weak
-    2    -> R.string.st_PasswordVaultScreen_strength_medium
+    2    -> R.string.st_PasswordVaultScreen_strength_mid
     3    -> R.string.st_PasswordVaultScreen_strength_strong
     else -> R.string.st_PasswordVaultScreen_strength_elite
 }
