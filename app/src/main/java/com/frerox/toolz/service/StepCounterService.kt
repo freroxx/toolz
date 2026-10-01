@@ -171,8 +171,25 @@ class StepCounterService : Service(), SensorEventListener {
     // ------------------------------------------------------------------
     // Location listener
     // ------------------------------------------------------------------
+    private var lastGpsFixMs = 0L
+    private val GPS_FIX_STALE_MS = 60_000L
+
+    private fun hasLocationPermission(): Boolean =
+        ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+    /** STRICT requires GPS: permission + recent fix. Called on every fix + mode switch. */
+    private fun refreshStrictGpsReady() {
+        if (currentEngineMode != "STRICT") return
+        val fresh = SystemClock.elapsedRealtime() - lastGpsFixMs < GPS_FIX_STALE_MS
+        dspEngine?.setGpsReady(hasLocationPermission() && fresh)
+    }
+
     private val locationListener = LocationListener { location ->
         if (!isCounterEnabled) return@LocationListener
+
+        lastGpsFixMs = SystemClock.elapsedRealtime()
+        refreshStrictGpsReady()
         
         // Speedometer Anti-Cheat — if speed > 10 m/s, user is likely driving
         val driving = location.hasSpeed() && location.speed > 10.0f
@@ -261,6 +278,7 @@ class StepCounterService : Service(), SensorEventListener {
                 onLog = { msg -> logToDebug(msg) }
             )
             simpleEngine = null
+            refreshStrictGpsReady()
         } else {
             simpleEngine = SimpleStepEngine(
                 onStepDetected = { countDelta, _ ->
@@ -284,7 +302,8 @@ class StepCounterService : Service(), SensorEventListener {
         if (delta <= 0) return
         lastStepActivityTimeMs = SystemClock.elapsedRealtime()
         lastStepCountForGpsGate += delta
-        // Wake GPS when movement resumes after deep sleep.
+        // Wake GPS when movement resumes after deep sleep (effective GPS
+        // includes mandatory STRICT tracking).
         if (isGpsEnabled && !gpsCurrentlyActive && isCounterEnabled) {
             startGpsTracking(highAccuracy = !isBatterySaveActive)
         }
@@ -340,9 +359,10 @@ class StepCounterService : Service(), SensorEventListener {
                 val batterySaveChanged = batterySave != isBatterySaveActive
                 isBatterySaveActive = batterySave
 
-                // GPS is strictly opt-in. STRICT mode no longer forces it on —
-                // the engine works without GPS, GPS only adds distance validation.
-                val wantsGps = useGps
+                // STRICT has mandatory GPS: effective GPS is ON in STRICT mode so the
+                // engine gets fixes for validation. Still permission-gated — without
+                // position permission the engine holds SUSPENDED and the UI prompts.
+                val wantsGps = useGps || engineMode == "STRICT"
                 if (wantsGps != isGpsEnabled || (batterySaveChanged && isGpsEnabled)) {
                     isGpsEnabled = wantsGps
                     if (isGpsEnabled) startGpsTracking(highAccuracy = !isBatterySaveActive) else stopGpsTracking()
@@ -354,6 +374,7 @@ class StepCounterService : Service(), SensorEventListener {
                     currentEngineMode = engineMode
                     initializeEngines()
                     registerSensor()
+                    refreshStrictGpsReady()
                 }
 
                 dspEngine?.setSensitivity(sensitivity)
@@ -386,15 +407,13 @@ class StepCounterService : Service(), SensorEventListener {
         }
 
         // OS hardware counter is the source of truth in BOTH modes (when present).
-        // STRICT previously ignored it entirely, wasting battery on accel DSP.
         stepSensor?.let { sensor ->
             sensorManager?.registerListener(this, sensor, SensorManager.SENSOR_DELAY_NORMAL, sensorHandler)
         }
 
-        if (currentEngineMode == "SIMPLE") {
-            gyroSensor?.let { sensor ->
-                sensorManager?.registerListener(this, sensor, accelDelay, sensorHandler)
-            }
+        // Gyro shake-gate in BOTH modes (Strict uses a longer 500ms freeze).
+        gyroSensor?.let { sensor ->
+            sensorManager?.registerListener(this, sensor, accelDelay, sensorHandler)
         }
     }
 
@@ -433,7 +452,7 @@ class StepCounterService : Service(), SensorEventListener {
                 val wz = event.values[2]
                 val angularVelocity = kotlin.math.sqrt(wx * wx + wy * wy + wz * wz)
                 if (currentEngineMode == "STRICT") {
-                    // StrictEngine does not use gyroscope
+                    dspEngine?.processGyroscope(angularVelocity, timeMs)
                 } else {
                     simpleEngine?.processGyroscope(angularVelocity, timeMs)
                 }

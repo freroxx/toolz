@@ -37,6 +37,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.res.stringResource
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.R
@@ -144,12 +148,16 @@ fun StepCounterSettingsBottomSheet(
                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(IntrinsicSize.Max),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         ExpressiveCard(
                             onClick = { onStepEngineModeChange("STRICT") },
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight(),
                             shape = MediumExpressiveShape,
                             containerColor = if (isStrict) Color(0xFF4FC3F7).copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceContainerHigh,
                             border = if (isStrict) BorderStroke(1.dp, Color(0xFF4FC3F7)) else null,
@@ -158,13 +166,15 @@ fun StepCounterSettingsBottomSheet(
                             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Icon(Icons.Rounded.Shield, null, tint = if (isStrict) Color(0xFF4FC3F7) else MaterialTheme.colorScheme.onSurfaceVariant)
                                 Text("Strict", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = if (isStrict) Color(0xFF4FC3F7) else MaterialTheme.colorScheme.onSurface)
-                                Text("High accuracy. Requires GPS.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 16.sp)
+                                Text("Tweaked Simple filter + mandatory GPS.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 16.sp)
                             }
                         }
                         
                         ExpressiveCard(
                             onClick = { onStepEngineModeChange("SIMPLE") },
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight(),
                             shape = MediumExpressiveShape,
                             containerColor = if (!isStrict) Color(0xFF81C784).copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceContainerHigh,
                             border = if (!isStrict) BorderStroke(1.dp, Color(0xFF81C784)) else null,
@@ -252,16 +262,21 @@ fun StepCounterSettingsBottomSheet(
                                 }
                             }
                             Text(
-                                if (isStrict) "Locked ON for strict speed validation"
+                                if (isStrict) "ON for Strict — GPS verifies every step"
                                 else "Use GPS to verify strides and measure distance",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.outline
                             )
                         }
                         ExpressiveSwitch(
-                            checked = if (isStrict) true else useGps,
-                            onCheckedChange = if (isStrict) { _ -> } else onUseGpsChange,
-                            enabled = !isStrict
+                            checked = useGps || isStrict,
+                            onCheckedChange = {
+                                if (!it && isStrict) {
+                                    // Turning GPS off drops back to Simple (Strict is GPS-mandatory).
+                                    onStepEngineModeChange("SIMPLE")
+                                }
+                                onUseGpsChange(it)
+                            }
                         )
                     }
 
@@ -342,48 +357,83 @@ fun StepCounterSettingsBottomSheet(
                         containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f),
                         elevation = 0.dp
                     ) {
+                        // Local drag draft: the slider never writes to DataStore
+                        // mid-drag (that was the lag — a disk write per pixel).
+                        // Commit once on release; keypad commits on Done.
+                        var sliderDraft by remember(stepGoal) { mutableFloatStateOf(stepGoal.toFloat()) }
+                        var goalText by remember(stepGoal) { mutableStateOf("%,d".format(stepGoal)) }
+                        var goalError by remember { mutableStateOf<String?>(null) }
+                        LaunchedEffect(stepGoal) {
+                            sliderDraft = stepGoal.toFloat()
+                            goalText = "%,d".format(stepGoal)
+                        }
+                        fun commitGoal(value: Int) {
+                            val clamped = value.coerceIn(100, 1_000_000)
+                            goalError = null
+                            onStepGoalChange(clamped)
+                        }
+
                         Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Column {
+                                Column(modifier = Modifier.weight(1f)) {
                                     Text(text = "Daily Step Target", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
                                     Text("Set your personal daily goal", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
-                                AnimatedContent(
-                                    targetState = stepGoal,
-                                    transitionSpec = {
-                                        if (targetState > initialState) {
-                                            (slideInVertically { height -> height } + fadeIn()).togetherWith(slideOutVertically { height -> -height } + fadeOut())
-                                        } else {
-                                            (slideInVertically { height -> -height } + fadeIn()).togetherWith(slideOutVertically { height -> height } + fadeOut())
-                                        }.using(SizeTransform(clip = false))
+                                OutlinedTextField(
+                                    value = goalText,
+                                    onValueChange = { raw ->
+                                        val digits = raw.filter { it.isDigit() }.take(7)
+                                        goalText = digits
+                                        val parsed = digits.toIntOrNull()
+                                        goalError = when {
+                                            digits.isEmpty() -> "Enter a goal"
+                                            parsed == null || parsed < 100 -> "Min 100"
+                                            parsed > 1_000_000 -> "Max 1,000,000"
+                                            else -> null
+                                        }
+                                        if (parsed != null && parsed in 100..1_000_000) {
+                                            sliderDraft = parsed.toFloat()
+                                            commitGoal(parsed)
+                                        }
                                     },
-                                    label = "GoalAnimation"
-                                ) { goal ->
-                                    Text(
-                                        text = "%,d".format(goal),
-                                        style = MaterialTheme.typography.headlineSmall,
-                                        fontWeight = FontWeight.Black,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                }
+                                    modifier = Modifier.width(128.dp),
+                                    singleLine = true,
+                                    isError = goalError != null,
+                                    supportingText = goalError?.let { { Text(it) } },
+                                    keyboardOptions = KeyboardOptions(
+                                        keyboardType = KeyboardType.Number,
+                                        imeAction = ImeAction.Done
+                                    ),
+                                    keyboardActions = KeyboardActions(
+                                        onDone = {
+                                            goalText.toIntOrNull()?.let { commitGoal(it) }
+                                        }
+                                    ),
+                                    shape = SmallExpressiveShape
+                                )
                             }
-                            
+
                             ExpressiveSlider(
-                                value = stepGoal.toFloat().coerceIn(100f, 50000f),
+                                value = sliderDraft.coerceIn(100f, 1_000_000f),
                                 onValueChange = {
-                                    onStepGoalChange(it.toInt())
+                                    sliderDraft = it
+                                    goalText = "%,d".format(it.toInt())
+                                    goalError = null
                                 },
-                                valueRange = 100f..50000f,
+                                onValueChangeFinished = {
+                                    commitGoal(sliderDraft.toInt())
+                                },
+                                valueRange = 100f..1_000_000f,
                                 modifier = Modifier.padding(vertical = 8.dp)
                             )
-                            
+
                             Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                                 Text("100", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
-                                Text("50,000", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                                Text("1,000,000", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
                             }
                         }
                     }
@@ -444,16 +494,22 @@ fun StepCounterSettingsBottomSheet(
                                 style = MaterialTheme.typography.bodySmall
                             )
                         } else {
+                            val effectiveProvider = if (availableProviders.contains(aiProvider)) aiProvider else availableProviders.first()
+                            // Same catalog source as the AI Assistant tool — never show a
+                            // stale stored model that would 404 on send.
+                            val coachModels = AiSettingsHelper.getModels(effectiveProvider)
+                            val effectiveModel = aiModel.takeIf { it in coachModels }
+                                ?: AiSettingsHelper.getRecommendedModel(effectiveProvider)
                             AiConfigDropdown(
                                 label = "Provider",
-                                selected = if (availableProviders.contains(aiProvider)) aiProvider else availableProviders.first(),
+                                selected = effectiveProvider,
                                 options = availableProviders,
                                 onSelected = onAiProviderChange
                             )
                             AiConfigDropdown(
                                 label = "Model",
-                                selected = aiModel,
-                                options = AiSettingsHelper.getModels(aiProvider),
+                                selected = effectiveModel,
+                                options = coachModels,
                                 onSelected = onAiModelChange
                             )
                             Spacer(Modifier.height(4.dp))

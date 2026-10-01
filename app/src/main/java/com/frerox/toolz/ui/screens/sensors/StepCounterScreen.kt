@@ -109,6 +109,10 @@ fun StepCounterScreen(
     } else {
         null
     }
+    // STRICT has mandatory GPS — prompt for position permission when needed.
+    val locationPermissionState = rememberPermissionState(Manifest.permission.ACCESS_FINE_LOCATION)
+    val locationGranted = locationPermissionState.status.isGranted
+    val needsLocation = state.stepEngineMode == "STRICT" || state.useGps
 
     if (showSettings) {
         StepCounterSettingsBottomSheet(
@@ -145,7 +149,13 @@ fun StepCounterScreen(
             stepSensitivity = state.stepSensitivity,
             onStepSensitivityChange = { viewModel.updateStepSensitivity(it) },
             stepEngineMode = state.stepEngineMode,
-            onStepEngineModeChange = { viewModel.updateStepEngineMode(it) }
+            onStepEngineModeChange = {
+                vibrationManager?.vibrateClick()
+                viewModel.updateStepEngineMode(it)
+                // STRICT requires GPS — auto-enable so the engine gets fixes.
+                // Permission itself is prompted via the banner below.
+                if (it == "STRICT" && !state.useGps) viewModel.toggleUseGps(true)
+            }
         )
     }
 
@@ -295,7 +305,15 @@ fun StepCounterScreen(
                     NoSensorView()
                 }
                 else -> {
-                    StepContentLayout(state = state, onShowChat = { showChatSheet = true }, viewModel = viewModel, onNavigateToTrends = onNavigateToTrends)
+                    StepContentLayout(
+                        state = state,
+                        onShowChat = { showChatSheet = true },
+                        viewModel = viewModel,
+                        onNavigateToTrends = onNavigateToTrends,
+                        needsLocation = needsLocation,
+                        locationGranted = locationGranted,
+                        onRequestLocation = { locationPermissionState.launchPermissionRequest() }
+                    )
                 }
             }
         }
@@ -634,7 +652,15 @@ private fun StatChip(
 }
 
 @Composable
-private fun StepContentLayout(state: StepState, onShowChat: () -> Unit, viewModel: StepCounterViewModel, onNavigateToTrends: () -> Unit) {
+private fun StepContentLayout(
+    state: StepState,
+    onShowChat: () -> Unit,
+    viewModel: StepCounterViewModel,
+    onNavigateToTrends: () -> Unit,
+    needsLocation: Boolean = false,
+    locationGranted: Boolean = true,
+    onRequestLocation: () -> Unit = {}
+) {
     val performanceMode = LocalPerformanceMode.current
     val selectedChartEntry by viewModel.selectedChartEntry.collectAsStateWithLifecycle()
     val trendRange by viewModel.trendRange.collectAsStateWithLifecycle()
@@ -646,6 +672,14 @@ private fun StepContentLayout(state: StepState, onShowChat: () -> Unit, viewMode
         contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
+        // Mandatory-GPS permission prompt for STRICT.
+        if (needsLocation && !locationGranted) {
+            item {
+                StaggeredEntrance(index = 1) {
+                    GpsPermissionBanner(onGrant = onRequestLocation)
+                }
+            }
+        }
         item {
             StaggeredEntrance(index = 0) {
                 StepProgressRingSection(
@@ -709,6 +743,40 @@ private fun StepContentLayout(state: StepState, onShowChat: () -> Unit, viewMode
         
         item {
             Spacer(Modifier.height(120.dp))
+        }
+    }
+}
+
+@Composable
+private fun GpsPermissionBanner(onGrant: () -> Unit) {
+    ExpressiveCard(
+        onClick = onGrant,
+        modifier = Modifier.fillMaxWidth(),
+        shape = SmallExpressiveShape,
+        containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.4f)),
+        elevation = 0.dp
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Icon(Icons.Rounded.LocationOn, null, tint = MaterialTheme.colorScheme.onErrorContainer)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "Position permission needed",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+                Text(
+                    "Strict mode verifies steps with GPS. Grant location access to start counting.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f)
+                )
+            }
+            Button(onClick = onGrant, shape = CircleShape) { Text("Grant") }
         }
     }
 }

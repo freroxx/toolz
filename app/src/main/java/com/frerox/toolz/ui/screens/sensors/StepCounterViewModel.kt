@@ -55,7 +55,7 @@ data class StepState(
     val retention: String = "30d",
     val aiEnabled: Boolean = false,
     val aiProvider: String = "Gemini",
-    val aiModel: String = "gemini-3.0-flash",
+    val aiModel: String = "gemini-2.5-flash-lite",
     val aiTone: String = "Professional",
     val aiMood: String = "Encouraging",
     val aiStyle: String = "Concise",
@@ -406,7 +406,7 @@ RULES:
             val systemPrompt = getSystemPrompt()
             
             val provider = if (uiState.value.availableProviders.contains(uiState.value.aiProvider)) uiState.value.aiProvider else uiState.value.availableProviders.firstOrNull() ?: "Gemini"
-            val model = uiState.value.aiModel
+            val model = resolveCoachModel(provider, uiState.value.aiModel)
             
             val userPrompt = "Please analyze my progress and give me a short, punchy motivational summary using Markdown."
             var fullText = ""
@@ -449,7 +449,7 @@ RULES:
             val systemPrompt = getSystemPrompt()
             
             val provider = if (uiState.value.availableProviders.contains(uiState.value.aiProvider)) uiState.value.aiProvider else uiState.value.availableProviders.firstOrNull() ?: "Gemini"
-            val model = uiState.value.aiModel
+            val model = resolveCoachModel(provider, uiState.value.aiModel)
 
             var fullText = ""
             val requestStartMs = android.os.SystemClock.elapsedRealtime()
@@ -491,7 +491,7 @@ RULES:
 
     fun updateGoal(newGoal: Int) {
         viewModelScope.launch {
-            settingsRepository.setStepGoal(newGoal)
+            settingsRepository.setStepGoal(newGoal.coerceIn(100, 1_000_000))
         }
     }
 
@@ -524,11 +524,35 @@ RULES:
     }
 
     fun updateAiProvider(provider: String) {
-        viewModelScope.launch { settingsRepository.setAiFitnessAgentProvider(provider) }
+        viewModelScope.launch {
+            settingsRepository.setAiFitnessAgentProvider(provider)
+            // Keep model in sync with the AI Assistant's catalog (same source).
+            // If the stored coach model isn't offered for the new provider,
+            // reset to the recommended default instead of sending a 404.
+            val models = com.frerox.toolz.data.ai.AiSettingsHelper.getModels(provider)
+            val current = uiState.value.aiModel
+            if (current !in models) {
+                settingsRepository.setAiFitnessAgentModel(
+                    com.frerox.toolz.data.ai.AiSettingsHelper.getRecommendedModel(provider)
+                )
+            }
+        }
     }
 
     fun updateAiModel(model: String) {
-        viewModelScope.launch { settingsRepository.setAiFitnessAgentModel(model) }
+        viewModelScope.launch {
+            // Guard against stale selections (e.g. remote catalog changed).
+            val provider = uiState.value.aiProvider
+            val models = com.frerox.toolz.data.ai.AiSettingsHelper.getModels(provider)
+            if (model in models) settingsRepository.setAiFitnessAgentModel(model)
+        }
+    }
+
+    /** Same resolution as the AI Assistant: stored model must be in the live list. */
+    private fun resolveCoachModel(provider: String, storedModel: String): String {
+        val models = com.frerox.toolz.data.ai.AiSettingsHelper.getModels(provider)
+        return storedModel.takeIf { it in models }
+            ?: com.frerox.toolz.data.ai.AiSettingsHelper.getRecommendedModel(provider)
     }
 
     fun updateAiTone(tone: String) {
