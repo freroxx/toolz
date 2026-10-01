@@ -19,8 +19,10 @@ package com.frerox.toolz.ui.screens.utils
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.frerox.toolz.util.password.GeneratorSpecStore
 import com.frerox.toolz.util.password.VaultPasswordEngine
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -97,11 +99,45 @@ data class RandomResult(
 )
 
 @HiltViewModel
-class RandomGeneratorViewModel @Inject constructor() : ViewModel() {
+class RandomGeneratorViewModel @Inject constructor(
+    @ApplicationContext private val appContext: android.content.Context
+) : ViewModel() {
 
     private val secureRandom = SecureRandom()
-    private val _uiState = MutableStateFlow(RandomGeneratorState())
+    private val _uiState = MutableStateFlow(
+        RandomGeneratorState().let { initial ->
+            val spec = GeneratorSpecStore.load(appContext)
+            initial.copy(
+                passwordLength = spec.length.toFloat(),
+                includeLower = spec.includeLowercase,
+                includeUpper = spec.includeUppercase,
+                includeNumbers = spec.includeNumbers,
+                includeSymbols = spec.includeSymbols,
+                customSymbols = spec.customSymbols,
+                excludeAmbiguous = spec.excludeAmbiguous,
+                pinMode = spec.pinMode
+            )
+        }
+    )
     val uiState: StateFlow<RandomGeneratorState> = _uiState.asStateFlow()
+
+    private fun persistKeygen() {
+        val s = _uiState.value
+        GeneratorSpecStore.save(
+            appContext,
+            VaultPasswordEngine.PasswordSpec(
+                length = s.passwordLength.toInt()
+                    .coerceIn(1, VaultPasswordEngine.MAX_LENGTH),
+                includeLowercase = s.includeLower,
+                includeUppercase = s.includeUpper,
+                includeNumbers = s.includeNumbers,
+                includeSymbols = s.includeSymbols,
+                customSymbols = s.customSymbols,
+                excludeAmbiguous = s.excludeAmbiguous,
+                pinMode = s.pinMode
+            )
+        )
+    }
 
     fun onMinChange(min: String) = _uiState.update { it.copy(min = min.filter { c -> c.isDigit() || c == '-' || (it.decimalPlaces > 0 && c == '.') }) }
     fun onMaxChange(max: String) = _uiState.update { it.copy(max = max.filter { c -> c.isDigit() || c == '-' || (it.decimalPlaces > 0 && c == '.') }) }
@@ -159,14 +195,38 @@ class RandomGeneratorViewModel @Inject constructor() : ViewModel() {
         }
     }
 
-    fun onPasswordLengthChange(l: Float) = _uiState.update { it.copy(passwordLength = l) }
-    fun onToggleUpper(v: Boolean) = _uiState.update { it.copy(includeUpper = v) }
-    fun onToggleLower(v: Boolean) = _uiState.update { it.copy(includeLower = v) }
-    fun onToggleNumbers(v: Boolean) = _uiState.update { it.copy(includeNumbers = v) }
-    fun onToggleSymbols(v: Boolean) = _uiState.update { it.copy(includeSymbols = v) }
-    fun onCustomSymbolsChange(v: String) = _uiState.update { it.copy(customSymbols = v) }
-    fun onToggleExcludeAmbiguous(v: Boolean) = _uiState.update { it.copy(excludeAmbiguous = v) }
-    fun onTogglePinMode(v: Boolean) = _uiState.update { it.copy(pinMode = v) }
+    fun onPasswordLengthChange(l: Float) {
+        _uiState.update { it.copy(passwordLength = l) }
+        persistKeygen()
+    }
+    fun onToggleUpper(v: Boolean) {
+        _uiState.update { it.copy(includeUpper = v) }
+        persistKeygen()
+    }
+    fun onToggleLower(v: Boolean) {
+        _uiState.update { it.copy(includeLower = v) }
+        persistKeygen()
+    }
+    fun onToggleNumbers(v: Boolean) {
+        _uiState.update { it.copy(includeNumbers = v) }
+        persistKeygen()
+    }
+    fun onToggleSymbols(v: Boolean) {
+        _uiState.update { it.copy(includeSymbols = v) }
+        persistKeygen()
+    }
+    fun onCustomSymbolsChange(v: String) {
+        _uiState.update { it.copy(customSymbols = v) }
+        persistKeygen()
+    }
+    fun onToggleExcludeAmbiguous(v: Boolean) {
+        _uiState.update { it.copy(excludeAmbiguous = v) }
+        persistKeygen()
+    }
+    fun onTogglePinMode(v: Boolean) {
+        _uiState.update { it.copy(pinMode = v) }
+        persistKeygen()
+    }
 
     fun applySpec(spec: VaultPasswordEngine.PasswordSpec) {
         _uiState.update {
@@ -181,6 +241,7 @@ class RandomGeneratorViewModel @Inject constructor() : ViewModel() {
                 pinMode = spec.pinMode
             )
         }
+        persistKeygen()
         generatePassword()
     }
 

@@ -753,10 +753,19 @@ fun ScanButton(isScanning: Boolean, onClick: () -> Unit) {
 @Composable
 fun CategoryHeader(name: String) {
     val categoryColor = when (name) {
-        "MUST CHANGE" -> MaterialTheme.colorScheme.error
-        "WEAK"        -> MaterialTheme.colorScheme.tertiary
-        "INCOMPLETE"  -> MaterialTheme.colorScheme.tertiary
-        else          -> MaterialTheme.colorScheme.primary
+        "CRITICAL"   -> MaterialTheme.colorScheme.error
+        "WEAK"       -> MaterialTheme.colorScheme.tertiary
+        "MID"        -> MaterialTheme.colorScheme.secondary
+        "INCOMPLETE" -> MaterialTheme.colorScheme.tertiary
+        else         -> MaterialTheme.colorScheme.primary
+    }
+    val labelRes = when (name) {
+        "CRITICAL"   -> R.string.st_PasswordVaultScreen_strength_critical
+        "WEAK"       -> R.string.st_PasswordVaultScreen_strength_weak
+        "MID"        -> R.string.st_PasswordVaultScreen_strength_mid
+        "STRONG"     -> R.string.st_PasswordVaultScreen_strength_strong
+        "ELITE"      -> R.string.st_PasswordVaultScreen_strength_elite
+        else         -> null
     }
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -768,7 +777,7 @@ fun CategoryHeader(name: String) {
             border = BorderStroke(1.dp, categoryColor.copy(alpha = 0.18f)),
         ) {
             Text(
-                text = name,
+                text = labelRes?.let { stringResource(it) } ?: name,
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.Black,
                 color = categoryColor,
@@ -2378,7 +2387,7 @@ private fun CategoryHeadersPreview() {
                 .background(MaterialTheme.colorScheme.surfaceContainerLowest)
                 .padding(20.dp),
         ) {
-            listOf("MUST CHANGE", "WEAK", "INCOMPLETE", "SAFE").forEach { name ->
+            listOf("CRITICAL", "WEAK", "MID", "STRONG", "ELITE", "INCOMPLETE").forEach { name ->
                 CategoryHeader(name = name)
             }
         }

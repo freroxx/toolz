@@ -23,11 +23,13 @@ import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.password.PasswordDao
 import com.frerox.toolz.data.password.PasswordEntity
 import com.frerox.toolz.util.password.CsvEngine
+import com.frerox.toolz.util.password.GeneratorSpecStore
 import com.frerox.toolz.util.password.PasswordGenerator
 import com.frerox.toolz.util.password.PasswordUtils
 import com.frerox.toolz.util.password.PwnedCheck
 import com.frerox.toolz.util.password.VaultPasswordEngine
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -35,7 +37,8 @@ import javax.inject.Inject
 
 @HiltViewModel
 class PasswordVaultViewModel @Inject constructor(
-    private val passwordDao: PasswordDao
+    private val passwordDao: PasswordDao,
+    @ApplicationContext private val appContext: android.content.Context
 ) : ViewModel() {
 
     private val _searchQuery = MutableStateFlow("")
@@ -50,7 +53,9 @@ class PasswordVaultViewModel @Inject constructor(
     private val _importMessage = MutableStateFlow<ImportMessage?>(null)
     val importMessage = _importMessage.asStateFlow()
 
-    private val _generatorSettings = MutableStateFlow(GeneratorSettings())
+    private val _generatorSettings = MutableStateFlow(
+        settingsFromSpec(GeneratorSpecStore.load(appContext))
+    )
     val generatorSettings = _generatorSettings.asStateFlow()
 
     private var scanJob: Job? = null
@@ -135,25 +140,33 @@ class PasswordVaultViewModel @Inject constructor(
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
     private fun categorize(list: List<PasswordEntity>): Map<String, List<PasswordEntity>> {
-        val mustChange = mutableListOf<PasswordEntity>()
+        val critical = mutableListOf<PasswordEntity>()
         val weak = mutableListOf<PasswordEntity>()
-        val safe = mutableListOf<PasswordEntity>()
+        val mid = mutableListOf<PasswordEntity>()
+        val strong = mutableListOf<PasswordEntity>()
+        val elite = mutableListOf<PasswordEntity>()
         val incomplete = mutableListOf<PasswordEntity>()
 
         list.sortedBy { it.name.lowercase() }.forEach { password ->
             when {
                 password.password.isEmpty() -> incomplete.add(password)
-                (password.pwnedCount ?: 0) > 0 -> mustChange.add(password)
-                password.strength < 2 -> weak.add(password)
-                else -> safe.add(password)
+                // Breached credentials are critical regardless of entropy.
+                (password.pwnedCount ?: 0) > 0 -> critical.add(password)
+                password.strength <= 0 -> critical.add(password)
+                password.strength == 1 -> weak.add(password)
+                password.strength == 2 -> mid.add(password)
+                password.strength == 3 -> strong.add(password)
+                else -> elite.add(password)
             }
         }
 
         return linkedMapOf(
-            "MUST CHANGE" to mustChange,
+            "CRITICAL" to critical,
             "WEAK" to weak,
-            "INCOMPLETE" to incomplete,
-            "SAFE" to safe
+            "MID" to mid,
+            "STRONG" to strong,
+            "ELITE" to elite,
+            "INCOMPLETE" to incomplete
         ).filter { it.value.isNotEmpty() }
     }
 
@@ -166,12 +179,28 @@ class PasswordVaultViewModel @Inject constructor(
     }
 
     fun updateGeneratorSettings(settings: GeneratorSettings) {
-        _generatorSettings.value = settings.copy(
+        val coerced = settings.copy(
             length = settings.length.coerceIn(
                 VaultPasswordEngine.MIN_LENGTH.toFloat(),
                 VaultPasswordEngine.MAX_LENGTH.toFloat()
             )
         )
+        _generatorSettings.value = coerced
+        GeneratorSpecStore.save(appContext, specFromSettings(coerced))
+    }
+
+    companion object {
+        fun settingsFromSpec(s: VaultPasswordEngine.PasswordSpec): GeneratorSettings =
+            GeneratorSettings(
+                length = s.length.toFloat(),
+                includeLowercase = s.includeLowercase,
+                includeSymbols = s.includeSymbols,
+                includeNumbers = s.includeNumbers,
+                includeUppercase = s.includeUppercase,
+                excludeAmbiguous = s.excludeAmbiguous,
+                customSymbols = s.customSymbols,
+                pinMode = s.pinMode
+            )
     }
 
     fun specFromSettings(s: GeneratorSettings = _generatorSettings.value): VaultPasswordEngine.PasswordSpec =

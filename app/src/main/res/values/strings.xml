@@ -3516,6 +3516,7 @@
     <string name="st_PasswordVaultScreen_gen_custom_symbols">Custom symbols</string>
     <string name="st_PasswordVaultScreen_gen_empty_pool">Enable at least one character class</string>
     <string name="st_PasswordVaultScreen_gen_use_password">Use password</string>
+    <string name="st_PasswordVaultScreen_advanced">Advanced</string>
 
     <!-- BiometricPromptUtils -->
     <string name="st_BiometricPromptUtils_title">Biometric Authentication</string>
