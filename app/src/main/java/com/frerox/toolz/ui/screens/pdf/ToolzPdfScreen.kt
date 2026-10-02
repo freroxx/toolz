@@ -81,6 +81,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.data.notepad.Note
 import com.frerox.toolz.data.notepad.PdfAttachResult
@@ -108,6 +109,7 @@ fun ToolzPdfScreen(
     val haptic = rememberToolzHapticFeedback()
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
+    val deletedStr = stringResource(R.string.snackbar_deleted)
 
     var renamingFile by remember { mutableStateOf<PdfFile?>(null) }
     var newFileName by remember { mutableStateOf("") }
@@ -381,7 +383,7 @@ fun ToolzPdfScreen(
                         viewModel.deleteFile(file)
                         deletingFile = null
                         haptic.click()
-                        scope.launch { snackbar.showSnackbar(context.getString(R.string.snackbar_deleted)) }
+                        scope.launch { snackbar.showSnackbar(deletedStr) }
                     }
                 ) {
                     Text(
