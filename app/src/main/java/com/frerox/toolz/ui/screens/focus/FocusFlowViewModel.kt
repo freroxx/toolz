@@ -129,6 +129,9 @@ class FocusFlowViewModel @Inject constructor(
 
     // ── Internal state ─────────────────────────────────────────────────────
 
+    // Memoized PM labels for limit-only rows (combine transform re-runs per emission).
+    private val labelCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+
     private val _rawStats          = MutableStateFlow<List<AppUsageInfo>>(emptyList())
     private val _isWeekly          = MutableStateFlow(false)
     val isWeekly                   = _isWeekly.asStateFlow()
@@ -349,9 +352,12 @@ class FocusFlowViewModel @Inject constructor(
         // Ensure apps with active limits are always visible even with 0 usage
         limits.forEach { limit ->
             if (!statsMap.containsKey(limit.packageName)) {
-                val displayName = try {
-                    pm.getApplicationLabel(pm.getApplicationInfo(limit.packageName, 0)).toString()
-                } catch (_: Exception) { limit.packageName }
+                // Memoized: this transform re-runs on every upstream emission.
+                val displayName = labelCache.getOrPut(limit.packageName) {
+                    try {
+                        pm.getApplicationLabel(pm.getApplicationInfo(limit.packageName, 0)).toString()
+                    } catch (_: Exception) { limit.packageName }
+                }
                 statsMap[limit.packageName] = AppUsageInfo(
                     packageName     = limit.packageName,
                     appName         = nameMap[limit.packageName] ?: displayName,
@@ -432,6 +438,8 @@ class FocusFlowViewModel @Inject constructor(
             }
         } catch (_: Exception) { /* bind retry happens on next start request */ }
         refreshStats()
+        // Prewarm weekly bars in parallel so the weekly tab is instant on first open.
+        viewModelScope.launch { refreshWeeklyBars() }
 
         // Auto-refresh adapts interval based on performance mode
         viewModelScope.launch {
@@ -468,7 +476,32 @@ class FocusFlowViewModel @Inject constructor(
         val topApps: List<Pair<String, Long>>
     )
 
-    fun getWeeklyLocalStats(): List<DailyLocalStat> {
+    /**
+     * Trailing-7-day bars, warmed on init so the weekly tab is instant.
+     * Single source for the weekly counter AND the chart — they can never disagree.
+     * Missing cache days are backfilled live from UsageStats on load.
+     */
+    private val _weeklyBars = MutableStateFlow<List<DailyLocalStat>>(emptyList())
+    val weeklyBars: StateFlow<List<DailyLocalStat>> = _weeklyBars.asStateFlow()
+
+    private val _weeklyBarsLoading = MutableStateFlow(true)
+    val weeklyBarsLoading: StateFlow<Boolean> = _weeklyBarsLoading.asStateFlow()
+
+    /** Synchronous snapshot for non-composable callers; composables collect [weeklyBars]. */
+    fun getWeeklyLocalStats(): List<DailyLocalStat> = _weeklyBars.value
+
+    private suspend fun refreshWeeklyBars() {
+        _weeklyBarsLoading.value = true
+        try {
+            _weeklyBars.value = withContext(Dispatchers.IO) { loadWeeklyBars() }
+        } catch (_: Exception) {
+            // Keep previous bars; a transient IPC failure must not blank the chart.
+        } finally {
+            _weeklyBarsLoading.value = false
+        }
+    }
+
+    private fun loadWeeklyBars(): List<DailyLocalStat> {
         val result = mutableListOf<DailyLocalStat>()
         val tz = TimeZone.getDefault()
         val cal = Calendar.getInstance(tz)
@@ -600,8 +633,10 @@ class FocusFlowViewModel @Inject constructor(
             val usageList = withContext(Dispatchers.IO) {
                 if (_isWeekly.value) {
                     val weekly = usageRepository.queryWeeklyByAggregate(startTime, now)
+                    // One batched IPC instead of N per-package scans (entry speed).
+                    val todayMap = usageRepository.queryTodayUsageMap()
                     weekly.map { info ->
-                        info.copy(todayUsageTimeMillis = usageRepository.queryPackageUsageToday(info.packageName))
+                        info.copy(todayUsageTimeMillis = todayMap[info.packageName] ?: 0L)
                     }
                 } else {
                     val daily = usageRepository.queryDailyByEvents(startTime, now)
@@ -614,6 +649,8 @@ class FocusFlowViewModel @Inject constructor(
                 saveDailyUsageLocally(todayStr, usageList)
                 pruneGhostLimits()
             }
+            // Keep the trailing-7-day bars fresh (today moves while the screen is open).
+            viewModelScope.launch { refreshWeeklyBars() }
             if (usageList.isEmpty()) {
                 Log.d(TAG, "No usage stats found. Check permissions or app usage today.")
             }

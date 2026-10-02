@@ -173,8 +173,16 @@ class UsageStatsRepository @Inject constructor(
     /**
      * Robust aggregate usage for a specific package today.
      * Sums all daily buckets (queryUsageStats can return several rows per pkg).
+     * Prefer [queryTodayUsageMap] when looking up several packages (one IPC).
      */
-    fun queryPackageUsageToday(packageName: String): Long {
+    fun queryPackageUsageToday(packageName: String): Long =
+        queryTodayUsageMap()[packageName] ?: 0L
+
+    /**
+     * Batched today-usage lookup: ONE queryUsageStats call for all packages.
+     * Replaces N x per-package queries (N binder scans) in weekly refresh.
+     */
+    fun queryTodayUsageMap(): Map<String, Long> {
         val calendar = java.util.Calendar.getInstance()
         calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
         calendar.set(java.util.Calendar.MINUTE, 0)
@@ -185,9 +193,11 @@ class UsageStatsRepository @Inject constructor(
 
         return try {
             val stats = usageStatsManager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, startMs, endMs)
-            stats.filter { it.packageName == packageName }.sumOf { it.totalTimeInForeground }
+            val out = mutableMapOf<String, Long>()
+            stats.forEach { out[it.packageName] = (out[it.packageName] ?: 0L) + it.totalTimeInForeground }
+            out
         } catch (e: Exception) {
-            0L
+            emptyMap()
         }
     }
 

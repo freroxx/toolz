@@ -115,10 +115,10 @@ fun FocusFlowScreen(
     var showResetAllConfirm     by remember { mutableStateOf(false) }
     var showOverflow            by remember { mutableStateOf(false) }
 
-    // Weekly chart source: binder IPC + JSON parse, never on the composition thread.
-    val weeklyLocalStats by produceState(initialValue = emptyList<FocusFlowViewModel.DailyLocalStat>(), isWeekly, usageStats) {
-        value = withContext(Dispatchers.IO) { viewModel.getWeeklyLocalStats() }
-    }
+    // Weekly bars are warmed in the ViewModel on init: collect (instant) instead of
+    // computing IPC + JSON per composition.
+    val weeklyLocalStats by viewModel.weeklyBars.collectAsState()
+    val weeklyBarsLoading by viewModel.weeklyBarsLoading.collectAsState()
 
     val overlayRequiredMsg = stringResource(R.string.focus_flow_err_overlay_required)
     val a11yRequiredMsg = stringResource(R.string.focus_flow_err_a11y_required)
@@ -331,13 +331,20 @@ fun FocusFlowScreen(
                 }
 
                 item {
+                    // Weekly counter == weekly chart source (trailing-7-day bars).
+                    // "…" while the prewarmed load is still in flight; never a wrong number.
+                    val weeklyTotal = weeklyLocalStats.sumOf { it.totalMillis }
+                    val weeklyReady = weeklyLocalStats.isNotEmpty() || !weeklyBarsLoading
                     val totalTime = if (isWeekly) {
-                        weeklyLocalStats.sumOf { it.totalMillis }
+                        if (weeklyReady) weeklyTotal else -1L
                     } else {
                         usageStats.sumOf { it.usageTimeMillis }
                     }
-                    val hours     = totalTime / 3_600_000
-                    val minutes   = (totalTime % 3_600_000) / 60_000
+                    val timeText = when {
+                        totalTime < 0L -> "…"
+                        totalTime / 3_600_000 > 0 -> "${totalTime / 3_600_000}h ${(totalTime % 3_600_000) / 60_000}m"
+                        else -> "${(totalTime % 3_600_000) / 60_000}m"
+                    }
                     
                     val appsCount = if (isWeekly) {
                         // Sum of unique packages across all days in weekly stats or just usageStats.size
@@ -352,7 +359,7 @@ fun FocusFlowScreen(
                     ) {
                         MetricCard(
                             label    = stringResource(R.string.st_FocusFlowScreen_i9j0),
-                            value    = if (hours > 0) "${hours}h ${minutes}m" else "${minutes}m",
+                            value    = timeText,
                             icon     = Icons.Rounded.PhoneAndroid,
                             color    = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.weight(1f),
@@ -1590,7 +1597,10 @@ fun WeeklySummaryCard(
     weeklyLocalStats: List<FocusFlowViewModel.DailyLocalStat>,
     onClick: () -> Unit,
 ) {
-    val totalTime = stats.sumOf { it.usageTimeMillis }
+    // Headline == chart bars (trailing-7-day). Falls back to the weekly aggregate
+    // only while bars are still loading (empty) so the card never shows 0m wrongly.
+    val barsTotal = weeklyLocalStats.sumOf { it.totalMillis }
+    val totalTime = barsTotal.takeIf { it > 0L } ?: stats.sumOf { it.usageTimeMillis }
     val hours     = totalTime / 3_600_000
     val minutes   = (totalTime % 3_600_000) / 60_000
 
@@ -2066,9 +2076,8 @@ fun WeeklyDetailedSheet(
     usageStats: List<AppUsageInfo>, // Pass usageStats to trigger updates
     onDismiss: () -> Unit,
 ) {
-    val stats by produceState<List<FocusFlowViewModel.DailyLocalStat>>(emptyList(), usageStats) {
-        value = withContext(Dispatchers.IO) { viewModel.getWeeklyLocalStats() }
-    }
+    // Shared warmed bars: no duplicate IPC/parse per sheet open.
+    val stats by viewModel.weeklyBars.collectAsState()
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
