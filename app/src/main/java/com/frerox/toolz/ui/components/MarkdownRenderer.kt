@@ -250,6 +250,10 @@ fun inlineMarkdownNoCompose(text: String): AnnotatedString = buildAnnotatedStrin
     // single-star/underscore guards so "**bold**" isn't misread as italic.
     scan("""`(.+?)`""", "code")
     scan("""\[(.+?)\]\((.+?)\)""", "link")
+    // Bare URLs (models often emit raw https:// links, e.g. in citations).
+    // Scanned AFTER code/links so spans inside `code` or [text](url) lose the
+    // overlap fight below (earliest start wins) and are never double-styled.
+    scan("""https?://[^\s<>\[\]()\"']+""", "barelink")
     scan("""\*\*([\s\S]+?)\*\*""", "bold")
     scan("""__([\s\S]+?)__""", "bold")
     scan("""(?<!\*)\*([^*\n]+?)\*(?!\*)""", "italic")
@@ -284,6 +288,20 @@ fun inlineMarkdownNoCompose(text: String): AnnotatedString = buildAnnotatedStrin
                     append(inlineMarkdownNoCompose(tok.content))
                 }
                 pop()
+            }
+            // Bare URL: same link styling, trailing sentence punctuation excluded.
+            "barelink" -> {
+                val raw = tok.content
+                val cleanUrl = raw.trimEnd('.', ',', ';', ':', '!', '?', ')', ']', '}', '\'', '"')
+                val trail = raw.substring(cleanUrl.length)
+                if (cleanUrl.isNotEmpty()) {
+                    pushStringAnnotation(tag = "URL", annotation = cleanUrl)
+                    withStyle(SpanStyle(color = Color(0xFF2962FF), textDecoration = TextDecoration.Underline, fontWeight = FontWeight.Bold)) {
+                        append(cleanUrl)
+                    }
+                    pop()
+                }
+                if (trail.isNotEmpty()) append(trail)
             }
             else     -> append(tok.content)
         }

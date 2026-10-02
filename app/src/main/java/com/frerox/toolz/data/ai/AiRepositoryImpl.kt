@@ -313,17 +313,38 @@ class AiRepositoryImpl @Inject constructor(
      * Safety net: strip a model-generated trailing 'Sources' section if the
      * model ignored the no-Sources instruction. The bottom sheet JSON is the
      * single source of truth, so removing this block never loses data.
+     *
+     * Tolerant of `## Sources`, `**Sources:**`, `__Sources__`, `Source:`,
+     * emoji-prefixed headers etc. — a header line counts when it contains
+     * nothing but the word sources/source/references. Conservative by design:
+     * the tail must look like a link list (bare/markdown URLs, bullets,
+     * numbers) or nothing is stripped.
      */
     internal fun stripSourcesSection(text: String): String {
-        val regex = Regex(
-            "(?im)^#{0,3}\\s*sources\\s*:?\\s*$[\\s\\S]*$"
-        )
-        val match = regex.find(text) ?: return text
-        // Only strip if it looks like a link list (has http or markdown links).
-        val tail = match.value
-        return if (tail.contains("http", ignoreCase = true) || tail.contains("](")) {
-            text.substring(0, match.range.first).trimEnd()
-        } else text
+        val lines = text.lines()
+        val headerIdx = lines.indexOfFirst { isSourcesHeader(it) }
+        if (headerIdx == -1) return text
+        val tail = lines.drop(headerIdx + 1)
+        if (tail.none { it.isNotBlank() }) return text
+        val tailText = tail.joinToString("\n")
+        if (!tailText.contains("http", ignoreCase = true) && !tailText.contains("](")) return text
+        val listShaped = tail.all { ln ->
+            val t = ln.trim()
+            t.isBlank() || t.startsWith("-") || t.startsWith("*") || t.startsWith("+") ||
+                t.startsWith(">") || t.startsWith("[") ||
+                t.matches(Regex("^\\d+[.)].*")) ||
+                t.contains("http") || t.contains("](")
+        }
+        if (!listShaped) return text
+        return lines.take(headerIdx).joinToString("\n").trimEnd()
+    }
+
+    private fun isSourcesHeader(line: String): Boolean {
+        // Keep only letters: "## **Sources:**" -> "sources"; a prose line like
+        // "Sources of protein include..." keeps other letters and never matches.
+        val letters = line.trim().filter { it.isLetter() }.lowercase(java.util.Locale.ROOT)
+        return letters == "sources" || letters == "source" ||
+            letters == "references" || letters == "reference"
     }
 
     /** Cheap local gate so greetings / chit-chat skip the search pipeline entirely. */
@@ -508,16 +529,21 @@ class AiRepositoryImpl @Inject constructor(
                 .distinctBy { canonicalSourceUrl(it.url) }
 
             val deepContext = StringBuilder()
+            val fetched = mutableListOf<SearchResult>()
             sources.take(3).forEach { source ->
                 val content = webSearchRepository.fetchWebsiteContent(source.url)
                 if (content.startsWith("Error:")) return@forEach
                 val structured = structureWebsiteContent(helperKey.first, helperKey.second, source.title, content)
                 deepContext.append("SOURCE: ${source.title.take(200)}\nURL: ${source.url}\nCONTENT: <untrusted>${structured.take(1200)}</untrusted>\n\n")
+                fetched.add(source)
             }
             if (deepContext.isBlank()) {
                 emit(Result.failure(Exception("Deep dive failed: could not fetch any source content.")))
                 return@flow
             }
+            // The deep-dive answer gets its own sources payload so the UI can
+            // show the Sources bottom-sheet button on the result message too.
+            val usedSourcesJson = sourcesAdapter.toJson(fetched)
 
             val finalPrompt = "DEEP DIVE CONTEXT (Fetched live from websites):\n$deepContext\n\n" +
                 "User original question: ${prompt.take(4000)}\n\n" +
@@ -530,7 +556,7 @@ class AiRepositoryImpl @Inject constructor(
             emit(callProvider(provider, keyState, modelName, finalPrompt, filteredHistory.takeLast(MAX_HISTORY_MESSAGES), null, false, null).let {
                 if (it.isSuccess) {
                     val cleaned = stripSourcesSection(it.getOrThrow().text)
-                    Result.success(it.getOrThrow().copy(text = cleaned))
+                    Result.success(it.getOrThrow().copy(text = cleaned, sources = usedSourcesJson))
                 } else it
             })
         } catch (e: Exception) {

@@ -479,17 +479,26 @@ class AiAssistantViewModel @Inject constructor(
             _uiState.update { it.copy(isLoading = true, loadingPhaseText = "Deep diving into websites...") }
             
             val accumulated = StringBuilder()
+            var deepSources: String? = null
             chatRepository.performDeepDive(userPrompt, sources, _uiState.value.messages).collect { r ->
                 r.onSuccess { chunk ->
                     accumulated.append(chunk.text)
+                    if (chunk.sources != null) deepSources = chunk.sources
                     _uiState.update { it.copy(streamingText = accumulated.toString()) }
                 }.onFailure { e ->
                     _uiState.update { it.copy(isLoading = false, error = "Deep dive failed: ${e.message}") }
                 }
             }
-            
+
             if (accumulated.isNotEmpty()) {
-                aiDao.insertMessage(AiMessage(chatId = chatId, text = accumulated.toString(), isUser = false))
+                aiDao.insertMessage(AiMessage(
+                    chatId = chatId,
+                    text = accumulated.toString(),
+                    isUser = false,
+                    searchSources = deepSources,
+                    canDeepDive = (deepSources != null),
+                    deepDiveState = if (deepSources != null) DeepDiveState.PENDING else DeepDiveState.NONE,
+                ))
             }
             _uiState.update { it.copy(isLoading = false, streamingText = "", loadingPhaseText = "") }
         }
@@ -719,10 +728,13 @@ class AiAssistantViewModel @Inject constructor(
 
     // ── Chat lifecycle ────────────────────────────────────────────────────
 
-    fun loadChat(chatId: Int) {
+    fun loadChat(chatId: Int, cancelInference: Boolean = true) {
         // Cancel any in-flight inference: streamingText is global, not per-chat —
         // without this, tokens from the old chat bleed into the newly opened one.
-        cancelRequest()
+        // Skipped when called from inside sendMessage's own inference job for a
+        // just-created chat (cancelling there would kill the sender itself and
+        // the first message would silently produce no answer).
+        if (cancelInference) cancelRequest()
         messagesJob?.cancel()
         viewModelScope.launch {
             val chat = aiDao.getAllChatsSync().find { it.id == chatId }
@@ -805,7 +817,9 @@ class AiAssistantViewModel @Inject constructor(
                 val tempTitle = if (text.isNotBlank()) text.take(20).trimEnd() + "…" else "New conversation"
                 currentId = aiDao.insertChat(AiChat(title = tempTitle)).toInt()
                 _uiState.update { it.copy(currentChatId = currentId) }
-                loadChat(currentId)
+                // Don't cancel inference here: this IS the inference job (the chat
+                // was just created, nothing else can be streaming into it).
+                loadChat(currentId, cancelInference = false)
             }
 
             aiDao.insertMessage(AiMessage(chatId = currentId, text = text, isUser = true))
