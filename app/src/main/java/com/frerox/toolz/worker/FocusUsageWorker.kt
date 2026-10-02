@@ -23,6 +23,7 @@ import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.frerox.toolz.data.focus.AppUsageInfo
+import com.frerox.toolz.data.focus.FocusPrefsLocks
 import com.frerox.toolz.data.focus.UsageStatsRepository
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
@@ -73,16 +74,19 @@ class FocusUsageWorker @AssistedInject constructor(
             }
 
             Result.success()
+        } catch (e: SecurityException) {
+            // Permission revoked mid-run: terminal, never retry (avoids WorkManager storm).
+            Log.w(TAG, "Usage permission lost, skipping snapshot", e)
+            Result.failure()
         } catch (e: Exception) {
             Log.e(TAG, "Error snapshotting usage", e)
-            Result.retry()
+            Result.failure()
         }
     }
 
     private fun saveUsageToPrefs(dateKey: String, usageList: List<AppUsageInfo>) {
         try {
             val prefs = applicationContext.getSharedPreferences(PREFS_USAGE_CACHE, Context.MODE_PRIVATE)
-            
             // Optimization: check if data changed significantly (optional but good for SSD wear)
             val jsonArray = JSONArray()
             usageList.forEach { info ->
@@ -94,10 +98,12 @@ class FocusUsageWorker @AssistedInject constructor(
             }
             
             val newJson = jsonArray.toString()
-            val oldJson = prefs.getString(dateKey, null)
-            
-            if (newJson != oldJson) {
-                prefs.edit().putString(dateKey, newJson).apply()
+            // Shared file with FocusFlowViewModel: guard against last-write-wins races.
+            synchronized(FocusPrefsLocks.usageCacheLock) {
+                val oldJson = prefs.getString(dateKey, null)
+                if (newJson != oldJson) {
+                    prefs.edit().putString(dateKey, newJson).apply()
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to save daily usage locally", e)

@@ -3769,4 +3769,8 @@
     <string name="speedometer_permission_title">Location access needed</string>
     <string name="speedometer_permission_body">Speed is measured with GPS. Location is only used while this screen is open.</string>
     <string name="speedometer_permission_grant">Allow location</string>
+    <!-- Focus Flow session preconditions (Steps 2/5: new keys only, old st_ keys untouched) -->
+    <string name="focus_flow_err_overlay_required">Display over other apps is required to show the lock screen. Please grant it, then start again.</string>
+    <string name="focus_flow_err_a11y_required">The Focus accessibility service is required for blocking. Please enable it, then start again.</string>
+    <string name="focus_flow_err_invalid_duration">Please choose a duration between 1 and 480 minutes.</string>
 </resources>

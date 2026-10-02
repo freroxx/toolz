@@ -163,7 +163,8 @@ class UsageStatsRepository @Inject constructor(
     fun queryTotalUsageInRange(startMs: Long, endMs: Long): Long {
         return try {
             val stats = usageStatsManager.queryAndAggregateUsageStats(startMs, endMs)
-            stats.values.sumOf { it.totalTimeInForeground }
+            // Filter excluded packages so the headline total matches the visible list sum.
+            stats.entries.filterNot { isExcluded(it.key) }.sumOf { it.value.totalTimeInForeground }
         } catch (e: Exception) {
             0L
         }
@@ -171,6 +172,7 @@ class UsageStatsRepository @Inject constructor(
 
     /**
      * Robust aggregate usage for a specific package today.
+     * Sums all daily buckets (queryUsageStats can return several rows per pkg).
      */
     fun queryPackageUsageToday(packageName: String): Long {
         val calendar = java.util.Calendar.getInstance()
@@ -183,7 +185,7 @@ class UsageStatsRepository @Inject constructor(
 
         return try {
             val stats = usageStatsManager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, startMs, endMs)
-            stats.find { it.packageName == packageName }?.totalTimeInForeground ?: 0L
+            stats.filter { it.packageName == packageName }.sumOf { it.totalTimeInForeground }
         } catch (e: Exception) {
             0L
         }

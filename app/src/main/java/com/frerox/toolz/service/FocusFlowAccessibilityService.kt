@@ -46,10 +46,8 @@ import com.frerox.toolz.ui.navigation.Screen
 import com.frerox.toolz.data.focus.AppLimitRepository
 import com.frerox.toolz.data.focus.CaffeinateRepository
 import com.frerox.toolz.data.settings.SettingsRepository
-import com.frerox.toolz.util.shizuku.ShizukuHelper
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.first
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
@@ -105,9 +103,12 @@ class FocusFlowAccessibilityService : AccessibilityService() {
     private var overlayShownAtMs: Long = 0L
     // When the current focus session became active (service memory). Backs the
     // stale-session watchdog that clears a flag orphaned by process death.
+    @Volatile
     private var sessionActiveSinceMs: Long = 0L
     // Resolved app-label cache so showOverlay never does PM IPC on Main.
     private val labelCache = ConcurrentHashMap<String, String>()
+    // Guards overlapping validateAndLock coroutines for the same package.
+    private val activeValidations = ConcurrentHashMap.newKeySet<String>()
 
     // Full-coverage session blocklist: ALL installed distraction apps, not just
     // today's used ones. Warmed async; single-app fallback covers uncached pkgs.
@@ -116,6 +117,7 @@ class FocusFlowAccessibilityService : AccessibilityService() {
     private var lastBlocklistRefreshMs: Long = 0L
 
     // Settings Cache
+    @Volatile
     private var isFocusSessionActive = false
     private var categoryMappings = emptyMap<String, String>()
     private var appLimits = emptyMap<String, Long>()
@@ -268,7 +270,12 @@ class FocusFlowAccessibilityService : AccessibilityService() {
                 addAction(Intent.ACTION_SCREEN_ON)
                 addAction(Intent.ACTION_USER_PRESENT)
             }
-            registerReceiver(screenReceiver, filter)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(screenReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                @Suppress("DEPRECATION")
+                registerReceiver(screenReceiver, filter)
+            }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to register screenReceiver", e)
         }
@@ -351,14 +358,14 @@ class FocusFlowAccessibilityService : AccessibilityService() {
                 val packageName = event.packageName?.toString() ?: return
                 val className = event.className?.toString() ?: ""
 
-                Log.d(TAG, "onAccessibilityEvent TYPE_WINDOW_STATE_CHANGED: $packageName / $className")
+                // Hot path: verbose only, never info/debug per window change (logspam).
+                Log.v(TAG, "STATE_CHANGED: $packageName / $className")
 
                 // CRITICAL: Always check Caffeinate first on EVERY window state change!
                 checkCaffeinate(packageName, className)
 
                 // Handle package change for precise tracking
                 if (packageName != currentPackage) {
-                    Log.d(TAG, "Package changed: $currentPackage -> $packageName")
                     currentPackage = packageName
                     currentPackageResumedTime = System.currentTimeMillis()
                 }
@@ -398,7 +405,7 @@ class FocusFlowAccessibilityService : AccessibilityService() {
                 try {
                     val detected = getCombinedForegroundPackage()
                     if (detected != null && detected != currentPackage) {
-                        Log.d(TAG, "WINDOWS_CHANGED: foreground now $detected (was $currentPackage)")
+                        Log.v(TAG, "WINDOWS_CHANGED: foreground now $detected (was $currentPackage)")
                         currentPackage = detected
                         currentPackageResumedTime = System.currentTimeMillis()
                         if (!isHomePackage(detected) && detected != toolzPackage &&
@@ -417,22 +424,6 @@ class FocusFlowAccessibilityService : AccessibilityService() {
                 } catch (_: Exception) {}
             }
         }
-        
-        // Only trigger clipboard check if WE are the ones becoming focused
-        if (packageName == toolzPackage) {
-            // Check if standard access is needed. If Shizuku is authorized, 
-            // the service handles it automatically without needing focus.
-            if (!ShizukuHelper.isAuthorized()) {
-                serviceScope.launch {
-                    delay(250) // Small delay to let MainActivity register focus
-                    triggerClipboardCheck()
-                }
-            }
-        }
-    }
-
-    private fun triggerClipboardCheck() {
-        // PAUSED — clipboard tool is under development. No-op until re-enabled.
     }
 
     private var homePackages = setOf<String>()
@@ -467,7 +458,9 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         // that must never run on Main (it janked blocking + buttons before).
         validationJob = serviceScope.launch(Dispatchers.Default) {
             while (isActive) {
-                delay(1000)
+                // Thrift: 1s only while enforcing, 10s idle. Same checks, less IPC/battery.
+                val enforcing = isFocusSessionActive || appLimits.isNotEmpty()
+                delay(if (enforcing) 1000L else 10_000L)
                 // Stale-session watchdog: a persisted active flag orphaned by
                 // process death or a failed timer start must never block forever.
                 if (isFocusSessionActive && sessionActiveSinceMs == 0L) {
@@ -528,12 +521,17 @@ class FocusFlowAccessibilityService : AccessibilityService() {
             return
         }
 
+        // Single-flight per package: overlapping event+periodic checks pile up
+        // coroutines that race to show/hide. Next tick re-checks if needed.
+        if (!activeValidations.add(packageName)) return
+
         // Capture epoch so a user tap on RETURN/EXIT while we do IO invalidates us.
         val startEpoch = dismissEpoch
 
         // Default dispatcher: freshness checks query UsageStats + PM (binder
         // IPC) that must never run on Main. show/hideOverlay self-hop to Main.
         serviceScope.launch(Dispatchers.Default) {
+            try {
             // Freshness first: drop stale requests before any work. Combined
             // detector (a11y + UsageEvents) sees secure windows + gesture nav
             // that the old a11y-only check missed (block never fired / ghost
@@ -632,6 +630,9 @@ class FocusFlowAccessibilityService : AccessibilityService() {
                     Log.d(TAG, "hiding overlay for $packageName because shouldLock is false (usage: $usageTime)")
                     hideOverlay()
                 }
+            }
+            } finally {
+                activeValidations.remove(packageName)
             }
         }
     }
@@ -1262,19 +1263,34 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         return label
     }
 
+    private fun lockMessage(packageName: String, isSessionBlock: Boolean, appName: String): String =
+        if (isSessionBlock) "Focus session in progress. $appName is restricted."
+        else "Time's up for $appName."
+
     private fun showOverlay(packageName: String, isSessionBlock: Boolean = false) {
-        // Resolve the label off-Main (PM binder IPC janks overlay buttons),
-        // then add the view single-threaded on Main.
+        // Instant block: show immediately with the cached label (or pkg as
+        // placeholder), then upgrade the message async. Previous code waited
+        // for PM IPC before showing anything (user saw the app first).
+        // WindowManager must be touched on Main — hop there without IO delay.
         if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
-            serviceScope.launch(Dispatchers.IO) {
-                val label = resolveAppLabel(packageName)
-                withContext(Dispatchers.Main) { showOverlayInternal(packageName, isSessionBlock, label) }
+            val cached = labelCache[packageName] ?: packageName
+            serviceScope.launch(Dispatchers.Main) {
+                showOverlayInternal(packageName, isSessionBlock, cached)
             }
-            return
+        } else {
+            showOverlayInternal(packageName, isSessionBlock, labelCache[packageName] ?: packageName)
         }
+        if (labelCache[packageName] != null) return
         serviceScope.launch(Dispatchers.IO) {
             val label = resolveAppLabel(packageName)
-            withContext(Dispatchers.Main) { showOverlayInternal(packageName, isSessionBlock, label) }
+            withContext(Dispatchers.Main) {
+                if (isOverlayShowing && overlayShowingForPackage == packageName) {
+                    try {
+                        overlayView?.findViewById<TextView>(R.id.tv_lock_message)?.text =
+                            lockMessage(packageName, isSessionBlock, label)
+                    } catch (_: Exception) {}
+                }
+            }
         }
     }
 

@@ -69,6 +69,7 @@ import androidx.compose.ui.res.stringResource
 import com.frerox.toolz.R
 import com.frerox.toolz.data.focus.AppCategory
 import com.frerox.toolz.data.focus.AppUsageInfo
+import com.frerox.toolz.data.focus.suggestLimitMinutes
 import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.toolzBackground
@@ -112,6 +113,16 @@ fun FocusFlowScreen(
     var showTipsSheet           by remember { mutableStateOf(false) }
     var showSessionPicker       by remember { mutableStateOf(false) }
     var showResetAllConfirm     by remember { mutableStateOf(false) }
+    var showOverflow            by remember { mutableStateOf(false) }
+
+    // Weekly chart source: binder IPC + JSON parse, never on the composition thread.
+    val weeklyLocalStats by produceState(initialValue = emptyList<FocusFlowViewModel.DailyLocalStat>(), isWeekly, usageStats) {
+        value = withContext(Dispatchers.IO) { viewModel.getWeeklyLocalStats() }
+    }
+
+    val overlayRequiredMsg = stringResource(R.string.focus_flow_err_overlay_required)
+    val a11yRequiredMsg = stringResource(R.string.focus_flow_err_a11y_required)
+    val invalidDurationMsg = stringResource(R.string.focus_flow_err_invalid_duration)
 
     val lifecycleEvent = rememberLifecycleEvent()
     LaunchedEffect(lifecycleEvent) {
@@ -128,7 +139,7 @@ fun FocusFlowScreen(
         }
     }
 
-    LaunchedEffect(sessionError) {
+    LaunchedEffect(sessionError, overlayRequiredMsg, a11yRequiredMsg, invalidDurationMsg) {
         when (sessionError) {
             "usage_required" -> {
                 snackbarHostState.showSnackbar("Usage access is required — blocking needs it for secure apps and gesture nav.")
@@ -136,6 +147,18 @@ fun FocusFlowScreen(
             }
             "service_not_ready" -> {
                 snackbarHostState.showSnackbar("Timer service isn't ready yet — try again in a moment.")
+                viewModel.consumeSessionError()
+            }
+            "overlay_required" -> {
+                snackbarHostState.showSnackbar(overlayRequiredMsg)
+                viewModel.consumeSessionError()
+            }
+            "a11y_required" -> {
+                snackbarHostState.showSnackbar(a11yRequiredMsg)
+                viewModel.consumeSessionError()
+            }
+            "invalid_duration" -> {
+                snackbarHostState.showSnackbar(invalidDurationMsg)
                 viewModel.consumeSessionError()
             }
         }
@@ -206,6 +229,7 @@ fun FocusFlowScreen(
                                         haptic.success()
                                     }
                                 },
+                                // Kept for backward compat; discoverable path is the overflow menu.
                                 onLongClick = {
                                     haptic.longClick()
                                     showResetAllConfirm = true
@@ -214,6 +238,29 @@ fun FocusFlowScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(Icons.Rounded.Refresh, stringResource(R.string.st_FocusFlowScreen_7c4d), modifier = Modifier.size(20.dp))
+                    }
+
+                    Box(modifier = Modifier.padding(end = 8.dp)) {
+                        ToolzTonalExpressiveIconButton(
+                            onClick = { showOverflow = true },
+                            shape = SquircleShape
+                        ) {
+                            Icon(Icons.Rounded.MoreVert, contentDescription = "More options")
+                        }
+                        DropdownMenu(
+                            expanded = showOverflow,
+                            onDismissRequest = { showOverflow = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.st_FocusFlowScreen_5d6e)) },
+                                leadingIcon = { Icon(Icons.Rounded.DeleteForever, contentDescription = null) },
+                                onClick = {
+                                    showOverflow = false
+                                    haptic.longClick()
+                                    showResetAllConfirm = true
+                                }
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
@@ -284,9 +331,8 @@ fun FocusFlowScreen(
                 }
 
                 item {
-                    val weeklyStats = remember(isWeekly, usageStats) { viewModel.getWeeklyLocalStats() }
                     val totalTime = if (isWeekly) {
-                        weeklyStats.sumOf { it.totalMillis }
+                        weeklyLocalStats.sumOf { it.totalMillis }
                     } else {
                         usageStats.sumOf { it.usageTimeMillis }
                     }
@@ -387,7 +433,7 @@ fun FocusFlowScreen(
                         if (weekly) {
                             WeeklySummaryCard(
                                 stats = usageStats,
-                                weeklyLocalStats = viewModel.getWeeklyLocalStats(),
+                                weeklyLocalStats = weeklyLocalStats,
                                 onClick = { showWeeklySheet = true }
                             )
                         } else {
@@ -437,7 +483,9 @@ fun FocusFlowScreen(
                                     lineHeight = 20.sp
                                 )
 
-                                if (hasUsagePermission) {
+                                // Grant action only makes sense when permission is missing.
+                                // When granted but empty (fresh device), show guidance text only.
+                                if (!hasUsagePermission) {
                                     Spacer(Modifier.height(24.dp))
                                     ToolzExpressiveButton(
                                         onClick = {
@@ -1249,9 +1297,7 @@ fun EnhancedUsageItem(
     }
 
     val suggestedLimitMinutes = remember(info.usageTimeMillis) {
-        val usedMinutes = info.usageTimeMillis / 60_000L
-        val roundedUp = (((usedMinutes / 15) + 1) * 15).coerceIn(15L, 120L)
-        roundedUp
+        suggestLimitMinutes(info.usageTimeMillis)
     }
 
     ExpressiveCard(
@@ -1318,7 +1364,7 @@ fun EnhancedUsageItem(
                                 shape = CircleShape,
                                 modifier = Modifier.padding(start = 2.dp)
                             ) {
-                                Text("AI", style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), color = MaterialTheme.colorScheme.tertiary, fontWeight = FontWeight.Bold, fontSize = 7.sp)
+                                Text("AI", style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp), color = MaterialTheme.colorScheme.tertiary, fontWeight = FontWeight.Bold, fontSize = 10.sp)
                             }
                         }
                     }
@@ -2021,7 +2067,7 @@ fun WeeklyDetailedSheet(
     onDismiss: () -> Unit,
 ) {
     val stats by produceState<List<FocusFlowViewModel.DailyLocalStat>>(emptyList(), usageStats) {
-        value = viewModel.getWeeklyLocalStats()
+        value = withContext(Dispatchers.IO) { viewModel.getWeeklyLocalStats() }
     }
 
     ModalBottomSheet(

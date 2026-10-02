@@ -17,12 +17,12 @@
 
 package com.frerox.toolz.ui.screens.focus
 
-import android.app.usage.UsageStatsManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.IBinder
@@ -38,6 +38,9 @@ import com.frerox.toolz.data.focus.AppCategory
 import com.frerox.toolz.data.focus.AppLimit
 import com.frerox.toolz.data.focus.AppLimitRepository
 import com.frerox.toolz.data.focus.AppUsageInfo
+import com.frerox.toolz.data.focus.FocusPrefsLocks
+import com.frerox.toolz.data.focus.UsageStatsRepository
+import com.frerox.toolz.data.focus.validateFocusMinutes
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.service.ToolService
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -48,10 +51,8 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import retrofit2.HttpException
 import java.util.*
 import javax.inject.Inject
-import com.frerox.toolz.data.focus.UsageStatsRepository
 
 // ─────────────────────────────────────────────────────────────
 //  Over-limit status — consumed by the accessibility service
@@ -116,12 +117,15 @@ class FocusFlowViewModel @Inject constructor(
     }
 
     // ── Persistent AI category cache ───────────────────────────────────────
-    private val aiPrefs: SharedPreferences =
+    // Lazy: getSharedPreferences does disk IO, never on the main thread at construction.
+    private val aiPrefs: SharedPreferences by lazy {
         context.getSharedPreferences(PREFS_AI_CACHE, Context.MODE_PRIVATE)
+    }
 
     // ── Local daily usage history cache ──────────────────────────────────
-    private val usagePrefs: SharedPreferences =
+    private val usagePrefs: SharedPreferences by lazy {
         context.getSharedPreferences(PREFS_USAGE_CACHE, Context.MODE_PRIVATE)
+    }
 
     // ── Internal state ─────────────────────────────────────────────────────
 
@@ -139,11 +143,13 @@ class FocusFlowViewModel @Inject constructor(
     val isFullyAuthorized: StateFlow<Boolean> = _isFullyAuthorized.asStateFlow()
 
     /**
-     * AI-determined categories. Pre-loaded from SharedPreferences so results
-     * from previous sessions are immediately available without re-calling Groq.
+     * AI-determined categories. Loaded async from SharedPreferences on init
+     * (never blocking construction) so first frames stay jank-free.
      * User-set mappings always take priority over this cache.
      */
-    private val _aiCategoryCache = MutableStateFlow(loadAiCacheFromPrefs())
+    private val _aiCategoryCache = MutableStateFlow<Map<String, AppCategory>>(emptyMap())
+    private val _aiCacheReady = MutableStateFlow(false)
+    val aiCacheReady: StateFlow<Boolean> = _aiCacheReady.asStateFlow()
 
     private val _isAiClassifying = MutableStateFlow(false)
     val isAiClassifying: StateFlow<Boolean> = _isAiClassifying.asStateFlow()
@@ -222,7 +228,12 @@ class FocusFlowViewModel @Inject constructor(
     }
 
     fun startFocusSession(minutes: Int) {
-        val totalMs = minutes * 60_000L
+        val safeMinutes = validateFocusMinutes(minutes)
+        if (safeMinutes == null) {
+            _sessionError.value = "invalid_duration"
+            return
+        }
+        val totalMs = safeMinutes * 60_000L
         viewModelScope.launch {
             // Secure-window + gesture-nav blocking depends on UsageEvents.
             // Starting a session without it silently blocks nothing.
@@ -230,11 +241,21 @@ class FocusFlowViewModel @Inject constructor(
                 _sessionError.value = "usage_required"
                 return@launch
             }
+            // Overlay is the visible enforcement; without it the session flag
+            // would block nothing while looking active.
+            if (!android.provider.Settings.canDrawOverlays(context)) {
+                _sessionError.value = "overlay_required"
+                return@launch
+            }
+            if (!checkAccessibilityEnabled(context)) {
+                _sessionError.value = "a11y_required"
+                return@launch
+            }
             val svc = toolService
             if (svc == null) {
                 // Defer: set the flag only once the timer can actually start,
                 // otherwise active=true with no timer blocks forever.
-                pendingSessionMinutes = minutes
+                pendingSessionMinutes = safeMinutes
                 _sessionError.value = "service_not_ready"
                 return@launch
             }
@@ -257,7 +278,8 @@ class FocusFlowViewModel @Inject constructor(
         if (service.isPomodoroRunning.value) {
             service.pausePomodoro()
         } else {
-            val remaining = _focusSession.value.remainingMillis.coerceAtLeast(60_000L)
+            // Resume exact remaining time; never inflate a nearly-done session to 60s.
+            val remaining = _focusSession.value.remainingMillis.coerceAtLeast(1_000L)
             service.startPomodoro(remaining, "WORK")
         }
     }
@@ -278,6 +300,9 @@ class FocusFlowViewModel @Inject constructor(
 
     fun resetAllFocusData() {
         viewModelScope.launch {
+            // Stop any active enforcement first so a wipe can never orphan blocking.
+            try { settingsRepository.setFocusFlowSessionActive(false) } catch (_: Exception) {}
+            try { toolService?.resetPomodoro() } catch (_: Exception) {}
             appLimitRepository.deleteAllLimits()
             settingsRepository.clearFocusMappings()
             _aiCategoryCache.value = emptyMap()
@@ -396,9 +421,16 @@ class FocusFlowViewModel @Inject constructor(
     // ── Init ───────────────────────────────────────────────────────────────
 
     init {
-        Intent(context, ToolService::class.java).also { intent ->
-            context.bindService(intent, connection, Context.BIND_AUTO_CREATE)
+        // Load AI cache off the main thread; combinedUsageStats re-emits when it arrives.
+        viewModelScope.launch(Dispatchers.IO) {
+            _aiCategoryCache.value = loadAiCacheFromPrefs()
+            _aiCacheReady.value = true
         }
+        try {
+            Intent(context, ToolService::class.java).also { intent ->
+                context.bindService(intent, connection, Context.BIND_AUTO_CREATE)
+            }
+        } catch (_: Exception) { /* bind retry happens on next start request */ }
         refreshStats()
 
         // Auto-refresh adapts interval based on performance mode
@@ -508,7 +540,11 @@ class FocusFlowViewModel @Inject constructor(
                 obj.put("time", info.usageTimeMillis)
                 jsonArray.put(obj)
             }
-            usagePrefs.edit().putString(dateKey, jsonArray.toString()).apply()
+            val payload = jsonArray.toString()
+            // Shared file with FocusUsageWorker: guard against last-write-wins races.
+            synchronized(FocusPrefsLocks.usageCacheLock) {
+                usagePrefs.edit().putString(dateKey, payload).apply()
+            }
         } catch(e: Exception) {
             Log.e(TAG, "Failed to save daily usage locally", e)
         }
@@ -576,6 +612,7 @@ class FocusFlowViewModel @Inject constructor(
             _rawStats.value = usageList
             if (!_isWeekly.value && usageList.isNotEmpty()) {
                 saveDailyUsageLocally(todayStr, usageList)
+                pruneGhostLimits()
             }
             if (usageList.isEmpty()) {
                 Log.d(TAG, "No usage stats found. Check permissions or app usage today.")
@@ -792,10 +829,46 @@ class FocusFlowViewModel @Inject constructor(
     private fun saveAiCacheToPrefs(cache: Map<String, AppCategory>) {
         try {
             val json = JSONObject().apply { cache.forEach { (k, v) -> put(k, v.name) } }
-            aiPrefs.edit().putString(KEY_CATEGORIES, json.toString()).apply()
+            val payload = json.toString()
+            synchronized(FocusPrefsLocks.aiCacheLock) {
+                aiPrefs.edit().putString(KEY_CATEGORIES, payload).apply()
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to persist AI cache: ${e.message}")
         }
+    }
+
+    /**
+     * Drops limits for packages that are no longer installed (best-effort).
+     * Runs inside refreshStats' coroutine; never throws.
+     */
+    private suspend fun pruneGhostLimits() {
+        try {
+            val limits = withContext(Dispatchers.IO) {
+                try { appLimitRepository.allLimits.first() } catch (_: Exception) { emptyList() }
+            }
+            if (limits.isEmpty()) return
+            val pm = context.packageManager
+            val self = context.packageName
+            withContext(Dispatchers.IO) {
+                limits.forEach { limit ->
+                    try {
+                        if (limit.packageName == self) return@forEach
+                        if (pm.getLaunchIntentForPackage(limit.packageName) != null) return@forEach
+                        // No launcher entry: keep work-profile/disabled apps, drop uninstalled ones.
+                        try {
+                            pm.getApplicationInfo(limit.packageName, 0)
+                        } catch (_: PackageManager.NameNotFoundException) {
+                            try {
+                                appLimitRepository.getLimitForApp(limit.packageName)?.let {
+                                    appLimitRepository.removeLimit(it)
+                                }
+                            } catch (_: Exception) {}
+                        }
+                    } catch (_: Exception) { /* best-effort only */ }
+                }
+            }
+        } catch (_: Exception) { /* never break refresh for pruning */ }
     }
 
     private fun loadAiCacheFromPrefs(): Map<String, AppCategory> {
