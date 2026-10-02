@@ -3517,6 +3517,12 @@
     <string name="st_PasswordVaultScreen_gen_empty_pool">Enable at least one character class</string>
     <string name="st_PasswordVaultScreen_gen_use_password">Use password</string>
     <string name="st_PasswordVaultScreen_advanced">Advanced</string>
+    <string name="st_PasswordVaultScreen_gen_presets">Presets</string>
+    <string name="st_PasswordVaultScreen_gen_symbols_title">Symbols</string>
+    <string name="st_PasswordVaultScreen_gen_charsets">Character sets</string>
+    <string name="st_PasswordVaultScreen_gen_copied">Copied</string>
+    <string name="st_PasswordVaultScreen_gen_copy_short">Copy</string>
+    <string name="st_PasswordVaultScreen_gen_advanced_subtitle">Symbols, presets, memorable</string>
 
     <!-- BiometricPromptUtils -->
     <string name="st_BiometricPromptUtils_title">Biometric Authentication</string>
