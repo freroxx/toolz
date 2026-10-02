@@ -599,8 +599,8 @@ fun UpdateScreenPreview() {
     com.frerox.toolz.ui.theme.ToolzTheme {
         UpdateScreenContent(
             onBack = {},
-            currentVersionName = "1.1.5",
-            currentVersionCode = 16,
+            currentVersionName = "1.1.6",
+            currentVersionCode = 17,
             uiState = UpdateUiState.Idle,
             preferredAbi = "AUTO",
             onCheckForUpdates = {},
