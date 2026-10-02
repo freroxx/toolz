@@ -22,7 +22,8 @@ class EngineRegistry @Inject constructor(
     private data class Cooldown(val until: Long)
     private val cooldowns = ConcurrentHashMap<EngineId, Cooldown>()
     private val COOLDOWN_MS = 30_000L
-    private val FALLBACK_ORDER = listOf(EngineId.BING, EngineId.BRAVE, EngineId.YAHOO)
+    // Kept in sync with EngineId.META_MEMBERS (parseable engines only).
+    private val FALLBACK_ORDER = listOf(EngineId.BING, EngineId.YAHOO, EngineId.QWANT, EngineId.DUCKDUCKGO)
 
     fun isAvailable(id: EngineId): Boolean {
         val c = cooldowns[id] ?: return true
@@ -31,7 +32,7 @@ class EngineRegistry @Inject constructor(
     fun cooldown(id: EngineId) { cooldowns[id] = Cooldown(System.currentTimeMillis() + COOLDOWN_MS) }
 
     fun resolve(engineSetting: String): List<EngineId> = when (engineSetting.uppercase()) {
-        "META" -> listOf(EngineId.BING, EngineId.BRAVE, EngineId.YAHOO)
+        "META" -> EngineId.META_MEMBERS
         "CUSTOM" -> listOf(EngineId.CUSTOM)
         else -> listOf(EngineId.fromString(engineSetting))
     }

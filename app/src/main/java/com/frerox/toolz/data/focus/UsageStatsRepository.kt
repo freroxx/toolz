@@ -85,20 +85,24 @@ class UsageStatsRepository @Inject constructor(
     fun queryDailyByEvents(startMs: Long, endMs: Long): List<AppUsageInfo> {
         val durations = mutableMapOf<String, Long>()
         val resumeTime = mutableMapOf<String, Long>()
-        val events = usageStatsManager.queryEvents(startMs, endMs)
+        // queryEvents() is a platform API: treat the result as nullable — a null
+        // return (no data / service hiccup) must yield empty stats, never a crash.
+        val events = usageStatsManager.queryEvents(startMs, endMs) ?: return emptyList()
 
         while (events.hasNextEvent()) {
             val ev = UsageEvents.Event()
             events.getNextEvent(ev)
+            // packageName is a platform String: skip nulls before they reach map keys.
+            val pkg = ev.packageName ?: continue
             when (ev.eventType) {
                 UsageEvents.Event.MOVE_TO_FOREGROUND -> {
-                    resumeTime[ev.packageName] = ev.timeStamp
+                    resumeTime[pkg] = ev.timeStamp
                 }
                 UsageEvents.Event.MOVE_TO_BACKGROUND -> {
-                    val start = resumeTime[ev.packageName]
+                    val start = resumeTime[pkg]
                     if (start != null) {
-                        durations[ev.packageName] = (durations[ev.packageName] ?: 0L) + (ev.timeStamp - start)
-                        resumeTime.remove(ev.packageName)
+                        durations[pkg] = (durations[pkg] ?: 0L) + (ev.timeStamp - start)
+                        resumeTime.remove(pkg)
                     }
                 }
             }
@@ -130,11 +134,14 @@ class UsageStatsRepository @Inject constructor(
     }
 
     fun queryWeeklyByAggregate(startMs: Long, endMs: Long): List<AppUsageInfo> {
+        // queryAndAggregateUsageStats() returns null when permission is missing
+        // or there is no data — a null map must yield empty stats, never an NPE
+        // on the line below the try/catch.
         val stats = try {
             usageStatsManager.queryAndAggregateUsageStats(startMs, endMs)
         } catch (e: Exception) {
-            emptyMap()
-        }
+            null
+        } ?: return emptyList()
         
         return stats.mapNotNull { (pkg, usage) ->
             if (isExcluded(pkg)) return@mapNotNull null
@@ -161,8 +168,10 @@ class UsageStatsRepository @Inject constructor(
      * Useful for filling analytics chart bars.
      */
     fun queryTotalUsageInRange(startMs: Long, endMs: Long): Long {
+        // Null map (no permission / no data) means zero usage — check explicitly
+        // instead of relying on the catch below to convert the NPE.
         return try {
-            val stats = usageStatsManager.queryAndAggregateUsageStats(startMs, endMs)
+            val stats = usageStatsManager.queryAndAggregateUsageStats(startMs, endMs) ?: return 0L
             // Filter excluded packages so the headline total matches the visible list sum.
             stats.entries.filterNot { isExcluded(it.key) }.sumOf { it.value.totalTimeInForeground }
         } catch (e: Exception) {
@@ -192,7 +201,8 @@ class UsageStatsRepository @Inject constructor(
         val endMs = System.currentTimeMillis()
 
         return try {
-            val stats = usageStatsManager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, startMs, endMs)
+            // queryUsageStats() returns null when there is no data — not an exception.
+            val stats = usageStatsManager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, startMs, endMs) ?: return emptyMap()
             val out = mutableMapOf<String, Long>()
             stats.forEach { out[it.packageName] = (out[it.packageName] ?: 0L) + it.totalTimeInForeground }
             out

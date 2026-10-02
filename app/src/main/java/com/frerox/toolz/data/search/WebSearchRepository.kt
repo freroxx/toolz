@@ -147,6 +147,37 @@ class WebSearchRepository @Inject constructor(
         }
     }
 
+    /**
+     * AI-dedicated search: always fans out to [EngineId.AI_META_MEMBERS] with
+     * category ALL / offset 0, independent of the user's Search-tab engine
+     * setting. Returns a canonical-deduped, consensus-ranked list capped for
+     * prompt injection (default 8). Single source of truth for AI citations —
+     * the UI bottom sheet renders exactly this list.
+     */
+    suspend fun searchForAi(
+        query: String,
+        maxResults: Int = 8,
+    ): List<SearchResult> = withContext(Dispatchers.IO) {
+        if (query.isBlank()) return@withContext emptyList()
+        val adBlockEnabled = try { settingsRepository.searchAdBlockEnabled.first() } catch (_: Exception) { true }
+        val safeSearch = try { settingsRepository.searchSafeSearch.first() } catch (_: Exception) { true }
+        val encodedQuery = URLEncoder.encode(query, StandardCharsets.UTF_8.name())
+        val queryEngines = EngineId.AI_META_MEMBERS
+        val resultsByEngine = coroutineScope {
+            queryEngines.map { eng ->
+                async {
+                    eng to fetchFromEngine(
+                        eng, encodedQuery, 0,
+                        SearchCategory.ALL, safeSearch, adBlockEnabled
+                    )
+                }
+            }.awaitAll().filter { (_, results) -> results.isNotEmpty() }.toMap()
+        }
+        if (resultsByEngine.isEmpty()) return@withContext emptyList()
+        // MetaMerger.merge already dedupes by canonical URL + merges richest fields.
+        metaMerger.merge(resultsByEngine).take(maxResults.coerceIn(1, 12))
+    }
+
     /** Images/videos never use META consensus merging — fan out, fall back across engines, dedupe by URL. */
     private suspend fun searchMedia(
         engine: EngineId,

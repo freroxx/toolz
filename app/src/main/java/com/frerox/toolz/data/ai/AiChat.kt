@@ -30,6 +30,8 @@ data class AiChat(
     /**
      * Alias used by [com.frerox.toolz.ui.screens.ai.chatGroup] so the UI
      * layer can reference a semantic name without a DB migration.
+     * Computed property (no backing field) — Room ignores it automatically,
+     * so no @Ignore / column is needed.
      */
     val createdAt: Long get() = timestamp
 }
@@ -67,16 +69,16 @@ data class AiMessage(
 @Dao
 interface AiDao {
 
-    @Query("SELECT * FROM ai_chats ORDER BY timestamp DESC")
+    @Query("SELECT * FROM ai_chats ORDER BY timestamp DESC, id DESC")
     fun getAllChats(): Flow<List<AiChat>>
 
-    @Query("SELECT * FROM ai_chats ORDER BY timestamp DESC LIMIT :limit")
+    @Query("SELECT * FROM ai_chats ORDER BY timestamp DESC, id DESC LIMIT :limit")
     fun getRecentChats(limit: Int): Flow<List<AiChat>>
 
     @Insert
     suspend fun insertChat(chat: AiChat): Long
 
-    @Query("SELECT * FROM ai_messages WHERE chatId = :chatId ORDER BY timestamp ASC")
+    @Query("SELECT * FROM ai_messages WHERE chatId = :chatId ORDER BY timestamp ASC, id ASC")
     fun getMessagesForChat(chatId: Int): Flow<List<AiMessage>>
 
     @Insert
@@ -89,16 +91,19 @@ interface AiDao {
     @Query("DELETE FROM ai_messages WHERE chatId = :chatId")
     suspend fun deleteMessagesForChat(chatId: Int)
 
+    @Query("DELETE FROM ai_messages WHERE chatId = :chatId AND id > :afterId")
+    suspend fun deleteMessagesAfter(chatId: Int, afterId: Int)
+
     @Update
     suspend fun updateChat(chat: AiChat)
 
     @Update
     suspend fun updateMessage(message: AiMessage)
 
-    @Query("SELECT * FROM ai_chats")
+    @Query("SELECT * FROM ai_chats ORDER BY timestamp DESC, id DESC")
     suspend fun getAllChatsSync(): List<AiChat>
 
-    @Query("SELECT * FROM ai_messages")
+    @Query("SELECT * FROM ai_messages ORDER BY chatId ASC, timestamp ASC, id ASC")
     suspend fun getAllMessagesSync(): List<AiMessage>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)

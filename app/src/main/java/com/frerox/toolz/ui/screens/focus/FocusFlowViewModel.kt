@@ -46,6 +46,7 @@ import com.frerox.toolz.service.ToolService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -494,8 +495,13 @@ class FocusFlowViewModel @Inject constructor(
         _weeklyBarsLoading.value = true
         try {
             _weeklyBars.value = withContext(Dispatchers.IO) { loadWeeklyBars() }
-        } catch (_: Exception) {
-            // Keep previous bars; a transient IPC failure must not blank the chart.
+        } catch (e: CancellationException) {
+            // Structured concurrency: never swallow cancellation.
+            throw e
+        } catch (t: Throwable) {
+            // Keep previous bars; a transient IPC failure must not blank the chart —
+            // and must never crash the app from a background prewarm (see NPE fix).
+            Log.w(TAG, "Weekly bars refresh failed; keeping previous", t)
         } finally {
             _weeklyBarsLoading.value = false
         }
@@ -520,9 +526,12 @@ class FocusFlowViewModel @Inject constructor(
             val m = dCal.get(Calendar.MONTH) + 1
             val d = dCal.get(Calendar.DAY_OF_MONTH)
             val key = String.format(Locale.US, "%04d-%02d-%02d", y, m, d)
-            val shortDate = android.text.format.DateFormat.format("EE dd", dCal).toString()
+            // DateFormat can throw on exotic locales — fall back to the ISO key.
+            val shortDate = runCatching {
+                android.text.format.DateFormat.format("EE dd", dCal).toString()
+            }.getOrDefault(key)
 
-            val jsonStr = usagePrefs.getString(key, null)
+            val jsonStr = runCatching { usagePrefs.getString(key, null) }.getOrNull()
             var total = 0L
             val topApps = mutableListOf<Pair<String, Long>>()
             

@@ -711,18 +711,23 @@ class AiAssistantViewModel @Inject constructor(
     // ── Chat lifecycle ────────────────────────────────────────────────────
 
     fun loadChat(chatId: Int) {
+        // Cancel any in-flight inference: streamingText is global, not per-chat —
+        // without this, tokens from the old chat bleed into the newly opened one.
+        cancelRequest()
         messagesJob?.cancel()
         viewModelScope.launch {
             val chat = aiDao.getAllChatsSync().find { it.id == chatId }
             val isCoach = chat?.title == "AI Fitness Coach"
-            _uiState.update { 
+            _uiState.update {
                 it.copy(
-                    currentChatId = chatId, 
-                    isHistoryOpen = false, 
-                    error = null, 
+                    currentChatId = chatId,
+                    isHistoryOpen = false,
+                    error = null,
                     chatSummary = null,
-                    isCoachMode = isCoach
-                ) 
+                    isCoachMode = isCoach,
+                    streamingText = "",
+                    loadingPhaseText = ""
+                )
             }
         }
         messagesJob = viewModelScope.launch {
@@ -1139,19 +1144,38 @@ Summarize this AI conversation as 3-6 concise bullet points.
         val currentMessages = _uiState.value.messages
         val messageIndex = currentMessages.indexOfFirst { it.id == messageId }
         if (messageIndex == -1) return@launch
-        
+
         val message = currentMessages[messageIndex]
         if (message.isUser) return@launch
+        if (_uiState.value.isLoading) return@launch
 
         // Find the last user message before this one
         val historyBefore = currentMessages.take(messageIndex)
-        val lastUserMessage = historyBefore.lastOrNull { it.isUser } ?: return@launch
+        val lastUserIndex = historyBefore.indexOfLast { it.isUser }
+        if (lastUserIndex == -1) return@launch
+        val lastUserMessage = historyBefore[lastUserIndex]
+        val chatId = _uiState.value.currentChatId ?: lastUserMessage.chatId
 
-        // Remove the message and everything after it
-        val newMessages = currentMessages.take(messageIndex).toMutableList()
-        _uiState.update { it.copy(messages = newMessages) }
+        // Delete from DB everything after the message BEFORE lastUser (inclusive
+        // of lastUser + the AI reply being regenerated). sendMessage() will
+        // re-insert lastUser, so excluding it from the delete avoids duplicates
+        // and prevents loadChat() from resurrecting stale rows.
+        try {
+            val keepUpToId = if (lastUserIndex > 0) historyBefore[lastUserIndex - 1].id else 0
+            if (keepUpToId > 0) {
+                aiDao.deleteMessagesAfter(chatId, keepUpToId)
+            } else {
+                aiDao.deleteMessagesForChat(chatId)
+            }
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "regenerate DAO cleanup failed", e)
+        }
 
-        // Trigger send with the last user message text
+        // Truncate UI to before lastUser; sendMessage re-adds it via DAO flow.
+        val truncated = currentMessages.take(messageIndex).take(lastUserIndex)
+        _uiState.update { it.copy(messages = truncated, error = null) }
+
+        // Trigger send with the last user message text (re-inserts user row)
         sendMessage(lastUserMessage.text)
     }
 

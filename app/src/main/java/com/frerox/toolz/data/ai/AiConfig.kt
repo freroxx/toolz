@@ -27,7 +27,11 @@ data class AiConfig(
     val apiKey: String,
     val iconRes: String = "AUTO", // "AUTO", "GEMINI", "CHATGPT", "GROQ", "CLAUDE", "BOT", "SPARKLE", "BRAIN"
     val customIconUri: String? = null
-)
+) {
+    // Never leak keys into logs/crash reports via data-class toString().
+    override fun toString(): String =
+        "AiConfig(name=$name, provider=$provider, model=$model, apiKey=${if (apiKey.isBlank()) "<empty>" else "<redacted:${apiKey.length} chars>"}, iconRes=$iconRes, customIconUri=$customIconUri)"
+}
 
 @JsonClass(generateAdapter = true)
 data class AiIdentity(

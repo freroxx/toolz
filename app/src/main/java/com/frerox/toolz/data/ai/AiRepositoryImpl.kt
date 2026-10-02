@@ -183,9 +183,10 @@ class AiRepositoryImpl @Inject constructor(
         "You are Toolz AI, a professional and highly accurate assistant. " +
                 "When search results are provided, you MUST use them to answer the user's query. " +
                 "Do NOT say you can't find information if snippets are present below. " +
-                "Always cite sources inline using [Title](URL) format. " +
-                "When uncertain, state it clearly. Use markdown for formatting. " +
-                "Provide a 'Sources' section at the end if web search was used."
+                "Cite inline using [Title](URL) format, using ONLY the URLs given — " +
+                "never invent URLs. Do NOT write a 'Sources' section; the app renders " +
+                "the source list separately. " +
+                "When uncertain, state it clearly. Use markdown for formatting."
     @Inject lateinit var webSearchRepository: WebSearchRepository
 
     override fun getChatResponse(
@@ -203,13 +204,15 @@ class AiRepositoryImpl @Inject constructor(
         val rawProvider = providerOverride ?: settingsManager.getAiProvider()
         val provider = AiSettingsHelper.canonicalProvider(rawProvider)
         val keyState = settingsManager.resolveApiKey(provider)
-        // Fall back to canonical recommended model if stored model is blank
-        val storedModel = modelOverride ?: settingsManager.getSelectedModel(provider)
-        val modelName = AiSettingsHelper.migrateRetiredModel(provider, storedModel)
+        // Blank stored model means "never chosen" — fall back to recommended instead of sending "".
+        val rawStored = (modelOverride ?: settingsManager.getSelectedModel(provider)).ifBlank {
+            AiSettingsHelper.getRecommendedModel(provider)
+        }
+        val modelName = AiSettingsHelper.migrateRetiredModel(provider, rawStored)
             ?.also { migrated ->
-                Log.w(TAG, "Migrated retired $provider model '$storedModel' -> '$migrated'")
+                Log.w(TAG, "Migrated retired $provider model '$rawStored' -> '$migrated'")
                 runCatching { settingsManager.setSelectedModel(migrated, provider) }
-            } ?: storedModel
+            } ?: rawStored
         val searchEnabled = settingsRepository.aiSearchEnabled.first()
 
         if (searchEnabled && needsWebSearchHeuristic(prompt)) {
@@ -223,32 +226,44 @@ class AiRepositoryImpl @Inject constructor(
             }
             if (searchQuery != null) {
                 val rawResults = try {
-                    webSearchRepository.search(searchQuery)
+                    // AI always uses the dedicated META fan-out (multiple unique results),
+                    // independent of the user's Search-tab engine setting.
+                    webSearchRepository.searchForAi(searchQuery, maxResults = 10)
                 } catch (e: Exception) {
                     Log.e(TAG, "Web search failed for '$searchQuery'", e)
                     emptyList()
                 }
                 if (rawResults.isNotEmpty()) {
-                    // Rank locally first (fast, free), then optionally refine with LLM top-5.
-                    val ranked = rankResultsLocally(prompt, rawResults)
+                    // searchForAi already returns canonical-deduped + consensus-ranked.
+                    // Re-dedupe defensively (canonical) in case ranking helpers change order.
+                    val deduped = rawResults.distinctBy { canonicalSourceUrl(it.url) }
+                    // Rank locally first (fast, free), then optionally refine with LLM top-8.
+                    val ranked = rankResultsLocally(prompt, deduped)
                     val bestResults = if (extractionKey != null) {
                         selectBestSources(extractionKey.first, extractionKey.second, prompt, ranked)
-                    } else ranked.take(5)
-                    val contextText = bestResults.joinToString("\n\n") { "TITLE: ${it.title}\nURL: ${it.url}\nSNIPPET: ${it.snippet}" }
+                    } else ranked.take(8)
+                    // Cap snippet length + mark untrusted to reduce prompt-injection surface.
+                    // The bottom sheet (searchSources JSON) is the ONLY rendered source list —
+                    // the model must NOT emit its own 'Sources' section.
+                    val contextText = bestResults.joinToString("\n\n") {
+                        "TITLE: ${it.title.take(200)}\nURL: ${it.url}\nSNIPPET: <untrusted>${it.snippet.take(500)}</untrusted>"
+                    }
 
                     val sourcesAdapter = moshi.adapter<List<SearchResult>>(Types.newParameterizedType(List::class.java, SearchResult::class.java))
                     val searchSources = sourcesAdapter.toJson(bestResults)
 
-                    val enrichedPrompt = "User Prompt: $prompt\n\n" +
+                    val enrichedPrompt = "User Prompt: ${prompt.take(4000)}\n\n" +
                         "BELOW ARE LIVE WEB SEARCH RESULTS (query: \"$searchQuery\"). USE THEM TO ANSWER:\n$contextText\n\n" +
                         "INSTRUCTIONS:\n" +
                         "1. Answer the prompt using the search results above. Prefer fresh facts over training data.\n" +
                         "2. Do NOT claim you cannot find information; use the snippets provided.\n" +
-                        "3. Use inline citations [Title](URL).\n" +
-                        "4. List all URLs in a 'Sources' section at the end."
+                        "3. Cite inline as [Title](URL) using ONLY the URLs given above. Never invent URLs.\n" +
+                        "4. Do NOT write a 'Sources' section — the app renders the source list separately."
 
                     emit(callProvider(provider, keyState, modelName, enrichedPrompt, history.takeLast(MAX_HISTORY_MESSAGES), image, true, systemPromptOverride).let {
-                        if (it.isSuccess) Result.success(it.getOrThrow().copy(sources = searchSources)) else it
+                        if (it.isSuccess) Result.success(stripSourcesSection(it.getOrThrow().text).let { cleaned ->
+                            it.getOrThrow().copy(text = cleaned, sources = searchSources)
+                        }) else it
                     })
                     return@flow
                 } else {
@@ -267,31 +282,84 @@ class AiRepositoryImpl @Inject constructor(
 
     // ── Web-search helpers ──────────────────────────────────────────
 
+    /**
+     * Canonical URL for AI dedup — mirrors MetaMerger.canonicalUrl without a
+     * new DI edge. Keeps the bottom-sheet JSON and the prompt in sync so the
+     * same page never appears twice under different tracking params.
+     */
+    internal fun canonicalSourceUrl(url: String): String = try {
+        val n = url.trim().let {
+            if (it.startsWith("http://", ignoreCase = true)) "https://" + it.substring(7) else it
+        }
+        val uri = java.net.URI(n)
+        val host = uri.host?.lowercase(java.util.Locale.ROOT)?.removePrefix("www.")?.removePrefix("m.") ?: ""
+        val path = (uri.path ?: "").removeSuffix("/").lowercase(java.util.Locale.ROOT)
+        val q = uri.query?.split("&")
+            ?.filterNot {
+                val k = it.substringBefore("=").lowercase(java.util.Locale.ROOT)
+                k.startsWith("utm_") || k in setOf(
+                    "ref", "fbclid", "gclid", "msclkid", "yclid", "mc_cid",
+                    "igshid", "wbraid", "gbraid"
+                )
+            }
+            ?.joinToString("&")?.takeIf { it.isNotEmpty() }?.let { "?$it" }.orEmpty()
+        if (host.isNotEmpty()) "https://$host$path$q"
+        else n.lowercase(java.util.Locale.ROOT).removeSuffix("/").substringBefore("#")
+    } catch (_: Exception) {
+        url.trim().substringBefore("#").removeSuffix("/").lowercase(java.util.Locale.ROOT)
+    }
+
+    /**
+     * Safety net: strip a model-generated trailing 'Sources' section if the
+     * model ignored the no-Sources instruction. The bottom sheet JSON is the
+     * single source of truth, so removing this block never loses data.
+     */
+    internal fun stripSourcesSection(text: String): String {
+        val regex = Regex(
+            "(?im)^#{0,3}\\s*sources\\s*:?\\s*$[\\s\\S]*$"
+        )
+        val match = regex.find(text) ?: return text
+        // Only strip if it looks like a link list (has http or markdown links).
+        val tail = match.value
+        return if (tail.contains("http", ignoreCase = true) || tail.contains("](")) {
+            text.substring(0, match.range.first).trimEnd()
+        } else text
+    }
+
     /** Cheap local gate so greetings / chit-chat skip the search pipeline entirely. */
     private fun needsWebSearchHeuristic(prompt: String): Boolean {
-        val p = prompt.trim().lowercase()
+        val p = prompt.trim().lowercase(java.util.Locale.ROOT)
         if (p.length < 4) return false
         val noSearch = listOf(
             "hi", "hello", "hey", "thanks", "thank you", "bye", "good morning",
             "good afternoon", "good evening", "how are you", "who are you"
         )
-        if (noSearch.any { p == it || p.startsWith("$it ") }) return false
+        if (noSearch.any { p == it || p.startsWith("$it ") || p.startsWith("$it?") || p.startsWith("$it!") }) return false
+        // Code / creative / chat intents never need live search.
+        val codeHints = listOf("write code", "write a function", "debug", "explain code", "regex", "sql query", "python", "kotlin", "java ", "javascript")
+        if (codeHints.any { p.contains(it) }) return false
         // Explicit user intent always searches
         if (p.contains("search") || p.contains("latest") || p.contains("today") ||
             p.contains("news") || p.contains("price") || p.contains("score") ||
             p.contains("weather") || p.contains("who won") || p.contains("release")
         ) return true
-        // Questions about current/factual topics default to search
-        if (p.endsWith("?") && p.split(" ").size >= 4) return true
-        if (p.split(" ").size >= 3) return true
+        val words = p.split(Regex("\\s+")).filter { it.isNotBlank() }
+        // Questions about current/factual topics default to search; plain chat needs more words.
+        if (p.endsWith("?") && words.size >= 4) return true
+        if (words.size >= 6) return true
         return false
     }
 
     /** Local keyword query when LLM extraction is unavailable or says NONE. */
     private fun heuristicSearchQuery(prompt: String): String? {
-        val cleaned = prompt.trim()
-            .removePrefix("search for").removePrefix("search").removePrefix("google")
-            .trim(' ', ':', '-', '?', '!', '.', '"', '\'')
+        var cleaned = prompt.trim()
+        // Case-insensitive prefix strip (original removePrefix was case-sensitive).
+        listOf("search for", "search", "google").forEach { prefix ->
+            if (cleaned.lowercase(java.util.Locale.ROOT).startsWith(prefix)) {
+                cleaned = cleaned.substring(prefix.length)
+            }
+        }
+        cleaned = cleaned.trim(' ', ':', '-', '?', '!', '.', '"', '\'')
         if (cleaned.length < 3) return null
         // Cap length so engine URLs stay short
         return cleaned.take(180)
@@ -319,14 +387,16 @@ class AiRepositoryImpl @Inject constructor(
 
     /** Local BM25-lite ranking: overlap of query terms + title boost + freshness. */
     private fun rankResultsLocally(prompt: String, results: List<SearchResult>): List<SearchResult> {
-        if (results.size <= 5) return results
-        val terms = prompt.lowercase().split(Regex("[^a-z0-9]+")).filter { it.length >= 3 }.toSet()
+        if (results.size <= 8) return results
+        // Note: [^a-z0-9] drops CJK; keep as cheap pre-filter only, consensus still applies.
+        val terms = prompt.lowercase(java.util.Locale.ROOT).split(Regex("[^a-z0-9\\p{L}]+"))
+            .filter { it.length >= 2 }.toSet()
         if (terms.isEmpty()) return results.take(10)
         return results.map { r ->
-            val hay = "${r.title} ${r.snippet}".lowercase()
+            val hay = "${r.title} ${r.snippet}".lowercase(java.util.Locale.ROOT)
             var score = 0.0
             terms.forEach { t ->
-                if (r.title.lowercase().contains(t)) score += 3.0 else if (hay.contains(t)) score += 1.0
+                if (r.title.lowercase(java.util.Locale.ROOT).contains(t)) score += 3.0 else if (hay.contains(t)) score += 1.0
             }
             // Prefer results corroborated by multiple engines + with dates
             score += r.engines.size * 0.5
@@ -373,16 +443,21 @@ class AiRepositoryImpl @Inject constructor(
     }
 
     private suspend fun selectBestSources(provider: String, model: String, prompt: String, results: List<SearchResult>): List<SearchResult> {
-        if (results.size <= 5) return results
+        // Dedupe canonically FIRST so the LLM never sees the same page twice.
+        val unique = results.distinctBy { canonicalSourceUrl(it.url) }
+        if (unique.size <= 8) return unique
         val canonical = AiSettingsHelper.canonicalProvider(provider)
-        val url = AiSettingsHelper.getChatCompletionUrl(canonical) ?: return results.take(5)
-        val apiKey = settingsManager.resolveApiKey(canonical).value.ifBlank { return results.take(5) }
+        val url = AiSettingsHelper.getChatCompletionUrl(canonical)?.takeIf { it.isNotBlank() } ?: return unique.take(8)
+        val apiKey = settingsManager.resolveApiKey(canonical).value.ifBlank { return unique.take(8) }
         val modelsToTry = listOf(model) + AiSettingsHelper.getFallbackModels(canonical)
         for (modelName in modelsToTry.distinct().take(2)) {
             try {
-                val selectionPrompt = "User Prompt: $prompt\n\nResults:\n" +
-                    results.take(12).withIndex().joinToString("\n") { (i, r) -> "[$i] ${r.title}: ${r.snippet.take(220)}" } +
-                    "\n\nBased on the user prompt, identify the top 5 most relevant results by index. Respond with ONLY a comma-separated list of numbers, e.g., 0,3,7,2,5"
+                // Give the selector consensus metadata so META agreement isn't discarded.
+                val selectionPrompt = "User Prompt: ${prompt.take(1000)}\n\nResults:\n" +
+                    unique.take(12).withIndex().joinToString("\n") { (i, r) ->
+                        "[$i] ${r.title.take(160)} | engines:${r.engines.joinToString("+").ifBlank { r.source }} | date:${r.date ?: "n/a"} | ${r.snippet.take(220)}"
+                    } +
+                    "\n\nBased on the user prompt, identify the top 8 most relevant results by index. Respond with ONLY a comma-separated list of numbers, e.g., 0,3,7,2,5"
 
                 val request = OpenAiRequest(
                     model = modelName,
@@ -390,7 +465,7 @@ class AiRepositoryImpl @Inject constructor(
                         OpenAiMessage("system", MessageContent.Text("You are a search result selector. Reply with ONLY indices.")),
                         OpenAiMessage("user", MessageContent.Text(selectionPrompt))
                     ),
-                    maxTokens = 32
+                    maxTokens = 48
                 )
 
                 val response = callChatCompletionWithRetry(
@@ -400,12 +475,12 @@ class AiRepositoryImpl @Inject constructor(
                     request = request
                 )
                 val indices = response.choices.firstOrNull()?.message?.content?.split(",")?.mapNotNull { it.trim().toIntOrNull() } ?: emptyList()
-                return indices.mapNotNull { results.getOrNull(it) }.distinctBy { it.url }.take(5).ifEmpty { results.take(5) }
+                return indices.mapNotNull { unique.getOrNull(it) }.distinctBy { canonicalSourceUrl(it.url) }.take(8).ifEmpty { unique.take(8) }
             } catch (e: Exception) {
                 Log.e(TAG, "Source selection failed with $modelName, trying fallback if available", e)
             }
         }
-        return results.take(5)
+        return unique.take(8)
     }
 
     override fun performDeepDive(
@@ -416,8 +491,10 @@ class AiRepositoryImpl @Inject constructor(
         val rawProvider = settingsManager.getAiProvider()
         val provider = AiSettingsHelper.canonicalProvider(rawProvider)
         val keyState = settingsManager.resolveApiKey(provider)
-        val storedModel = settingsManager.getSelectedModel(provider)
-        val modelName = AiSettingsHelper.migrateRetiredModel(provider, storedModel) ?: storedModel
+        val rawStored = settingsManager.getSelectedModel(provider).ifBlank {
+            AiSettingsHelper.getRecommendedModel(provider)
+        }
+        val modelName = AiSettingsHelper.migrateRetiredModel(provider, rawStored) ?: rawStored
         val helperKey = resolveSearchHelperKey(provider)
 
         if (helperKey == null) {
@@ -427,23 +504,35 @@ class AiRepositoryImpl @Inject constructor(
 
         try {
             val sourcesAdapter = moshi.adapter<List<SearchResult>>(Types.newParameterizedType(List::class.java, SearchResult::class.java))
-            val sources = sourcesAdapter.fromJson(sourcesJson) ?: emptyList()
+            val sources = (sourcesAdapter.fromJson(sourcesJson) ?: emptyList())
+                .distinctBy { canonicalSourceUrl(it.url) }
 
             val deepContext = StringBuilder()
             sources.take(3).forEach { source ->
                 val content = webSearchRepository.fetchWebsiteContent(source.url)
+                if (content.startsWith("Error:")) return@forEach
                 val structured = structureWebsiteContent(helperKey.first, helperKey.second, source.title, content)
-                deepContext.append("SOURCE: ${source.title}\nURL: ${source.url}\nCONTENT: $structured\n\n")
+                deepContext.append("SOURCE: ${source.title.take(200)}\nURL: ${source.url}\nCONTENT: <untrusted>${structured.take(1200)}</untrusted>\n\n")
+            }
+            if (deepContext.isBlank()) {
+                emit(Result.failure(Exception("Deep dive failed: could not fetch any source content.")))
+                return@flow
             }
 
             val finalPrompt = "DEEP DIVE CONTEXT (Fetched live from websites):\n$deepContext\n\n" +
-                "User original question: $prompt\n\n" +
-                "Provide an extremely detailed answer using this full website context. Cite everything with [Title](URL)."
+                "User original question: ${prompt.take(4000)}\n\n" +
+                "Provide an extremely detailed answer using this full website context. " +
+                "Cite inline with [Title](URL) using ONLY the URLs above. Do NOT write a 'Sources' section."
 
             // Filter history to avoid consecutive assistant messages (important for Claude/OpenAI)
             val filteredHistory = history.filter { !it.text.contains("dig deeper", ignoreCase = true) }
 
-            emit(callProvider(provider, keyState, modelName, finalPrompt, filteredHistory.takeLast(MAX_HISTORY_MESSAGES), null, false, null))
+            emit(callProvider(provider, keyState, modelName, finalPrompt, filteredHistory.takeLast(MAX_HISTORY_MESSAGES), null, false, null).let {
+                if (it.isSuccess) {
+                    val cleaned = stripSourcesSection(it.getOrThrow().text)
+                    Result.success(it.getOrThrow().copy(text = cleaned))
+                } else it
+            })
         } catch (e: Exception) {
             emit(Result.failure(e))
         }
@@ -483,6 +572,7 @@ class AiRepositoryImpl @Inject constructor(
         val key = config.apiKey.trim().ifBlank {
             settingsManager.resolveApiKey(config.provider).value
         }
+        val model = config.model.ifBlank { AiSettingsHelper.getRecommendedModel(config.provider) }
         emit(
             try {
                 val result = callProvider(
@@ -491,12 +581,14 @@ class AiRepositoryImpl @Inject constructor(
                         value = key,
                         source = if (key.isBlank()) ApiKeySource.NONE else ApiKeySource.USER,
                     ),
-                    modelName = config.model,
+                    modelName = model,
                     prompt = "Reply with exactly: OK",
                     history = emptyList(),
                     image = null,
                     searchEnabled = false,
-                    systemPromptOverride = null
+                    systemPromptOverride = null,
+                    // Contract: test must not mutate global selected-model state.
+                    persistFallback = false,
                 )
                 result.map { it.text }
             } catch (e: Exception) {
@@ -543,17 +635,43 @@ class AiRepositoryImpl @Inject constructor(
 
     private fun isModelNotFound(e: Throwable): Boolean {
         if (e is HttpException && e.code() == 404) return true
-        val msg = (e.message ?: "").lowercase()
-        return msg.contains("404") && (msg.contains("model") || msg.contains("not found") || msg.contains("decommissioned")) ||
+        // 410 Gone = retired model; 400 with model mention = bad model id.
+        if (e is HttpException && (e.code() == 410 || e.code() == 400)) {
+            val body = runCatching { e.response()?.errorBody()?.string().orEmpty() }
+                .getOrDefault("").lowercase(java.util.Locale.ROOT)
+            val msg = (e.message ?: "").lowercase(java.util.Locale.ROOT) + " " + body
+            if (msg.contains("model")) return true
+        }
+        val msg = (e.message ?: "").lowercase(java.util.Locale.ROOT)
+        // Tightened: bare "does not exist" without 404/model context caused false positives.
+        return (msg.contains("404") && (msg.contains("model") || msg.contains("not found") || msg.contains("decommissioned"))) ||
             msg.contains("model_not_found") || msg.contains("model not found") ||
-            msg.contains("does not exist") || msg.contains("decommissioned")
+            msg.contains("decommissioned") ||
+            (msg.contains("does not exist") && msg.contains("model"))
     }
 
     private fun isRateLimited(e: Throwable): Boolean {
-        if (e is HttpException && (e.code() == 429 || e.code() == 503)) return true
-        val msg = (e.message ?: "").lowercase()
+        if (e is HttpException && (e.code() == 429 || e.code() == 503 || e.code() == 502 || e.code() == 500 || e.code() == 504)) return true
+        val msg = (e.message ?: "").lowercase(java.util.Locale.ROOT)
         return msg.contains("429") || msg.contains("rate limit") || msg.contains("quota") ||
-            msg.contains("503") || msg.contains("overloaded")
+            msg.contains("503") || msg.contains("502") || msg.contains("overloaded") ||
+            msg.contains("temporarily unavailable") || msg.contains("try again later")
+    }
+
+    private fun isRetryable(e: Throwable): Boolean {
+        if (e is HttpException) {
+            return when (e.code()) {
+                429, 500, 502, 503, 504 -> true
+                else -> false
+            }
+        }
+        // Moshi parse errors / auth errors must never retry.
+        val name = e.javaClass.name
+        if (name.contains("JsonDataException") || name.contains("JsonEncodingException")) return false
+        val msg = (e.message ?: "").lowercase(java.util.Locale.ROOT)
+        if (msg.contains("unauthorized") || msg.contains("invalid api key") || msg.contains("401") || msg.contains("403")) return false
+        return msg.contains("timeout") || msg.contains("unavailable") || msg.contains("deadline") ||
+            msg.contains("network") || msg.contains("500") || msg.contains("502") || msg.contains("503")
     }
 
     private fun referralHeaders(provider: String): Pair<String?, String?> = when (AiSettingsHelper.canonicalProvider(provider)) {
@@ -563,8 +681,8 @@ class AiRepositoryImpl @Inject constructor(
 
     /**
      * Single chat-completion POST with up to [MAX_API_ATTEMPTS] attempts.
-     * Retries transient failures (429/5xx/timeout) with exponential backoff.
-     * Does NOT retry 404 (caller migrates the model instead).
+     * Retries transient failures (429/5xx/timeout) with exponential backoff + jitter.
+     * Honors Retry-After when present. Does NOT retry 404/auth/parse errors.
      */
     private suspend fun callChatCompletionWithRetry(
         provider: String,
@@ -582,10 +700,11 @@ class AiRepositoryImpl @Inject constructor(
             } catch (e: HttpException) {
                 lastError = e
                 when {
-                    e.code() == 404 -> throw e // model gone — caller must migrate, retrying same ID is useless
+                    e.code() == 404 || e.code() == 410 -> throw e // model gone — caller must migrate
                     e.code() == 401 || e.code() == 403 -> throw e // bad key — retry won't help
+                    !isRetryable(e) -> throw e
                     attempt < attempts - 1 -> {
-                        val backoff = RETRY_BASE_DELAY_MS * (1L shl attempt)
+                        val backoff = retryBackoff(attempt, e)
                         Log.w(TAG, "Chat call $canonical/${request.model} attempt ${attempt + 1}/$attempts failed HTTP ${e.code()}, retry in ${backoff}ms")
                         delay(backoff)
                     }
@@ -594,17 +713,28 @@ class AiRepositoryImpl @Inject constructor(
             } catch (e: Exception) {
                 lastError = e
                 if (isModelNotFound(e)) throw e
-                val msg = (e.message ?: "").lowercase()
-                val isAuth = msg.contains("unauthorized") || msg.contains("invalid api key") || msg.contains("401")
-                if (isAuth) throw e
+                if (!isRetryable(e)) throw e
                 if (attempt < attempts - 1) {
-                    val backoff = RETRY_BASE_DELAY_MS * (1L shl attempt)
+                    val backoff = retryBackoff(attempt, e)
                     Log.w(TAG, "Chat call $canonical/${request.model} attempt ${attempt + 1}/$attempts failed (${e.message}), retry in ${backoff}ms")
                     delay(backoff)
                 }
             }
         }
         throw lastError ?: Exception("Chat completion failed after $attempts attempts")
+    }
+
+    private fun retryBackoff(attempt: Int, e: Throwable): Long {
+        // Prefer server Retry-After (seconds) when present, else exp backoff + jitter.
+        val retryAfterSec = (e as? HttpException)?.let { http ->
+            runCatching {
+                http.response()?.headers()?.get("Retry-After")?.trim()?.toLongOrNull()
+            }.getOrNull()
+        }?.takeIf { it in 1..120 }?.times(1000L)
+        if (retryAfterSec != null) return retryAfterSec
+        val exp = RETRY_BASE_DELAY_MS * (1L shl attempt.coerceAtMost(4))
+        val jitter = (Math.random() * 250L).toLong()
+        return (exp + jitter).coerceAtMost(10_000L)
     }
 
     private suspend fun callProvider(
@@ -615,7 +745,8 @@ class AiRepositoryImpl @Inject constructor(
         history: List<AiMessage>,
         image: Bitmap?,
         searchEnabled: Boolean,
-        systemPromptOverride: String?
+        systemPromptOverride: String?,
+        persistFallback: Boolean = true,
     ): Result<ChatRepository.ChatResponseChunk> {
         val canonical = AiSettingsHelper.canonicalProvider(provider)
         if (keyState.value.isBlank()) {
@@ -625,19 +756,28 @@ class AiRepositoryImpl @Inject constructor(
         // Build candidate chain: stored model → retired-model migration → provider fallbacks.
         // Dedupe while preserving order. Cap at 4 to bound latency.
         val candidates = buildList {
-            add(modelName)
+            add(modelName.ifBlank { AiSettingsHelper.getRecommendedModel(canonical) })
             AiSettingsHelper.migrateRetiredModel(canonical, modelName)?.let { add(it) }
             addAll(AiSettingsHelper.getFallbackModels(canonical))
         }.distinct().take(4)
+
+        // Image requests: fail fast if NO candidate supports vision (avoids silent Unknown error).
+        if (image != null && candidates.none { AiSettingsHelper.supportsVision(canonical, it) }) {
+            return Result.failure(
+                Exception("$canonical has no vision-capable model in its fallback chain. Remove the image or pick a vision model.")
+            )
+        }
 
         var lastError: Throwable? = null
         for ((index, currentModel) in candidates.withIndex()) {
             try {
                 if (image != null && !AiSettingsHelper.supportsVision(canonical, currentModel)) {
-                    return Result.failure(Exception("$canonical model '$currentModel' does not support image input. Pick a vision-capable model or remove the image."))
+                    Log.w(TAG, "Skipping non-vision model $currentModel for image request")
+                    // Don't abort — try next fallback that supports vision.
+                    continue
                 }
                 val result = executeProviderCall(canonical, keyState.value, currentModel, prompt, history, image, searchEnabled, systemPromptOverride)
-                if (result.isSuccess && index > 0) {
+                if (result.isSuccess && index > 0 && persistFallback) {
                     // Persist the working fallback so the next message doesn't 404 again.
                     runCatching { settingsManager.setSelectedModel(currentModel, canonical) }
                     Log.i(TAG, "Auto-recovered $canonical: now using $currentModel")
@@ -660,19 +800,14 @@ class AiRepositoryImpl @Inject constructor(
     }
 
     private fun friendlyError(provider: String, model: String, e: Throwable): Throwable {
-        val raw = e.message ?: "Unknown error"
+        // Truncate raw detail: server messages can be long / contain request echoes.
+        val raw = (e.message ?: "Unknown error").take(300)
         return when {
             isModelNotFound(e) -> Exception("Model '$model' is retired / not found on $provider (404). Pick ${AiSettingsHelper.getRecommendedModel(provider)} in Settings — or it auto-switched already. Detail: $raw")
             isRateLimited(e) -> Exception("$provider rate limit hit for '$model'. Wait ~30s or switch to ${AiSettingsHelper.getFallbackModels(provider).firstOrNull() ?: "another model"}. Detail: $raw")
-            raw.contains("401", true) || raw.contains("unauthorized", true) -> Exception("Invalid API key for $provider. Open Settings → $provider and check the key. Detail: $raw")
+            raw.contains("401", true) || raw.contains("unauthorized", true) -> Exception("Invalid API key for $provider. Open Settings → $provider and check the key.")
             else -> e
         }
-    }
-
-    private fun getFallbackModel(model: String): String? = when (model) {
-        "meta-llama/llama-3.3-70b-instruct" -> "llama-3.3-70b-versatile"
-        "meta-llama/llama-3.1-8b-instruct", "llama-3.1-8b-instant" -> "openai/gpt-oss-20b"
-        else -> null
     }
 
     private suspend fun executeProviderCall(
@@ -745,9 +880,24 @@ class AiRepositoryImpl @Inject constructor(
     }
 
     private fun isTransient(e: Throwable): Boolean {
-        val msg = (e.message ?: "").lowercase()
+        val msg = (e.message ?: "").lowercase(java.util.Locale.ROOT)
         return msg.contains("timeout") || msg.contains("unavailable") || msg.contains("deadline") ||
             msg.contains("network") || msg.contains("500") || msg.contains("502") || msg.contains("503")
+    }
+
+    /** Cap history to ~12k chars total (plus current prompt) to bound tokens/latency. */
+    private fun budgetHistory(history: List<AiMessage>, maxChars: Int = 12_000): List<AiMessage> {
+        if (history.isEmpty()) return history
+        var used = 0
+        val out = ArrayDeque<AiMessage>()
+        for (m in history.asReversed()) {
+            val len = m.text.length
+            if (used + len > maxChars && out.isNotEmpty()) break
+            out.addFirst(m)
+            used += len
+            if (out.size >= MAX_HISTORY_MESSAGES) break
+        }
+        return out.toList()
     }
 
     private suspend fun callOpenAiCompatible(
@@ -760,13 +910,14 @@ class AiRepositoryImpl @Inject constructor(
         searchEnabled: Boolean,
         systemPromptOverride: String?
     ): Result<ChatRepository.ChatResponseChunk> {
-        val url = AiSettingsHelper.getChatCompletionUrl(provider) ?: return Result.failure(Exception("No URL for $provider"))
+        val url = AiSettingsHelper.getChatCompletionUrl(provider)?.takeIf { it.isNotBlank() }
+            ?: return Result.failure(Exception("No URL for $provider"))
         val messages = mutableListOf<OpenAiMessage>()
         messages += OpenAiMessage("system", MessageContent.Text(systemPromptOverride ?: systemPrompt))
 
         // Merge consecutive messages of same role for OpenAI compatible
         val mergedHistory = mutableListOf<AiMessage>()
-        history.forEach { msg ->
+        budgetHistory(history).forEach { msg ->
             val last = mergedHistory.lastOrNull()
             if (last != null && last.isUser == msg.isUser) {
                 mergedHistory[mergedHistory.size - 1] = last.copy(text = last.text + "\n\n" + msg.text)
@@ -830,6 +981,36 @@ class AiRepositoryImpl @Inject constructor(
         return Result.success(ChatRepository.ChatResponseChunk(cleanResponseText(text)))
     }
 
-    private fun bitmapToBase64(bitmap: Bitmap): String = ByteArrayOutputStream().use { bos -> bitmap.compress(Bitmap.CompressFormat.JPEG, 80, bos); Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP) }
-    private fun cleanResponseText(text: String): String = text.replace("\uFEFF", "").trim()
+    /**
+     * Downscale to max 1024px before base64 to avoid OOM / 413s.
+     * Full-res JPEG-80 can exceed 3MB base64; capped version stays < ~1.2MB.
+     */
+    private fun bitmapToBase64(bitmap: Bitmap): String {
+        val maxSide = 1024
+        val w = bitmap.width
+        val h = bitmap.height
+        val scale = if (w <= maxSide && h <= maxSide) 1f else maxSide / maxOf(w, h).toFloat()
+        val scaled = if (scale >= 1f) bitmap else try {
+            android.graphics.Bitmap.createScaledBitmap(
+                bitmap, (w * scale).toInt().coerceAtLeast(1), (h * scale).toInt().coerceAtLeast(1), true
+            )
+        } catch (_: Exception) { bitmap }
+        return try {
+            ByteArrayOutputStream().use { bos ->
+                scaled.compress(Bitmap.CompressFormat.JPEG, 75, bos)
+                var bytes = bos.toByteArray()
+                // Extra guard: recompress lower if still huge (>1.5MB raw).
+                if (bytes.size > 1_500_000) {
+                    ByteArrayOutputStream().use { bos2 ->
+                        scaled.compress(Bitmap.CompressFormat.JPEG, 60, bos2)
+                        bytes = bos2.toByteArray()
+                    }
+                }
+                Base64.encodeToString(bytes, Base64.NO_WRAP)
+            }
+        } finally {
+            if (scaled !== bitmap) runCatching { scaled.recycle() }
+        }
+    }
+    private fun cleanResponseText(text: String): String = stripSourcesSection(text.replace("\uFEFF", "")).trim()
 }

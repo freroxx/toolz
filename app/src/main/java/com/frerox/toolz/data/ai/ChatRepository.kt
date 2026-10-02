@@ -24,8 +24,8 @@ import kotlinx.coroutines.flow.Flow
  * Abstraction over all AI providers.
  *
  * - [getChatResponse] sends a prompt (and optional image) to the currently-configured
- *   provider. The flow emits one [Result] per chunk for streaming providers, or a
- *   single [Result] for request/response providers. The ViewModel accumulates chunks.
+ *   provider. The flow emits a single [Result] per request (unary request/response;
+ *   accumulated by the ViewModel via `streamingText`). Not true token streaming.
  *
  * - [testConnection] validates credentials for an ephemeral [AiConfig] WITHOUT
  *   touching the global [AiSettingsManager] state. Safe to call during the

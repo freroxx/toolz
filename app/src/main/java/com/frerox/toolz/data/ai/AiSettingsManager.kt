@@ -136,14 +136,27 @@ class AiSettingsManager @Inject constructor(
         if (getSelectedIdentityId() == id) setSelectedIdentityId("none")
     }
 
+    private var encryptedFallbackUsed = false
+
     private fun buildPrefs(): SharedPreferences = try {
         val mk = MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
         EncryptedSharedPreferences.create(context, PREFS_NAME, mk,
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM)
     } catch (e: Exception) {
-        Log.e(TAG, "EncryptedSharedPreferences unavailable: ${e.message}")
+        // Fail-open would silently store keys in plaintext. Keep fallback for
+        // old devices, but flag it so UI can warn and export can refuse keys.
+        Log.e(TAG, "EncryptedSharedPreferences unavailable, using plaintext fallback: ${e.message}")
+        encryptedFallbackUsed = true
         context.getSharedPreferences("${PREFS_NAME}_plain", Context.MODE_PRIVATE)
+    }
+
+    /** True when keys are NOT encrypted — UI should warn. */
+    fun isUsingPlaintextFallback(): Boolean {
+        // Force lazy init.
+        @Suppress("UNUSED_EXPRESSION")
+        prefs
+        return encryptedFallbackUsed
     }
 
     // ── Key resolution ─────────────────────────────────────────────────────
@@ -173,8 +186,11 @@ class AiSettingsManager @Inject constructor(
     fun getAiProvider(): String = prefs.getString("ai_provider", DEFAULT_PROVIDER) ?: DEFAULT_PROVIDER
     fun setAiProvider(provider: String) = prefs.edit().putString("ai_provider", provider).apply()
     
-    fun getSelectedModel(provider: String = getAiProvider()): String =
-        prefs.getString("selected_model_$provider", null) ?: AiSettingsHelper.getRecommendedModel(provider)
+    fun getSelectedModel(provider: String = getAiProvider()): String {
+        val stored = prefs.getString("selected_model_$provider", null)?.takeIf { it.isNotBlank() }
+        if (stored != null) return stored
+        return AiSettingsHelper.getRecommendedModel(provider)
+    }
         
     fun setSelectedModel(model: String, provider: String = getAiProvider()) =
         prefs.edit().putString("selected_model_$provider", model).apply()
@@ -255,8 +271,12 @@ class AiSettingsManager @Inject constructor(
             .apply()
     }
 
-    fun exportPortableSettings(): Map<String, String> {
+    fun exportPortableSettings(redactKeys: Boolean = false): Map<String, String> {
         return prefs.all.mapNotNull { (key, value) ->
+            if (redactKeys && (key.startsWith("api_key_user_") || key == KEY_SAVED_CONFIGS)) {
+                // Never export raw keys when redaction requested (share/backup).
+                return@mapNotNull null
+            }
             val encoded = when (value) {
                 is String -> "string:$value"
                 is Boolean -> "boolean:$value"

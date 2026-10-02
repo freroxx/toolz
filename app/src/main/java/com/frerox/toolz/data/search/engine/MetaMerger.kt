@@ -96,7 +96,7 @@ class MetaMerger @Inject constructor() {
 
             /**
              * Normalizes a URL for cross-engine dedup: forces https, strips `www.`,
-             * trailing slash, and known tracking params (utm_*, ref=) so the same
+             * trailing slash, and known tracking params so the same
              * page returned by different engines with different tracking tags
              * collapses to one result instead of appearing twice.
              */
@@ -105,18 +105,34 @@ class MetaMerger @Inject constructor() {
                     if (it.startsWith("http://", ignoreCase = true)) "https://" + it.substring(7) else it
                 }
                 val uri = java.net.URI(normalizedScheme)
-                val host = uri.host?.lowercase()?.removePrefix("www.") ?: ""
-                val path = (uri.path ?: "").removeSuffix("/")
+                var host = uri.host?.lowercase()?.removePrefix("www.")?.removePrefix("m.")?.removePrefix("amp.") ?: ""
+                // Drop default ports.
+                val port = uri.port
+                if (port == 80 || port == 443) {
+                    // host stays bare; port is omitted on rebuild below.
+                } else if (port != -1) {
+                    host = "$host:$port"
+                }
+                val path = (uri.path ?: "").removeSuffix("/").lowercase().ifEmpty { "" }
                 val query = uri.query
                 ?.split("&")
-                ?.filterNot { it.startsWith("utm_", ignoreCase = true) || it.startsWith("ref=", ignoreCase = true) }
+                ?.mapNotNull { param ->
+                    val key = param.substringBefore("=").lowercase()
+                    // Extended tracking-param blocklist.
+                    if (key.startsWith("utm_") || key in setOf(
+                            "ref", "fbclid", "gclid", "msclkid", "yclid", "mc_cid",
+                            "igshid", "wbraid", "gbraid", "dclid", "vero_id",
+                            "_ga", "_gid", "mc_eid", "vero_conv", "pk_campaign"
+                        )
+                    ) null else param
+                }
                 ?.joinToString("&")
                 ?.takeIf { it.isNotEmpty() }
                 ?.let { "?$it" }
                 .orEmpty()
 
-                if (host.isNotEmpty()) "https://$host$path$query" else normalizedScheme.lowercase().removeSuffix("/")
+                if (host.isNotEmpty()) "https://$host$path$query" else normalizedScheme.lowercase().removeSuffix("/").substringBefore("#")
             } catch (_: Exception) {
-                url.trim().removeSuffix("/").lowercase()
+                url.trim().substringBefore("#").removeSuffix("/").lowercase()
             }
 }

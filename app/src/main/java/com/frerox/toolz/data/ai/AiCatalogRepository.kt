@@ -22,6 +22,9 @@ import com.squareup.moshi.Moshi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -69,32 +72,43 @@ class AiCatalogRepository @Inject constructor(
     private val _isRefreshing = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
 
+    private val refreshMutex = Mutex()
+
     /**
      * App-start entry point: install cache synchronously, refresh when stale.
-     * Never throws.
+     * Never throws. Network fetch is bounded to 10s so startup never hangs.
      */
     suspend fun warmup() {
         installCached()
-        if (isCacheStale()) refresh()
+        if (isCacheStale()) {
+            withTimeoutOrNull(10_000L) { refresh() }
+        }
     }
 
     /**
      * Fetch the catalog unless the cache is fresh (or [force] is true).
      * @return true if a catalog (fresh or cached) is now active.
      */
-    suspend fun refresh(force: Boolean = false): Boolean {
-        if (!force && !isCacheStale() && _installedVersion.value != null) return true
+    suspend fun refresh(force: Boolean = false): Boolean = refreshMutex.withLock {
+        if (!force && !isCacheStaleLocked() && _installedVersion.value != null) return true
         if (_isRefreshing.value) return _installedVersion.value != null
         _isRefreshing.value = true
         try {
             val remote = try {
-                api.getModelCatalog()
+                withTimeoutOrNull(10_000L) { api.getModelCatalog() } ?: run {
+                    Log.w(TAG, "Catalog fetch timed out; keeping previous")
+                    return _installedVersion.value != null
+                }
             } catch (e: Exception) {
                 Log.w(TAG, "Catalog fetch failed; keeping previous", e)
                 return _installedVersion.value != null
             }
             if (remote.providers.isEmpty()) {
                 Log.w(TAG, "Catalog payload has no providers; ignoring")
+                return _installedVersion.value != null
+            }
+            if (!isTrustedCatalog(remote)) {
+                Log.w(TAG, "Catalog rejected: untrusted chatCompletionUrl")
                 return _installedVersion.value != null
             }
             val current = _installedVersion.value ?: 0
@@ -119,7 +133,31 @@ class AiCatalogRepository @Inject constructor(
     private fun isCacheStale(): Boolean {
         if (_installedVersion.value == null) return true
         val age = System.currentTimeMillis() - settingsManager.getCachedCatalogTimestamp()
-        return age >= CACHE_TTL_MS
+        // Clock skew (negative age) must not force constant refresh.
+        return age.coerceAtLeast(0L) >= CACHE_TTL_MS
+    }
+
+    private fun isCacheStaleLocked(): Boolean = isCacheStale()
+
+    /**
+     * Catalog poisoning guard: chatCompletionUrl is where Bearer keys are sent.
+     * Reject non-https or non-allowlisted hosts so a compromised endpoint
+     * can't exfiltrate keys.
+     */
+    private fun isTrustedCatalog(catalog: AiCatalogResponse): Boolean {
+        val allowedHosts = setOf(
+            "api.openai.com", "api.groq.com", "api.deepseek.com", "openrouter.ai",
+            "opencode.ai", "api.anthropic.com", "generativelanguage.googleapis.com"
+        )
+        return catalog.providers.all { p ->
+            val raw = p.chatCompletionUrl?.takeIf { it.isNotBlank() } ?: return@all true
+            try {
+                val uri = java.net.URI(raw.trim())
+                val schemeOk = uri.scheme?.lowercase(java.util.Locale.ROOT) == "https"
+                val host = uri.host?.lowercase(java.util.Locale.ROOT).orEmpty()
+                schemeOk && (allowedHosts.any { host == it || host.endsWith(".$it") })
+            } catch (_: Exception) { false }
+        }
     }
 
     private fun installCached() {

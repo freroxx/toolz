@@ -313,10 +313,9 @@ object AiSettingsHelper {
         // Universal rules — safe for models the catalog hasn't seen yet.
         if (m.endsWith(":free") || m.endsWith("-free")) return true
         if (m in setOf("big-pickle", "allam-2-7b")) return true
-        val remoteEntry = remoteProvider(provider)
-        if (remoteEntry != null) {
-            return remoteEntry.freeModels.any { it.equals(model, ignoreCase = true) }
-        }
+        // OR logic: either remote OR bundled grants free status (incomplete server tables must not hide bundled frees).
+        val remoteFree = remoteProvider(provider)?.freeModels?.any { it.equals(model, ignoreCase = true) } == true
+        if (remoteFree) return true
         return bundledIsFreeModel(provider, model)
     }
 
@@ -341,11 +340,10 @@ object AiSettingsHelper {
 
     /** Retired model IDs that now 404 — auto-migrated to a live equivalent. */
     fun migrateRetiredModel(provider: String, model: String): String? {
+        // OR logic: remote migration wins, but bundled still applies when remote
+        // knows the provider yet omits a retired entry (incomplete server table).
         remoteProvider(provider)?.retiredModels?.let { retired ->
             retired.entries.firstOrNull { it.key.equals(model, ignoreCase = true) }?.let { return it.value }
-            // Provider known remotely but model not listed as retired → no migration.
-            // (Do NOT fall through to bundled: the server is authoritative.)
-            return null
         }
         return bundledMigrateRetiredModel(provider, model)
     }
@@ -389,7 +387,9 @@ object AiSettingsHelper {
     private fun bundledSupportsVision(p: String, model: String): Boolean {
         return when (p) {
             "Gemini" -> true
-            "ChatGPT" -> model.contains("gpt-5", ignoreCase = true) || model.contains("gpt-4", ignoreCase = true) || model.contains("o", ignoreCase = true)
+            // Fixed: bare contains("o") matched ANY model with letter 'o'. Use o-series regex.
+            "ChatGPT" -> model.contains("gpt-5", ignoreCase = true) || model.contains("gpt-4", ignoreCase = true) ||
+                    Regex("\\bo[134]\\b|\\bo[134]-mini\\b", RegexOption.IGNORE_CASE).containsMatchIn(model)
             "Claude" -> true // All Claude 4/5 models natively support vision
             "OpenRouter" -> {
                 model.contains("gemini", ignoreCase = true) ||
@@ -445,7 +445,8 @@ object AiSettingsHelper {
         return when (canonicalProvider(provider)) {
             "Gemini" -> true
             "Claude" -> true
-            "ChatGPT" -> model.contains("gpt-5", ignoreCase = true) || model.contains("gpt-4", ignoreCase = true) || model.contains("o", ignoreCase = true)
+            "ChatGPT" -> model.contains("gpt-5", ignoreCase = true) || model.contains("gpt-4", ignoreCase = true) ||
+                    Regex("\\bo[134]\\b", RegexOption.IGNORE_CASE).containsMatchIn(model)
             "OpenRouter" -> model.contains("claude", ignoreCase = true) || model.contains("gemini", ignoreCase = true) || model.contains("gpt-5", ignoreCase = true) || model.contains("gpt-4", ignoreCase = true)
             "OpenCode Zen", "OpenCode Go" -> true // gateway accepts attachments; model may ignore
             else -> false
