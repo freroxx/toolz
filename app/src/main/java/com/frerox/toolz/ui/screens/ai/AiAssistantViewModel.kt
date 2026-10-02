@@ -195,10 +195,17 @@ class AiAssistantViewModel @Inject constructor(
         val icon = settingsManager.getActiveIcon()
         val customIcon = settingsManager.getActiveCustomIconUri()
         val activeName = settingsManager.getActiveConfigName()
+        // Self-heal keys persisted dirty by older builds (quotes/Bearer/whitespace):
+        // clean once so a visibly-set key can never 401 on stale bytes again.
+        val storedKey = settingsManager.getRawApiKey(provider)
+        val cleanKey = AiSettingsHelper.normalizeApiKeyInput(storedKey)
+        if (cleanKey != storedKey && cleanKey.isNotBlank()) {
+            settingsManager.setApiKey(cleanKey, provider)
+        }
         _settingsUiState.update {
             it.copy(
                 provider             = provider,
-                apiKey               = settingsManager.getRawApiKey(provider),
+                apiKey               = cleanKey,
                 selectedModel        = model,
                 selectedIcon         = icon,
                 customIconUri        = customIcon,
@@ -515,7 +522,7 @@ class AiAssistantViewModel @Inject constructor(
         _settingsUiState.update {
             it.copy(
                 provider             = provider,
-                apiKey               = settingsManager.getRawApiKey(provider),
+                apiKey               = AiSettingsHelper.normalizeApiKeyInput(settingsManager.getRawApiKey(provider)),
                 selectedModel        = it.selectedModel.takeIf { model -> model in availableModels }
                     ?: AiSettingsHelper.getRecommendedModel(provider),
             )
@@ -565,9 +572,10 @@ class AiAssistantViewModel @Inject constructor(
         val s = _settingsUiState.value
         val currentProvider = settingsManager.getAiProvider()
         val currentModel = settingsManager.getSelectedModel(currentProvider)
-        val currentApiKey = settingsManager.getRawApiKey(currentProvider)
+        val currentApiKey = AiSettingsHelper.normalizeApiKeyInput(settingsManager.getRawApiKey(currentProvider))
 
-        val changed = s.provider != currentProvider || s.selectedModel != currentModel || s.apiKey != currentApiKey
+        val changed = s.provider != currentProvider || s.selectedModel != currentModel ||
+                AiSettingsHelper.normalizeApiKeyInput(s.apiKey) != currentApiKey
         if (!changed) return
 
         // Warn when switching to (or saving) a provider with no key set —
@@ -611,7 +619,8 @@ class AiAssistantViewModel @Inject constructor(
 
     fun saveConfig(name: String) {
         with(_settingsUiState.value) {
-            settingsManager.saveConfig(AiConfig(name = name, provider = provider, model = selectedModel, apiKey = apiKey, iconRes = selectedIcon, customIconUri = customIconUri), editingConfig?.name)
+            val cleanKey = AiSettingsHelper.normalizeApiKeyInput(apiKey)
+            settingsManager.saveConfig(AiConfig(name = name, provider = provider, model = selectedModel, apiKey = cleanKey, iconRes = selectedIcon, customIconUri = customIconUri), editingConfig?.name)
         }
         _settingsUiState.update { it.copy(editingConfig = null) }
         loadConfigs()
@@ -691,9 +700,9 @@ class AiAssistantViewModel @Inject constructor(
 
     fun testConnection() {
         val s = _settingsUiState.value
-        if (s.apiKey.isNotBlank() && !AiSettingsHelper.validateApiKey(s.provider, s.apiKey)) {
-            _settingsUiState.update { it.copy(testResult = "Invalid key format for ${s.provider}") }; return
-        }
+        // NOTE: prefix validation is only a soft hint (isKeyValid badge). A live
+        // request is the authority — custom gateways rotate key formats, so a
+        // "wrong-looking" key must still be tested, never hard-blocked here.
         viewModelScope.launch {
             _settingsUiState.update { it.copy(isTesting = true, testResult = null) }
             val keyToTest = s.apiKey.ifBlank { settingsManager.resolveApiKey(s.provider).value }

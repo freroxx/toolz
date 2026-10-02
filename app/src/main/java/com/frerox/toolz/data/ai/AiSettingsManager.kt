@@ -175,7 +175,10 @@ class AiSettingsManager @Inject constructor(
     fun getRawApiKey(provider: String = getAiProvider()): String = prefs.getString(userKey(provider), "").orEmpty()
 
     fun setApiKey(key: String, provider: String = getAiProvider()) {
-        val s = key.trim()
+        // Single choke point: every writer (settings Apply, Groq dialog, preset
+        // apply, restores) is normalized here, so a quote-wrapped or
+        // "Bearer "-prefixed paste can never be persisted dirty and 401 later.
+        val s = AiSettingsHelper.normalizeApiKeyInput(key)
         prefs.edit().apply {
             if (s.isBlank()) remove(userKey(provider)) else putString(userKey(provider), s)
         }.apply()

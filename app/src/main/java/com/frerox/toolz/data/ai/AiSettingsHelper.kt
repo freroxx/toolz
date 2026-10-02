@@ -529,8 +529,25 @@ object AiSettingsHelper {
         else -> ""
     }
 
-    fun normalizeApiKeyInput(raw: String): String =
-        raw.trim().removePrefix("\"").removeSuffix("\"").removePrefix("'").removeSuffix("'")
+    fun normalizeApiKeyInput(raw: String): String {
+        var s = raw.trim()
+        // Pastes often include the "Bearer " scheme — the app adds it at request time.
+        if (s.startsWith("Bearer ", ignoreCase = true)) s = s.substring(7).trim()
+        // Strip wrapping quotes (ASCII + smart quotes from keyboards/docs), repeatedly:
+        // a key saved WITH quotes looks set in Settings yet 401s on every call.
+        var prev: String
+        do {
+            prev = s
+            s = s.removePrefix("\"").removeSuffix("\"")
+                .removePrefix("'").removeSuffix("'")
+                .removePrefix("“").removeSuffix("”")
+                .removePrefix("‘").removeSuffix("’")
+                .trim()
+        } while (s != prev)
+        // Keys never contain whitespace or invisible format chars (ZWSP etc. from
+        // web copy); drop them so a visually-correct paste can't 401.
+        return s.filterNot { it.isWhitespace() || Character.getType(it) == Character.FORMAT.toInt() }
+    }
 
     fun validateApiKey(provider: String, key: String): Boolean {
         val normalized = normalizeApiKeyInput(key)

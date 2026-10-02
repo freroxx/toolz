@@ -425,6 +425,32 @@ class FocusFlowViewModel @Inject constructor(
         .debounce(2_500L)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
+    // ── Weekly bars state ────────────────────────────────────────────────
+    // Declared BEFORE init: init launches `refreshWeeklyBars()` on
+    // Dispatchers.Main.immediate, which runs eagerly on the constructing
+    // thread — any state touched there must already be initialized, or the
+    // first access NPEs outside the function's try/catch and crashes on open.
+
+    data class DailyLocalStat(
+        val date: String,
+        val totalMillis: Long,
+        val topApps: List<Pair<String, Long>>
+    )
+
+    /**
+     * Trailing-7-day bars, warmed on init so the weekly tab is instant.
+     * Single source for the weekly counter AND the chart — they can never disagree.
+     * Missing cache days are backfilled live from UsageStats on load.
+     */
+    private val _weeklyBars = MutableStateFlow<List<DailyLocalStat>>(emptyList())
+    val weeklyBars: StateFlow<List<DailyLocalStat>> = _weeklyBars.asStateFlow()
+
+    private val _weeklyBarsLoading = MutableStateFlow(true)
+    val weeklyBarsLoading: StateFlow<Boolean> = _weeklyBarsLoading.asStateFlow()
+
+    /** Synchronous snapshot for non-composable callers; composables collect [weeklyBars]. */
+    fun getWeeklyLocalStats(): List<DailyLocalStat> = _weeklyBars.value
+
     // ── Init ───────────────────────────────────────────────────────────────
 
     init {
@@ -470,26 +496,6 @@ class FocusFlowViewModel @Inject constructor(
         _isWeekly.value = weekly
         refreshStats()
     }
-
-    data class DailyLocalStat(
-        val date: String,
-        val totalMillis: Long,
-        val topApps: List<Pair<String, Long>>
-    )
-
-    /**
-     * Trailing-7-day bars, warmed on init so the weekly tab is instant.
-     * Single source for the weekly counter AND the chart — they can never disagree.
-     * Missing cache days are backfilled live from UsageStats on load.
-     */
-    private val _weeklyBars = MutableStateFlow<List<DailyLocalStat>>(emptyList())
-    val weeklyBars: StateFlow<List<DailyLocalStat>> = _weeklyBars.asStateFlow()
-
-    private val _weeklyBarsLoading = MutableStateFlow(true)
-    val weeklyBarsLoading: StateFlow<Boolean> = _weeklyBarsLoading.asStateFlow()
-
-    /** Synchronous snapshot for non-composable callers; composables collect [weeklyBars]. */
-    fun getWeeklyLocalStats(): List<DailyLocalStat> = _weeklyBars.value
 
     private suspend fun refreshWeeklyBars() {
         _weeklyBarsLoading.value = true
