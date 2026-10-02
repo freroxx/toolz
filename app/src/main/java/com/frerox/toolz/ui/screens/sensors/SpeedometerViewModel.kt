@@ -50,16 +50,17 @@ import kotlin.math.roundToInt
 /** Number of one-second samples kept for the trend chart. */
 const val SPEED_HISTORY_SIZE = 60
 
-private const val UPDATE_INTERVAL_MS = 1_000L
+private const val UPDATE_INTERVAL_MS = 500L
 private const val TICK_MS = 1_000L
+
+/** Fixes older than this (cached locations) are ignored entirely. */
+private const val MAX_FIX_AGE_MS = 10_000L
 
 /** Fixes worse than this are shown as "poor signal" but never used for speed or distance. */
 private const val MAX_USABLE_ACCURACY_M = 50f
 private const val GOOD_ACCURACY_M = 10f
 private const val FAIR_ACCURACY_M = 25f
 
-/** Below ~1.8 km/h a GPS speed is indistinguishable from drift. */
-private const val STATIONARY_THRESHOLD_MPS = 0.5f
 private const val MIN_BEARING_SPEED_MPS = 1f
 
 /** With no usable fix for this long, the speed reads zero instead of freezing on the last value. */
@@ -72,6 +73,10 @@ private const val MAX_TRIP_GAP_MS = 5_000L
 private const val LIMIT_STEP = 5
 private const val GAUGE_GROW_FACTOR = 0.92f
 private const val GAUGE_SHRINK_FACTOR = 0.8f
+
+/** Indoor-mode stride slider bounds, centimetres per step. */
+const val STRIDE_MIN_CM = 40
+const val STRIDE_MAX_CM = 120
 
 // endregion
 
@@ -123,7 +128,14 @@ enum class GpsSignal { DISABLED, SEARCHING, POOR, FAIR, GOOD }
 enum class TripState { IDLE, RECORDING, PAUSED }
 
 /** Which axis the HUD mirrors on. Depends on how the phone sits against the windshield. */
-enum class HudFlip { VERTICAL, HORIZONTAL }
+enum class HudMirror { NORMAL, MIRROR_VERTICAL, MIRROR_HORIZONTAL }
+
+/** Pre-rename values of [HudMirror], kept so old installs migrate instead of resetting. */
+private fun migrateHudMirror(name: String?): HudMirror = when (name) {
+    "VERTICAL" -> HudMirror.MIRROR_VERTICAL
+    "HORIZONTAL" -> HudMirror.MIRROR_HORIZONTAL
+    else -> HudMirror.entries.firstOrNull { it.name == name } ?: HudMirror.MIRROR_VERTICAL
+}
 
 @Immutable
 data class SpeedSettings(
@@ -132,7 +144,13 @@ data class SpeedSettings(
     /** Expressed in [unit]. */
     val speedLimit: Int = 100,
     val keepScreenOn: Boolean = true,
-    val hudFlip: HudFlip = HudFlip.VERTICAL,
+    val hudMirror: HudMirror = HudMirror.MIRROR_VERTICAL,
+    /** Starts the trip automatically when the screen opens. A manual pause wins for the session. */
+    val autoRecord: Boolean = true,
+    /** Opt-in: estimate speed from step cadence (treadmill) instead of GPS. Off by default. */
+    val indoorMode: Boolean = false,
+    /** Step length in centimetres used by indoor mode. Local override, default 75. */
+    val strideCm: Int = 75,
 )
 
 @Immutable
@@ -156,6 +174,8 @@ data class SpeedUiState(
     /** Current gauge scale in display units. Managed by the ViewModel (see [SpeedUnit.nextGaugeMax]). */
     val gaugeMax: Float = 0f,
     val isHudMode: Boolean = false,
+    /** True while the gauge is driven by step cadence instead of GPS. */
+    val indoorActive: Boolean = false,
 ) {
     val unit: SpeedUnit get() = settings.unit
     val speedDisplay: Float get() = unit.toDisplay(speedMps)
@@ -201,7 +221,8 @@ class GpsSource @Inject constructor(
 
     val isEnabled: Boolean
         get() = try {
-            locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+            locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+                locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
         } catch (e: Exception) {
             false
         }
@@ -211,6 +232,8 @@ class GpsSource @Inject constructor(
     fun events(): Flow<GpsEvent> = callbackFlow {
         // minDistance = 0 on purpose: with a distance filter the OS stops delivering fixes when the
         // device is stationary, and the last (non-zero) speed would stay on screen.
+        // Both providers feed the same listener: GPS gives Doppler speed, network fills gaps
+        // (urban canyons, slow GPS lock). Poor fixes are rejected downstream by accuracy.
         val locationListener = LocationListener { trySend(GpsEvent.Fix(it)) }
 
         val gnssCallback = object : GnssStatus.Callback() {
@@ -231,6 +254,25 @@ class GpsSource @Inject constructor(
                 locationListener,
                 Looper.getMainLooper(),
             )
+        } catch (e: SecurityException) {
+            close()
+        } catch (e: IllegalArgumentException) {
+            close()
+        }
+        try {
+            locationManager.requestLocationUpdates(
+                LocationManager.NETWORK_PROVIDER,
+                UPDATE_INTERVAL_MS,
+                0f,
+                locationListener,
+                Looper.getMainLooper(),
+            )
+        } catch (e: SecurityException) {
+            // GPS alone is enough; ignore.
+        } catch (e: IllegalArgumentException) {
+            // Device without a network provider; GPS alone is enough.
+        }
+        try {
             locationManager.registerGnssStatusCallback(gnssCallback, Handler(Looper.getMainLooper()))
         } catch (e: SecurityException) {
             close()
@@ -260,9 +302,11 @@ class SpeedometerPrefs @Inject constructor(
             speedLimitEnabled = prefs.getBoolean(KEY_LIMIT_ENABLED, defaults.speedLimitEnabled),
             speedLimit = prefs.getInt(KEY_LIMIT, defaults.speedLimit),
             keepScreenOn = prefs.getBoolean(KEY_KEEP_SCREEN_ON, defaults.keepScreenOn),
-            hudFlip = prefs.getString(KEY_HUD_FLIP, null)
-                ?.let { name -> HudFlip.entries.firstOrNull { it.name == name } }
-                ?: defaults.hudFlip,
+            hudMirror = migrateHudMirror(prefs.getString(KEY_HUD_FLIP, null)),
+            autoRecord = prefs.getBoolean(KEY_AUTO_RECORD, defaults.autoRecord),
+            indoorMode = prefs.getBoolean(KEY_INDOOR_MODE, defaults.indoorMode),
+            strideCm = prefs.getInt(KEY_STRIDE_CM, defaults.strideCm)
+                .coerceIn(STRIDE_MIN_CM, STRIDE_MAX_CM),
         )
     }
 
@@ -272,7 +316,10 @@ class SpeedometerPrefs @Inject constructor(
             .putBoolean(KEY_LIMIT_ENABLED, settings.speedLimitEnabled)
             .putInt(KEY_LIMIT, settings.speedLimit)
             .putBoolean(KEY_KEEP_SCREEN_ON, settings.keepScreenOn)
-            .putString(KEY_HUD_FLIP, settings.hudFlip.name)
+            .putString(KEY_HUD_FLIP, settings.hudMirror.name)
+            .putBoolean(KEY_AUTO_RECORD, settings.autoRecord)
+            .putBoolean(KEY_INDOOR_MODE, settings.indoorMode)
+            .putInt(KEY_STRIDE_CM, settings.strideCm)
             .apply()
     }
 
@@ -283,6 +330,9 @@ class SpeedometerPrefs @Inject constructor(
         const val KEY_LIMIT = "limit"
         const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
         const val KEY_HUD_FLIP = "hud_flip"
+        const val KEY_AUTO_RECORD = "auto_record"
+        const val KEY_INDOOR_MODE = "indoor_mode"
+        const val KEY_STRIDE_CM = "stride_cm"
     }
 }
 
@@ -292,12 +342,14 @@ class SpeedometerPrefs @Inject constructor(
 class SpeedometerViewModel @Inject constructor(
     private val gps: GpsSource,
     private val prefs: SpeedometerPrefs,
+    private val steps: StepCadenceSource,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SpeedUiState(settings = prefs.load()).withGauge())
     val state: StateFlow<SpeedUiState> = _state.asStateFlow()
 
     private var updatesJob: Job? = null
+    private var stepJob: Job? = null
 
     // All of the below is only touched on the main thread (viewModelScope + main-looper callbacks).
     private var lastFixAtMs: Long? = null
@@ -307,13 +359,30 @@ class SpeedometerViewModel @Inject constructor(
     private var segmentStartMs = 0L
     private var committedElapsedMs = 0L
 
+    /**
+     * Set on a manual pause, cleared on a manual start. Session-only on purpose: it lives in
+     * the ViewModel, so reopening the screen (new ViewModel) auto-records again.
+     */
+    private var userPaused = false
+    private val smoother = SpeedSmoother()
+    private var altitudeSmoothed: Double? = null
+    private var lastStepEmissionMs: Long? = null
+
+    /** Indoor mode only counts when opted in, permitted and backed by hardware. */
+    private fun isIndoorActive(): Boolean =
+        _state.value.settings.indoorMode && steps.hasPermission() && steps.hasSensor
+
+    val hasStepSensor: Boolean get() = steps.hasSensor
+
     // region Lifecycle
 
-    /** Starts listening for GPS. Call when the screen is visible and location permission is granted. */
+    /** Starts listening for GPS. Auto-records unless the user manually paused this session. */
     fun startUpdates() {
         if (updatesJob?.isActive == true) return
 
-        if (_state.value.tripState == TripState.RECORDING) {
+        if (shouldAutoStart(_state.value.tripState, _state.value.settings.autoRecord, userPaused)) {
+            startOrResumeTrip()
+        } else if (_state.value.tripState == TripState.RECORDING) {
             segmentStartMs = SystemClock.elapsedRealtime()
             lastTripFixNanos = null
         }
@@ -326,12 +395,16 @@ class SpeedometerViewModel @Inject constructor(
                 }
             }
         }
+        updateState { it.copy(indoorActive = isIndoorActive()) }
+        ensureStepCollection()
     }
 
     /** Stops listening. A recording trip is paused implicitly: no fixes arrive and no time is counted. */
     fun stopUpdates() {
         updatesJob?.cancel()
         updatesJob = null
+        stepJob?.cancel()
+        stepJob = null
 
         if (_state.value.tripState == TripState.RECORDING) {
             val now = SystemClock.elapsedRealtime()
@@ -342,12 +415,70 @@ class SpeedometerViewModel @Inject constructor(
         lastUsableFixAtMs = null
         previousUsableFix = null
         lastTripFixNanos = null
+        smoother.reset()
+        altitudeSmoothed = null
 
         updateState {
             it.copy(
                 speedMps = 0f,
                 signal = if (it.signal == GpsSignal.DISABLED) GpsSignal.DISABLED else GpsSignal.SEARCHING,
                 elapsedMs = committedElapsedMs,
+            )
+        }
+    }
+
+    // endregion
+
+    // region Indoor steps
+
+    /**
+     * Starts the step collector when indoor mode is usable, stops it otherwise.
+     * Called from [startUpdates], the settings setters and the 1s tick, so a
+     * permission granted mid-screen or a toggled switch takes effect promptly.
+     */
+    private fun ensureStepCollection() {
+        val active = updatesJob?.isActive == true && isIndoorActive()
+        updateState { it.copy(indoorActive = active) }
+        if (!active) {
+            stepJob?.cancel()
+            stepJob = null
+            lastStepEmissionMs = null
+            return
+        }
+        if (stepJob?.isActive == true) return
+        lastStepEmissionMs = null
+        stepJob = viewModelScope.launch { steps.stepsPerSecond().collect(::onStepEmission) }
+    }
+
+    private fun onStepEmission(stepsInSecond: Int) {
+        if (!isIndoorActive()) return
+        val now = SystemClock.elapsedRealtime()
+        val dtMs = lastStepEmissionMs?.let { now - it }
+        lastStepEmissionMs = now
+
+        val raw = stepSpeedMps(stepsInSecond, 1.0, _state.value.settings.strideCm)
+        val speed = smoother.update(raw, STEP_SPEED_ACCURACY_M, null)
+
+        val current = _state.value
+        var distance = current.distanceMeters
+        var moving = current.movingTimeMs
+        if (current.tripState == TripState.RECORDING) {
+            if (dtMs != null && dtMs in 1L..MAX_TRIP_GAP_MS && speed > 0f) {
+                distance += speed.toDouble() * dtMs / 1_000.0
+                moving += dtMs
+            }
+        }
+
+        updateState {
+            it.copy(
+                speedMps = speed,
+                maxSpeedMps = if (current.tripState == TripState.RECORDING) {
+                    max(it.maxSpeedMps, speed)
+                } else {
+                    it.maxSpeedMps
+                },
+                distanceMeters = distance,
+                movingTimeMs = moving,
             )
         }
     }
@@ -366,6 +497,10 @@ class SpeedometerViewModel @Inject constructor(
     }
 
     private fun onFix(location: Location) {
+        // Drop cached fixes: a stale location would spike the speed and shift the position.
+        val fixAgeMs = (SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos) / 1_000_000L
+        if (fixAgeMs > MAX_FIX_AGE_MS) return
+
         val now = SystemClock.elapsedRealtime()
         lastFixAtMs = now
 
@@ -376,11 +511,19 @@ class SpeedometerViewModel @Inject constructor(
         }
 
         lastUsableFixAtMs = now
-        val speed = resolveSpeed(location)
+        // In indoor mode the step cadence owns the gauge; GPS only feeds position and signal.
+        val indoor = _state.value.indoorActive
+        val speed = if (indoor) {
+            _state.value.speedMps
+        } else {
+            val raw = rawSpeed(location)
+            val speedAccuracy = if (location.hasSpeedAccuracy()) location.speedAccuracyMetersPerSecond else null
+            smoother.update(raw, accuracy, speedAccuracy)
+        }
         previousUsableFix = location
 
         val current = _state.value
-        val recording = current.tripState == TripState.RECORDING
+        val recording = current.tripState == TripState.RECORDING && !indoor
         var distance = current.distanceMeters
         var moving = current.movingTimeMs
         if (recording) {
@@ -404,26 +547,30 @@ class SpeedometerViewModel @Inject constructor(
             else -> GpsSignal.POOR
         }
 
+        if (location.hasAltitude()) {
+            altitudeSmoothed = smoothAltitude(altitudeSmoothed, location.altitude)
+        }
+
         updateState {
             it.copy(
                 speedMps = speed,
                 maxSpeedMps = if (recording) max(it.maxSpeedMps, speed) else it.maxSpeedMps,
                 distanceMeters = distance,
                 movingTimeMs = moving,
-                altitudeMeters = if (location.hasAltitude()) location.altitude else it.altitudeMeters,
+                altitudeMeters = altitudeSmoothed ?: it.altitudeMeters,
                 bearingDegrees = bearing,
                 latitude = location.latitude,
                 longitude = location.longitude,
                 accuracyMeters = accuracy,
                 signal = signal,
-                speedHistory = it.speedHistory.pushed(speed),
             )
         }
     }
 
-    private fun resolveSpeed(location: Location): Float {
+    /** Raw Doppler speed when available, otherwise derived from position deltas. Unfiltered. */
+    private fun rawSpeed(location: Location): Float {
         val raw = if (location.hasSpeed()) location.speed else derivedSpeed(location)
-        return if (raw < STATIONARY_THRESHOLD_MPS) 0f else raw
+        return raw.coerceAtLeast(0f)
     }
 
     private fun derivedSpeed(location: Location): Float {
@@ -432,25 +579,38 @@ class SpeedometerViewModel @Inject constructor(
         return if (seconds > 0f) location.distanceTo(previous) / seconds else 0f
     }
 
-    /** Runs once a second: detects lost signal, zeroes stale speed and advances the trip clock. */
+    /**
+     * Runs once a second: detects lost signal, zeroes stale speed, samples the trend chart
+     * (one sample per second keeps the 60s window accurate regardless of fix rate)
+     * and advances the trip clock.
+     */
     private fun onTick() {
         val now = SystemClock.elapsedRealtime()
         val enabled = gps.isEnabled
         val hasRecentFix = lastFixAtMs?.let { now - it <= SIGNAL_LOST_AFTER_MS } == true
         val hasRecentUsableFix = lastUsableFixAtMs?.let { now - it <= STALE_SPEED_AFTER_MS } == true
         val recording = _state.value.tripState == TripState.RECORDING
+        // Picks up a mid-screen permission grant or settings toggle within a second.
+        ensureStepCollection()
+        val indoor = _state.value.indoorActive
 
         updateState {
-            val stale = !hasRecentUsableFix
+            // Step cadence decays on its own; only GPS-driven speed goes stale.
+            val stale = !hasRecentUsableFix && !indoor
+            val speed = if (stale) 0f else it.speedMps
             it.copy(
                 signal = when {
                     !enabled -> GpsSignal.DISABLED
                     !hasRecentFix -> GpsSignal.SEARCHING
                     else -> it.signal
                 },
-                speedMps = if (stale) 0f else it.speedMps,
+                speedMps = speed,
                 // Keep the chart moving through a dropout instead of freezing it.
-                speedHistory = if (stale && it.speedHistory.isNotEmpty()) it.speedHistory.pushed(0f) else it.speedHistory,
+                speedHistory = if (it.speedHistory.isNotEmpty() || speed > 0f) {
+                    it.speedHistory.pushed(speed)
+                } else {
+                    it.speedHistory
+                },
                 elapsedMs = if (recording) committedElapsedMs + (now - segmentStartMs) else it.elapsedMs,
             )
         }
@@ -470,12 +630,17 @@ class SpeedometerViewModel @Inject constructor(
     private fun startOrResumeTrip() {
         segmentStartMs = SystemClock.elapsedRealtime()
         lastTripFixNanos = null
+        userPaused = false
         updateState { it.copy(tripState = TripState.RECORDING) }
     }
 
     private fun pauseTrip() {
-        committedElapsedMs += SystemClock.elapsedRealtime() - segmentStartMs
+        // A manual pause wins over auto-record for the rest of this session.
+        if (_state.value.tripState == TripState.RECORDING) {
+            committedElapsedMs += SystemClock.elapsedRealtime() - segmentStartMs
+        }
         lastTripFixNanos = null
+        userPaused = true
         updateState { it.copy(tripState = TripState.PAUSED, elapsedMs = committedElapsedMs) }
     }
 
@@ -499,9 +664,14 @@ class SpeedometerViewModel @Inject constructor(
 
         committedElapsedMs = 0L
         lastTripFixNanos = null
+        // With auto-record on, Reset clears the stats but keeps recording.
+        val stayRecording = resetStaysRecording(current.settings.autoRecord, userPaused)
+        if (stayRecording) {
+            segmentStartMs = SystemClock.elapsedRealtime()
+        }
         updateState {
             it.copy(
-                tripState = TripState.IDLE,
+                tripState = if (stayRecording) TripState.RECORDING else TripState.IDLE,
                 maxSpeedMps = 0f,
                 distanceMeters = 0.0,
                 movingTimeMs = 0L,
@@ -512,8 +682,17 @@ class SpeedometerViewModel @Inject constructor(
     }
 
     fun restoreTrip(snapshot: TripSnapshot) {
-        // If the user already started a new trip, don't overwrite it.
-        if (_state.value.tripState != TripState.IDLE) return
+        val current = _state.value
+        // If the user already started a new trip, don't overwrite it — except right after an
+        // auto-record Reset, where the trip is RECORDING but still empty and Undo is expected.
+        if (current.tripState != TripState.IDLE) {
+            val freshAutoTrip = current.tripState == TripState.RECORDING &&
+                snapshot.tripState == TripState.RECORDING &&
+                current.maxSpeedMps == 0f &&
+                current.distanceMeters == 0.0 &&
+                current.movingTimeMs == 0L
+            if (!freshAutoTrip) return
+        }
 
         committedElapsedMs = snapshot.elapsedMs
         segmentStartMs = SystemClock.elapsedRealtime()
@@ -548,7 +727,29 @@ class SpeedometerViewModel @Inject constructor(
 
     fun setKeepScreenOn(keepOn: Boolean) = updateSettings { it.copy(keepScreenOn = keepOn) }
 
-    fun setHudFlip(flip: HudFlip) = updateSettings { it.copy(hudFlip = flip) }
+    fun setAutoRecord(autoRecord: Boolean) {
+        updateSettings { it.copy(autoRecord = autoRecord) }
+        // Enabling it mid-screen starts the trip right away instead of waiting for a reopen.
+        if (autoRecord && !userPaused &&
+            _state.value.tripState == TripState.IDLE && updatesJob?.isActive == true
+        ) {
+            startOrResumeTrip()
+        }
+    }
+
+    fun setIndoorMode(indoorMode: Boolean) {
+        updateSettings { it.copy(indoorMode = indoorMode) }
+        // GPS and cadence share the smoother: reset so one source's tail can't leak into the other.
+        smoother.reset()
+        lastStepEmissionMs = null
+        ensureStepCollection()
+    }
+
+    fun setStrideCm(strideCm: Int) {
+        updateSettings { it.copy(strideCm = strideCm.coerceIn(STRIDE_MIN_CM, STRIDE_MAX_CM)) }
+    }
+
+    fun setHudMirror(mirror: HudMirror) = updateSettings { it.copy(hudMirror = mirror) }
 
     fun toggleHudMode() = updateState { it.copy(isHudMode = !it.isHudMode) }
 

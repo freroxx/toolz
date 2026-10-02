@@ -53,6 +53,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.DirectionsWalk
 import androidx.compose.material.icons.rounded.Flip
 import androidx.compose.material.icons.rounded.GpsFixed
 import androidx.compose.material.icons.rounded.GpsNotFixed
@@ -175,6 +176,8 @@ fun SpeedometerScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val permission = rememberPermissionState(Manifest.permission.ACCESS_FINE_LOCATION)
     val granted = permission.status.isGranted
+    val activityPermission = rememberPermissionState(Manifest.permission.ACTIVITY_RECOGNITION)
+    val activityGranted = activityPermission.status.isGranted
     val vibration = LocalVibrationManager.current
     val context = LocalContext.current
     val view = LocalView.current
@@ -355,6 +358,12 @@ fun SpeedometerScreen(
                                     context.startActivity(Intent(AndroidSettings.ACTION_LOCATION_SOURCE_SETTINGS))
                                 }
                             },
+                            activityGranted = activityGranted,
+                            hasStepSensor = viewModel.hasStepSensor,
+                            onGrantActivity = {
+                                vibration?.vibrateClick()
+                                activityPermission.launchPermissionRequest()
+                            },
                         )
                     } else {
                         PermissionView(
@@ -377,7 +386,10 @@ fun SpeedometerScreen(
             onLimitEnabled = viewModel::setSpeedLimitEnabled,
             onLimit = viewModel::setSpeedLimit,
             onKeepScreenOn = viewModel::setKeepScreenOn,
-            onHudFlip = viewModel::setHudFlip,
+            onAutoRecord = viewModel::setAutoRecord,
+            onIndoorMode = viewModel::setIndoorMode,
+            onStride = viewModel::setStrideCm,
+            onHudMirror = viewModel::setHudMirror,
         )
     }
 }
@@ -390,6 +402,9 @@ private fun SpeedometerContent(
     state: SpeedUiState,
     onUnitClick: () -> Unit,
     onOpenLocationSettings: () -> Unit,
+    activityGranted: Boolean,
+    hasStepSensor: Boolean,
+    onGrantActivity: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val unit = state.unit
@@ -416,6 +431,13 @@ private fun SpeedometerContent(
 
         AnimatedVisibility(visible = state.signal == GpsSignal.DISABLED) {
             LocationOffBanner(onOpenSettings = onOpenLocationSettings)
+        }
+
+        AnimatedVisibility(visible = state.settings.indoorMode && (!activityGranted || !hasStepSensor)) {
+            IndoorUnavailableBanner(
+                hasStepSensor = hasStepSensor,
+                onGrantActivity = onGrantActivity,
+            )
         }
 
         StatusRow(state = state)
@@ -620,6 +642,15 @@ private fun StatusRow(state: SpeedUiState) {
             )
         }
 
+        if (state.indoorActive) {
+            StatusPill(
+                text = stringResource(R.string.speedometer_steps_source),
+                icon = Icons.Rounded.DirectionsWalk,
+                container = colors.secondaryContainer,
+                content = colors.onSecondaryContainer,
+            )
+        }
+
         if (state.settings.speedLimitEnabled) {
             StatusPill(
                 text = stringResource(R.string.speedometer_limit_pill, state.settings.speedLimit),
@@ -684,6 +715,41 @@ private fun LocationOffBanner(onOpenSettings: () -> Unit) {
             )
             TextButton(onClick = onOpenSettings) {
                 Text(stringResource(R.string.speedometer_open_location_settings))
+            }
+        }
+    }
+}
+
+@Composable
+private fun IndoorUnavailableBanner(
+    hasStepSensor: Boolean,
+    onGrantActivity: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = SquircleShape,
+        color = MaterialTheme.colorScheme.tertiaryContainer,
+        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 16.dp, top = 8.dp, end = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = stringResource(
+                    if (hasStepSensor) {
+                        R.string.speedometer_activity_body
+                    } else {
+                        R.string.speedometer_no_step_sensor
+                    },
+                ),
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+            if (hasStepSensor) {
+                TextButton(onClick = onGrantActivity) {
+                    Text(stringResource(R.string.speedometer_activity_grant))
+                }
             }
         }
     }
@@ -975,7 +1041,7 @@ private fun HudScreen(
         targetValue = if (state.isOverLimit) HudRed else Color.White,
         label = "hudSpeedColor",
     )
-    val flip = state.settings.hudFlip
+    val mirror = state.settings.hudMirror
 
     Box(
         modifier = modifier
@@ -1002,41 +1068,90 @@ private fun HudScreen(
                 .fillMaxSize()
                 .padding(24.dp),
         ) {
-            val speedSize = with(LocalDensity.current) { (maxWidth * 0.46f).toSp() }
-            Column(
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .graphicsLayer {
-                        scaleX = if (flip == HudFlip.HORIZONTAL) -1f else 1f
-                        scaleY = if (flip == HudFlip.VERTICAL) -1f else 1f
-                    },
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text(
-                    text = state.speedDisplay.roundToInt().toString(),
-                    style = TextStyle(
+            // NORMAL shows the readout as-is (phone/bike mount); the mirror modes flip it
+            // for windshield reflection.
+            val mirrorModifier = Modifier.graphicsLayer {
+                scaleX = if (mirror == HudMirror.MIRROR_HORIZONTAL) -1f else 1f
+                scaleY = if (mirror == HudMirror.MIRROR_VERTICAL) -1f else 1f
+            }
+            if (maxWidth > maxHeight) {
+                val speedSize = with(LocalDensity.current) { (maxHeight * 0.52f).toSp() }
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .then(mirrorModifier),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(32.dp, Alignment.CenterHorizontally),
+                ) {
+                    HudSpeedText(
+                        text = state.speedDisplay.roundToInt().toString(),
                         fontSize = speedSize,
-                        fontWeight = FontWeight.Bold,
-                        fontFeatureSettings = TabularDigits,
-                    ),
-                    color = speedColor,
-                    maxLines = 1,
-                    softWrap = false,
-                )
-                Text(
-                    text = state.unit.label,
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = Color.White.copy(alpha = 0.7f),
-                )
-                if (state.settings.speedLimitEnabled) {
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        text = stringResource(R.string.speedometer_limit_pill, state.settings.speedLimit),
-                        style = MaterialTheme.typography.titleLarge,
-                        color = if (state.isOverLimit) HudRed else Color.White.copy(alpha = 0.7f),
+                        color = speedColor,
                     )
+                    HudSideColumn(state = state)
+                }
+            } else {
+                val speedSize = with(LocalDensity.current) { (maxWidth * 0.46f).toSp() }
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .then(mirrorModifier),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    HudSpeedText(
+                        text = state.speedDisplay.roundToInt().toString(),
+                        fontSize = speedSize,
+                        color = speedColor,
+                    )
+                    HudSideColumn(state = state)
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun HudSpeedText(
+    text: String,
+    fontSize: androidx.compose.ui.unit.TextUnit,
+    color: Color,
+) {
+    Text(
+        text = text,
+        style = TextStyle(
+            fontSize = fontSize,
+            fontWeight = FontWeight.Bold,
+            fontFeatureSettings = TabularDigits,
+        ),
+        color = color,
+        maxLines = 1,
+        softWrap = false,
+    )
+}
+
+@Composable
+private fun HudSideColumn(state: SpeedUiState) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            text = state.unit.label,
+            style = MaterialTheme.typography.headlineMedium,
+            color = Color.White.copy(alpha = 0.7f),
+        )
+        if (state.settings.speedLimitEnabled) {
+            Spacer(Modifier.height(12.dp))
+            Text(
+                text = stringResource(R.string.speedometer_limit_pill, state.settings.speedLimit),
+                style = MaterialTheme.typography.titleLarge,
+                color = if (state.isOverLimit) HudRed else Color.White.copy(alpha = 0.7f),
+            )
+        }
+        if (state.indoorActive) {
+            Spacer(Modifier.height(12.dp))
+            Text(
+                text = stringResource(R.string.speedometer_steps_source),
+                style = MaterialTheme.typography.titleMedium,
+                color = Color.White.copy(alpha = 0.7f),
+            )
         }
     }
 }
@@ -1106,7 +1221,10 @@ private fun SettingsSheet(
     onLimitEnabled: (Boolean) -> Unit,
     onLimit: (Int) -> Unit,
     onKeepScreenOn: (Boolean) -> Unit,
-    onHudFlip: (HudFlip) -> Unit,
+    onAutoRecord: (Boolean) -> Unit,
+    onIndoorMode: (Boolean) -> Unit,
+    onStride: (Int) -> Unit,
+    onHudMirror: (HudMirror) -> Unit,
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1172,20 +1290,55 @@ private fun SettingsSheet(
                 onCheckedChange = onKeepScreenOn,
             )
 
+            SettingsSwitch(
+                title = stringResource(R.string.speedometer_settings_auto_record),
+                description = stringResource(R.string.speedometer_settings_auto_record_desc),
+                checked = settings.autoRecord,
+                onCheckedChange = onAutoRecord,
+            )
+
+            SettingsSwitch(
+                title = stringResource(R.string.speedometer_settings_indoor),
+                description = stringResource(R.string.speedometer_settings_indoor_desc),
+                checked = settings.indoorMode,
+                onCheckedChange = onIndoorMode,
+            )
+            AnimatedVisibility(visible = settings.indoorMode) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 24.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Slider(
+                        value = settings.strideCm.toFloat(),
+                        onValueChange = { onStride(it.roundToInt()) },
+                        valueRange = STRIDE_MIN_CM.toFloat()..STRIDE_MAX_CM.toFloat(),
+                        steps = (STRIDE_MAX_CM - STRIDE_MIN_CM) / 5 - 1,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = stringResource(R.string.speedometer_stride_cm, settings.strideCm),
+                        style = MaterialTheme.typography.titleMedium.copy(fontFeatureSettings = TabularDigits),
+                        textAlign = TextAlign.End,
+                        modifier = Modifier.widthIn(min = 88.dp),
+                    )
+                }
+            }
+
             SettingsLabel(stringResource(R.string.speedometer_settings_hud_mirror))
             SingleChoiceSegmentedButtonRow(Modifier.padding(horizontal = 24.dp).fillMaxWidth()) {
-                HudFlip.entries.forEachIndexed { index, option ->
+                HudMirror.entries.forEachIndexed { index, option ->
                     SegmentedButton(
-                        selected = option == settings.hudFlip,
-                        onClick = { onHudFlip(option) },
-                        shape = SegmentedButtonDefaults.itemShape(index, HudFlip.entries.size),
+                        selected = option == settings.hudMirror,
+                        onClick = { onHudMirror(option) },
+                        shape = SegmentedButtonDefaults.itemShape(index, HudMirror.entries.size),
                         icon = {},
                         label = {
                             Text(
                                 stringResource(
                                     when (option) {
-                                        HudFlip.VERTICAL -> R.string.speedometer_hud_flip_vertical
-                                        HudFlip.HORIZONTAL -> R.string.speedometer_hud_flip_horizontal
+                                        HudMirror.NORMAL -> R.string.speedometer_hud_mirror_normal
+                                        HudMirror.MIRROR_VERTICAL -> R.string.speedometer_hud_flip_vertical
+                                        HudMirror.MIRROR_HORIZONTAL -> R.string.speedometer_hud_flip_horizontal
                                     },
                                 ),
                             )
@@ -1254,6 +1407,9 @@ private fun SpeedometerContentPreview() {
             ),
             onUnitClick = {},
             onOpenLocationSettings = {},
+            activityGranted = true,
+            hasStepSensor = true,
+            onGrantActivity = {},
         )
     }
 }

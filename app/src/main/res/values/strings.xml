@@ -3762,7 +3762,17 @@
     <string name="speedometer_settings_limit">Speed limit alert</string>
     <string name="speedometer_settings_limit_desc">The gauge turns red when you go over</string>
     <string name="speedometer_settings_keep_on">Keep screen on</string>
+    <string name="speedometer_settings_auto_record">Auto-record trip</string>
+    <string name="speedometer_settings_auto_record_desc">Starts recording when you open the screen. Pause anytime to stop.</string>
+    <string name="speedometer_settings_indoor">Step-based indoor mode</string>
+    <string name="speedometer_settings_indoor_desc">Uses the step counter for treadmill speed. Off by default.</string>
+    <string name="speedometer_stride_cm">%1$d cm</string>
+    <string name="speedometer_steps_source">Steps</string>
+    <string name="speedometer_activity_body">Allow physical activity access to measure treadmill speed from your step cadence.</string>
+    <string name="speedometer_activity_grant">Allow</string>
+    <string name="speedometer_no_step_sensor">This device has no step counter sensor, so indoor mode is unavailable.</string>
     <string name="speedometer_settings_hud_mirror">HUD mirroring</string>
+    <string name="speedometer_hud_mirror_normal">Normal</string>
     <string name="speedometer_hud_flip_vertical">Vertical</string>
     <string name="speedometer_hud_flip_horizontal">Horizontal</string>
 
