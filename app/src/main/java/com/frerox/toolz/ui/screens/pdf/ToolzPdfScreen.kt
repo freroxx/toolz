@@ -16,6 +16,7 @@
  */
 
 package com.frerox.toolz.ui.screens.pdf
+import com.frerox.toolz.R
 
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -380,7 +381,7 @@ fun ToolzPdfScreen(
                         viewModel.deleteFile(file)
                         deletingFile = null
                         haptic.click()
-                        scope.launch { snackbar.showSnackbar("Deleted") }
+                        scope.launch { snackbar.showSnackbar(context.getString(R.string.snackbar_deleted)) }
                     }
                 ) {
                     Text(

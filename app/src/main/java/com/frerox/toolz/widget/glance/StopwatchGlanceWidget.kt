@@ -90,6 +90,42 @@ class StopwatchGlanceWidget : GlanceAppWidget() {
     )
     override val stateDefinition = StopwatchWidgetStateDefinition
 
+    // Generated picker preview (API 35+). Static demo data only — never
+    // touch DataStore/Hilt/Settings here.
+    override suspend fun providePreview(context: Context, widgetCategory: Int) {
+        provideContent {
+            GlanceTheme {
+                val size = LocalSize.current
+                val wide = stopwatchIsWide(size)
+                val previewIntent = Intent()
+                Box(
+                    modifier = GlanceModifier
+                        .fillMaxSize()
+                        .background(GlanceTheme.colors.surface)
+                        .cornerRadius(widgetOuterCornerFor(size.width, size.height)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (wide) {
+                        WideStopwatchContent(
+                            elapsedMs = 12 * 60 * 1000L + 34 * 1000L,
+                            isRunning = false,
+                            lapCount = 2,
+                            lastLapMs = 31 * 1000L,
+                            openStopwatchIntent = previewIntent
+                        )
+                    } else {
+                        SquareStopwatchContent(
+                            elapsedMs = 12 * 60 * 1000L + 34 * 1000L,
+                            isRunning = false,
+                            lapCount = 2,
+                            openStopwatchIntent = previewIntent
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val prefs = getAppWidgetState<Preferences>(context, StopwatchWidgetStateDefinition, id)
         val base = try { prefs[StopwatchWidgetState.KEY_BASE_ELAPSED_MS] ?: 0L } catch (_: Exception) { 0L }

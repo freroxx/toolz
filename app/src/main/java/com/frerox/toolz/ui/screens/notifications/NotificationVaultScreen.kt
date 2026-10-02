@@ -382,7 +382,7 @@ fun NotificationVaultScreen(
                         clipboard.setPrimaryClip(
                             ClipData.newPlainText("Notification", "${n.title}\n${n.text}")
                         )
-                        Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, context.getString(R.string.toast_copied_clipboard), Toast.LENGTH_SHORT).show()
                     },
                 )
             }
@@ -398,7 +398,7 @@ fun NotificationVaultScreen(
                 showContextSheet = null
                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                 clipboard.setPrimaryClip(ClipData.newPlainText("Notification", "${n.title}\n${n.text}"))
-                Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, context.getString(R.string.toast_copied_clipboard), Toast.LENGTH_SHORT).show()
             },
             onHideApp = {
                 showContextSheet = null
@@ -423,10 +423,10 @@ fun NotificationVaultScreen(
                         launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         context.startActivity(launchIntent)
                     } else {
-                        Toast.makeText(context, "App doesn't have a launcher activity", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, context.getString(R.string.toast_no_launcher), Toast.LENGTH_SHORT).show()
                     }
                 } catch (e: Exception) {
-                    Toast.makeText(context, "Failed to launch app: ${e.message}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, context.getString(R.string.toast_launch_failed, e.message ?: ""), Toast.LENGTH_SHORT).show()
                 }
             },
         )

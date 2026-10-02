@@ -428,7 +428,7 @@ fun NetworkSuiteScreen(
                                 state = uiState,
                                 onCopySummary = {
                                     clipboard.setText(AnnotatedString(tweaksVm.buildDiagnosticSummary()))
-                                    scope.launch { snackbarHostState.showSnackbar("Diagnostic summary copied.") }
+                                    scope.launch { snackbarHostState.showSnackbar(context.getString(R.string.snackbar_diag_copied)) }
                                 },
                                 onOpenWifiSettings = { launchSettings(context, Settings.ACTION_WIFI_SETTINGS) },
                                 onOpenDevSettings = { launchSettings(context, Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS) },
@@ -438,7 +438,7 @@ fun NetworkSuiteScreen(
                                     // P4 fix: traceroute now always gives UI feedback via tweaksVm (isTracing + traceHops + snackbar)
                                     // PowerVm streaming kept as fallback for privileged path
                                     if (target.isBlank()) {
-                                        scope.launch { snackbarHostState.showSnackbar("Enter a host to trace") }
+                                        scope.launch { snackbarHostState.showSnackbar(context.getString(R.string.snackbar_enter_host)) }
                                     } else {
                                         tweaksVm.runTraceRoute(target)
                                         if (privilegedReady) powerVm.runTraceRoute(target)
@@ -523,7 +523,7 @@ fun NetworkSuiteScreen(
         APDetailSheet(result = result, onDismiss = { showDetailSheet = null }, onPing = { target ->
             scope.launch {
                 val latency = tweaksVm.pingHost(target)
-                snackbarHostState.showSnackbar("Ping to $target: ${latency ?: "Timeout"}ms")
+                snackbarHostState.showSnackbar(context.getString(R.string.snackbar_ping_result, target, latency?.toString() ?: context.getString(R.string.snackbar_timeout)))
             }
         })
     }

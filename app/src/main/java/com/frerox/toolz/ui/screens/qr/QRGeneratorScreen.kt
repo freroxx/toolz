@@ -599,7 +599,7 @@ fun QRGeneratorScreen(
                                 val b = qrBitmap ?: return@Button
                                 viewModel.saveQrCode(context, b, { 
                                     vibrationManager?.vibrateSuccess()
-                                    scope.launch { snackbarHostState.showSnackbar("Saved to Gallery!") }
+                                    scope.launch { snackbarHostState.showSnackbar(context.getString(R.string.snackbar_saved_gallery)) }
                                 }, {})
                             },
                             modifier = Modifier.weight(1.2f).height(68.dp),

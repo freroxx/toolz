@@ -85,6 +85,49 @@ class PomodoroGlanceWidget : GlanceAppWidget() {
     )
     override val stateDefinition = PomodoroWidgetStateDefinition
 
+    // Generated picker preview (API 35+). Static demo data only — never
+    // touch DataStore/Hilt/Settings here.
+    override suspend fun providePreview(context: Context, widgetCategory: Int) {
+        provideContent {
+            GlanceTheme {
+                val size = LocalSize.current
+                val tier = pomoTier(size)
+                val previewIntent = Intent()
+                Box(
+                    modifier = GlanceModifier
+                        .fillMaxSize()
+                        .background(GlanceTheme.colors.surface)
+                        .cornerRadius(widgetOuterCornerFor(size.width, size.height)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    when (tier) {
+                        2 -> ExpandedPomodoroContent(
+                            mode = "WORK", isRunning = false,
+                            sessionsDone = 3, sessionsGoal = 8,
+                            progress = 0.35f,
+                            displayMs = 24 * 60 * 1000L + 59 * 1000L,
+                            openPomodoroIntent = previewIntent
+                        )
+                        1 -> TallPomodoroContent(
+                            mode = "WORK", isRunning = false,
+                            sessionsDone = 3, sessionsGoal = 8,
+                            progress = 0.35f,
+                            displayMs = 24 * 60 * 1000L + 59 * 1000L,
+                            openPomodoroIntent = previewIntent
+                        )
+                        else -> CompactPomodoroContent(
+                            mode = "WORK", isRunning = false,
+                            sessionsDone = 3, sessionsGoal = 8,
+                            progress = 0.35f,
+                            displayMs = 24 * 60 * 1000L + 59 * 1000L,
+                            openPomodoroIntent = previewIntent
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val prefs = getAppWidgetState<Preferences>(context, PomodoroWidgetStateDefinition, id)
         val mode = prefs[PomodoroWidgetState.KEY_MODE] ?: "WORK"

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Static picker preview for Pomodoro widget (API 31-34). Mirrors minimal compact tier. -->
+<!-- Static picker preview for Pomodoro widget (API 31+). Mirrors compact tier.
+     Preview-safe: only @color/@drawable (never ?attr). -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -14,7 +15,7 @@
         android:text="FOCUS • READY"
         android:textSize="10sp"
         android:textStyle="bold"
-        android:textColor="?attr/colorOnPrimaryContainer"
+        android:textColor="@color/widget_preview_on_container"
         android:background="@drawable/widget_button_tonal"
         android:paddingStart="10dp"
         android:paddingEnd="10dp"
@@ -27,7 +28,7 @@
         android:text="24:59"
         android:textSize="32sp"
         android:textStyle="bold"
-        android:textColor="?attr/colorOnSurface"
+        android:textColor="@color/widget_preview_text"
         android:layout_marginTop="6dp" />
 
     <TextView
@@ -35,7 +36,7 @@
         android:layout_height="wrap_content"
         android:text="SESSION 3 OF 8"
         android:textSize="10sp"
-        android:textColor="?attr/colorOnSurfaceVariant"
+        android:textColor="@color/widget_preview_subtext"
         android:layout_marginTop="2dp" />
 
     <ProgressBar
@@ -45,8 +46,8 @@
         style="?android:attr/progressBarStyleHorizontal"
         android:progress="35"
         android:max="100"
-        android:progressTint="?attr/colorPrimary"
-        android:progressBackgroundTint="?attr/colorSurfaceVariant" />
+        android:progressTint="@color/widget_preview_accent"
+        android:progressBackgroundTint="@color/widget_preview_track" />
 
     <FrameLayout
         android:layout_width="52dp"
@@ -59,7 +60,7 @@
             android:layout_height="24dp"
             android:layout_gravity="center"
             android:src="@drawable/ic_widget_play"
-            android:tint="?attr/colorOnPrimary"
+            android:tint="@color/widget_preview_on_accent"
             android:contentDescription="@null" />
     </FrameLayout>
 </LinearLayout>

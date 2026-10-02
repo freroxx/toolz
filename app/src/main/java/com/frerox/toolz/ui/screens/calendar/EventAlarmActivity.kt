@@ -16,6 +16,7 @@
  */
 
 package com.frerox.toolz.ui.screens.calendar
+import com.frerox.toolz.R
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -291,7 +292,7 @@ class EventAlarmActivity : ComponentActivity() {
                 ).show()
             } catch (e2: Exception) {
                 android.util.Log.e("EventAlarmActivity", "Snooze fallback also failed", e2)
-                android.widget.Toast.makeText(this, "Couldn't schedule snooze", android.widget.Toast.LENGTH_LONG).show()
+                android.widget.Toast.makeText(this, getString(R.string.toast_snooze_failed), android.widget.Toast.LENGTH_LONG).show()
                 return
             }
         }

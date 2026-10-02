@@ -2073,9 +2073,9 @@ fun saveToGallery(context: android.content.Context, bitmap: Bitmap) {
         }
         bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream)
         outputStream.close()
-        android.widget.Toast.makeText(context, "Saved to gallery", android.widget.Toast.LENGTH_SHORT).show()
+        android.widget.Toast.makeText(context, context.getString(R.string.toast_saved_gallery), android.widget.Toast.LENGTH_SHORT).show()
     } catch (e: Exception) {
-        android.widget.Toast.makeText(context, "Failed to save: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+        android.widget.Toast.makeText(context, context.getString(R.string.toast_save_failed, e.message ?: ""), android.widget.Toast.LENGTH_SHORT).show()
     }
 }
 
@@ -2102,7 +2102,7 @@ fun saveAndShareQr(context: android.content.Context, bitmap: Bitmap) {
         }
         context.startActivity(Intent.createChooser(shareIntent, "Share QR code"))
     } catch (e: Exception) {
-        android.widget.Toast.makeText(context, "Sharing failed: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+        android.widget.Toast.makeText(context, context.getString(R.string.toast_share_failed, e.message ?: ""), android.widget.Toast.LENGTH_SHORT).show()
     }
 }
 

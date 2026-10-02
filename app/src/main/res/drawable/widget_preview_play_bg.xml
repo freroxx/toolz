@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Theme-aware circular play background for widget picker previews. -->
+<!-- Preview-safe circular play background. Hardcoded @color, never ?attr. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="oval">
-    <solid android:color="?attr/colorPrimary" />
+    <solid android:color="@color/widget_preview_accent" />
 </shape>

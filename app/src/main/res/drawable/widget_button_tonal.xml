@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <shape xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Theme-aware: picker pill follows M3 primary-container in light/dark. -->
-    <solid android:color="?attr/colorPrimaryContainer" />
+    <!-- Preview-safe pill. Hardcoded @color, never ?attr (launcher system theme). -->
+    <solid android:color="@color/widget_preview_container" />
     <corners android:radius="16dp" />
 </shape>

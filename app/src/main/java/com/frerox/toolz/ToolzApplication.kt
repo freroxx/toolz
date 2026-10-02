@@ -103,6 +103,14 @@ class ToolzApplication : Application(), Configuration.Provider {
         scheduleWhisperDelivery()
         schedulePurgeShotReschedule()
         com.frerox.toolz.worker.ClipboardCleanupWorker.schedule(this)
+        // Widget generated previews (API 35+, rate-limited, non-fatal).
+        // App-level publish covers cold starts where MainActivity never runs
+        // before the user opens the widget picker (reboot, update, restore).
+        appScope.launch {
+            try {
+                com.frerox.toolz.widget.ui.WidgetPreviewsPublisher.publishAll(this@ToolzApplication)
+            } catch (_: Exception) { }
+        }
         // Screen Time widget removed — no periodic widget work. Any orphaned
         // ScreenTimeWidgetRefresh work from older installs is cancelled once.
         try {

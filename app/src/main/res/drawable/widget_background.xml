@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <shape xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Theme-aware: picker previews follow light/dark instead of hardcoded white. -->
-    <solid android:color="?attr/colorSurface" />
+    <!-- Preview-safe: hardcoded @color (never ?attr — launcher inflates
+         previewLayout with the system theme, ?attr fails -> blank tile).
+         Light/dark via values-night/colors.xml. -->
+    <solid android:color="@color/widget_preview_bg" />
     <corners android:radius="28dp" />
 </shape>

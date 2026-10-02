@@ -16,6 +16,7 @@
  */
 
 package com.frerox.toolz.ui.screens.notifications
+import com.frerox.toolz.R
 
 import android.widget.Toast
 import androidx.lifecycle.ViewModel
@@ -221,7 +222,7 @@ class NotificationVaultViewModel @Inject constructor(
                 file.writeText(content)
 
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(context, "Logs exported to: ${file.name}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(context, context.getString(R.string.toast_logs_exported, file.name), Toast.LENGTH_LONG).show()
                 }
             } catch (e: Exception) {
                 e.printStackTrace()

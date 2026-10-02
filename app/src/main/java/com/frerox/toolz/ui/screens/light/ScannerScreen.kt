@@ -114,10 +114,10 @@ fun ScannerScreen(
                 if (!detected.isNullOrEmpty()) {
                     scanResult = detected
                 } else {
-                    Toast.makeText(context, "No QR / barcode detected in image", Toast.LENGTH_LONG).show()
+                    Toast.makeText(context, context.getString(R.string.toast_no_qr_detected), Toast.LENGTH_LONG).show()
                 }
             } catch (e: Exception) {
-                Toast.makeText(context, "Failed to scan image: ${e.message}", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, context.getString(R.string.toast_scan_failed, e.message ?: ""), Toast.LENGTH_LONG).show()
             } finally {
                 isScanningInitialImage = false
             }

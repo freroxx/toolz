@@ -103,6 +103,60 @@ class MusicGlanceWidget : GlanceAppWidget() {
     )
     override val stateDefinition = MusicWidgetStateDefinition
 
+    // Generated picker preview (API 35+ setWidgetPreviews). Default
+    // GlanceAppWidget.providePreview is empty, so without this the picker
+    // shows a blank tile on VanillaIceCream+. Static demo data only — never
+    // touch DataStore/Hilt/Settings here (no widget instance exists yet).
+    override suspend fun providePreview(context: Context, widgetCategory: Int) {
+        provideContent {
+            GlanceTheme {
+                val size = LocalSize.current
+                val tier = musicTier(size)
+                val outerCorner = widgetOuterCornerFor(size.width, size.height)
+                val previewIntent = Intent()
+                Box(
+                    modifier = GlanceModifier
+                        .fillMaxSize()
+                        .background(GlanceTheme.colors.surface)
+                        .cornerRadius(outerCorner),
+                    contentAlignment = Alignment.TopStart,
+                ) {
+                    when (tier) {
+                        2 -> ExpandedMusicContent(
+                            title = "Midnight Drive", artist = "Neon Coast",
+                            progress = 0.35f,
+                            positionLabel = "1:12", durationLabel = "3:24",
+                            isPlaying = true, artBitmap = null, artShape = "SQUIRCLE",
+                            isFavorite = false, accentColor = null,
+                            hasNext = true, hasPrev = true,
+                            isShuffle = false, repeatMode = 0,
+                            queue = listOf(
+                                QueueTrackInfo("preview-1", "Blinding Lights", "The Weeknd", 1),
+                                QueueTrackInfo("preview-2", "Levitating", "Dua Lipa", 2)
+                            ),
+                            openMusicIntent = previewIntent
+                        )
+                        1 -> MediumMusicContent(
+                            title = "Midnight Drive", artist = "Neon Coast",
+                            progress = 0.35f,
+                            positionLabel = "1:12", durationLabel = "3:24",
+                            isPlaying = true, artBitmap = null, artShape = "SQUIRCLE",
+                            isFavorite = false, accentColor = null,
+                            hasNext = true, hasPrev = true,
+                            openMusicIntent = previewIntent
+                        )
+                        else -> CompactMusicContent(
+                            title = "Midnight Drive", artist = "Neon Coast", isPlaying = true,
+                            artBitmap = null, artShape = "SQUIRCLE",
+                            accentColor = null, progress = 0.35f,
+                            isFavorite = false, openMusicIntent = previewIntent
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val prefs = getAppWidgetState<Preferences>(context, MusicWidgetStateDefinition, id)
         val title = prefs[MusicWidgetState.KEY_TITLE]?.takeIf { it.isNotBlank() } ?: "Not Playing"

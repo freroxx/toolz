@@ -142,11 +142,11 @@ fun FocusFlowScreen(
     LaunchedEffect(sessionError, overlayRequiredMsg, a11yRequiredMsg, invalidDurationMsg) {
         when (sessionError) {
             "usage_required" -> {
-                snackbarHostState.showSnackbar("Usage access is required — blocking needs it for secure apps and gesture nav.")
+                snackbarHostState.showSnackbar(context.getString(R.string.snackbar_usage_access_required))
                 viewModel.consumeSessionError()
             }
             "service_not_ready" -> {
-                snackbarHostState.showSnackbar("Timer service isn't ready yet — try again in a moment.")
+                snackbarHostState.showSnackbar(context.getString(R.string.snackbar_timer_not_ready))
                 viewModel.consumeSessionError()
             }
             "overlay_required" -> {

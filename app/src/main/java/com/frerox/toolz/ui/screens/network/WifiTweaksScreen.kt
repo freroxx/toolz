@@ -879,7 +879,7 @@ private fun ExportActionsCard() {
             OutlinedButton(
                 onClick = {
                     clipboard.setText(AnnotatedString(vm.exportScanCsv()))
-                    android.widget.Toast.makeText(context, "CSV copied", android.widget.Toast.LENGTH_SHORT).show()
+                    android.widget.Toast.makeText(context, context.getString(R.string.toast_csv_copied), android.widget.Toast.LENGTH_SHORT).show()
                 },
                 modifier = Modifier.weight(1f),
                 shape = RoundedCornerShape(50)
@@ -899,7 +899,7 @@ private fun ExportActionsCard() {
                         }
                         context.startActivity(android.content.Intent.createChooser(send, "Share diagnostic").addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
                     }.onFailure {
-                        android.widget.Toast.makeText(context, "JSON copied", android.widget.Toast.LENGTH_SHORT).show()
+                        android.widget.Toast.makeText(context, context.getString(R.string.toast_json_copied), android.widget.Toast.LENGTH_SHORT).show()
                     }
                 },
                 modifier = Modifier.weight(1f),

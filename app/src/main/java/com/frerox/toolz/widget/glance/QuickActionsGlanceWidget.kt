@@ -79,6 +79,25 @@ class QuickActionsGlanceWidget : GlanceAppWidget() {
         setOf(WidgetSizes.ToolbarExpanded)
     )
 
+    // Generated picker preview (API 35+). Static demo data only — never
+    // touch DataStore/Hilt/Settings here (no widget instance exists yet).
+    override suspend fun providePreview(context: Context, widgetCategory: Int) {
+        val previewIntent = Intent()
+        provideContent {
+            GlanceTheme {
+                ToolbarContent(
+                    slots = listOf("mic", "flashlight", "qr"),
+                    appearance = WidgetAppearance(),
+                    openSearchIntent = previewIntent,
+                    micIntent = previewIntent,
+                    qrIntent = previewIntent,
+                    pomodoroIntent = previewIntent,
+                    stopwatchIntent = previewIntent
+                )
+            }
+        }
+    }
+
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val openSearchIntent = widgetNavIntent(context, "search").apply {
             putExtra("auto_focus_search", true)

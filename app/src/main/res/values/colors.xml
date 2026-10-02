@@ -13,4 +13,17 @@
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
     <color name="favorite_red">#FFE0555C</color>
+
+    <!-- Widget picker previews: hardcoded (never ?attr — the launcher inflates
+         previewLayout with the system theme, so Material3 attrs fail to resolve
+         and the picker shows a blank tile). Light/dark handled via
+         values-night/colors.xml with the same names. -->
+    <color name="widget_preview_bg">#FFFFF8F2</color>
+    <color name="widget_preview_accent">#FFFF6D00</color>
+    <color name="widget_preview_on_accent">#FFFFFFFF</color>
+    <color name="widget_preview_text">#FF1F1B16</color>
+    <color name="widget_preview_subtext">#FF6D5E4F</color>
+    <color name="widget_preview_container">#FFFFE0B2</color>
+    <color name="widget_preview_on_container">#FF4A2800</color>
+    <color name="widget_preview_track">#FFE8DED2</color>
 </resources>

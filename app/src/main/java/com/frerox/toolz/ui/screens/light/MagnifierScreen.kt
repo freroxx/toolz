@@ -144,7 +144,7 @@ fun MagnifierScreen(
                 }
 
                 override fun onError(exc: ImageCaptureException) {
-                    Toast.makeText(context, "Capture failed: ${exc.message}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, context.getString(R.string.toast_capture_failed, exc.message ?: ""), Toast.LENGTH_SHORT).show()
                 }
             }
         )

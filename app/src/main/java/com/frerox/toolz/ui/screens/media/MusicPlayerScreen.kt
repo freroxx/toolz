@@ -464,7 +464,7 @@ fun MusicPlayerScreen(
                                 musicState = state,
                                 onStartKaraoke = { track ->
                                     if (track.aiLyrics.isNullOrEmpty() && track.sourceUrl == null) {
-                                        android.widget.Toast.makeText(context, "No available lyrics were found", android.widget.Toast.LENGTH_SHORT).show()
+                                        android.widget.Toast.makeText(context, context.getString(R.string.toast_no_lyrics), android.widget.Toast.LENGTH_SHORT).show()
                                     } else {
                                         viewModel.playTrack(track)
                                         viewModel.setKaraokeMode(true)

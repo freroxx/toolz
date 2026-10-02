@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Static picker preview for Music widget (API 31-34). Mirrors S tier: art + titles + play + progress. -->
+<!-- Static picker preview for Music widget (API 31+). Mirrors S tier: art + titles + play + progress.
+     Preview-safe: only @color/@drawable (never ?attr — launcher inflates with system theme). -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -25,7 +26,7 @@
                 android:layout_gravity="center"
                 android:padding="14dp"
                 android:src="@drawable/ic_music_note"
-                android:tint="?attr/colorOnSurfaceVariant"
+                android:tint="@color/widget_preview_subtext"
                 android:contentDescription="@null" />
         </FrameLayout>
 
@@ -43,7 +44,7 @@
                 android:text="Midnight Drive"
                 android:textSize="14sp"
                 android:textStyle="bold"
-                android:textColor="?attr/colorOnSurface"
+                android:textColor="@color/widget_preview_text"
                 android:maxLines="1" />
 
             <TextView
@@ -51,7 +52,7 @@
                 android:layout_height="wrap_content"
                 android:text="Neon Coast"
                 android:textSize="11sp"
-                android:textColor="?attr/colorOnSurfaceVariant"
+                android:textColor="@color/widget_preview_subtext"
                 android:maxLines="1" />
         </LinearLayout>
 
@@ -65,7 +66,7 @@
                 android:layout_height="22dp"
                 android:layout_gravity="center"
                 android:src="@drawable/ic_widget_pause"
-                android:tint="?attr/colorOnPrimary"
+                android:tint="@color/widget_preview_on_accent"
                 android:contentDescription="@null" />
         </FrameLayout>
     </LinearLayout>
@@ -77,6 +78,6 @@
         style="?android:attr/progressBarStyleHorizontal"
         android:progress="35"
         android:max="100"
-        android:progressTint="?attr/colorPrimary"
-        android:progressBackgroundTint="?attr/colorSurfaceVariant" />
+        android:progressTint="@color/widget_preview_accent"
+        android:progressBackgroundTint="@color/widget_preview_track" />
 </LinearLayout>

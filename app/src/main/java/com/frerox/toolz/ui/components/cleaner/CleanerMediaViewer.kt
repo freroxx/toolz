@@ -1,4 +1,5 @@
 package com.frerox.toolz.ui.components.cleaner
+import com.frerox.toolz.R
 
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -81,7 +82,7 @@ fun CleanerMediaViewer(
     fun copyPath() {
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
         clipboard?.setPrimaryClip(ClipData.newPlainText("File path", filePath))
-        Toast.makeText(context, "Path copied", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, context.getString(R.string.toast_path_copied), Toast.LENGTH_SHORT).show()
     }
 
     // Zoom & Pan state for images

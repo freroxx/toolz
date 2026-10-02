@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Static picker preview for Stopwatch widget (API 31-34). Mirrors square tier. -->
+<!-- Static picker preview for Stopwatch widget (API 31+). Mirrors square tier.
+     Preview-safe: only @color/@drawable (never ?attr). -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -14,7 +15,7 @@
         android:text="STOPWATCH"
         android:textSize="10sp"
         android:textStyle="bold"
-        android:textColor="?attr/colorOnPrimaryContainer"
+        android:textColor="@color/widget_preview_on_container"
         android:background="@drawable/widget_button_tonal"
         android:paddingStart="10dp"
         android:paddingEnd="10dp"
@@ -27,7 +28,7 @@
         android:text="12:34"
         android:textSize="32sp"
         android:textStyle="bold"
-        android:textColor="?attr/colorOnSurface"
+        android:textColor="@color/widget_preview_text"
         android:layout_marginTop="8dp" />
 
     <TextView
@@ -35,7 +36,7 @@
         android:layout_height="wrap_content"
         android:text="2 LAPS"
         android:textSize="10sp"
-        android:textColor="?attr/colorOnSurfaceVariant"
+        android:textColor="@color/widget_preview_subtext"
         android:layout_marginTop="2dp" />
 
     <FrameLayout
@@ -49,7 +50,7 @@
             android:layout_height="24dp"
             android:layout_gravity="center"
             android:src="@drawable/ic_widget_play"
-            android:tint="?attr/colorOnPrimary"
+            android:tint="@color/widget_preview_on_accent"
             android:contentDescription="@null" />
     </FrameLayout>
 </LinearLayout>
