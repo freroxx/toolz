@@ -7,7 +7,6 @@ import com.frerox.toolz.data.news.NewsRepository
 import com.frerox.toolz.data.settings.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -64,21 +63,30 @@ class NewsViewModel @Inject constructor(
         }
     }
 
-    /** Dashboard/foreground entry: evaluate candidate and show after its delaySeconds. */
+    /** Dashboard/foreground entry: show the eligible candidate immediately. */
     fun evaluatePopup() {
         if (sessionPopupShown) return
         popupJob?.cancel()
         popupJob = viewModelScope.launch {
             try {
+                // No foreground delay: news shows as soon as it reaches the
+                // user, dashboard-only (this host lives in DashboardScreen).
                 val candidate = newsRepository.popupCandidate() ?: return@launch
-                if (candidate.delaySeconds > 0) delay(candidate.delaySeconds * 1000L)
                 if (sessionPopupShown) return@launch
-                val fresh = newsRepository.popupCandidate()
-                if (fresh?.id != candidate.id) return@launch
                 _popup.value = candidate
                 _popupVisible.value = true
                 sessionPopupShown = true
                 newsRepository.markShown(candidate.id)
+                refreshUnread()
+            } catch (_: Exception) { }
+        }
+    }
+
+    /** Foreground arrival check: sync, then immediately notify anything new. */
+    fun checkNotifications() {
+        viewModelScope.launch {
+            try {
+                newsRepository.syncAndNotify()
                 refreshUnread()
             } catch (_: Exception) { }
         }

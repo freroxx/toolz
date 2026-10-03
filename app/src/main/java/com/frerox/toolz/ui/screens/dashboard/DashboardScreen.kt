@@ -221,6 +221,9 @@ fun DashboardScreen(
     androidx.compose.runtime.LaunchedEffect(Unit) {
         newsViewModel.refreshUnread()
         newsViewModel.evaluatePopup()
+        // Arrival check: news + notifications surface as soon as they reach
+        // the user (stale-gated + once-per-id, so this never spams).
+        newsViewModel.checkNotifications()
     }
 
     Box(modifier = Modifier.fillMaxSize().toolzBackground()) {

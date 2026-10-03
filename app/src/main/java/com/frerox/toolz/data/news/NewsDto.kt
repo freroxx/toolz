@@ -21,7 +21,7 @@ data class NewsDto(
     @SerialName("maxAppVersion") val maxAppVersion: String? = null,
     @SerialName("onlyVersions") val onlyVersions: List<String> = emptyList(),
     @SerialName("excludedVersions") val excludedVersions: List<String> = emptyList(),
-    @SerialName("delaySeconds") val delaySeconds: Int = 5,
+    @SerialName("delaySeconds") val delaySeconds: Int = 0,
     @SerialName("frequency") val frequency: String = "once",
     @SerialName("intervalHours") val intervalHours: Int? = null,
     @SerialName("maxImpressions") val maxImpressions: Int? = null,
@@ -29,6 +29,7 @@ data class NewsDto(
     @SerialName("showInHistory") val showInHistory: Boolean = true,
     @SerialName("requiresAction") val requiresAction: Boolean = false,
     @SerialName("notify") val notify: Boolean = true,
+    @SerialName("disappearing") val disappearing: Boolean = false,
     @SerialName("createdAt") val createdAt: String = "",
     @SerialName("updatedAt") val updatedAt: String = ""
 )

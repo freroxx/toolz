@@ -2,6 +2,7 @@ package com.frerox.toolz.di
 
 import android.content.Context
 import androidx.room.Room
+import com.frerox.toolz.data.news.NEWS_MIGRATION_1_2
 import com.frerox.toolz.data.news.NewsApi
 import com.frerox.toolz.data.news.NewsDao
 import com.frerox.toolz.data.news.NewsDatabase
@@ -34,6 +35,7 @@ object NewsModule {
     @Singleton
     fun provideNewsDatabase(@ApplicationContext context: Context): NewsDatabase =
         Room.databaseBuilder(context, NewsDatabase::class.java, "toolz_news_db")
+            .addMigrations(NEWS_MIGRATION_1_2)
             .fallbackToDestructiveMigrationOnDowngrade()
             .build()
 

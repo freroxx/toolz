@@ -4,6 +4,8 @@ import android.content.Context
 import com.frerox.toolz.data.settings.SettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -21,6 +23,10 @@ class NewsRepository @Inject constructor(
         private const val PRUNE_AFTER_MS = 90L * 24 * 60 * 60 * 1000L
     }
 
+    // Single-flight: concurrent triggers (boot, dashboard, worker, manual)
+    // share one sync instead of racing Retrofit + Room + DataStore.
+    private val syncMutex = Mutex()
+
     fun currentVersion(): String {
         return try {
             val pm = context.packageManager
@@ -31,18 +37,45 @@ class NewsRepository @Inject constructor(
 
     suspend fun syncIfStale(force: Boolean = false): Boolean {
         return try {
-            val last = settingsRepository.newsLastSync.first()
-            if (!force && System.currentTimeMillis() - last < SYNC_STALE_MS) return true
-            val av = currentVersion()
-            val feed = newsApi.getNews(av)
-            val now = System.currentTimeMillis()
-            newsDao.upsertAll(feed.news.map { it.toEntity(now) })
-            reconcileRemovals(feedIds = feed.news.map { it.id }.toSet(), appVersion = av, now = now)
-            newsDao.prune(now, now - PRUNE_AFTER_MS)
-            settingsRepository.setNewsLastSync(now)
-            true
+            syncMutex.withLock {
+                val last = settingsRepository.newsLastSync.first()
+                if (!force && System.currentTimeMillis() - last < SYNC_STALE_MS) return@withLock true
+                val av = currentVersion()
+                val feed = newsApi.getNews(av)
+                val now = System.currentTimeMillis()
+                newsDao.upsertAll(feed.news.map { it.toEntity(now) })
+                reconcileRemovals(feedIds = feed.news.map { it.id }.toSet(), appVersion = av, now = now)
+                newsDao.prune(now, now - PRUNE_AFTER_MS)
+                settingsRepository.setNewsLastSync(now)
+                true
+            }
         } catch (_: Exception) {
             false
+        }
+    }
+
+    /**
+     * Sync (single-flight, stale-gated) then immediately notify up to 3
+     * newly-eligible items. Each id notifies exactly once; critical bypasses
+     * the notifications toggle. Returns the number of posted notifications.
+     */
+    suspend fun syncAndNotify(): Int {
+        return try {
+            val ok = syncIfStale()
+            if (!ok) return 0
+            val notifOn = settingsRepository.newsNotificationsEnabled.first()
+            val notified = settingsRepository.newsNotifiedIds.first()
+            var posted = 0
+            for (candidate in notificationCandidates(limit = 3)) {
+                if (candidate.id in notified) continue
+                if (!notifOn && candidate.priority != "critical") continue
+                NewsNotifier.post(context, candidate)
+                settingsRepository.addNewsNotified(candidate.id)
+                posted++
+            }
+            posted
+        } catch (_: Exception) {
+            0
         }
     }
 

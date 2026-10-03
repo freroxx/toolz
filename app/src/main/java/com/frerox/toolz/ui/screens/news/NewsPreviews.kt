@@ -20,7 +20,7 @@ private fun fakeNews(
     actionUrl: String? = "https://toolz-app.vercel.app",
     pinned: Boolean = true,
     requiresAction: Boolean = false,
-    delaySeconds: Int = 5
+    delaySeconds: Int = 0
 ) = NewsEntity(
     id = id,
     title = title,
@@ -45,6 +45,7 @@ private fun fakeNews(
     showInHistory = true,
     requiresAction = requiresAction,
     notify = true,
+    disappearing = false,
     receivedAt = System.currentTimeMillis()
 )
 

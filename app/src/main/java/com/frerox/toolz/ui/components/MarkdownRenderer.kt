@@ -375,7 +375,20 @@ fun MarkdownSegment(
                 2 -> (baseFontSize.value * 1.25f).sp to FontWeight.ExtraBold
                 else -> (baseFontSize.value * 1.15f).sp to FontWeight.Bold
             }
-            Text(seg.text, fontSize = fontSize, fontWeight = weight, lineHeight = (fontSize.value + 4).sp, color = textColor, modifier = modifier.padding(top = 12.dp, bottom = 4.dp))
+            // Parse inline markdown so **bold**, `code` and [links](url) work
+            // in headers like everywhere else (links stay tappable).
+            MarkdownAnnotatedText(
+                text = inlineMarkdownNoCompose(seg.text),
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = fontSize,
+                    lineHeight = (fontSize.value + 4).sp,
+                    fontWeight = weight,
+                    color = textColor
+                ),
+                modifier = modifier.padding(top = 12.dp, bottom = 4.dp),
+                onLinkClick = onLinkClick,
+                onLongClick = onLongClick,
+            )
         }
         is MdSegment.Paragraph -> {
             MarkdownAnnotatedText(

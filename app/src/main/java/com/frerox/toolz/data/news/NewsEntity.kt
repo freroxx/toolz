@@ -32,6 +32,7 @@ data class NewsEntity(
     val showInHistory: Boolean,
     val requiresAction: Boolean,
     val notify: Boolean,
+    val disappearing: Boolean,
     val receivedAt: Long
 )
 
@@ -42,7 +43,7 @@ fun NewsDto.toEntity(now: Long = System.currentTimeMillis()): NewsEntity {
         title = title.take(120),
         body = body.take(2000),
         imageUrl = imageUrl?.take(500),
-        actionLabel = actionLabel?.take(30),
+        actionLabel = actionLabel?.take(50),
         actionUrl = actionUrl?.take(500),
         priority = priority,
         status = status,
@@ -61,6 +62,7 @@ fun NewsDto.toEntity(now: Long = System.currentTimeMillis()): NewsEntity {
         showInHistory = showInHistory,
         requiresAction = requiresAction && priority == "critical",
         notify = notify,
+        disappearing = disappearing,
         receivedAt = now
     )
 }
@@ -85,6 +87,6 @@ interface NewsDao {
     @Query("UPDATE news_items SET status = 'archived' WHERE id IN (:ids)")
     suspend fun markArchived(ids: List<String>)
 
-    @Query("DELETE FROM news_items WHERE (showInHistory = 0 AND expiresAt IS NOT NULL AND expiresAt <= :now) OR (expiresAt IS NOT NULL AND expiresAt <= :pruneBefore)")
+    @Query("DELETE FROM news_items WHERE (showInHistory = 0 AND expiresAt IS NOT NULL AND expiresAt <= :now) OR (disappearing = 1 AND expiresAt IS NOT NULL AND expiresAt <= :now) OR (expiresAt IS NOT NULL AND expiresAt <= :pruneBefore)")
     suspend fun prune(now: Long, pruneBefore: Long): Int
 }
