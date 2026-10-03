@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -26,6 +27,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -33,7 +35,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -45,6 +47,8 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -54,15 +58,19 @@ import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil3.compose.AsyncImage
 import com.frerox.toolz.data.news.NewsEntity
+import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.components.MarkdownContent
+import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.components.stripMarkdown
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.components.rememberToolzHapticFeedback
+import com.frerox.toolz.ui.theme.toolzBackground
 import kotlinx.coroutines.flow.distinctUntilChanged
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun ToolzNewsScreen(
     onBack: () -> Unit,
@@ -108,26 +116,40 @@ fun ToolzNewsScreen(
     }
 
     Scaffold(
+        modifier = Modifier.toolzBackground(),
+        containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
-            TopAppBar(
-                title = { Text("Toolz News", fontWeight = FontWeight.Black) },
-                navigationIcon = {
-                    IconButton(onClick = {
-                        haptic.click()
-                        onBack()
-                    }) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                actions = {
-                    IconButton(onClick = {
-                        haptic.click()
-                        viewModel.refreshNow()
-                    }) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "Check for news")
-                    }
-                }
-            )
+            Surface(
+                shape = RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                tonalElevation = 0.dp,
+                shadowElevation = 8.dp
+            ) {
+                ExpressiveTopAppBar(
+                    title = "Toolz News",
+                    subtitle = "Announcements & changelog",
+                    navigationIcon = {
+                        IconButton(onClick = {
+                            haptic.click()
+                            onBack()
+                        }) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = {
+                            haptic.click()
+                            viewModel.refreshNow()
+                        }) {
+                            Icon(Icons.Rounded.Refresh, contentDescription = "Check for news")
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Transparent,
+                        scrolledContainerColor = Color.Transparent
+                    )
+                )
+            }
         }
     ) { padding ->
         if (items.isEmpty() && loading) {
@@ -151,7 +173,7 @@ fun ToolzNewsScreen(
         } else {
             LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxSize().padding(padding),
+                modifier = Modifier.fillMaxSize().padding(padding).fadingEdges(top = 12.dp, bottom = 100.dp),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
@@ -223,7 +245,8 @@ fun NewsHistoryCard(
                 AsyncImage(
                     model = item.imageUrl,
                     contentDescription = item.title,
-                    modifier = Modifier.fillMaxWidth().height(160.dp).clip(RoundedCornerShape(20.dp))
+                    contentScale = ContentScale.FillWidth,
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp).clip(RoundedCornerShape(20.dp))
                 )
             }
             Spacer(Modifier.height(8.dp))
@@ -235,7 +258,7 @@ fun NewsHistoryCard(
                 )
             } else {
                 Text(
-                    item.body, maxLines = 3, overflow = TextOverflow.Ellipsis,
+                    stripMarkdown(item.body), maxLines = 3, overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
