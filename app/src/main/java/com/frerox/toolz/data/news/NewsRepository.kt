@@ -56,8 +56,29 @@ class NewsRepository @Inject constructor(
                 reconcileRemovals(feedIds = feed.news.map { it.id }.toSet(), appVersion = av, now = now)
                 newsDao.prune(now, now - PRUNE_AFTER_MS)
                 settingsRepository.setNewsLastSync(now)
+                if (feed.feedVersion >= 0) settingsRepository.setNewsFeedVersion(feed.feedVersion)
                 true
             }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Change-driven sync: compares the cheap `news:version` generation counter
+     * and force-syncs only when the server moved. Falls back to the stale gate
+     * when the version check fails. This is what makes deletes and edits land
+     * within minutes instead of waiting out the 6-hour window.
+     */
+    suspend fun syncIfChanged(): Boolean {
+        return try {
+            val remote = runCatching { newsApi.getNewsVersion() }.getOrNull()
+            if (remote != null && !remote.degraded && remote.v >= 0) {
+                val local = settingsRepository.newsFeedVersion.first()
+                if (remote.v != local) return syncIfStale(force = true)
+                return true
+            }
+            syncIfStale()
         } catch (_: Exception) {
             false
         }
@@ -70,7 +91,7 @@ class NewsRepository @Inject constructor(
      */
     suspend fun syncAndNotify(): Int {
         return try {
-            val ok = syncIfStale()
+            val ok = syncIfChanged()
             if (!ok) return 0
             val notifOn = settingsRepository.newsNotificationsEnabled.first()
             val notified = settingsRepository.newsNotifiedIds.first()

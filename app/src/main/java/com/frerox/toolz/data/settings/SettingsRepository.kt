@@ -581,6 +581,7 @@ class SettingsRepository @Inject constructor(
     private val NEWS_ENABLED = booleanPreferencesKey("news_enabled")
     private val NEWS_NOTIFICATIONS_ENABLED = booleanPreferencesKey("news_notifications_enabled")
     private val NEWS_LAST_SYNC = longPreferencesKey("news_last_sync")
+    private val NEWS_FEED_VERSION = intPreferencesKey("news_feed_version")
     private val NEWS_IMPRESSIONS_JSON = stringPreferencesKey("news_impressions_json")
     private val NEWS_LAST_SHOWN_JSON = stringPreferencesKey("news_last_shown_json")
     private val NEWS_DISMISSED_IDS = stringSetPreferencesKey("news_dismissed_ids")
@@ -1042,6 +1043,7 @@ class SettingsRepository @Inject constructor(
     val newsEnabled: Flow<Boolean> = dataStore.data.map { it[NEWS_ENABLED] ?: true }
     val newsNotificationsEnabled: Flow<Boolean> = dataStore.data.map { it[NEWS_NOTIFICATIONS_ENABLED] ?: true }
     val newsLastSync: Flow<Long> = dataStore.data.map { it[NEWS_LAST_SYNC] ?: 0L }
+    val newsFeedVersion: Flow<Int> = dataStore.data.map { it[NEWS_FEED_VERSION] ?: -1 }
     val newsImpressionsJson: Flow<String> = dataStore.data.map { it[NEWS_IMPRESSIONS_JSON] ?: "{}" }
     val newsLastShownJson: Flow<String> = dataStore.data.map { it[NEWS_LAST_SHOWN_JSON] ?: "{}" }
     val newsDismissedIds: Flow<Set<String>> = dataStore.data.map { it[NEWS_DISMISSED_IDS] ?: emptySet() }
@@ -1654,6 +1656,7 @@ class SettingsRepository @Inject constructor(
     suspend fun setNewsEnabled(enabled: Boolean) { dataStore.edit { it[NEWS_ENABLED] = enabled } }
     suspend fun setNewsNotificationsEnabled(enabled: Boolean) { dataStore.edit { it[NEWS_NOTIFICATIONS_ENABLED] = enabled } }
     suspend fun setNewsLastSync(timestamp: Long) { dataStore.edit { it[NEWS_LAST_SYNC] = timestamp } }
+    suspend fun setNewsFeedVersion(version: Int) { dataStore.edit { it[NEWS_FEED_VERSION] = version } }
     suspend fun setNewsImpressionsJson(json: String) { dataStore.edit { it[NEWS_IMPRESSIONS_JSON] = json } }
     suspend fun setNewsLastShownJson(json: String) { dataStore.edit { it[NEWS_LAST_SHOWN_JSON] = json } }
     suspend fun addNewsDismissed(id: String) {

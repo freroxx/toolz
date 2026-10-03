@@ -9,4 +9,7 @@ interface NewsApi {
         @Query("appVersion") appVersion: String,
         @Query("platform") platform: String = "android"
     ): NewsFeedDto
+
+    @GET("api/news-version")
+    suspend fun getNewsVersion(): NewsVersionDto
 }

@@ -40,9 +40,17 @@ Corrections and limits worth knowing up front:
   empty feed is indistinguishable from a failed fetch; true deletes arrive as
   tombstones), and a degraded feed aborts the sync without touching the DB or
   the retry timestamp. Items targeting other versions are never touched.
-- The public feed is CDN-cached for 5 minutes (`s-maxage=300`), so a publish
-  takes up to ~5 min to reach devices (and the website home section / `/news`
-  page), plus up to 6 h of on-device sync staleness (forced refresh bypasses it).
+- Propagation is version-driven, not window-driven: every admin mutation bumps
+  the `news:version` generation counter (served as feed `v` and by the tiny
+  `GET /api/news-version`, CDN-cached 60 s). The app compares it via
+  `syncIfChanged()` on dashboard foreground and in the 12 h worker, force-syncing
+  only when the generation moved — deletes and edits land within minutes with
+  no manual refresh. The 6 h stale gate remains as a backstop.
+- The public feed is CDN-cached for ~1 minute (`s-maxage=60`), so a publish
+  takes about a minute to reach devices (and the website home section / `/news`
+  page). The app additionally syncs on version change (see above), so the 6 h
+  stale gate only matters if the version check itself fails (forced refresh
+  bypasses everything).
 - `GET /api/news?all=1` skips version filtering for the public website surface
   (home previews, `/news` page). Status + time window always apply, so drafts
   and scheduled/expired items never leak to the public page.
@@ -249,7 +257,8 @@ Public website surface (same feed, `?all=1`, no login):
   SQLCipher, strict migration chain) so news never risks user data on schema
   drift. News is public content; no encryption needed.
 - `NewsRepository.kt` — `syncIfStale` (6 h stale gate, **single-flight mutex**
-  so boot/dashboard/worker/manual triggers share one sync), unpublish
+  so boot/dashboard/worker/manual triggers share one sync), `syncIfChanged`
+  (cheap generation check → force-sync on change, stale fallback), unpublish
   reconciliation, prune (incl. disappearing auto-delete), `syncAndNotify`
   (sync + immediate notify up to 3 new items, once-per-id), impression/snooze
   state, `popupCandidate`, `notificationCandidates(limit)`.
@@ -393,7 +402,8 @@ isolated from the encrypted main DB.
 
 ## 14. File inventory
 
-Website (new): `api/news.ts`, `api/news-admin.ts`, `src/lib/news-schema.ts`,
+Website (new): `api/news.ts`, `api/news-admin.ts`, `api/news-image.ts`,
+`api/news-version.ts`, `src/lib/news-schema.ts`,
 `src/lib/newsVerdict.ts`, `src/lib/stripMarkdown.ts`,
 `src/hooks/useNewsAdmin.ts`, `src/hooks/usePublicNews.ts`,
 `src/components/news-admin/` (6 files), `src/components/landing/NewsSection.tsx`,
