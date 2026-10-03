@@ -58,6 +58,7 @@ object NotificationHelper {
     const val CHANNEL_IMAGE_DOWNLOADS = "toolz_image_downloads"
     const val CHANNEL_VIDEO_DOWNLOADS = "toolz_video_downloads"
     const val CHANNEL_BACKUPS = "backups_channel"
+    const val CHANNEL_TOOLZ_NEWS = "toolz_news"
 
     // Notification IDs
     const val ID_FOREGROUND_SERVICE = 1000
@@ -75,6 +76,7 @@ object NotificationHelper {
     const val ID_UPDATE_READY = 8002
     const val ID_MUSIC_DOWNLOAD_BASE = 9000
     const val ID_BACKUP_OPERATION = 10001
+    const val ID_NEWS_BASE = 8100
 
     // Non-overlapping download ID namespaces. Each band is 1000 wide so
     // concurrent downloads never collide across tools.
@@ -204,6 +206,13 @@ object NotificationHelper {
                 NotificationManager.IMPORTANCE_DEFAULT
             ).apply {
                 description = context.getString(R.string.st_Channel_Backups_Desc)
+            },
+            NotificationChannel(
+                CHANNEL_TOOLZ_NEWS,
+                "Toolz News",
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply {
+                description = "Announcements from the Toolz team"
             }
         )
 

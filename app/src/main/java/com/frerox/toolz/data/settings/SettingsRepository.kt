@@ -577,6 +577,16 @@ class SettingsRepository @Inject constructor(
 
     // Update System
     private val LAST_UPDATE_CHECK = longPreferencesKey("last_update_check")
+    // Toolz News (remote announcements; both ON by default)
+    private val NEWS_ENABLED = booleanPreferencesKey("news_enabled")
+    private val NEWS_NOTIFICATIONS_ENABLED = booleanPreferencesKey("news_notifications_enabled")
+    private val NEWS_LAST_SYNC = longPreferencesKey("news_last_sync")
+    private val NEWS_IMPRESSIONS_JSON = stringPreferencesKey("news_impressions_json")
+    private val NEWS_LAST_SHOWN_JSON = stringPreferencesKey("news_last_shown_json")
+    private val NEWS_DISMISSED_IDS = stringSetPreferencesKey("news_dismissed_ids")
+    private val NEWS_SNOOZED_JSON = stringPreferencesKey("news_snoozed_until_json")
+    private val NEWS_SEEN_IDS = stringPreferencesKey("news_seen_ids")
+    private val NEWS_NOTIFIED_IDS = stringSetPreferencesKey("news_notified_ids")
     private val DOWNLOADED_APK_PATH = stringPreferencesKey("downloaded_apk_path")
     private val AUTO_UPDATE_ENABLED = booleanPreferencesKey("auto_update_enabled")
     private val UPDATE_AVAILABLE_VERSION = stringPreferencesKey("update_available_version")
@@ -1028,6 +1038,18 @@ class SettingsRepository @Inject constructor(
     val timerSaveWallMs: Flow<Long> = dataStore.data.map { it[TIMER_SAVE_WALL_MS] ?: 0L }
 
     val lastUpdateCheck: Flow<Long> = dataStore.data.map { it[LAST_UPDATE_CHECK] ?: 0L }
+    // Toolz News state (master + notifications default ON)
+    val newsEnabled: Flow<Boolean> = dataStore.data.map { it[NEWS_ENABLED] ?: true }
+    val newsNotificationsEnabled: Flow<Boolean> = dataStore.data.map { it[NEWS_NOTIFICATIONS_ENABLED] ?: true }
+    val newsLastSync: Flow<Long> = dataStore.data.map { it[NEWS_LAST_SYNC] ?: 0L }
+    val newsImpressionsJson: Flow<String> = dataStore.data.map { it[NEWS_IMPRESSIONS_JSON] ?: "{}" }
+    val newsLastShownJson: Flow<String> = dataStore.data.map { it[NEWS_LAST_SHOWN_JSON] ?: "{}" }
+    val newsDismissedIds: Flow<Set<String>> = dataStore.data.map { it[NEWS_DISMISSED_IDS] ?: emptySet() }
+    val newsSnoozedJson: Flow<String> = dataStore.data.map { it[NEWS_SNOOZED_JSON] ?: "{}" }
+    val newsSeenIds: Flow<Set<String>> = dataStore.data.map {
+        (it[NEWS_SEEN_IDS] ?: "").split(",").filter { s -> s.isNotBlank() }.toSet()
+    }
+    val newsNotifiedIds: Flow<Set<String>> = dataStore.data.map { it[NEWS_NOTIFIED_IDS] ?: emptySet() }
     val downloadedApkPath: Flow<String?> = dataStore.data.map { it[DOWNLOADED_APK_PATH] }
     val autoUpdateEnabled: Flow<Boolean> = dataStore.data.map { it[AUTO_UPDATE_ENABLED] ?: false }
     val updateAvailableVersion: Flow<String?> = dataStore.data.map { it[UPDATE_AVAILABLE_VERSION] }
@@ -1628,6 +1650,22 @@ class SettingsRepository @Inject constructor(
     }
 
     suspend fun setLastUpdateCheck(timestamp: Long) { dataStore.edit { it[LAST_UPDATE_CHECK] = timestamp } }
+    // Toolz News setters
+    suspend fun setNewsEnabled(enabled: Boolean) { dataStore.edit { it[NEWS_ENABLED] = enabled } }
+    suspend fun setNewsNotificationsEnabled(enabled: Boolean) { dataStore.edit { it[NEWS_NOTIFICATIONS_ENABLED] = enabled } }
+    suspend fun setNewsLastSync(timestamp: Long) { dataStore.edit { it[NEWS_LAST_SYNC] = timestamp } }
+    suspend fun setNewsImpressionsJson(json: String) { dataStore.edit { it[NEWS_IMPRESSIONS_JSON] = json } }
+    suspend fun setNewsLastShownJson(json: String) { dataStore.edit { it[NEWS_LAST_SHOWN_JSON] = json } }
+    suspend fun addNewsDismissed(id: String) {
+        dataStore.edit { it[NEWS_DISMISSED_IDS] = ((it[NEWS_DISMISSED_IDS] ?: emptySet()) + id).toList().takeLast(200).toSet() }
+    }
+    suspend fun setNewsSnoozedJson(json: String) { dataStore.edit { it[NEWS_SNOOZED_JSON] = json } }
+    suspend fun setNewsSeenIds(ids: Set<String>) {
+        dataStore.edit { it[NEWS_SEEN_IDS] = ids.toList().takeLast(300).joinToString(",") }
+    }
+    suspend fun addNewsNotified(id: String) {
+        dataStore.edit { it[NEWS_NOTIFIED_IDS] = ((it[NEWS_NOTIFIED_IDS] ?: emptySet()) + id).toList().takeLast(200).toSet() }
+    }
     suspend fun setDownloadedApkPath(path: String?) {
         dataStore.edit {
             if (path == null) it.remove(DOWNLOADED_APK_PATH) else it[DOWNLOADED_APK_PATH] = path

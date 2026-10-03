@@ -76,9 +76,11 @@ fun SettingsScreen(
     viewModel: SettingsViewModel,
     onBack: () -> Unit,
     onNavigateToUpdate: () -> Unit,
+    onNavigateToNews: () -> Unit = {},
     onNavigateToBackupRestore: () -> Unit,
     onNavigateToToolShortcuts: () -> Unit = {},
-    onResetOnboarding: () -> Unit
+    onResetOnboarding: () -> Unit,
+    newsViewModel: com.frerox.toolz.ui.screens.news.NewsViewModel = androidx.hilt.navigation.compose.hiltViewModel()
 ) {
     val vibrationManager = LocalVibrationManager.current
     val context = LocalContext.current
@@ -113,6 +115,12 @@ fun SettingsScreen(
     val flashlightNotificationsEnabled by viewModel.flashlightNotificationsEnabled.collectAsState(initial = false)
     val caffeinateNotificationsEnabled by viewModel.caffeinateNotificationsEnabled.collectAsState(initial = true)
     val purgeShotNotifications by viewModel.purgeShotNotifications.collectAsState(initial = true)
+
+    val newsEnabled by newsViewModel.newsEnabled.collectAsState(initial = true)
+    val newsNotificationsEnabled by newsViewModel.newsNotificationsEnabled.collectAsState(initial = true)
+    val newsUnread by newsViewModel.unreadCount.collectAsState(initial = 0)
+    var showCriticalNewsInfo by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(Unit) { newsViewModel.refreshUnread() }
 
     val widgetBgColor by viewModel.widgetBackgroundColor.collectAsState(initial = 0xFFFFFFFF.toInt())
     val widgetAccentColor by viewModel.widgetAccentColor.collectAsState(initial = 0xFF4CAF50.toInt())
@@ -1508,9 +1516,83 @@ fun SettingsScreen(
                         }
                     }
 
-                    // 11. Section: ABOUT
+                    // 10b. Section: TOOLZ NEWS
                     StaggeredEntrance(index = 10) {
-                        AboutSection(onCheckUpdate = onNavigateToUpdate)
+                        SettingsExpandableSection(
+                            title = "NEWS",
+                            icon = Icons.Rounded.Newspaper,
+                            isExpanded = expandedSection == "NEWS" || searchQuery.isNotEmpty(),
+                            onExpandToggle = {
+                                expandedSection = if (expandedSection == "NEWS") null else "NEWS"
+                            }
+                        ) {
+                            if (matches(searchQuery, "news", "announcement", "changelog")) {
+                                SettingsItem(
+                                    title = if (newsUnread > 0) "Toolz News ($newsUnread new)" else "Toolz News",
+                                    subtitle = "Announcements and changelog history",
+                                    icon = Icons.Rounded.Newspaper,
+                                    onClick = onNavigateToNews
+                                )
+                            }
+                            if (matches(searchQuery, "news", "announcement")) {
+                                SettingsToggleItem(
+                                    title = "Toolz News",
+                                    subtitle = "Show announcement popups (critical always shows)",
+                                    icon = Icons.Rounded.Campaign,
+                                    checked = newsEnabled,
+                                    onCheckedChange = { newsViewModel.toggleNews(it) }
+                                )
+                            }
+                            if (matches(searchQuery, "news", "notification", "announcement")) {
+                                SettingsToggleItem(
+                                    title = "News notifications",
+                                    subtitle = "Notify when news drops (critical always notifies)",
+                                    icon = Icons.Rounded.Notifications,
+                                    checked = newsNotificationsEnabled,
+                                    onCheckedChange = { newsViewModel.toggleNotifications(it) }
+                                )
+                            }
+                            if (matches(searchQuery, "news", "critical", "info")) {
+                                SettingsItem(
+                                    title = "Why do critical news always show?",
+                                    subtitle = "Outages and security notices bypass toggles",
+                                    icon = Icons.Rounded.Info,
+                                    onClick = { showCriticalNewsInfo = true }
+                                )
+                            }
+                            if (matches(searchQuery, "news", "check", "sync", "refresh")) {
+                                SettingsItem(
+                                    title = "Check for news",
+                                    subtitle = "Sync announcements now",
+                                    icon = Icons.Rounded.Refresh,
+                                    onClick = { newsViewModel.syncNow() }
+                                )
+                            }
+                        }
+                    }
+
+                    if (showCriticalNewsInfo) {
+                        androidx.compose.material3.AlertDialog(
+                            onDismissRequest = { showCriticalNewsInfo = false },
+                            title = { androidx.compose.material3.Text("Why am I seeing this?") },
+                            text = {
+                                androidx.compose.material3.Text(
+                                    "Critical announcements (outages, security notices) always show " +
+                                        "and always notify, even when Toolz News or news notifications " +
+                                        "are turned off — so you never miss something urgent."
+                                )
+                            },
+                            confirmButton = {
+                                androidx.compose.material3.TextButton(onClick = { showCriticalNewsInfo = false }) {
+                                    androidx.compose.material3.Text("Got it")
+                                }
+                            }
+                        )
+                    }
+
+                    // 11. Section: ABOUT
+                    StaggeredEntrance(index = 11) {
+                        AboutSection(onCheckUpdate = onNavigateToUpdate, onNewsClick = onNavigateToNews)
                     }
 
                     Spacer(modifier = Modifier.height(80.dp))
@@ -1788,7 +1870,7 @@ fun SearchField(query: String, onQueryChange: (String) -> Unit) {
 }
 
 @Composable
-fun AboutSection(onCheckUpdate: () -> Unit) {
+fun AboutSection(onCheckUpdate: () -> Unit, onNewsClick: () -> Unit = {}) {
     val context = LocalContext.current
     val vibrationManager = LocalVibrationManager.current
 
@@ -1866,6 +1948,18 @@ fun AboutSection(onCheckUpdate: () -> Unit) {
                     @Suppress("DEPRECATION")
                     Text(stringResource(R.string.st_About_Discord), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
                 }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            ToolzExpressiveButton(
+                onClick = onNewsClick,
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f), contentColor = MaterialTheme.colorScheme.onSecondaryContainer)
+            ) {
+                Icon(Icons.Rounded.Newspaper, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(10.dp))
+                Text("Toolz News", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
             }
         }
     }

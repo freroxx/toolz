@@ -26,6 +26,7 @@ import coil3.network.NetworkHeaders
 import coil3.network.httpHeaders
 import coil3.request.ImageRequest
 import com.frerox.toolz.data.device.DeviceSpecsRepository
+import com.frerox.toolz.data.news.NewsRepository
 import com.frerox.toolz.data.notepad.NoteDao
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.data.update.UpdateRepository
@@ -47,6 +48,7 @@ class LoadingViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val updateRepository: UpdateRepository,
     private val specsRepository: DeviceSpecsRepository,
+    private val newsRepository: NewsRepository,
     private val noteDao: NoteDao,
 ) : ViewModel() {
 
@@ -101,6 +103,8 @@ class LoadingViewModel @Inject constructor(
                 // Fast-path: still await the real notes query (a few ms from
                 // Room cache) so the dashboard doesn't pop notes in late.
                 awaitNotesReady(timeoutMs = 3_000L)
+                // Fire-and-forget news sync so the popup/data is fresh.
+                launch { try { newsRepository.syncIfStale() } catch (_: Exception) { } }
                 _loadingProgress.value = 1f
                 _isInitialized.value = true
                 delay(100) // Minimal breather for Compose to render before hiding
@@ -128,6 +132,12 @@ class LoadingViewModel @Inject constructor(
             } catch (_: Exception) { /* Non-fatal */ }
 
             _loadingProgress.value = 0.50f
+
+            // ── Stage 3.2: Toolz News sync (never blocks boot) ────
+            _loadingMessage.value = "CHECKING FOR NEWS"
+            try {
+                withTimeoutOrNull(8_000L) { newsRepository.syncIfStale() }
+            } catch (_: Exception) { /* Non-fatal: cached news still works */ }
 
             // ── Stage 3.5: Prefetch Device Specs & Image ────
             try {

@@ -22,6 +22,7 @@ sealed class Screen(val route: String) {
     object Dashboard : Screen("dashboard")
     object Settings : Screen("settings")
     object Update : Screen("update")
+    object ToolzNews : Screen("toolz_news")
     object BackupRestore : Screen("backup_restore?initialUri={initialUri}") {
         fun createRoute(initialUri: String? = null) =
             "backup_restore" + (initialUri?.let { "?initialUri=${java.net.URLEncoder.encode(it, "UTF-8")}" } ?: "")

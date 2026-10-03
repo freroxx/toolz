@@ -133,6 +133,7 @@ import com.frerox.toolz.util.OfflineManager
 import com.frerox.toolz.util.OfflineState
 import kotlinx.coroutines.delay
 import com.frerox.toolz.util.VibrationManager
+import com.frerox.toolz.worker.NewsCheckWorker
 import com.frerox.toolz.worker.NotificationCleanupWorker
 import com.frerox.toolz.worker.UpdateCheckWorker
 import dagger.hilt.android.AndroidEntryPoint
@@ -218,6 +219,7 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
         NotificationHelper.createAllChannels(this)
         scheduleCleanup()
         scheduleUpdateCheck()
+        scheduleNewsCheck()
         scheduleFocusUsageSnapshot()
 
         // Permissions are now deferred to feature sheets (PurgeShot / Whisper) and onboarding.
@@ -481,6 +483,23 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
             "UpdateCheck",
             ExistingPeriodicWorkPolicy.KEEP,
             updateCheckRequest
+        )
+    }
+
+    private fun scheduleNewsCheck() {
+        val newsCheckRequest = PeriodicWorkRequestBuilder<NewsCheckWorker>(
+            12, TimeUnit.HOURS
+        ).setConstraints(
+            Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.CONNECTED)
+                .setRequiresBatteryNotLow(true)
+                .build()
+        ).build()
+
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            "NewsCheck",
+            ExistingPeriodicWorkPolicy.KEEP,
+            newsCheckRequest
         )
     }
 
@@ -786,6 +805,7 @@ fun ToolzNavHost(
     val currentRoute = navBackStackEntry?.destination?.route
     var pendingExternalRoute by remember { mutableStateOf<String?>(null) }
     var pendingIsShortcut by remember { mutableStateOf(false) }
+    var pendingNewsId by remember { mutableStateOf<String?>(null) }
     var launchedFromShortcut by remember { mutableStateOf(MainActivity.isShortcutIntent(incomingIntent)) }
     var showShortcutExitDialog by remember { mutableStateOf(false) }
     val context = LocalContext.current
@@ -796,11 +816,16 @@ fun ToolzNavHost(
             launchedFromShortcut = false
             showShortcutExitDialog = false
         }
+        // Clear a consumed news highlight once we leave the news screen.
+        if (currentRoute != Screen.ToolzNews.route) {
+            pendingNewsId = null
+        }
     }
 
     LaunchedEffect(incomingIntentVersion) {
         val latestIntent = incomingIntent ?: return@LaunchedEffect
         val isShortcut = MainActivity.isShortcutIntent(latestIntent)
+        pendingNewsId = latestIntent.getStringExtra("news_id")?.takeIf { it.isNotBlank() }
         
         // 1. Resolve route first (handles aliases specifically)
         val resolvedRoute = resolveExternalNavigationRoute(latestIntent)
@@ -968,6 +993,7 @@ fun ToolzNavHost(
                 viewModel = hiltViewModel(),
                 onBack = { toolOnBack() },
                 onNavigateToUpdate = { navController.navigate(Screen.Update.route) },
+                onNavigateToNews = { navController.navigate(Screen.ToolzNews.route) },
                 onNavigateToBackupRestore = { navController.navigate(Screen.BackupRestore.route) },
                 onNavigateToToolShortcuts = { navController.navigate(Screen.ToolShortcuts.route) },
                 onResetOnboarding = {
@@ -1002,6 +1028,13 @@ fun ToolzNavHost(
                     @Suppress("DEPRECATION")
                     packageInfo.versionCode.toLong()
                 }
+            )
+        }
+
+        composable(Screen.ToolzNews.route) {
+            com.frerox.toolz.ui.screens.news.ToolzNewsScreen(
+                onBack = { toolOnBack() },
+                highlightNewsId = pendingNewsId
             )
         }
 

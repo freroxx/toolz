@@ -167,6 +167,7 @@ fun DashboardScreen(
     catalogViewModel: CatalogViewModel       = hiltViewModel(),
     pdfViewModel: PdfViewModel               = hiltViewModel(),
     focusViewModel: FocusFlowViewModel       = hiltViewModel(),
+    newsViewModel: com.frerox.toolz.ui.screens.news.NewsViewModel = hiltViewModel(),
     settingsRepository: SettingsRepository,
 ) {
     val vibrationManager = LocalVibrationManager.current
@@ -212,6 +213,15 @@ fun DashboardScreen(
     val spotlightTool by viewModel.spotlightTool.collectAsStateWithLifecycle()
     val selectedTab by viewModel.selectedTab.collectAsStateWithLifecycle()
     val tabCategories by viewModel.tabCategories.collectAsStateWithLifecycle()
+    val newsUnread by newsViewModel.unreadCount.collectAsStateWithLifecycle()
+    val newsPopup by newsViewModel.popup.collectAsStateWithLifecycle()
+    val newsPopupVisible by newsViewModel.popupVisible.collectAsStateWithLifecycle()
+    val newsMasterOn by newsViewModel.newsEnabled.collectAsStateWithLifecycle()
+
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        newsViewModel.refreshUnread()
+        newsViewModel.evaluatePopup()
+    }
 
     Box(modifier = Modifier.fillMaxSize().toolzBackground()) {
         DashboardContent(
@@ -263,7 +273,23 @@ fun DashboardScreen(
             onTogglePerformance = viewModel::togglePerformanceMode,
             stats               = stats,
             spotlightTool       = spotlightTool,
+            newsUnread          = newsUnread,
+            onNewsClick         = { navigate(com.frerox.toolz.ui.navigation.Screen.ToolzNews.route) },
         )
+
+        if (newsPopupVisible && newsPopup != null) {
+            com.frerox.toolz.ui.screens.news.ToolzNewsPopup(
+                item = newsPopup!!,
+                masterNewsEnabled = newsMasterOn,
+                onAction = { newsViewModel.onPopupAction() },
+                onLater = { newsViewModel.onPopupLater() },
+                onDismiss = { newsViewModel.onPopupDismiss() },
+                onViewAll = {
+                    newsViewModel.onPopupAction()
+                    navigate(com.frerox.toolz.ui.navigation.Screen.ToolzNews.route)
+                }
+            )
+        }
 
         ToolzFloatingToolbar(
             selectedTab = selectedTab,
@@ -350,6 +376,8 @@ fun DashboardContent(
     onTogglePerformance: (Boolean) -> Unit,
     stats: DashboardStats,
     spotlightTool: ToolItem?,
+    newsUnread: Int = 0,
+    onNewsClick: (() -> Unit)? = null,
 ) {
     val vibrationManager = LocalVibrationManager.current
     val performanceMode  = LocalPerformanceMode.current
@@ -417,7 +445,9 @@ fun DashboardContent(
                             offlineState = offlineState,
                             searchQuery = searchQuery,
                             musicViewModel = musicViewModel,
-                            pdfViewModel = pdfViewModel
+                            pdfViewModel = pdfViewModel,
+                            newsUnread = newsUnread,
+                            onNewsClick = onNewsClick
                         )
                     }
                     else -> {
@@ -484,7 +514,9 @@ fun HomeTabContent(
     offlineState: OfflineState,
     searchQuery: String,
     musicViewModel: MusicPlayerViewModel,
-    pdfViewModel: PdfViewModel
+    pdfViewModel: PdfViewModel,
+    newsUnread: Int = 0,
+    onNewsClick: (() -> Unit)? = null
 ) {
     val performanceMode = LocalPerformanceMode.current
     val allTools = remember(categories) { categories.flatMap { it.items } }
@@ -507,7 +539,7 @@ fun HomeTabContent(
         }
 
         item(key = "dashboard_header") {
-            DashboardHeader(userName, offlineState, onToggleOffline, onTogglePerformance) 
+            DashboardHeader(userName, offlineState, onToggleOffline, onTogglePerformance, newsUnread, onNewsClick) 
         }
 
         if (showDashboardStats) {
@@ -1197,7 +1229,9 @@ fun DashboardHeader(
     userName: String, 
     offlineState: OfflineState,
     onToggleOffline: (Boolean) -> Unit,
-    onTogglePerformance: (Boolean) -> Unit
+    onTogglePerformance: (Boolean) -> Unit,
+    newsUnread: Int = 0,
+    onNewsClick: (() -> Unit)? = null
 ) {
     val performanceMode = LocalPerformanceMode.current
     val vibrationManager = LocalVibrationManager.current
@@ -1276,6 +1310,37 @@ fun DashboardHeader(
                         tint = if (performanceMode) MaterialTheme.colorScheme.primary 
                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
                     )
+                }
+
+                // Toolz News button with unread badge
+                if (onNewsClick != null) {
+                    Surface(
+                        onClick = {
+                            vibrationManager?.vibrateTick()
+                            onNewsClick()
+                        },
+                        shape = CircleShape,
+                        color = if (newsUnread > 0) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                               else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f)),
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Rounded.Newspaper,
+                                contentDescription = "Toolz News",
+                                modifier = Modifier.padding(8.dp).size(16.dp),
+                                tint = if (newsUnread > 0) MaterialTheme.colorScheme.primary
+                                       else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                            )
+                            if (newsUnread > 0) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.align(Alignment.TopEnd).padding(top = 4.dp, end = 4.dp).size(8.dp)
+                                ) {}
+                            }
+                        }
+                    }
                 }
             }
         }
