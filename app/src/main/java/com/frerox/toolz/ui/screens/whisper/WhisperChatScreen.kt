@@ -1927,6 +1927,16 @@ private fun MessageBubble(
 
                     
                     Row(Modifier.align(Alignment.End), verticalAlignment = Alignment.CenterVertically) {
+                        // Phase-1A per-message FS badge: v3 ratchet frames carry
+                        // forward secrecy; v2 envelopes do not (static ECDH).
+                        // Derived from message.fsProtected (content_iv == "v3").
+                        Icon(
+                            imageVector = if (message.fsProtected) Icons.Rounded.Lock else Icons.Rounded.LockOpen,
+                            contentDescription = null,
+                            modifier = Modifier.size(11.dp).alpha(0.55f),
+                            tint = bubbleContentColor.copy(alpha = 0.7f),
+                        )
+                        Spacer(Modifier.width(3.dp))
                         Text(message.createdAt.formatWhisperTime(), style = MaterialTheme.typography.labelSmall, modifier = Modifier.alpha(0.6f))
                         if (isMine && !message.isDeletedForEveryone) {
                             Spacer(Modifier.width(4.dp))

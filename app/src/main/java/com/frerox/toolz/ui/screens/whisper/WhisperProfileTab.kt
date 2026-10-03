@@ -144,7 +144,7 @@ internal fun ProfileTab(
     val credentialCopiedMsg = stringResource(R.string.st_Whisper_CredentialCopied)
 
     // Track unsaved changes and notify parent
-    val hasUnsaved = displayName != initialDisplayName || bio != initialBio || 
+    val hasUnsaved = displayName != initialDisplayName || bio != initialBio ||
                     isPrivate != initialIsPrivate || isHidden != initialIsHidden
     
     LaunchedEffect(hasUnsaved) {
@@ -160,7 +160,9 @@ internal fun ProfileTab(
         val prevPrivate = initialIsPrivate
         val prevHidden = initialIsHidden
 
-        viewModel.updateProfile(displayName, bio, isPrivate, isHidden) {
+        viewModel.updateProfile(
+            displayName, bio, isPrivate, isHidden,
+        ) {
             val toasts = mutableListOf<String>()
             if (displayName != prevName) toasts.add(nameUpdatedMsg)
             if (bio != prevBio) toasts.add(bioUpdatedMsg)

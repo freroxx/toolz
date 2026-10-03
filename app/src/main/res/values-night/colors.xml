@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dark variants of the hardcoded widget picker preview palette.
+     Same names as values/colors.xml — selected by night qualifier at
+     inflation time (resource selection works in the launcher process,
+     unlike ?attr theme resolution which does not). -->
+<resources>
+    <color name="widget_preview_bg">#FF211A14</color>
+    <color name="widget_preview_accent">#FFFFB77A</color>
+    <color name="widget_preview_on_accent">#FF3A1D00</color>
+    <color name="widget_preview_text">#FFF5EFE7</color>
+    <color name="widget_preview_subtext">#FFD7C2B0</color>
+    <color name="widget_preview_container">#FF5C3D00</color>
+    <color name="widget_preview_on_container">#FFFFDCBE</color>
+    <color name="widget_preview_track">#FF4A3A2E</color>
+</resources>

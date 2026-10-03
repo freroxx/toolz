@@ -264,6 +264,9 @@
     <string name="st_Whisper_Section_Security">Security</string>
     <string name="st_Whisper_Section_Backup">Backup</string>
     <string name="st_Whisper_Section_DangerZone">Danger zone</string>
+    <string name="st_Whisper_Legacy_Migrate_Title">Action needed: migrate your Whisper account</string>
+    <string name="st_Whisper_Legacy_Migrate_Desc">Legacy Whisper token accounts (pre-2026 truncated emails) must migrate within 30 days — open Whisper and log in once to auto-upgrade, then the old credential is disabled. Contact support if you are locked out.</string>
+    <string name="st_Whisper_Legacy_Migrate_Action">Log in to migrate</string>
     <string name="st_Whisper_DeleteAccount">Delete Account</string>
     <string name="st_Whisper_HideDiscoverConfirmTitle">Hide from Discover?</string>
     <string name="st_Whisper_HideDiscoverConfirmDesc">You won\'t appear in recommendations or search. People can only find you if you add them first.</string>
@@ -386,7 +389,7 @@
     <string name="st_Whisper_Error_AubupEncryptionFailed">Failed to encrypt access file with the provided Whisper Code.</string>
     <string name="st_Whisper_Beta_Badge">BETA</string>
     <string name="st_Whisper_Beta_Warning_Title">Whisper Beta</string>
-    <string name="st_Whisper_Beta_Warning_Desc">Whisper is in active development. Messages are end-to-end encrypted with per-message forward secrecy: each message uses a one-time key that is destroyed after use. Features may change while we polish the experience — feedback is welcome!</string>
+    <string name="st_Whisper_Beta_Warning_Desc">Whisper is in active development. Messages are end-to-end encrypted with per-message forward secrecy: each message uses a one-time key that is destroyed after use. Features may change while we polish the experience — feedback is welcome! Uses custom E2EE, not independently audited. Only v3 ratchet messages have forward secrecy.</string>
     <string name="st_Whisper_Beta_Warning_Confirm">I Understand</string>
     <!-- Whisper: Onboarding -->
     <string name="st_Whisper_Onboarding_Title1">Chat Without Limits</string>
@@ -602,6 +605,10 @@
     <string name="st_BackgroundRemover_SaveFailed">Save failed.</string>
     <string name="st_BackgroundRemover_MeteredBlocked">“%1$s” is large (%2$s) — connect to Wi-Fi or allow mobile download.</string>
     <string name="st_BackgroundRemover_NoStorage">Not enough storage — free %1$s to download this model.</string>
+    <string name="st_BackgroundRemover_ProConsentRequired">Pro requires non-commercial consent — accept the research-use terms to download.</string>
+    <string name="st_BackgroundRemover_ProConsentTitle">Research-only model</string>
+    <string name="st_BackgroundRemover_ProConsentDesc">Pro uses ISNet (research-only, non-commercial). Confirm you will use it for research or personal non-commercial purposes only.</string>
+    <string name="st_BackgroundRemover_ProConsentAccept">I agree — non-commercial use only</string>
     <string name="st_BackgroundRemover_ModeNone">None</string>
     <string name="st_BackgroundRemover_ModeWhite">White</string>
     <string name="st_BackgroundRemover_ModeBlur">Blur</string>
@@ -3606,6 +3613,12 @@
     <string name="st_Whisper_Bypass_RateLimited">Too many attempts — try again in ~15 minutes.</string>
     <string name="st_Whisper_Bypass_Unavailable">Verification service unavailable — check connection or server setup.</string>
 
+    <!-- Legacy token migration banner (20261005-P2) -->
+    <string name="st_Whisper_Legacy_Banner">Legacy account found — tap Migrate to move to the new secure credential.</string>
+    <string name="st_Whisper_Legacy_Migrate">Migrate</string>
+    <string name="st_Whisper_Legacy_Warning">You signed in with a legacy credential. Migrate within 30 days to keep your chats.</string>
+    <string name="st_Whisper_Legacy_NeedsUsername">Choose a username to finish migration</string>
+
     <!-- Tool Shortcuts -->
     <string name="st_Shortcut_Exit_Title">Exit Tool?</string>
     <string name="st_Shortcut_Exit_Message">Are you sure you want to exit? You will return to the dashboard.</string>
@@ -3807,4 +3820,15 @@
     <string name="snackbar_timeout">Timeout</string>
     <string name="notif_purgeshot_active">PurgeShot active</string>
     <string name="snackbar_ping_result">Ping to %1$s: %2$sms</string>
+    <!-- Whisper: anti-mod attestation + update-lock -->
+    <string name="st_Whisper_Unofficial_Title">Unofficial build blocked</string>
+    <string name="st_Whisper_Unofficial_Message">This copy of Toolz didn\'t pass official-build verification, so Whisper is disabled here. Install the official Toolz APK to keep chatting.</string>
+    <string name="st_Whisper_Unofficial_GetOfficial">Get official app</string>
+    <string name="st_Whisper_Error_UnofficialBuild">Unofficial build blocked — install the official Toolz APK.</string>
+    <string name="st_Whisper_UpdateRequired_Title">Update required</string>
+    <string name="st_Whisper_UpdateRequired_Message">Whisper needs Toolz %1$s or newer to keep working. Update to keep chatting.</string>
+    <string name="st_Whisper_UpdateRequired_Critical">A critical security update is available. Whisper is paused until you update.</string>
+    <string name="st_Whisper_UpdateRequired_UpdateNow">Update now</string>
+    <string name="st_Whisper_Debuggable_Blocked">This build is debuggable and did not pass official-build verification, so Whisper is disabled. Install the official Toolz release.</string>
+    <string name="st_Whisper_UpdateRequired_Local">This Toolz build is below the minimum required version, so Whisper is disabled. Update to keep chatting.</string>
 </resources>
