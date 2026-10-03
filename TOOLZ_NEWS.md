@@ -36,9 +36,10 @@ Corrections and limits worth knowing up front:
 - Unpublish/archive propagation is best-effort reconciliation, not instant.
   `NewsRepository.syncIfStale()` archives locally any cached `published` item
   that is still time-valid and version-eligible for this device but absent from
-  the feed. Items targeting other versions are never touched, and reconciliation
-  is skipped if the feed looks truncated (100-id fetch cap vs a 50-item
-  server cap, so this is a safety margin, not a live path).
+  a non-empty feed. Empty or degraded feeds never trigger reconciliation (an
+  empty feed is indistinguishable from a failed fetch; true deletes arrive as
+  tombstones), and a degraded feed aborts the sync without touching the DB or
+  the retry timestamp. Items targeting other versions are never touched.
 - The public feed is CDN-cached for 5 minutes (`s-maxage=300`), so a publish
   takes up to ~5 min to reach devices (and the website home section / `/news`
   page), plus up to 6 h of on-device sync staleness (forced refresh bypasses it).

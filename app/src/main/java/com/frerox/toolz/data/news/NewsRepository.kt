@@ -42,6 +42,10 @@ class NewsRepository @Inject constructor(
                 if (!force && System.currentTimeMillis() - last < SYNC_STALE_MS) return@withLock true
                 val av = currentVersion()
                 val feed = newsApi.getNews(av)
+                // Degraded feed (Redis outage, bad env): touch NOTHING. The
+                // payload is empty by design, and treating it as truth would
+                // archive the entire local cache and stall retry for 6 h.
+                if (feed.degraded) return@withLock false
                 val now = System.currentTimeMillis()
                 newsDao.upsertAll(feed.news.map { it.toEntity(now) })
                 // Deleted upstream: hard-delete cached copies everywhere
@@ -89,11 +93,16 @@ class NewsRepository @Inject constructor(
      * `published` item that is still time-valid and version-eligible for THIS device
      * but absent from the feed was removed server-side → archive it locally so it
      * stops popping up (it stays in history). Items targeting other versions are
-     * never touched. Skipped when the feed may be truncated (100-id fetch cap).
+     * never touched. Skipped for empty feeds (outage vs wipeout is
+     * indistinguishable; true deletes arrive as tombstones) and for possibly
+     * truncated feeds (100-id fetch cap).
      */
     private suspend fun reconcileRemovals(feedIds: Set<String>, appVersion: String, now: Long) {
         try {
-            if (feedIds.size >= 100) return
+            // An empty feed is indistinguishable from a failed fetch, so it
+            // must never trigger mass-archival (real deletes arrive as
+            // tombstones via removedIds). Same for a possibly-truncated feed.
+            if (feedIds.isEmpty() || feedIds.size >= 100) return
             val stale = newsDao.publishedOrdered().filter { cached ->
                 cached.id !in feedIds &&
                     timeValid(cached, now) &&
