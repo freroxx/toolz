@@ -20,19 +20,19 @@
 
 ## ✨ Why Toolz?
 
-Toolz is designed to be a real daily driver, not a demo shelf. Instead of juggling dozens of bloated closed-source single-purpose apps, you get:
+Toolz provides productivity, media, PDF, sensor, privacy, and system utilities in one app:
 
-- **Zero Bloat, One Home** — Ditch the folder of 40+ single-purpose apps. Toolz provides a unified library of polished utilities in one optimized APK.
-- **Privacy as a Standard** — Core tools work 100% offline. Sensitive data like passwords, notes, and notifications are stored locally using industrial-grade SQLCipher encryption.
-- **Deep System Integration** — Native Quick Settings tiles, Homescreen Widgets, and Autofill support ensure the toolkit feels like a native extension of your Android OS, an ecosystem built for power users.
-- **Polished tools** — Every tool is built for accuracy, utilizing FFmpeg for media, ML Kit for vision, and GPS-calibrated sensors for navigation... All wrapped inside a Material 3 expressive customisable experience.
-- **Unified Dashboard** — A smart dashboard with pinned favorites and a floating "status pill" keeps your active timers, music, or recordings accessible from anywhere.
+- **One Home** — A unified library of 45+ utilities in one APK.
+- **Privacy as a Standard** — Core tools work 100% offline. Passwords, notes, and notifications are stored locally using SQLCipher encryption.
+- **Deep System Integration** — Quick Settings tiles, Homescreen Widgets, and Autofill support.
+- **Polished tools** — FFmpeg for media, ZXing + Tesseract for vision (on-device, no ML Kit), and system sensors for navigation, in a Material 3 expressive interface.
+- **Unified Dashboard** — A dashboard with pinned favorites and a floating "status pill" for active timers, music, or recordings.
 
 ---
 
 ## 📦 Complete Tool Catalog
 
-Toolz includes **48+ precision instruments** organized across 9 categories:
+Toolz includes **45+ precision instruments** organized across 9 categories:
 
 ### ⏱️ Time & Productivity
 - **Timer** — Precise countdown engine with background persistence and physics-based alarms
@@ -117,7 +117,7 @@ The short version: you sign in with a username + password or a random 64-charact
 
 ### Key features
 
-- **End-to-end encryption** — P-256 identity + signing keys in AndroidKeyStore, X25519 sessions via X3DH → Double Ratchet, all sealed with AES-256-GCM (direction-bound AAD). New chats try the ratchet first (per-message forward secrecy); if the handshake can't complete the message still delivers via the self-healing multi-key envelope fallback (static ECDH, no FS) — a message is never blocked by session problems. Keys rotate every 30 days; verify fingerprints in person via QR
+- **End-to-end encryption** — P-256 identity + signing keys in AndroidKeyStore, X25519 sessions via X3DH → Double Ratchet, all sealed with AES-256-GCM (direction-bound AAD). New chats try the ratchet first (per-message forward secrecy); proven-v3 peers block insecure fallback with visible warning; new contacts try v3 first, fall back to envelope only while unproven (static ECDH, no FS). Uses custom E2EE, not independently audited. Only v3 ratchet messages have forward secrecy. Keys rotate every 30 days; verify fingerprints in person via QR
 - **No-email sign-in** — two ways in: username + password (≥10 chars, auto-saved to the Toolz Vault), or a random 64-char hex token (`SHA-256(token)@whisper.toolz.app`, hashed server-side). Save your token — lose it, lose the account
 - **Friend-gated chats** — no messaging until the friend request is accepted; blocks are enforced client + DB-level, both sides know when they're blocked
 - **Realtime delivery** — messages, reactions, typing (8 s fresh), and presence arrive over broadcast channels, with postgres-change polling as the reliable fallback; FCM data-only wake pings (senderId/messageId, no content) cover killed apps
@@ -130,7 +130,7 @@ The short version: you sign in with a username + password or a random 64-charact
 - **Mute & block** — silence a conversation or block a user entirely
 - **In-app notifications** — grouped per conversation, deduplicated across realtime+FCM, suppressed while you're inside that chat or when muted/hidden
 
-Whisper is early-access software: expect rough edges. It is centralized — the server can see *who* talks to *whom* (usernames/IDs, timestamps, ciphertext blobs) but never plaintext. See [`WHISPER.md`](WHISPER.md) + [`PRIVACY.md`](PRIVACY.md) for the full info.
+Whisper is early-access software (beta): expect rough edges. It is centralized — the server can see *who* talks to *whom* (usernames/IDs, timestamps, ciphertext blobs) but never plaintext. Uses custom E2EE, not independently audited. Only v3 ratchet messages have forward secrecy; proven-v3 peers block insecure fallback with visible warning. See [`WHISPER.md`](WHISPER.md) + [`PRIVACY.md`](PRIVACY.md) for the full info.
 
 ---
 
@@ -213,11 +213,6 @@ Verified from `gradle/libs.versions.toml` + `app/build.gradle.kts`
   (`firebase-messaging` data-only wake pings, no content), google-services 4.5.0
 - **System integration** — Shizuku 13.1.5 (optional privileged ops), Biometric
   1.4.0-alpha07 + Autofill, google GenerativeAI 0.9.0 (optional assistant providers)
-
-> Corrections vs older README: ML Kit is gone (ZXing + Tesseract), FFmpeg is the
-> `ffmpeg-kit-lts-16kb` fork (not `FFmpegKit` upstream), PDF is PdfRenderer+pdfbox
-> (not AndroidX PDF Viewer), and Supabase/Firebase/Shizuku/Media3/CameraX/Glance
-> are first-class — see `PRIVACY.md` for what actually hits the network.
 
 ---
 

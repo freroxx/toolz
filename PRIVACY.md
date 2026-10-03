@@ -8,7 +8,8 @@ Contact: frerox.toolz@gmail.com
 
 Rule for everything below: **network happens only when you tap the feature**.
 Idle app makes no network calls except Whisper realtime/push (only if you signed
-into Whisper) and periodic update checks (only if enabled in Settings).
+into Whisper), periodic update checks (only if enabled in Settings), and Toolz News
+sync (on by default, toggle in Settings — see Toolz News section below).
 
 ## What runs 100% on-device (locally)
 
@@ -98,6 +99,18 @@ into Whisper) and periodic update checks (only if enabled in Settings).
   (`data/update/UpdateConstants.kt`). Trigger: Settings → update check / periodic
   `UpdateCheckWorker` (only if enabled). Downloads APK assets from GitHub Releases.
 
+### Toolz News
+- `GET https://toolz-app.vercel.app/api/news` + `GET https://toolz-app.vercel.app/api/news-version`
+  (`data/news/NewsApi.kt`, base URL in `di/NewsModule.kt`). Sends: `appVersion` and
+  `platform=android` query params; no personal data, no identifiers.
+- Triggers: app start (`LoadingViewModel` fire-and-forget `syncIfStale`, 8 s capped);
+  dashboard foreground (`DashboardScreen` → `NewsViewModel.checkNotifications` →
+  `syncAndNotify`); periodic 12 h `NewsCheckWorker` (`MainActivity.scheduleNewsCheck`,
+  `NetworkType.CONNECTED` + battery-not-low, stale-gated 6 h); manual refresh
+  (Settings → Toolz News → Check for news / `syncNow`).
+- Default ON (`SettingsRepository.newsEnabled` defaults to `true`); toggle in Settings
+  (`NewsViewModel.toggleNews`). Sync is stale-gated (6 h) and single-flight.
+
 ### Whisper messaging (only if you sign in)
 - Backend: your Supabase project (`SUPABASE_URL`, `SUPABASE_ANON_KEY` from
   `local.properties`) — PostgREST (`profiles`, `messages`, `message_reactions`,
@@ -123,6 +136,15 @@ into Whisper) and periodic update checks (only if enabled in Settings).
   + password (≥10 chars), or 64-char hex token → `SHA-256(token)@whisper.toolz.app`.
   Lose the token, lose the account. Delete Account calls `whisper-delete-account`
   (server wipes data before GoTrue deletion) then wipes local sessions/Room.
+- Presence/typing (same for everyone): `last_seen_at` stamps update while the
+  app is in the foreground and `whisper_public_profiles`/discover report them
+  directly; typing signals are always sent while typing (8-second freshness).
+- Enumeration hardening: discover paging stays quota-guarded (60 pages/hour);
+  username-availability checks move to the `whisper_check_username_available()`
+  RPC (10 checks/hour/caller, 1-bit boolean answer); profile search keeps its
+  2-character minimum query gate.
+- Delete-for-everyone writes a sender-only tombstone that the server content
+  guard explicitly allows (all other payload edits stay immutable).
 
 ## Privileged access (only when you enable it)
 

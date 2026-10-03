@@ -419,3 +419,28 @@ Android (new): `data/news/` (8 files), `di/NewsModule.kt`,
 Android (edited): `MainActivity.kt`, `DashboardScreen.kt`,
 `SettingsScreen.kt`, `LoadingViewModel.kt`, `Screen.kt`,
 `SettingsRepository.kt`, `NotificationHelper.kt`, `AndroidManifest.xml`.
+
+## 15. Draft announcement — legacy Whisper token migration (publish via `/admin/news`, not in-app seed)
+
+News items are authored in the `toolz-website` admin panel (`/admin/news`) and
+served from Redis — the app never seeds them locally, so this is copy for the
+admin to paste, plus the matching in-app banner strings
+(`st_Whisper_Legacy_Migrate_*` in `app/src/main/res/values/strings.xml`).
+In-app code only documents the payload here (`NewsRepository.kt` companion
+comment); no behavior change.
+
+Suggested payload:
+
+- `title`: "Action needed: migrate your Whisper account"
+- `body`: "Legacy Whisper token accounts (pre-2026 truncated emails) must
+  migrate within 30d — open Whisper > log in once to auto-upgrade, then the
+  old credential is disabled. Contact support if locked."
+- `priority`: `critical`, `notify`: true, `frequency`: `once`,
+  `requiresAction`: false (blocking dialog not needed; banner + login flow
+  covers it), `actionLabel`: "Log in to migrate", `actionUrl`:
+  `toolz://whisper/login` (deep link resolved by the generic `navigate_to`
+  intent extra; falls back to opening Whisper).
+- Targeting: no version gate (all versions), no expiry shorter than 30 days
+  (`expiresAt` = publish + 30d, `disappearing`: false so it stays in history).
+- In-app banner strings: `st_Whisper_Legacy_Migrate_Title` /
+  `_Desc` / `_Action` mirror the copy above for the login-screen banner.
