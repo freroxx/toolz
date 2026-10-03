@@ -180,9 +180,22 @@ class ModelDownloadManager(
     suspend fun download(
         model: BackgroundModel,
         allowMetered: Boolean = false,
+        proNonCommercialConsentAccepted: Boolean = false,
         onProgress: (Long, Long) -> Unit = { _, _ -> },
     ): Result<Unit> =
         withContext(Dispatchers.IO) {
+            // Non-commercial consent gate for the Pro (ISNet/DIS) tier:
+            // research-only license — refuse without explicit opt-in.
+            if (model.requiresNonCommercialConsent && !proNonCommercialConsentAccepted) {
+                val msg = runCatching {
+                    context.getString(R.string.st_BackgroundRemover_ProConsentRequired)
+                }.getOrDefault("Pro requires non-commercial consent — accept the research-use terms to download.")
+                synchronized(lock) {
+                    _states.getOrPut(model.id) { MutableStateFlow(DownloadState.Idle) }.value =
+                        DownloadState.Failed(msg, retryable = false)
+                }
+                return@withContext Result.failure(Exception(msg))
+            }
             // Metered-network gate for large models (user confirms in UI).
             if (model.gatedOnWifi && !allowMetered && isMeteredConnection()) {
                 val msg = context.getString(

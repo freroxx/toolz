@@ -61,7 +61,8 @@ import kotlin.math.min
 /**
  * ViewModel for Background Remover — 2026 revamp.
  *
- * ONNX Runtime backend for all quality tiers (Pro default, Ultra tiled).
+ * ONNX Runtime backend for all quality tiers (Fast default, commercial-safe;
+ * Pro is opt-in research/non-commercial with an explicit consent gate).
  * The UI reads [BgStage] — it never guesses what "processing" means anymore.
  */
 @HiltViewModel
@@ -159,10 +160,46 @@ class BackgroundRemoverViewModel @Inject constructor(
     fun downloadNeedsMeteredConsent(model: BackgroundModel): Boolean =
         model.gatedOnWifi && downloadManager.isMeteredConnection()
 
-    fun downloadModel(model: BackgroundModel, allowMetered: Boolean = false) {
+    /** Pro (ISNet/DIS) is research/non-commercial: UI must show an explicit checkbox first. */
+    fun requiresProConsent(model: BackgroundModel): Boolean =
+        model.requiresNonCommercialConsent && !isProNonCommercialConsentAccepted()
+
+    fun isProNonCommercialConsentAccepted(): Boolean =
+        prefs.getBoolean(KEY_PRO_NC_CONSENT, false)
+
+    fun setProNonCommercialConsentAccepted(accepted: Boolean) {
+        prefs.edit().putBoolean(KEY_PRO_NC_CONSENT, accepted).apply()
+    }
+
+    fun downloadModel(
+        model: BackgroundModel,
+        allowMetered: Boolean = false,
+        proNonCommercialConsentAccepted: Boolean = false,
+    ) {
         activeJob?.cancel()
         activeJob = viewModelScope.launch(Dispatchers.IO) {
             try {
+                // Pro consent gate: explicit checkbox/consent required before download.
+                // Persists in bg_remover_prefs so the user accepts once.
+                val consentAccepted =
+                    proNonCommercialConsentAccepted || isProNonCommercialConsentAccepted()
+                if (model.requiresNonCommercialConsent && !consentAccepted) {
+                    val msg = runCatching {
+                        context.getString(R.string.st_BackgroundRemover_ProConsentRequired)
+                    }.getOrDefault("Pro requires non-commercial consent — accept the research-use terms to download.")
+                    _uiState.update {
+                        it.copy(
+                            stage = BgStage.FAILED,
+                            isProcessing = false,
+                            downloadingId = null,
+                            failure = BgFailure(msg, RetryAction.RETRY_DOWNLOAD),
+                        )
+                    }
+                    return@launch
+                }
+                if (model.requiresNonCommercialConsent && proNonCommercialConsentAccepted) {
+                    setProNonCommercialConsentAccepted(true)
+                }
                 _uiState.update {
                     it.copy(
                         stage = BgStage.DOWNLOADING,
@@ -176,7 +213,11 @@ class BackgroundRemoverViewModel @Inject constructor(
                         error = null,
                     )
                 }
-                val result = downloadManager.download(model, allowMetered) { bytes, total ->
+                val result = downloadManager.download(
+                    model,
+                    allowMetered,
+                    proNonCommercialConsentAccepted = consentAccepted,
+                ) { bytes, total ->
                     _uiState.update {
                         it.copy(
                             downloadedBytes = bytes,
@@ -722,6 +763,7 @@ class BackgroundRemoverViewModel @Inject constructor(
     }
 
     companion object {
+        private const val KEY_PRO_NC_CONSENT = "pro_noncommercial_consent_accepted"
         /** Matting transient + result footprint per source pixel (conservative). */
         private const val MATTING_BYTES_PER_PX = 12L
         /** Ultra pre-flight: refuse below 6 GB total RAM — the 1024 spike would kill us. */

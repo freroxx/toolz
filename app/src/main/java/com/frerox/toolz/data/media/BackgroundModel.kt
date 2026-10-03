@@ -28,7 +28,9 @@ package com.frerox.toolz.data.media
  * - PORTRAIT— Robust Video Matting (MobileNetV3, fp32 ONNX): people/pets, hair-level
  *             alpha, single-pass still mode with zero recurrent states.
  * - PRO     — ISNet general-use ONNX: best general quality, large + slow, Wi-Fi gated.
- *             The default for new installs (quality-first lineup).
+ *             Opt-in quality tier, research/non-commercial only — requires explicit
+ *             consent (see requiresNonCommercialConsent). Never the default: the
+ *             commercial-safe default for new installs is FAST (Apache-2.0).
  */
 enum class BackgroundModel(
     val id: String,
@@ -67,6 +69,12 @@ enum class BackgroundModel(
      * slowness warning in the model hub (e.g. 30–90 s on Snapdragon 6 Gen 3).
      */
     val warnSlowDevice: Boolean = false,
+    /**
+     * True when downloading/using this model requires an explicit
+     * research/non-commercial consent gate in the UI (Pro/ISNet tier).
+     * The download path must refuse without it — see ModelDownloadManager.
+     */
+    val requiresNonCommercialConsent: Boolean = false,
 ) {
     FAST_GENERAL(
         id = "fast_general",
@@ -82,6 +90,7 @@ enum class BackgroundModel(
         expectedSizeBytes = 4574861L,
         licenseName = "Apache-2.0 (U-2-Net)",
         licenseUrl = "https://github.com/xuebinqin/U-2-Net/blob/master/LICENSE",
+        isRecommended = true,
     ),
 
     PORTRAIT_RVM(
@@ -113,9 +122,9 @@ enum class BackgroundModel(
         expectedSha256 = "60920e99c45464f2ba57bee2ad08c919a52bbf852739e96947fbb4358c0d964a",
         expectedSizeBytes = 178648008L,
         gatedOnWifi = true,
-        licenseName = "See BR-MODELS.md (ISNet via rembg)",
-        licenseUrl = "https://github.com/danielgatis/rembg",
-        isRecommended = true,
+        licenseName = "Research-only / non-commercial (DIS, via rembg)",
+        licenseUrl = "https://github.com/xuebinqin/DIS",
+        requiresNonCommercialConsent = true,
     ),
 
     ULTRA_BIREFNET(
@@ -142,7 +151,7 @@ enum class BackgroundModel(
 
     companion object {
         fun fromId(id: String): BackgroundModel? = entries.find { it.id == id }
-        fun default(): BackgroundModel = PRO_DETAIL
+        fun default(): BackgroundModel = FAST_GENERAL
 
         /** Retired pre-revamp ids → their migration target (null = default). */
         fun migrateLegacyId(oldId: String): BackgroundModel = when (oldId) {

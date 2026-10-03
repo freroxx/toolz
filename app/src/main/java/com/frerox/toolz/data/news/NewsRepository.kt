@@ -18,6 +18,13 @@ class NewsRepository @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
     companion object {
+        // Draft admin-panel announcement (publish via /admin/news, NOT seeded here):
+        // title="Action needed: migrate your Whisper account",
+        // body="Legacy Whisper token accounts (pre-2026 truncated emails) must migrate
+        //   within 30d — open Whisper > log in once to auto-upgrade, then the old
+        //   credential is disabled. Contact support if locked.",
+        // priority=critical, notify=true, frequency=once, action="Log in to migrate".
+        // See TOOLZ_NEWS.md §15 + st_Whisper_Legacy_Migrate_* strings.
         const val SYNC_STALE_MS = 6 * 60 * 60 * 1000L
         const val HISTORY_PAGE_SIZE = 10
         private const val PRUNE_AFTER_MS = 90L * 24 * 60 * 60 * 1000L
