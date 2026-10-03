@@ -24,8 +24,10 @@ Whisper has a hybrid identity: long-term P-256 ECDH and P-256 signing keys in
 AndroidKeyStore, plus software X25519 identity, signed prekeys, and one-time
 prekeys for sessions. Messages travel as v2 multi-key envelopes (static ECDH,
 self-healing across key drift) or v3 Double Ratchet frames (X3DH handshake, then
-per-message forward secrecy). New chats try v3 first and fall back to v2 on any
-seal failure, so a message is never blocked by session problems.
+per-message forward secrecy). New chats try v3 first; proven v3 peers never
+silently downgrade to v2 (seal failure blocks with a warning instead), and only
+unproven peers may fall back to v2 envelopes. New v3 frames never carry a v2
+insurance copy.
 
 Three corrections to older docs:
 
@@ -43,16 +45,19 @@ with CRC32), and hosted on ImgBB through an edge function. Avatars use Supabase
 Storage or ImgBB with deterministic per-owner keys. Push is FCM data-only
 (sender and message IDs, no content). Local Room caches hold ciphertext only.
 
+Uses custom E2EE, not independently audited.
+
 ## 2. Cryptography
 
 ### 2.1 Primitives
 
-`crypto/SessionCrypto.kt` (192 lines) is pure-software X25519 (Montgomery ladder
-per RFC 7748, BigInteger, documented as not constant-time), HKDF-SHA256
-(RFC 5869), HMAC-SHA256, SHA-256, and AES-256-GCM (12-byte IV, 128-bit tag,
-packed as IV + ciphertext + tag). `sharedSecret` returns null on an all-zero
-peer point; callers treat that as an invalid key. Covered by
-`SessionCryptoVectorTest` with RFC vectors.
+`crypto/SessionCrypto.kt` is X25519 via Tink `subtle.X25519` (constant-time
+curve25519-donna; the old BigInteger Montgomery ladder is removed),
+HKDF-SHA256 (RFC 5869), HMAC-SHA256, SHA-256, and AES-256-GCM (12-byte IV,
+128-bit tag, packed as IV + ciphertext + tag). `sharedSecret` returns null on
+banned/low-order or all-zero peer points (Tink throws InvalidKeyException;
+mapped to null); callers treat that as an invalid key. Covered by
+`SessionCryptoVectorTest` with RFC 7748 §5.2/§6.1 vectors.
 
 `data/whisper/WhisperCrypto.kt` (866 lines) is the hardware identity:
 
@@ -103,19 +108,33 @@ peer point; callers treat that as an invalid key. Covered by
 
 ### 2.3 Double Ratchet
 
-`data/whisper/session/WhisperRatchet.kt` (296 lines) implements Signal sections
+`data/whisper/session/WhisperRatchet.kt` implements Signal sections
 1-5. Root KDF uses HKDF with info `WhisperRatchetRoot` (64 bytes split into new
 root and chain key). Chain KDF uses HMAC with `0x01` for the message key and
 `0x02` for the next chain key. Headers carry `{dhPub, pn, n}` and the AAD binds
 header bytes plus session and participant IDs, so routing tampering fails
-authentication. Out-of-order keys are kept up to `MAX_SKIPPED = 400` (oldest
-evicted), consumed keys are remembered so duplicates still open, and the last
-eight retired remote keys are tracked. Unrecoverable messages throw
-`WhisperRatchetLostMessage`, rendered as an honest locked placeholder.
+authentication. Decrypt is copy-commit (`tryDecryptOnCopy`): the primary path
+derives on a trial copy and commits only after AEAD verifies, so a forged
+header/ciphertext advances no chain and triggers no DH step (snapshot-identical
+before/after, pinned by `forged-header-no-mutation`). Out-of-order keys are
+kept up to `MAX_SKIPPED = 400` with NO eviction: far-future `n` (gap beyond the
+window) or a full window is REJECTED with `WhisperRatchetLostMessage`, leaving
+the existing window intact. Consumed keys are remembered so duplicates still
+open, and the last eight retired remote keys are tracked. Unrecoverable
+messages throw `WhisperRatchetLostMessage`, rendered as an honest locked
+placeholder. A gap-overflow lock (skipped-key gap beyond `MAX_SKIPPED`, which
+can never catch up) additionally triggers a fresh handshake fire-and-forget,
+rate-limited to one attempt per 30s per peer (`ratchet.gapHandshake`,
+`WireProtocol.isGapLoss`/`shouldRefreshOnGap`), with the UI notice "Missed too
+many messages - starting fresh session, ask peer to resend"; other losses keep
+the placeholder and rely on server catch-up.
 
-`data/whisper/session/WhisperSessionStore.kt` (296 lines) persists one session
+`data/whisper/session/WhisperSessionStore.kt` (341 lines) persists one session
 per peer at `filesDir/whisper_sessions/<sha256(peerId)>.json` plus an in-memory
-map, guarded by a per-peer mutex so two threads never advance one ratchet. Only
+map, guarded by a per-peer mutex so two threads never advance one ratchet. It
+also keeps an in-memory-only consecutive establish-failure count per peer
+(incremented on every X3DH establish failure, reset on success or process
+restart — never persisted, so a block can never wedge across reboots). Only
 framing (session ID, pending header, peer identity key) is plaintext; the X3DH
 key and the whole ratchet snapshot are Keystore-wrapped. A corrupt file is
 deleted and treated as no session, which falls back to envelopes plus a fresh
@@ -124,13 +143,21 @@ identity change, otherwise the lower session ID wins so racing initiators
 converge. `WhisperSessionSecretProtector.kt` (36 lines) is the wrap/unwrap seam
 (Keystore in production, fake in tests).
 
-`data/whisper/WireProtocol.kt` (146 lines) holds the pure decisions: negotiated
+`data/whisper/WireProtocol.kt` (379 lines) holds the pure decisions: negotiated
 version never above what this build speaks, peer floor is the lowest version the
 peer proved, v3 is used for live sessions or fresh contacts unless the peer
 proved it cannot parse v3 or an establish failed within the last 30 seconds,
-key changes classify as match / auto-rotated (server row fresh within 30
-minutes, or known key older than interval minus 24h) / changed, and stale
-sessions tear down only on in-window fresh rows. `WhisperProtocolConfig.kt`
+key changes are fail-closed (MATCH iff pinned == server; any difference is
+CHANGED unless a ROTv2 rotation cert `ROTv2:<prev>:<new>:<counter>:<ts>`
+chains the new key to the pin — counter must strictly exceed the peer's last
+accepted counter (`WhisperKeyTrustStore` `rotation_counter_*`, default 0) and
+|now-ts| must be within 24h; v1 `sign(prev,new)` certs are still accepted for
+compat — verified peers always need manual re-verify; time windows never
+auto-accept), stale sessions tear down only on in-window fresh rows, and after
+3 consecutive establish failures with no live/proven session the envelope
+fallback blocks ("Handshake repeatedly failed (3x) - blocked insecure fallback,
+retry later", `send.blocked.downgrade_N`) instead of silently downgrading under
+persistent failure. `WhisperProtocolConfig.kt`
 (20 lines) sets live version 2 (envelope fallback), ratchet version 3, ratchet
 enabled.
 
@@ -140,13 +167,15 @@ enabled.
   identity key plus P-256 signer) to `profiles`, rotates the signed prekey
   weekly, tops the one-time pool to 50 (persisted cap 120). Private halves are
   Keystore-wrapped and persisted so process death cannot break handshakes.
-- `WhisperKeyTrustStore.kt` (176): TOFU anchors plus user-verified keys in
+- `WhisperKeyTrustStore.kt` (202): TOFU anchors plus user-verified keys in
   `EncryptedSharedPreferences` (migrated once from the old plaintext file),
-  durable fsync writes off the main thread.
+  durable fsync writes off the main thread, plus the ROTv2 anti-replay counter
+  (`rotation_counter_*` per peer, default 0 — only a cert with a strictly
+  greater counter and a fresh timestamp chains).
 - `WhisperKeyRotationStore.kt` (77): 30-day rotation interval with up to 6 hours
   of jitter, single source of truth shared with key-change classification.
-  A 30-minute fresh-rotation window distinguishes routine rotation from
-  suspicious change.
+  Rotation trust is cert-based (`sign(prev,new)` verified against the pin),
+  never time-window based; verified safety numbers always re-verify manually.
 - `ProtocolDiagnostics.kt` (66): process-local ring buffer (last 60 events) plus
   counters. Never carries content, IDs, or key material. Exported only through
   the debug diagnostics button.
@@ -157,19 +186,26 @@ enabled.
 |---|---|---|
 | v1 legacy | `messages.content` + separate `content_iv` | raw base64 ciphertext + IV column |
 | v2 envelope | `messages.content`, `content_iv = NULL` | `{"v":2,"k":[{"kid","iv","ct"}], "ik"?, "x3dh"?}` |
-| v3 ratchet | `messages.content`, `content_iv = "v3"` | `{"v":3,"sid","dh","pn","n","ct", "x3dh"?, "env"?}` |
+| v3 ratchet | `messages.content`, `content_iv = "v3"` | `{"v":3,"sid","dh","pn","n","ct", "x3dh"?}` (no `env` on new sends; legacy rows may still carry one for decode) |
 
 `WhisperEnvelope.kt` (133 lines): key IDs are the first 8 hex chars of
-SHA-256 of the base64 public key. Senders seal to every known recipient key
-(pinned plus fresher server key); receivers try each. The sender public key
+SHA-256 of the base64 public key. Senders seal only to the pinned key plus keys
+chaining to it via a valid rotation cert (fail-closed — an unproven server key
+is dropped and the send blocks with a key-change warning); receivers try each
+decrypt candidate including the trial-only in-band sender key `ik` (never
+adopted into trust without a cert). The sender public key
 rides in-band as `ik` so delivery does not depend on a fresh profile row. The
 X3DH header rides as a sibling `x3dh` object on the first session message.
 Detection is prefix-based, so v1 and v2 rows coexist.
 
-`session/WhisperV3Codec.kt` (125 lines): one JSON object per frame, never a
-multi-key envelope. `x3dh` appears only on the first frame. `env` is a parallel
-v2 copy on unproven sessions (handshake insurance); old clients ignore it and
-proven sessions stop sending it.
+`session/WhisperV3Codec.kt` (144 lines): one JSON object per frame, never a
+multi-key envelope. `x3dh` appears only on the first frame. Legacy `env`
+(decode-only) may still ride on pre-Phase-1A rows for backward compat, but only
+for rows created at or before 2026-12-01 (`LEGACY_ENV_CUTOFF_MS`): post-cutoff
+`env` copies are rejected fail-closed in `tryInsurance` (`v3.insuranceCutoff` —
+a post-cutoff `env` is a replay or a misbehaving peer, since new sends never
+populate it); new sends never populate it, and per-message FS state
+(`fsProtected`, v + sessionProven) drives the lock badge in chat bubbles.
 
 ## 4. Images and avatars
 
@@ -186,10 +222,12 @@ proven sessions stop sending it.
   query and fragment, allowlist `i.ibb.co`, `ibb.co`, and the project's
   `whisper-avatars` storage path (one redirect followed), cap 7 MiB, and map
   403/404 to an expired-image signal.
-- `WhisperAvatarCodec.kt` (58): per-owner key from
-  `HKDF(SHA-256(ownerPub + ":whisper-avatar-v1"), info "whisper-avatar-key")`,
-  owner key as AAD. Anyone holding the profile row can derive it; the host sees
-  ciphertext only. Fails closed on mismatch.
+- `WhisperAvatarCodec.kt`: deterministic per-owner OBFUSCATION (sealed blobs),
+  not encryption — key from `HKDF(SHA-256(ownerPub + ":whisper-avatar-v1"),
+  info "whisper-avatar-key")`, owner key as AAD. Sealed: anyone with your
+  public key can derive the key; the host sees ciphertext only. Hides bytes
+  from third-party hosts only, fails closed on mismatch. Never label "encrypted"
+  in UI/docs; `strings.xml` carries no avatar-encryption claims (verified).
 - `WhisperAvatarLoader.kt` (142): memory LRU plus in-flight dedupe plus sealed
   disk cache under `filesDir/whisper_avatars` (SHA-256 of URL, max 64 entries),
   with PNG and double-wrap healing and a generation guard so sign-out cannot
@@ -201,16 +239,19 @@ sealing (`WhisperChatViewModel.compressImageForUpload`). Avatars are cropped to
 
 ## 5. Backend
 
-`supabase/migrations/main-whisper-sql.sql` (1417 lines) is the canonical single
-baseline, squashing 14 migrations (policy in `whisper-sql-info.md`). Tables:
-`messages` (with `content_hash` replay guard and block-aware insert guard),
+`supabase/migrations/main-whisper-sql.sql` (1797 lines) is the canonical single
+baseline, squashing 15 migrations (policy in `whisper-sql-info.md`). Tables:
+`messages` (with `content_hash` replay guard, block-aware insert guard, and a
+sender-authorized delete-for-everyone tombstone exception in the content guard),
 `message_reactions`, `friendships`/`friends` (pending-only transitions,
 block-aware), `profiles` (identity binding, public key, last seen, avatar),
 `whisper_blocks`, `whisper_prekeys` (account, key ID, kind, public key,
 signature), `whisper_fcm_tokens` (user ID primary key), `whisper_typing_signals`
-(8-second freshness), upload/discover/bypass/destructive quotas, deleted
-tombstones, image ownership, and the `whisper_public_profiles` view. Includes
-the discover, bypass-attempt, quota-refund, and account-purge RPCs, owner-scoped
+(8-second freshness),
+upload/discover/bypass/destructive/username-check quotas, deleted
+tombstones, image ownership, and the `whisper_public_profiles` view (with direct
+`last_seen_at`). Includes
+the discover, bypass-attempt, quota-refund, username-availability, and account-purge RPCs, owner-scoped
 RLS, realtime publication, and full replica identity. Idempotent, safe to rerun.
 
 Edge functions in `supabase/functions/whisper-*/index.ts`:
@@ -240,7 +281,10 @@ from 60 seconds to 180 days, event dedupe TTL 30 seconds (max 1024 IDs), up to
 - Health: republishes the local key when the server row diverges (repairing a
   broken identity first), retries prekey publication on failure.
 - Send: tries the ratchet under the per-peer mutex (establishing the session on
-  a miss), otherwise builds a multi-key envelope to every candidate key. Inserts
+  a miss), otherwise builds a multi-key envelope to every candidate key. The
+  advanced ratchet state is persisted BEFORE the frame leaves the mutex
+  (`sealWithRatchet`: encrypt → clear pending header → `sessionStore.save` —
+  verified, no code change in Phase 1B). Inserts
   the row with a client UUID (idempotent retries), queues ciphertext-only on
   failure (never plaintext), and schedules delivery. Images are sealed per
   recipient plus a self-addressed copy so the sender keeps access after partner
@@ -263,17 +307,22 @@ from 60 seconds to 180 days, event dedupe TTL 30 seconds (max 1024 IDs), up to
 - Social (`WhisperRepositorySocial.kt`, 467) and profile
   (`WhisperRepositoryProfile.kt`, 398) splits cover friend requests, blocks
   (client plus DB enforcement), discover paging with quota, hide/mute, typing
-  broadcast, profile CRUD, avatar upload/delete under
+  broadcast, profile CRUD,
+  username-availability checks (migrating to the quota-guarded RPC),
+  avatar upload/delete under
   `whisper-avatars/<userId>/`, and QR key verification.
 - Deletes and reactions: delete-for-everyone writes a
-  `[deleted_by_sender:<name>]` tombstone and deletes the hosted image,
+  `[deleted_by_sender:<name>]` tombstone and deletes the hosted image (the
+  server content guard permits only this sender-authorized tombstone write),
   delete-for-me stays device-local, clear-chat supports 24h/7d/30d/all/custom
   with 30-second undo, reactions send delta toggles reconciled by authoritative
   snapshots, and the outbox flushes FIFO (duplicate keys count as delivered,
   exhausted attempts go to the drop ledger).
 
 Supporting stores, all read in full: access-file backup and restore
-(`WhisperAubupManager`, 526), device-only delete-for-me with 24-hour eviction
+(`WhisperAubupManager`, credential-only `WhisperAccessPayload` — username,
+authType, credential, displayName; ratchet/session state is NEVER included,
+verified Phase 1B, no code change), device-only delete-for-me with 24-hour eviction
 (`WhisperDeletedMessagesStore`, 167), auto-returning hidden chats
 (`WhisperHiddenChatsStore`, 99), mute with expiry (`WhisperMutePreferences`,
 129), 30-second clear-chat undo (`WhisperUndoBufferStore`, 104), grouped
@@ -295,11 +344,13 @@ scheduler with 15-second exponential backoff (42).
   GoTrue email auth (confirmation off, immediate session, one retry on transient
   post-signup failure).
 - Token path: 32 random bytes as 64 hex. Email is `SHA-256(token)` at
-  `whisper.toolz.app`, password is `SHA-256("pwd_" + token)`. Login tries four
-  frozen historical derivations (current 256-bit first, three legacy 32-bit
-  variants) with 500 ms pacing. Tokens are normalized (non-hex stripped,
-  lowercased) and validated as 64 hex. Credential errors are detected
-  structurally, not by bare status code.
+  `whisper.toolz.app`, password is `SHA-256("pwd_" + token)`. Login makes a
+  SINGLE attempt with the current full-hash derivation (Phase 1B: the three
+  legacy truncated 32-bit derivations are removed). Invalid credentials fail
+  closed with "Legacy token accounts require one-time migration - contact
+  support / use recovery" (`migrateLegacyTokenAccounts`). Tokens are normalized
+  (non-hex stripped, lowercased) and validated as 64 hex. Credential errors are
+  detected structurally, not by bare status code.
 - Extras: restore from the Toolz password vault or an encrypted access file
   plus whisper code, clipboard auto-expiry for displayed tokens, username
   availability check, sign-out, and account deletion (re-auth for password
@@ -307,7 +358,7 @@ scheduler with 15-second exponential backoff (42).
   then local wipe of sessions, Room, trust, outbox, avatars, and FCM token).
 
 `ui/screens/whisper/WhisperAuthViewModel.kt` (601) drives these flows with
-clipboard expiry, access-file import, and frozen candidate ordering.
+clipboard expiry, access-file import, and single-attempt token login.
 
 ## 8. UI and view models
 
@@ -361,7 +412,21 @@ All 18 files under `ui/screens/whisper/`:
 ## 10. Tests
 
 Handshake math and SessionCrypto vectors (RFC 7748 sections 5.2 and 6.1, the
-`WhisperX3DH-v1` HKDF framing, AES-GCM round trip), model invariants (names,
+`WhisperX3DH-v1` HKDF framing, AES-GCM round trip), ratchet security matrix
+(`WhisperRatchetSecurityTest`: out-of-order, replay, reinstall desync,
+key-change strict, skipped-limit rejected, forged-header-no-mutation
+snapshot-identical), interop/persistence/reinstall gates (`WhisperV3InteropTest` —
+self-interop only: both ends are this code, so a systematic framing bug would
+pass there unnoticed), EXTERNAL reference vectors (`WhisperRefVectorTest`: RFC
+7748 DH pairs in Signal X3DH arrangement, RFC 5869 Appendix A.2 HKDF,
+Python-cross-checked Double-Ratchet root/chain KATs, env-cutoff boundary, and
+the no-`env`-on-new-sends pin — every expected value comes from an RFC or an
+independent implementation, never from this repo's output; external review of
+the full Signal-compat claim is still needed), pure-rule pins for the
+residual-downgrade N-block, ROTv2 counter/timestamp anti-replay, and
+gap-refresh rate-limiting (`WireProtocolTest`),
+chaos with zero wrong plaintexts (`WhisperRatchetChaosTest`, far-future
+rejected, window never evicted), model invariants (names,
 avatars, pending/sent/read ordering, image prefix, tombstones, snake-case
 serialization), chat reaction merging, bypass verdicts (blank and oversize
 inputs), image transport (v2 magic, legacy fallback, CRC rejection, pixel cap),
@@ -426,8 +491,10 @@ Whisper has a hybrid identity: long-term P-256 ECDH and P-256 signing keys in
 AndroidKeyStore, plus software X25519 identity, signed prekeys, and one-time
 prekeys for sessions. Messages travel as v2 multi-key envelopes (static ECDH,
 self-healing across key drift) or v3 Double Ratchet frames (X3DH handshake, then
-per-message forward secrecy). New chats try v3 first and fall back to v2 on any
-seal failure, so a message is never blocked by session problems.
+per-message forward secrecy). New chats try v3 first; proven v3 peers never
+silently downgrade to v2 (seal failure blocks with a warning instead), and only
+unproven peers may fall back to v2 envelopes. New v3 frames never carry a v2
+insurance copy.
 
 Three corrections to older docs:
 
@@ -445,16 +512,19 @@ with CRC32), and hosted on ImgBB through an edge function. Avatars use Supabase
 Storage or ImgBB with deterministic per-owner keys. Push is FCM data-only
 (sender and message IDs, no content). Local Room caches hold ciphertext only.
 
+Uses custom E2EE, not independently audited.
+
 ## 2. Cryptography
 
 ### 2.1 Primitives
 
-`crypto/SessionCrypto.kt` (192 lines) is pure-software X25519 (Montgomery ladder
-per RFC 7748, BigInteger, documented as not constant-time), HKDF-SHA256
-(RFC 5869), HMAC-SHA256, SHA-256, and AES-256-GCM (12-byte IV, 128-bit tag,
-packed as IV + ciphertext + tag). `sharedSecret` returns null on an all-zero
-peer point; callers treat that as an invalid key. Covered by
-`SessionCryptoVectorTest` with RFC vectors.
+`crypto/SessionCrypto.kt` is X25519 via Tink `subtle.X25519` (constant-time
+curve25519-donna; the old BigInteger Montgomery ladder is removed),
+HKDF-SHA256 (RFC 5869), HMAC-SHA256, SHA-256, and AES-256-GCM (12-byte IV,
+128-bit tag, packed as IV + ciphertext + tag). `sharedSecret` returns null on
+banned/low-order or all-zero peer points (Tink throws InvalidKeyException;
+mapped to null); callers treat that as an invalid key. Covered by
+`SessionCryptoVectorTest` with RFC 7748 §5.2/§6.1 vectors.
 
 `data/whisper/WhisperCrypto.kt` (866 lines) is the hardware identity:
 
@@ -505,19 +575,33 @@ peer point; callers treat that as an invalid key. Covered by
 
 ### 2.3 Double Ratchet
 
-`data/whisper/session/WhisperRatchet.kt` (296 lines) implements Signal sections
+`data/whisper/session/WhisperRatchet.kt` implements Signal sections
 1-5. Root KDF uses HKDF with info `WhisperRatchetRoot` (64 bytes split into new
 root and chain key). Chain KDF uses HMAC with `0x01` for the message key and
 `0x02` for the next chain key. Headers carry `{dhPub, pn, n}` and the AAD binds
 header bytes plus session and participant IDs, so routing tampering fails
-authentication. Out-of-order keys are kept up to `MAX_SKIPPED = 400` (oldest
-evicted), consumed keys are remembered so duplicates still open, and the last
-eight retired remote keys are tracked. Unrecoverable messages throw
-`WhisperRatchetLostMessage`, rendered as an honest locked placeholder.
+authentication. Decrypt is copy-commit (`tryDecryptOnCopy`): the primary path
+derives on a trial copy and commits only after AEAD verifies, so a forged
+header/ciphertext advances no chain and triggers no DH step (snapshot-identical
+before/after, pinned by `forged-header-no-mutation`). Out-of-order keys are
+kept up to `MAX_SKIPPED = 400` with NO eviction: far-future `n` (gap beyond the
+window) or a full window is REJECTED with `WhisperRatchetLostMessage`, leaving
+the existing window intact. Consumed keys are remembered so duplicates still
+open, and the last eight retired remote keys are tracked. Unrecoverable
+messages throw `WhisperRatchetLostMessage`, rendered as an honest locked
+placeholder. A gap-overflow lock (skipped-key gap beyond `MAX_SKIPPED`, which
+can never catch up) additionally triggers a fresh handshake fire-and-forget,
+rate-limited to one attempt per 30s per peer (`ratchet.gapHandshake`,
+`WireProtocol.isGapLoss`/`shouldRefreshOnGap`), with the UI notice "Missed too
+many messages - starting fresh session, ask peer to resend"; other losses keep
+the placeholder and rely on server catch-up.
 
-`data/whisper/session/WhisperSessionStore.kt` (296 lines) persists one session
+`data/whisper/session/WhisperSessionStore.kt` (341 lines) persists one session
 per peer at `filesDir/whisper_sessions/<sha256(peerId)>.json` plus an in-memory
-map, guarded by a per-peer mutex so two threads never advance one ratchet. Only
+map, guarded by a per-peer mutex so two threads never advance one ratchet. It
+also keeps an in-memory-only consecutive establish-failure count per peer
+(incremented on every X3DH establish failure, reset on success or process
+restart — never persisted, so a block can never wedge across reboots). Only
 framing (session ID, pending header, peer identity key) is plaintext; the X3DH
 key and the whole ratchet snapshot are Keystore-wrapped. A corrupt file is
 deleted and treated as no session, which falls back to envelopes plus a fresh
@@ -526,13 +610,21 @@ identity change, otherwise the lower session ID wins so racing initiators
 converge. `WhisperSessionSecretProtector.kt` (36 lines) is the wrap/unwrap seam
 (Keystore in production, fake in tests).
 
-`data/whisper/WireProtocol.kt` (146 lines) holds the pure decisions: negotiated
+`data/whisper/WireProtocol.kt` (379 lines) holds the pure decisions: negotiated
 version never above what this build speaks, peer floor is the lowest version the
 peer proved, v3 is used for live sessions or fresh contacts unless the peer
 proved it cannot parse v3 or an establish failed within the last 30 seconds,
-key changes classify as match / auto-rotated (server row fresh within 30
-minutes, or known key older than interval minus 24h) / changed, and stale
-sessions tear down only on in-window fresh rows. `WhisperProtocolConfig.kt`
+key changes are fail-closed (MATCH iff pinned == server; any difference is
+CHANGED unless a ROTv2 rotation cert `ROTv2:<prev>:<new>:<counter>:<ts>`
+chains the new key to the pin — counter must strictly exceed the peer's last
+accepted counter (`WhisperKeyTrustStore` `rotation_counter_*`, default 0) and
+|now-ts| must be within 24h; v1 `sign(prev,new)` certs are still accepted for
+compat — verified peers always need manual re-verify; time windows never
+auto-accept), stale sessions tear down only on in-window fresh rows, and after
+3 consecutive establish failures with no live/proven session the envelope
+fallback blocks ("Handshake repeatedly failed (3x) - blocked insecure fallback,
+retry later", `send.blocked.downgrade_N`) instead of silently downgrading under
+persistent failure. `WhisperProtocolConfig.kt`
 (20 lines) sets live version 2 (envelope fallback), ratchet version 3, ratchet
 enabled.
 
@@ -542,13 +634,15 @@ enabled.
   identity key plus P-256 signer) to `profiles`, rotates the signed prekey
   weekly, tops the one-time pool to 50 (persisted cap 120). Private halves are
   Keystore-wrapped and persisted so process death cannot break handshakes.
-- `WhisperKeyTrustStore.kt` (176): TOFU anchors plus user-verified keys in
+- `WhisperKeyTrustStore.kt` (202): TOFU anchors plus user-verified keys in
   `EncryptedSharedPreferences` (migrated once from the old plaintext file),
-  durable fsync writes off the main thread.
+  durable fsync writes off the main thread, plus the ROTv2 anti-replay counter
+  (`rotation_counter_*` per peer, default 0 — only a cert with a strictly
+  greater counter and a fresh timestamp chains).
 - `WhisperKeyRotationStore.kt` (77): 30-day rotation interval with up to 6 hours
   of jitter, single source of truth shared with key-change classification.
-  A 30-minute fresh-rotation window distinguishes routine rotation from
-  suspicious change.
+  Rotation trust is cert-based (`sign(prev,new)` verified against the pin),
+  never time-window based; verified safety numbers always re-verify manually.
 - `ProtocolDiagnostics.kt` (66): process-local ring buffer (last 60 events) plus
   counters. Never carries content, IDs, or key material. Exported only through
   the debug diagnostics button.
@@ -559,19 +653,26 @@ enabled.
 |---|---|---|
 | v1 legacy | `messages.content` + separate `content_iv` | raw base64 ciphertext + IV column |
 | v2 envelope | `messages.content`, `content_iv = NULL` | `{"v":2,"k":[{"kid","iv","ct"}], "ik"?, "x3dh"?}` |
-| v3 ratchet | `messages.content`, `content_iv = "v3"` | `{"v":3,"sid","dh","pn","n","ct", "x3dh"?, "env"?}` |
+| v3 ratchet | `messages.content`, `content_iv = "v3"` | `{"v":3,"sid","dh","pn","n","ct", "x3dh"?}` (no `env` on new sends; legacy rows may still carry one for decode) |
 
 `WhisperEnvelope.kt` (133 lines): key IDs are the first 8 hex chars of
-SHA-256 of the base64 public key. Senders seal to every known recipient key
-(pinned plus fresher server key); receivers try each. The sender public key
+SHA-256 of the base64 public key. Senders seal only to the pinned key plus keys
+chaining to it via a valid rotation cert (fail-closed — an unproven server key
+is dropped and the send blocks with a key-change warning); receivers try each
+decrypt candidate including the trial-only in-band sender key `ik` (never
+adopted into trust without a cert). The sender public key
 rides in-band as `ik` so delivery does not depend on a fresh profile row. The
 X3DH header rides as a sibling `x3dh` object on the first session message.
 Detection is prefix-based, so v1 and v2 rows coexist.
 
-`session/WhisperV3Codec.kt` (125 lines): one JSON object per frame, never a
-multi-key envelope. `x3dh` appears only on the first frame. `env` is a parallel
-v2 copy on unproven sessions (handshake insurance); old clients ignore it and
-proven sessions stop sending it.
+`session/WhisperV3Codec.kt` (144 lines): one JSON object per frame, never a
+multi-key envelope. `x3dh` appears only on the first frame. Legacy `env`
+(decode-only) may still ride on pre-Phase-1A rows for backward compat, but only
+for rows created at or before 2026-12-01 (`LEGACY_ENV_CUTOFF_MS`): post-cutoff
+`env` copies are rejected fail-closed in `tryInsurance` (`v3.insuranceCutoff` —
+a post-cutoff `env` is a replay or a misbehaving peer, since new sends never
+populate it); new sends never populate it, and per-message FS state
+(`fsProtected`, v + sessionProven) drives the lock badge in chat bubbles.
 
 ## 4. Images and avatars
 
@@ -588,10 +689,12 @@ proven sessions stop sending it.
   query and fragment, allowlist `i.ibb.co`, `ibb.co`, and the project's
   `whisper-avatars` storage path (one redirect followed), cap 7 MiB, and map
   403/404 to an expired-image signal.
-- `WhisperAvatarCodec.kt` (58): per-owner key from
-  `HKDF(SHA-256(ownerPub + ":whisper-avatar-v1"), info "whisper-avatar-key")`,
-  owner key as AAD. Anyone holding the profile row can derive it; the host sees
-  ciphertext only. Fails closed on mismatch.
+- `WhisperAvatarCodec.kt`: deterministic per-owner OBFUSCATION (sealed blobs),
+  not encryption — key from `HKDF(SHA-256(ownerPub + ":whisper-avatar-v1"),
+  info "whisper-avatar-key")`, owner key as AAD. Sealed: anyone with your
+  public key can derive the key; the host sees ciphertext only. Hides bytes
+  from third-party hosts only, fails closed on mismatch. Never label "encrypted"
+  in UI/docs; `strings.xml` carries no avatar-encryption claims (verified).
 - `WhisperAvatarLoader.kt` (142): memory LRU plus in-flight dedupe plus sealed
   disk cache under `filesDir/whisper_avatars` (SHA-256 of URL, max 64 entries),
   with PNG and double-wrap healing and a generation guard so sign-out cannot
@@ -603,16 +706,19 @@ sealing (`WhisperChatViewModel.compressImageForUpload`). Avatars are cropped to
 
 ## 5. Backend
 
-`supabase/migrations/main-whisper-sql.sql` (1417 lines) is the canonical single
-baseline, squashing 14 migrations (policy in `whisper-sql-info.md`). Tables:
-`messages` (with `content_hash` replay guard and block-aware insert guard),
+`supabase/migrations/main-whisper-sql.sql` (1797 lines) is the canonical single
+baseline, squashing 15 migrations (policy in `whisper-sql-info.md`). Tables:
+`messages` (with `content_hash` replay guard, block-aware insert guard, and a
+sender-authorized delete-for-everyone tombstone exception in the content guard),
 `message_reactions`, `friendships`/`friends` (pending-only transitions,
 block-aware), `profiles` (identity binding, public key, last seen, avatar),
 `whisper_blocks`, `whisper_prekeys` (account, key ID, kind, public key,
 signature), `whisper_fcm_tokens` (user ID primary key), `whisper_typing_signals`
-(8-second freshness), upload/discover/bypass/destructive quotas, deleted
-tombstones, image ownership, and the `whisper_public_profiles` view. Includes
-the discover, bypass-attempt, quota-refund, and account-purge RPCs, owner-scoped
+(8-second freshness),
+upload/discover/bypass/destructive/username-check quotas, deleted
+tombstones, image ownership, and the `whisper_public_profiles` view (with direct
+`last_seen_at`). Includes
+the discover, bypass-attempt, quota-refund, username-availability, and account-purge RPCs, owner-scoped
 RLS, realtime publication, and full replica identity. Idempotent, safe to rerun.
 
 Edge functions in `supabase/functions/whisper-*/index.ts`:
@@ -642,7 +748,10 @@ from 60 seconds to 180 days, event dedupe TTL 30 seconds (max 1024 IDs), up to
 - Health: republishes the local key when the server row diverges (repairing a
   broken identity first), retries prekey publication on failure.
 - Send: tries the ratchet under the per-peer mutex (establishing the session on
-  a miss), otherwise builds a multi-key envelope to every candidate key. Inserts
+  a miss), otherwise builds a multi-key envelope to every candidate key. The
+  advanced ratchet state is persisted BEFORE the frame leaves the mutex
+  (`sealWithRatchet`: encrypt → clear pending header → `sessionStore.save` —
+  verified, no code change in Phase 1B). Inserts
   the row with a client UUID (idempotent retries), queues ciphertext-only on
   failure (never plaintext), and schedules delivery. Images are sealed per
   recipient plus a self-addressed copy so the sender keeps access after partner
@@ -665,17 +774,22 @@ from 60 seconds to 180 days, event dedupe TTL 30 seconds (max 1024 IDs), up to
 - Social (`WhisperRepositorySocial.kt`, 467) and profile
   (`WhisperRepositoryProfile.kt`, 398) splits cover friend requests, blocks
   (client plus DB enforcement), discover paging with quota, hide/mute, typing
-  broadcast, profile CRUD, avatar upload/delete under
+  broadcast, profile CRUD,
+  username-availability checks (migrating to the quota-guarded RPC),
+  avatar upload/delete under
   `whisper-avatars/<userId>/`, and QR key verification.
 - Deletes and reactions: delete-for-everyone writes a
-  `[deleted_by_sender:<name>]` tombstone and deletes the hosted image,
+  `[deleted_by_sender:<name>]` tombstone and deletes the hosted image (the
+  server content guard permits only this sender-authorized tombstone write),
   delete-for-me stays device-local, clear-chat supports 24h/7d/30d/all/custom
   with 30-second undo, reactions send delta toggles reconciled by authoritative
   snapshots, and the outbox flushes FIFO (duplicate keys count as delivered,
   exhausted attempts go to the drop ledger).
 
 Supporting stores, all read in full: access-file backup and restore
-(`WhisperAubupManager`, 526), device-only delete-for-me with 24-hour eviction
+(`WhisperAubupManager`, credential-only `WhisperAccessPayload` — username,
+authType, credential, displayName; ratchet/session state is NEVER included,
+verified Phase 1B, no code change), device-only delete-for-me with 24-hour eviction
 (`WhisperDeletedMessagesStore`, 167), auto-returning hidden chats
 (`WhisperHiddenChatsStore`, 99), mute with expiry (`WhisperMutePreferences`,
 129), 30-second clear-chat undo (`WhisperUndoBufferStore`, 104), grouped
@@ -697,11 +811,13 @@ scheduler with 15-second exponential backoff (42).
   GoTrue email auth (confirmation off, immediate session, one retry on transient
   post-signup failure).
 - Token path: 32 random bytes as 64 hex. Email is `SHA-256(token)` at
-  `whisper.toolz.app`, password is `SHA-256("pwd_" + token)`. Login tries four
-  frozen historical derivations (current 256-bit first, three legacy 32-bit
-  variants) with 500 ms pacing. Tokens are normalized (non-hex stripped,
-  lowercased) and validated as 64 hex. Credential errors are detected
-  structurally, not by bare status code.
+  `whisper.toolz.app`, password is `SHA-256("pwd_" + token)`. Login makes a
+  SINGLE attempt with the current full-hash derivation (Phase 1B: the three
+  legacy truncated 32-bit derivations are removed). Invalid credentials fail
+  closed with "Legacy token accounts require one-time migration - contact
+  support / use recovery" (`migrateLegacyTokenAccounts`). Tokens are normalized
+  (non-hex stripped, lowercased) and validated as 64 hex. Credential errors are
+  detected structurally, not by bare status code.
 - Extras: restore from the Toolz password vault or an encrypted access file
   plus whisper code, clipboard auto-expiry for displayed tokens, username
   availability check, sign-out, and account deletion (re-auth for password
@@ -709,7 +825,7 @@ scheduler with 15-second exponential backoff (42).
   then local wipe of sessions, Room, trust, outbox, avatars, and FCM token).
 
 `ui/screens/whisper/WhisperAuthViewModel.kt` (601) drives these flows with
-clipboard expiry, access-file import, and frozen candidate ordering.
+clipboard expiry, access-file import, and single-attempt token login.
 
 ## 8. UI and view models
 
@@ -763,7 +879,21 @@ All 18 files under `ui/screens/whisper/`:
 ## 10. Tests
 
 Handshake math and SessionCrypto vectors (RFC 7748 sections 5.2 and 6.1, the
-`WhisperX3DH-v1` HKDF framing, AES-GCM round trip), model invariants (names,
+`WhisperX3DH-v1` HKDF framing, AES-GCM round trip), ratchet security matrix
+(`WhisperRatchetSecurityTest`: out-of-order, replay, reinstall desync,
+key-change strict, skipped-limit rejected, forged-header-no-mutation
+snapshot-identical), interop/persistence/reinstall gates (`WhisperV3InteropTest` —
+self-interop only: both ends are this code, so a systematic framing bug would
+pass there unnoticed), EXTERNAL reference vectors (`WhisperRefVectorTest`: RFC
+7748 DH pairs in Signal X3DH arrangement, RFC 5869 Appendix A.2 HKDF,
+Python-cross-checked Double-Ratchet root/chain KATs, env-cutoff boundary, and
+the no-`env`-on-new-sends pin — every expected value comes from an RFC or an
+independent implementation, never from this repo's output; external review of
+the full Signal-compat claim is still needed), pure-rule pins for the
+residual-downgrade N-block, ROTv2 counter/timestamp anti-replay, and
+gap-refresh rate-limiting (`WireProtocolTest`),
+chaos with zero wrong plaintexts (`WhisperRatchetChaosTest`, far-future
+rejected, window never evicted), model invariants (names,
 avatars, pending/sent/read ordering, image prefix, tombstones, snake-case
 serialization), chat reaction merging, bypass verdicts (blank and oversize
 inputs), image transport (v2 magic, legacy fallback, CRC rejection, pixel cap),
