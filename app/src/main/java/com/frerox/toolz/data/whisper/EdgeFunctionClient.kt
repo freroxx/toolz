@@ -44,6 +44,7 @@ import javax.inject.Singleton
 @Singleton
 class EdgeFunctionClient @Inject constructor(
     private val supabase: SupabaseClient,
+    private val attestor: PlayIntegrityAttestor,
 ) {
     enum class AuthMode {
         /** Anonymous gate only (Authorization: Bearer <anon key>) — bundle fetch. */
@@ -74,6 +75,13 @@ class EdgeFunctionClient @Inject constructor(
         val is2xx: Boolean get() = code in 200..299
 
         /**
+         * Anti-mod gate verdict: the edge function refused an unofficial build.
+         * Surfaces the "Unofficial build blocked" dialog (never a retry).
+         */
+        val isUnofficialBuildBlocked: Boolean
+            get() = code == PlayIntegrityAttestor.UNOFFICIAL_BUILD_HTTP_CODE
+
+        /**
          * Mirrors the historical error extraction: prefer a structured
          * {"error":"…"} field, else the first 200 chars of the raw body.
          */
@@ -89,6 +97,12 @@ class EdgeFunctionClient @Inject constructor(
             engine {
                 config {
                     retryOnConnectionFailure(true)
+                    // Light cert pinning: enforced only when WhisperPinConfig
+                    // ships real pins (ENFORCE=true); otherwise log-only and
+                    // this no-ops so rotations can never brick the app.
+                    WhisperPinConfig.certificatePinnerOrNull()?.let {
+                        certificatePinner(it)
+                    }
                 }
             }
         }
@@ -105,10 +119,23 @@ class EdgeFunctionClient @Inject constructor(
             AuthMode.USER -> supabase.auth.currentSessionOrNull()?.accessToken.orEmpty()
             AuthMode.TOKEN -> request.bearerToken.orEmpty()
         }
+        // Anti-mod attestation headers (local-only, cached 1h): every
+        // whisper-* request carries X-App-Package + X-App-Cert-Sha256 +
+        // X-App-VersionCode. The shared edge gate
+        // (supabase/functions/_shared/attest.ts) enforces the
+        // cert+package+version baseline and answers 428 for unofficial
+        // builds. No Play Integrity token is sent — that path is optional
+        // and disabled by default server-side (FOSS-safe: no Google API).
+        val attestHeaders = runCatching { attestor.attestHeaders() }
+            .getOrDefault(emptyMap())
+        runCatching {
+            WhisperPinConfig.logHandshake(android.net.Uri.parse(url).host.orEmpty())
+        }
         val httpResponse: HttpResponse = http.post(url) {
             header("Authorization", "Bearer $bearer")
             header("apikey", BuildConfig.SUPABASE_ANON_KEY)
             contentType(ContentType.Application.Json)
+            attestHeaders.forEach { (k, v) -> header(k, v) }
             request.extraHeaders.forEach { (k, v) -> header(k, v) }
             setBody(request.jsonBody)
             timeout {

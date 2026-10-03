@@ -24,6 +24,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.frerox.toolz.MainActivity
 import com.frerox.toolz.R
@@ -31,6 +32,11 @@ import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.util.NotificationHelper
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.first
+import org.json.JSONObject
+import java.security.KeyFactory
+import java.security.Signature
+import java.security.spec.X509EncodedKeySpec
+import java.util.Base64
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -91,6 +97,33 @@ class UpdateRepository @Inject constructor(
             if (manifestResponse?.isSuccessful == true) {
                 val manifest = manifestResponse.body()
                 if (manifest != null) {
+                    // Fail-closed manifest authentication: when the manifest
+                    // is signed, a missing/invalid Ed25519 signature means
+                    // NO UPDATE — a mod or MITM can never forge a
+                    // minimumVersionCode bump or swap a download URL.
+                    if (manifest.signature != null) {
+                        val rawBytes = try {
+                            updateService.getUpdateManifestRaw(UpdateConstants.MANIFEST_URL)
+                                .body()?.bytes()
+                        } catch (e: Exception) {
+                            null
+                        }
+                        val verified = rawBytes != null && verifyManifestSignature(
+                            canonicalManifestBytes(rawBytes),
+                            manifest.signature
+                        )
+                        if (!verified) {
+                            Log.w(
+                                TAG,
+                                "Update manifest signature missing or invalid — " +
+                                    "treating as no-update (fail-closed)"
+                            )
+                            return UpdateCheckResult.UpToDate
+                        }
+                        // Only a signature-verified manifest may seed the
+                        // LOCAL Whisper gate's cached version floor.
+                        cacheManifestFloor(manifest)
+                    }
                     val currentVersion = getCurrentVersionName()
                     if (isNewerVersion(currentVersion, manifest.versionName)) {
                         val preferredAbi = settingsRepository.preferredAbi.first()
@@ -209,6 +242,194 @@ class UpdateRepository @Inject constructor(
         }
         return false
     }
+
+    // ── Anti-mod update-lock ────────────────────────────────────────────
+    // Whisper nav gate (WhisperBuildGate) calls [checkWhisperBlocked]: while the
+    // installed build is below the manifest floor — or a critical release is
+    // newer than the install — Whisper screens show a blocking "Update
+    // required" card instead of chat UI. Fail-open on network error so offline
+    // users are never bricked by an unreachable manifest.
+
+    fun getCurrentVersionCode(): Long {
+        return try {
+            val packageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.packageManager.getPackageInfo(context.packageName, PackageManager.PackageInfoFlags.of(0))
+            } else {
+                @Suppress("DEPRECATION")
+                context.packageManager.getPackageInfo(context.packageName, 0)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                packageInfo.longVersionCode
+            } else {
+                @Suppress("DEPRECATION")
+                packageInfo.versionCode.toLong()
+            }
+        } catch (e: Exception) {
+            0L
+        }
+    }
+
+    /** Pure rule — unit-testable without Android. */
+    fun isWhisperBlockedByManifest(installedCode: Long, manifest: UpdateManifest): Boolean {
+        val floor = manifest.minimumVersionCode?.toLong() ?: 0L
+        if (floor > 0 && installedCode < floor) return true
+        // Reuse isCritical: a critical release newer than the install also
+        // pauses Whisper until the user updates.
+        if (manifest.isCritical == true && installedCode < manifest.versionCode.toLong()) return true
+        return false
+    }
+
+    suspend fun checkWhisperBlocked(): WhisperBlockState {
+        return try {
+            val res = updateService.getUpdateManifest(UpdateConstants.MANIFEST_URL)
+            if (!res.isSuccessful) return WhisperBlockState.NotBlocked
+            val manifest = res.body() ?: return WhisperBlockState.NotBlocked
+            if (isWhisperBlockedByManifest(getCurrentVersionCode(), manifest)) {
+                WhisperBlockState.Blocked(
+                    latestVersionName = manifest.versionName,
+                    latestVersionCode = manifest.versionCode,
+                    isCritical = manifest.isCritical == true,
+                )
+            } else {
+                WhisperBlockState.NotBlocked
+            }
+        } catch (e: Exception) {
+            WhisperBlockState.NotBlocked
+        }
+    }
+
+    // ── Offline update-manifest signature gate ──────────────────
+    // The manifest is the ONLY channel that can raise the Whisper
+    // minimumVersionCode floor, so it must be authenticated. The
+    // Ed25519 public half is embedded at build time; the private
+    // half stays with the release signer. java.security Ed25519
+    // (JDK/Android API 28+) — no new dependency.
+
+    companion object {
+        private const val TAG = "UpdateRepository"
+        private const val MANIFEST_CACHE_PREFS = "toolz_update_manifest"
+        private const val KEY_CACHED_MINIMUM_VERSION_CODE = "minimum_version_code"
+
+        /**
+         * Official update-manifest Ed25519 public key — raw 32-byte
+         * key, base64.
+         *
+         * REPLACE_ME — generate a keypair and embed the public half:
+         *   python3 -c "from cryptography.hazmat.primitives.asymmetric import ed25519; from cryptography.hazmat.primitives import serialization; import base64; k = ed25519.Ed25519PrivateKey.generate(); print(base64.b64encode(k.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)).decode())"
+         * or with openssl:
+         *   openssl genpkey -algorithm Ed25519 -out ed25519-priv.pem
+         *   openssl pkey -in ed25519-priv.pem -pubout -outform DER | tail -c 32 | openssl base64 -A
+         * Keep the private key offline; sign every released
+         * update_manifest.json with it (see verifyManifestSignature).
+         */
+        const val ED25519_PUBLIC_KEY_B64 = "REPLACE_ME_ED25519_PUBKEY"
+
+        /** X.509 SubjectPublicKeyInfo header wrapping a raw Ed25519 key. */
+        private val ED25519_X509_PREFIX = byteArrayOf(
+            0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00
+        )
+
+        /**
+         * Verify the Ed25519 signature of an update manifest against
+         * the embedded [ED25519_PUBLIC_KEY_B64].
+         *
+         * @param manifestJsonBytesWithoutSignatureField canonical manifest
+         *        bytes — the raw manifest JSON with the `signature` and
+         *        `_comment` fields removed, minified (no whitespace),
+         *        keys in original order. See [canonicalManifestBytes].
+         * @param signatureB64 base64 Ed25519 signature (64 bytes).
+         * @return true only when the signature verifies; false on ANY
+         *         error (fail-closed).
+         *
+         * Release-signing tool (both produce the same 64-byte signature
+         * over the canonical bytes):
+         *   python:
+         *     python3 -c "import json,base64;from cryptography.hazmat.primitives.asymmetric import ed25519; m=json.load(open('update_manifest.json')); m.pop('signature',None); m.pop('_comment',None); c=json.dumps(m,separators=(',',':')).encode(); k=ed25519.Ed25519PrivateKey.from_private_bytes(base64.b64decode(open('priv.key.b64').read())); print(base64.b64encode(k.sign(c)).decode())"
+         *   openssl (canonical.json = manifest minus signature/_comment, minified):
+         *     openssl pkeyutl -sign -inkey ed25519-priv.pem -rawin -in canonical.json | openssl base64 -A
+         */
+        fun verifyManifestSignature(
+            manifestJsonBytesWithoutSignatureField: ByteArray,
+            signatureB64: String,
+        ): Boolean = verifyManifestSignatureWithKey(
+            manifestJsonBytesWithoutSignatureField, signatureB64, ED25519_PUBLIC_KEY_B64
+        )
+
+        /**
+         * Same as [verifyManifestSignature] with an explicit raw-32-byte
+         * base64 public key — exposed for unit tests (internal).
+         */
+        internal fun verifyManifestSignatureWithKey(
+            manifestJsonBytesWithoutSignatureField: ByteArray,
+            signatureB64: String,
+            publicKeyB64: String,
+        ): Boolean {
+            return try {
+                val publicKey = KeyFactory.getInstance("Ed25519").generatePublic(
+                    X509EncodedKeySpec(
+                        ED25519_X509_PREFIX + Base64.getDecoder().decode(publicKeyB64)
+                    )
+                )
+                val signature = Signature.getInstance("Ed25519").apply {
+                    initVerify(publicKey)
+                    update(manifestJsonBytesWithoutSignatureField)
+                }
+                signature.verify(Base64.getDecoder().decode(signatureB64))
+            } catch (e: Exception) {
+                false // fail-closed: bad key, bad signature, bad base64
+            }
+        }
+
+        /**
+         * Canonical manifest bytes for signature verification: the raw
+         * JSON with the `signature` and `_comment` fields removed,
+         * re-serialized compactly (org.json preserves key order).
+         * Signers MUST produce identical bytes — python equivalent:
+         *   json.dumps(m, separators=(',',':'))
+         */
+        fun canonicalManifestBytes(manifestJsonBytes: ByteArray): ByteArray {
+            val json = JSONObject(String(manifestJsonBytes, Charsets.UTF_8))
+            json.remove("signature")
+            json.remove("_comment")
+            return json.toString().toByteArray(Charsets.UTF_8)
+        }
+    }
+
+    /**
+     * Remember the manifest's minimumVersionCode — only from
+     * signature-verified manifests — so the LOCAL Whisper gate
+     * (WhisperBuildGate.gateWhisperAccess) can enforce the floor
+     * while offline.
+     */
+    private fun cacheManifestFloor(manifest: UpdateManifest) {
+        manifest.minimumVersionCode?.let { floor ->
+            context.getSharedPreferences(MANIFEST_CACHE_PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .putInt(KEY_CACHED_MINIMUM_VERSION_CODE, floor)
+                .apply()
+        }
+    }
+
+    /** Last signature-verified manifest floor; null when never cached. */
+    fun cachedMinimumVersionCode(): Int? {
+        val floor = context
+            .getSharedPreferences(MANIFEST_CACHE_PREFS, Context.MODE_PRIVATE)
+            .getInt(KEY_CACHED_MINIMUM_VERSION_CODE, 0)
+        return floor.takeIf { it > 0 }
+    }
+}
+
+sealed interface WhisperBlockState {
+    data object NotBlocked : WhisperBlockState
+    data class Blocked(
+        val latestVersionName: String,
+        val latestVersionCode: Int,
+        val isCritical: Boolean,
+        /** Set when blocked by the LOCAL runtime gate (cert pin / debuggable / version floor). */
+        val reason: String? = null,
+        /** Official release page to offer the user; the blocked card opens this. */
+        val officialDownloadUrl: String? = null,
+    ) : WhisperBlockState
 }
 
 sealed class UpdateCheckResult {

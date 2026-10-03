@@ -107,6 +107,11 @@ fun WhisperAuthScreen(
     // Recovery tokens and credentials are sensitive — never capture this screen.
     SecureWindow(bypassEnabled = screenshotBypassEnabled)
 
+    // Anti-mod gates: the LOCAL runtime tamper gate (unofficial cert /
+    // debuggable release build / version floor) and the manifest
+    // update-lock stop here with a blocking card.
+    if (WhisperBuildGate()) return
+
     if (showBypassDialog) {
         // M-17 FIX (reviewwhisper.md): password required to enable AND disable; unified copy.
         WhisperScreenshotBypassDialog(

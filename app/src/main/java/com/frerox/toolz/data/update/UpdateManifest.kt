@@ -25,6 +25,21 @@ data class UpdateManifest(
     val versionName: String,
     val changelog: String? = null,
     val isCritical: Boolean? = false,
+    /**
+     * Anti-mod update-lock: Whisper is blocked while
+     * `installedVersionCode < minimumVersionCode`. Null/0 = no floor.
+     * Keep in sync with edge secret MIN_VERSION_CODE.
+     */
+    val minimumVersionCode: Int? = null,
+    /**
+     * Ed25519 signature (base64, 64 bytes) over the canonical manifest
+     * JSON — the manifest with the `signature` and `_comment` fields
+     * removed, minified, keys in original order (see
+     * [UpdateRepository.verifyManifestSignature]). Null = unsigned legacy
+     * manifest. When present, it MUST verify against the public key
+     * embedded in the app or the manifest is rejected fail-closed.
+     */
+    val signature: String? = null,
     val releases: List<UpdateRelease>? = null
 )
 

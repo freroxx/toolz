@@ -36,4 +36,12 @@ interface UpdateService {
 
     @GET
     suspend fun getUpdateManifest(@Url url: String): Response<UpdateManifest>
+
+    /**
+     * Raw manifest bytes — required to verify the Ed25519
+     * [UpdateManifest.signature] over the original JSON (the typed
+     * call above already consumed/rewrote it via Moshi).
+     */
+    @GET
+    suspend fun getUpdateManifestRaw(@Url url: String): Response<okhttp3.ResponseBody>
 }

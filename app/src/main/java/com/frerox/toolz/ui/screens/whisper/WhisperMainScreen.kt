@@ -150,6 +150,11 @@ fun WhisperMainScreen(
     // Conversation previews contain decrypted content — never allow screenshots/recents capture.
     SecureWindow(bypassEnabled = screenshotBypassEnabled)
 
+    // Anti-mod gates: the LOCAL runtime tamper gate (unofficial cert /
+    // debuggable release build / version floor) and the manifest
+    // update-lock stop here with a blocking card — no chat UI, no send.
+    if (WhisperBuildGate()) return
+
     if (showBypassDialog) {
         // M-17 FIX (reviewwhisper.md): the password is now required BOTH to enable and to
         // disable the bypass (previously disabling needed no verification at all), and
