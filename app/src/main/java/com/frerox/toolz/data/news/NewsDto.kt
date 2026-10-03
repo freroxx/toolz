@@ -40,5 +40,6 @@ data class NewsFeedDto(
     @SerialName("appVersion") val appVersion: String = "",
     @SerialName("count") val count: Int = 0,
     @SerialName("news") val news: List<NewsDto> = emptyList(),
+    @SerialName("removedIds") val removedIds: List<String> = emptyList(),
     @SerialName("degraded") val degraded: Boolean = false
 )

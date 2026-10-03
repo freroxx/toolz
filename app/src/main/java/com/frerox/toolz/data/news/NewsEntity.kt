@@ -87,6 +87,9 @@ interface NewsDao {
     @Query("UPDATE news_items SET status = 'archived' WHERE id IN (:ids)")
     suspend fun markArchived(ids: List<String>)
 
+    @Query("DELETE FROM news_items WHERE id IN (:ids)")
+    suspend fun deleteByIds(ids: List<String>)
+
     @Query("DELETE FROM news_items WHERE (showInHistory = 0 AND expiresAt IS NOT NULL AND expiresAt <= :now) OR (disappearing = 1 AND expiresAt IS NOT NULL AND expiresAt <= :now) OR (expiresAt IS NOT NULL AND expiresAt <= :pruneBefore)")
     suspend fun prune(now: Long, pruneBefore: Long): Int
 }

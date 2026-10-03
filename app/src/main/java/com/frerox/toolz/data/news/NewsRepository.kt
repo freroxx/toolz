@@ -44,6 +44,11 @@ class NewsRepository @Inject constructor(
                 val feed = newsApi.getNews(av)
                 val now = System.currentTimeMillis()
                 newsDao.upsertAll(feed.news.map { it.toEntity(now) })
+                // Deleted upstream: hard-delete cached copies everywhere
+                // (popup, notifications, history) before reconciling the rest.
+                if (feed.removedIds.isNotEmpty()) {
+                    newsDao.deleteByIds(feed.removedIds.take(200))
+                }
                 reconcileRemovals(feedIds = feed.news.map { it.id }.toSet(), appVersion = av, now = now)
                 newsDao.prune(now, now - PRUNE_AFTER_MS)
                 settingsRepository.setNewsLastSync(now)
