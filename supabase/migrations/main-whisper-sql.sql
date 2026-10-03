@@ -1,7 +1,7 @@
 -- ============================================================================
 -- WHISPER — COMBINED BASELINE MIGRATION (single file)
 -- ============================================================================
--- This file replaces the fourteen chronological migrations
+-- This file replaces the seventeen chronological migrations
 --   20260820_whisper_realtime_hardening.sql        20260826_whisper_bypass_atomic.sql
 --   20260821_whisper_hardening_fixes.sql           20260827_whisper_review_v2_hardening.sql
 --   20260822_whisper_1_0_hardening.sql             20260828_whisper_destructive_rate_limit.sql
@@ -9,10 +9,13 @@
 --   20260824_whisper_bypass_rate_limit.sql         20260830_whisper_prekeys.sql
 --   20260825_whisper_quota_refund.sql              20260831_whisper_typing_signal.sql
 --   20260901_whisper_server_enforcement.sql        20260904_whisper_block_enforcement.sql
+--   20261003_whisper_phase1_hardening.sql
+--   20261004_whisper_remove_presence_typing.sql
+--   20261005_whisper_signup_discover_hardening.sql
 -- squashed VERBATIM in application order.
 -- See whisper-sql-info.md — ALL Whisper SQL changes MUST be merged into this single file.
 --
--- IDEMPOTENT (V6-R5 + P6): SAFE TO RE-RUN AT ANY TIME, on any state:
+-- IDEMPOTENT (V6-R5 + P6 + 20261003-P1 + 20261004-RM + 20261005-P2): SAFE TO RE-RUN AT ANY TIME, on any state:
 --   * fresh project → builds the full final schema;
 --   * production   → every statement is guarded or replace-compatible;
 --     superseded intermediate function versions were pruned so no replay ever
@@ -1415,3 +1418,675 @@ CREATE TRIGGER whisper_block_check_friend
 --    so failing inserts never emit to realtime.
 -- ============================================================
 
+-- ═══════════════ 20261003_whisper_phase1_hardening.sql ═
+-- 20261003 — Phase 1 SQL + privacy hardening
+-- WHY: three gaps. (1) TOMBSTONE BLOCKED: whisper_protect_message_content_v2
+--   (20260827 section 5) rejects ANY content/content_iv UPDATE, so the client's
+--   delete-for-everyone tombstone write (WhisperRepository.deleteMessageForEveryone)
+--   bounces with 42501 and delete-for-everyone silently fails client-side.
+--   (2) NO OPT-OUTS: profiles had no presence/typing toggles and typing signals
+--   were stored regardless of the receiver's preference. (3) USERNAME ORACLE:
+--   checkUsernameAvailable probed profiles with an exact-eq select — an
+--   unlimited, unbudgeted enumeration oracle over registered handles.
+-- IDEMPOTENT: safe to re-run (ADD COLUMN IF NOT EXISTS + SET DEFAULT + null
+--   backfill / CREATE OR REPLACE / guarded drops / IF NOT EXISTS). Amends v2 in
+--   place (same name/signature/trigger) so history replays converge; adds one
+--   quota table + one RPC + one trigger, all guarded.
+-- ============================================================================
+
+-- ── 1. Sender-authorized tombstone UPDATE (amends content_v2) ───────────────
+-- The ONLY legal payload mutation is now the SENDER rewriting their OWN row to
+-- a tombstone constant (WhisperTombstone: legacy '[deleted_by_sender]',
+-- DISPLAY_TEXT 'This message has been deleted', or the named
+-- '[deleted_by_sender:<name>]' prefix). Participants stay immutable always;
+-- non-payload columns (status/read flags) stay freely updatable by either
+-- party. True DELETE stays RLS sender-only (messages_delete_sender) — untouched.
+create or replace function public.whisper_protect_message_content_v2()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  -- Service-role updates (auth.uid() is null) bypass the restriction.
+  if (auth.uid() is null) then
+    return new;
+  end if;
+  -- Participants are immutable for everyone, tombstone or not.
+  if (
+    new.sender_id is distinct from old.sender_id
+    or new.receiver_id is distinct from old.receiver_id
+  ) then
+    raise exception 'Message payload and participants are immutable' using errcode = '42501';
+  end if;
+  -- Non-payload updates (status/read flags) stay legal for either party.
+  if (
+    new.content is not distinct from old.content
+    and new.content_iv is not distinct from old.content_iv
+  ) then
+    return new;
+  end if;
+  -- Payload change: only the SENDER tombstoning their OWN row (old row sender
+  -- is the caller, which — with immutable participants — also pins
+  -- new.sender_id to the caller). The client nulls content_iv on tombstone;
+  -- any IV value is accepted so other clients that keep it are not broken.
+  if (
+    auth.uid() = old.sender_id
+    and (
+      new.content = '[deleted_by_sender]'
+      or new.content = 'This message has been deleted'
+      or new.content like '[deleted_by_sender:%]'
+    )
+  ) then
+    return new;
+  end if;
+  raise exception 'Message payload and participants are immutable' using errcode = '42501';
+end;
+$$;
+
+drop trigger if exists whisper_protect_message_content_v2 on public.messages;
+create trigger whisper_protect_message_content_v2
+  before update on public.messages
+  for each row execute function public.whisper_protect_message_content_v2();
+
+-- ── 2. Presence / typing opt-outs ──────────────────────────────────────────
+-- Owner-scoped toggles, default ON (existing behavior preserved). RLS needs no
+-- change: profiles_update_own already restricts UPDATE to id = auth.uid(),
+-- which covers the new columns. Clients render presence/typing from
+-- whisper_public_profiles and must stop emitting their own signals/stamps when
+-- disabled (see WhisperRepository TODOs).
+alter table public.profiles add column if not exists presence_enabled boolean not null default true;
+alter table public.profiles add column if not exists typing_enabled boolean not null default true;
+alter table public.profiles alter column presence_enabled set default true;
+alter table public.profiles alter column typing_enabled set default true;
+update public.profiles set presence_enabled = true where presence_enabled is null;
+update public.profiles set typing_enabled = true where typing_enabled is null;
+
+-- Server-side typing enforcement: writes targeting a receiver who disabled
+-- typing are skipped SILENTLY (BEFORE-trigger NULL return → PostgREST sees 0
+-- rows, no error), so the sender's throttled retry just no-ops until the stale
+-- row ages out. Fail-OPEN when the receiver row is unreadable: a missing
+-- profile must never wedge the typing lane.
+create or replace function public.whisper_suppress_typing_when_disabled()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_enabled boolean;
+begin
+  select typing_enabled into v_enabled from public.profiles where id = new.receiver_id;
+  if v_enabled = false then
+    return null;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists whisper_typing_respect_optout on public.whisper_typing_signals;
+create trigger whisper_typing_respect_optout
+  before insert or update on public.whisper_typing_signals
+  for each row execute function public.whisper_suppress_typing_when_disabled();
+
+-- ── 3. Presence-gated last_seen in whisper_public_profiles + discover ──────
+-- The view previously hid last_seen_at entirely while discover still RANKED by
+-- the raw column (presence-disabled users leaked ordering signal). The view now
+-- projects a gated last_seen_at (NULL when the owner disabled presence) and
+-- the discover ranking uses the same gated expression with NULLS LAST, so
+-- opted-out users sink instead of floating to the top (DESC defaults NULLS
+-- FIRST — the old query never specified null ordering).
+-- NOTE: direct PostgREST reads of profiles.last_seen_at stay visible to
+-- authenticated users (the open select policy feeds the public_key discovery
+-- path); clients MUST render presence from whisper_public_profiles.last_seen_at.
+-- V6-R2 rerun pattern: drop the dependent function BEFORE rebuilding the view.
+drop function if exists public.whisper_discover_profiles(integer, integer);
+do $do$
+declare
+    v_col         text;
+    v_projection  text := 'id';
+    v_has_seen    boolean := false;
+    v_has_presence boolean := false;
+begin
+    for v_col in
+        select c.column_name
+          from information_schema.columns c
+         where c.table_schema = 'public'
+           and c.table_name   = 'profiles'
+           and c.column_name  = any (array[
+               'username',
+               'display_name',
+               'avatar_url',
+               'bio',
+               'public_key',
+               'is_private',
+               'hide_from_discover',
+               'updated_at'
+           ])
+         order by c.ordinal_position
+    loop
+        v_projection := v_projection || ', ' || quote_ident(v_col);
+    end loop;
+
+    select exists (
+        select 1 from information_schema.columns
+         where table_schema = 'public' and table_name = 'profiles'
+           and column_name = 'last_seen_at'
+    ) into v_has_seen;
+    select exists (
+        select 1 from information_schema.columns
+         where table_schema = 'public' and table_name = 'profiles'
+           and column_name = 'presence_enabled'
+    ) into v_has_presence;
+
+    -- Gate only when BOTH columns exist; otherwise keep the old behavior of
+    -- never projecting last_seen_at (never expose it raw).
+    if v_has_seen and v_has_presence then
+        v_projection := v_projection ||
+            ', case when presence_enabled is distinct from false' ||
+            ' then last_seen_at else null end as last_seen_at';
+    end if;
+
+    execute format(
+        'drop view if exists public.whisper_public_profiles'
+    );
+    execute format(
+        'create or replace view public.whisper_public_profiles as select %s from public.profiles',
+        v_projection
+    );
+end;
+$do$;
+
+-- Keep the underlying profiles RLS in force even for direct PostgREST selects
+-- against the view (PG15+).
+alter view public.whisper_public_profiles set (security_invoker = true);
+
+-- Authenticated clients may read the projected columns directly; nobody else gets
+-- anything (revoke-then-grant keeps anon/public clean even after re-runs).
+revoke all on public.whisper_public_profiles from public;
+revoke all on public.whisper_public_profiles from anon;
+revoke all on public.whisper_public_profiles from authenticated;
+grant select on public.whisper_public_profiles to authenticated;
+
+-- Return-type dependency was dropped above; recreate with the SAME quota (60
+-- pages/hour unchanged — tightening it would break existing clients; the
+-- username oracle below gets the strict budget instead) and presence-gated
+-- ranking with explicit NULLS LAST.
+drop function if exists public.whisper_discover_profiles(int, int);
+
+create or replace function public.whisper_discover_profiles(
+    p_page      int DEFAULT 0,
+    p_page_size int DEFAULT 20
+)
+RETURNS SETOF public.whisper_public_profiles
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_caller    uuid := auth.uid();
+    v_page      int := GREATEST(coalesce(p_page, 0), 0);
+    v_page_size int := GREATEST(LEAST(coalesce(p_page_size, 20), 30), 0);
+    v_window    timestamptz;
+    v_count     int;
+    v_limit     int := 60; -- max pages per hour (unchanged)
+    v_offset    int := v_page * v_page_size;
+BEGIN
+    IF v_caller IS NULL THEN
+        RAISE EXCEPTION 'not_authenticated' USING ERRCODE = 'P0001';
+    END IF;
+
+    -- Upsert quota row (unchanged from 20260823/20260827).
+    INSERT INTO whisper_discover_quota (user_id, page_count, window_start)
+    VALUES (v_caller, 1, now())
+    ON CONFLICT (user_id) DO UPDATE
+        SET page_count  = CASE
+                              WHEN EXTRACT(EPOCH FROM (now() - whisper_discover_quota.window_start)) > 3600
+                              THEN 1                              -- new window
+                              ELSE whisper_discover_quota.page_count + 1
+                          END,
+            window_start = CASE
+                               WHEN EXTRACT(EPOCH FROM (now() - whisper_discover_quota.window_start)) > 3600
+                               THEN now()
+                               ELSE whisper_discover_quota.window_start
+                           END
+    RETURNING page_count, window_start INTO v_count, v_window;
+
+    IF v_count > v_limit THEN
+        RAISE EXCEPTION 'rate_limited' USING ERRCODE = 'P0002';
+    END IF;
+
+    -- Same filters as before (not private, not hidden from discover, not self,
+    -- not blocking the caller; friend exclusion stays client-side). Ranking now
+    -- uses the presence-gated timestamp so opted-out users are not ordered by
+    -- a timestamp nobody is allowed to see; NULLS LAST sinks them (and users
+    -- with no stamp at all) to the bottom.
+    RETURN QUERY
+        SELECT v.*
+        FROM whisper_public_profiles v
+        WHERE v.is_private = false
+          AND v.hide_from_discover = false
+          AND v.id <> v_caller
+          AND NOT EXISTS (
+              SELECT 1 FROM whisper_blocks wb
+              WHERE wb.blocker_id = v.id
+                AND wb.blocked_id = v_caller
+          )
+        ORDER BY (SELECT CASE WHEN p.presence_enabled IS DISTINCT FROM false
+                              THEN p.last_seen_at ELSE NULL END
+                    FROM profiles p WHERE p.id = v.id) DESC NULLS LAST
+        LIMIT v_page_size
+        OFFSET v_offset;
+END;
+$$;
+
+-- Same grants as the current function (20260823/20260827).
+REVOKE ALL ON FUNCTION public.whisper_discover_profiles(int, int) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.whisper_discover_profiles(int, int) TO authenticated;
+
+-- ── 4. Quota-guarded username-availability RPC ─────────────────────────────
+-- Replaces unlimited direct exact-eq probes on profiles(username) with a
+-- 1-bit SECURITY DEFINER oracle budgeted at 10 checks/hour per caller (advisory
+-- lock serializes races like the bypass/destructive limiters). Input is
+-- normalized exactly like the client (trim + lowercase) and validated against
+-- the canonical handle charset (WhisperAuthManager.USERNAME_PATTERN,
+-- lowercased; upper bound 32 generous vs the 20-char registration cap so no
+-- legitimate handle is ever rejected). CLIENT MUST MIGRATE: TODO on
+-- WhisperRepositoryProfile.checkUsernameAvailable.
+create table if not exists public.whisper_username_check_quota (
+    user_id     uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    check_count int NOT NULL DEFAULT 0,
+    window_start timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id)
+);
+
+alter table public.whisper_username_check_quota enable row level security;
+
+-- Deliberately NO policies: only the SECURITY DEFINER RPC below touches this
+-- table (same posture as whisper_bypass_attempts / whisper_destructive_attempts).
+create index if not exists whisper_username_check_quota_window_idx
+    on public.whisper_username_check_quota(user_id, window_start desc);
+
+create or replace function public.whisper_check_username_available(p_username text)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_caller uuid := auth.uid();
+  v_uname  text := lower(trim(both from coalesce(p_username, '')));
+  v_count  int;
+  v_window timestamptz;
+  v_limit  int := 10; -- max availability checks per hour per caller
+  v_taken  boolean;
+begin
+  if v_caller is null then
+    raise exception 'not_authenticated' using errcode = 'P0001';
+  end if;
+  if v_uname !~ '^[a-z0-9_]{1,32}$' then
+    raise exception 'invalid_username' using errcode = 'P0001';
+  end if;
+
+  -- Serialize concurrent checks for the same caller (auto-released at commit).
+  perform pg_advisory_xact_lock(hashtextextended('username-check:' || v_caller::text, 0));
+
+  insert into public.whisper_username_check_quota(user_id, check_count, window_start)
+  values (v_caller, 1, now())
+  on conflict (user_id) do update set
+    check_count  = case
+                     when extract(epoch from (now() - whisper_username_check_quota.window_start)) > 3600
+                     then 1
+                     else whisper_username_check_quota.check_count + 1
+                   end,
+    window_start = case
+                     when extract(epoch from (now() - whisper_username_check_quota.window_start)) > 3600
+                     then now()
+                     else whisper_username_check_quota.window_start
+                   end
+  returning check_count, window_start into v_count, v_window;
+
+  if v_count > v_limit then
+    raise exception 'rate_limited' using errcode = 'P0002';
+  end if;
+
+  select exists(
+    select 1 from public.profiles where lower(username) = v_uname
+  ) into v_taken;
+
+  -- Housekeeping piggybacked on every check: keep the table tiny without pg_cron.
+  delete from public.whisper_username_check_quota where window_start < now() - interval '24 hours';
+
+  return not v_taken;
+end;
+$$;
+
+revoke all on function public.whisper_check_username_available(text) from public;
+revoke all on function public.whisper_check_username_available(text) from anon;
+grant execute on function public.whisper_check_username_available(text) to authenticated;
+
+-- ── 5. Purge coverage for the new quota table ──────────────────────────────
+-- whisper_purge_account_data mirrors the delete-account cleanup list exactly;
+-- the username-check quota joins it (FK cascade on auth.users would catch it
+-- anyway, but the purge runs BEFORE GoTrue deletion and must leave no rows).
+-- Body is otherwise verbatim (20260830 version).
+create or replace function public.whisper_purge_account_data(p_uid uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+    if p_uid is null then raise exception 'uid required' using errcode = '42501'; end if;
+    delete from public.messages where sender_id = p_uid or receiver_id = p_uid;
+    delete from public.message_reactions where user_id = p_uid;
+    delete from public.friends where user_a = p_uid or user_b = p_uid;
+    delete from public.whisper_blocks where blocker_id = p_uid or blocked_id = p_uid;
+    delete from public.profiles where id = p_uid;
+    delete from public.whisper_upload_quota where user_id = p_uid;
+    delete from public.whisper_deleted_tombstones where user_id = p_uid;
+    delete from public.whisper_discover_quota where user_id = p_uid;
+    delete from public.whisper_username_check_quota where user_id = p_uid;
+    delete from public.whisper_image_ownership where user_id = p_uid;
+    delete from public.whisper_fcm_tokens where user_id = p_uid;
+    delete from public.whisper_prekeys where account = p_uid;
+end;
+$$;
+
+revoke all on function public.whisper_purge_account_data(uuid) from public;
+revoke all on function public.whisper_purge_account_data(uuid) from anon;
+revoke all on function public.whisper_purge_account_data(uuid) from authenticated;
+grant execute on function public.whisper_purge_account_data(uuid) to service_role;
+
+-- ═══════════════ 20261004_whisper_remove_presence_typing.sql ═
+-- 20261004 — Remove presence/typing opt-outs (product: same rights for all users)
+-- WHY: product decision same-rights, remove opt-outs. The 20261003 section added
+--   per-user presence_enabled/typing_enabled columns on profiles, a
+--   typing-suppress trigger (whisper_typing_respect_optout) and a presence-gated
+--   last_seen_at projection/ranking in whisper_public_profiles +
+--   whisper_discover_profiles(). All users now share the same presence/typing
+--   abilities, so the toggles go away: presence stamps and typing signals are
+--   unconditional again. This section reverses ONLY that slice — the
+--   sender-authorized tombstone UPDATE, the whisper_check_username_available()
+--   RPC + whisper_username_check_quota table, and the purge coverage from
+--   20261003 are KEPT (username quota is enumeration hardening, not presence).
+-- IDEMPOTENT: safe to re-run (guarded drops / IF EXISTS / OR REPLACE / dynamic
+--   view rebuild). No-ops on a prod that never ran 20261003 (drops match nothing).
+-- ============================================================================
+
+-- ── 1. Drop the typing-suppress trigger + function ─────────────────────────
+-- Trigger name first (dependency), then the real 20261003 function, then the
+-- bare trigger-name signature as a safety net for any historical drift.
+drop trigger if exists whisper_typing_respect_optout on public.whisper_typing_signals;
+drop function if exists public.whisper_suppress_typing_when_disabled();
+drop function if exists public.whisper_typing_respect_optout();
+
+-- ── 2. Drop the opt-out columns ────────────────────────────────────────────
+-- IF EXISTS: fresh projects and prod-that-never-ran-20261003 have no columns.
+-- Dependency order: the view projects these columns, so drop dependents FIRST
+-- (function returns the view type; the view itself references the columns).
+-- Later drops in steps 3-4 become harmless no-ops on re-run.
+drop function if exists public.whisper_discover_profiles(integer, integer);
+drop view if exists public.whisper_public_profiles;
+alter table public.profiles drop column if exists presence_enabled;
+alter table public.profiles drop column if exists typing_enabled;
+
+-- ── 3. Restore direct last_seen_at in whisper_public_profiles ──────────────
+-- Same dynamic whitelist projection as 20260828, but last_seen_at is projected
+-- DIRECTLY again (no CASE gating): every user shares the same presence
+-- ability. V6-R2 rerun pattern: drop the dependent function BEFORE rebuilding
+-- the view.
+drop function if exists public.whisper_discover_profiles(integer, integer);
+do $do$
+declare
+    v_col        text;
+    v_projection text := 'id';
+begin
+    for v_col in
+        select c.column_name
+          from information_schema.columns c
+         where c.table_schema = 'public'
+           and c.table_name   = 'profiles'
+           and c.column_name  = any (array[
+               'username',
+               'display_name',
+               'avatar_url',
+               'bio',
+               'public_key',
+               'is_private',
+               'hide_from_discover',
+               'updated_at',
+               'last_seen_at'
+           ])
+         order by c.ordinal_position
+    loop
+        v_projection := v_projection || ', ' || quote_ident(v_col);
+    end loop;
+
+    execute format(
+        'drop view if exists public.whisper_public_profiles'
+    );
+    execute format(
+        'create or replace view public.whisper_public_profiles as select %s from public.profiles',
+        v_projection
+    );
+end;
+$do$;
+
+-- Keep the underlying profiles RLS in force even for direct PostgREST selects
+-- against the view (PG15+).
+alter view public.whisper_public_profiles set (security_invoker = true);
+
+-- Authenticated clients may read the projected columns directly; nobody else gets
+-- anything (revoke-then-grant keeps anon/public clean even after re-runs).
+revoke all on public.whisper_public_profiles from public;
+revoke all on public.whisper_public_profiles from anon;
+revoke all on public.whisper_public_profiles from authenticated;
+grant select on public.whisper_public_profiles to authenticated;
+
+-- ── 4. Restore ungated discover ranking (quota + filters unchanged) ────────
+-- Return-type dependency was dropped above; recreate with the SAME quota (60
+-- pages/hour), SAME filters, SAME clamps — only the ORDER BY loses its
+-- presence CASE and ranks on the direct last_seen_at again (20260828 shape).
+drop function if exists public.whisper_discover_profiles(int, int);
+
+create or replace function public.whisper_discover_profiles(
+    p_page      int DEFAULT 0,
+    p_page_size int DEFAULT 20
+)
+RETURNS SETOF public.whisper_public_profiles
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_caller    uuid := auth.uid();
+    v_page      int := GREATEST(coalesce(p_page, 0), 0);
+    v_page_size int := GREATEST(LEAST(coalesce(p_page_size, 20), 30), 0);
+    v_window    timestamptz;
+    v_count     int;
+    v_limit     int := 60; -- max pages per hour (unchanged)
+    v_offset    int := v_page * v_page_size;
+BEGIN
+    IF v_caller IS NULL THEN
+        RAISE EXCEPTION 'not_authenticated' USING ERRCODE = 'P0001';
+    END IF;
+
+    -- Upsert quota row (unchanged from 20260823/20260827).
+    INSERT INTO whisper_discover_quota (user_id, page_count, window_start)
+    VALUES (v_caller, 1, now())
+    ON CONFLICT (user_id) DO UPDATE
+        SET page_count  = CASE
+                              WHEN EXTRACT(EPOCH FROM (now() - whisper_discover_quota.window_start)) > 3600
+                              THEN 1                              -- new window
+                              ELSE whisper_discover_quota.page_count + 1
+                          END,
+            window_start = CASE
+                               WHEN EXTRACT(EPOCH FROM (now() - whisper_discover_quota.window_start)) > 3600
+                               THEN now()
+                               ELSE whisper_discover_quota.window_start
+                           END
+    RETURNING page_count, window_start INTO v_count, v_window;
+
+    IF v_count > v_limit THEN
+        RAISE EXCEPTION 'rate_limited' USING ERRCODE = 'P0002';
+    END IF;
+
+    -- Same filters as before (not private, not hidden from discover, not self,
+    -- not blocking the caller; friend exclusion stays client-side). Ranking is
+    -- the direct last_seen_at again — no opt-outs, no NULLS LAST carve-out.
+    RETURN QUERY
+        SELECT v.*
+        FROM whisper_public_profiles v
+        WHERE v.is_private = false
+          AND v.hide_from_discover = false
+          AND v.id <> v_caller
+          AND NOT EXISTS (
+              SELECT 1 FROM whisper_blocks wb
+              WHERE wb.blocker_id = v.id
+                AND wb.blocked_id = v_caller
+          )
+        ORDER BY (SELECT p.last_seen_at FROM profiles p WHERE p.id = v.id) DESC
+        LIMIT v_page_size
+        OFFSET v_offset;
+END;
+$$;
+
+-- Same grants as the current function (20260823/20260827).
+REVOKE ALL ON FUNCTION public.whisper_discover_profiles(int, int) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.whisper_discover_profiles(int, int) TO authenticated;
+
+-- ═══════════════ 20261005_whisper_signup_discover_hardening.sql ═
+-- 20261005 — Signup Sybil quotas + Discover opt-in default + legacy-disable registry
+-- WHY: three gaps. (1) NO SIGNUP GATE: nothing budgets account creation per IP,
+--   so one network can mint unlimited Sybil identities. The (anti-mod-owned)
+--   whisper-signup-gate edge function needs a server-side counter — provided
+--   here as whisper_signup_quota + whisper_check_signup_allowed() (5/day/IP,
+--   advisory-lock serialized like the bypass/destructive limiters). Each check
+--   consumes one slot; the edge function MUST call it pre-auth (hence EXECUTE
+--   for anon + authenticated). (2) DISCOVER OPT-OUT: hide_from_discover
+--   defaulted to visible, so every new account was searchable until the owner
+--   found the toggle. New rows now default to hidden (opt-IN to Discover);
+--   existing rows are NOT backfilled so nobody silently vanishes.
+--   (3) LEGACY SUNSET: whisper_legacy_disabled + whisper_is_legacy_disabled()
+--   give the (anti-mod-owned) whisper-legacy-migrate edge function an
+--   admin-readable kill-switch registry. GoTrue user deletion itself needs the
+--   Auth admin API — SQL cannot delete GoTrue users, so this table records
+--   disable intent/state only.
+-- IDEMPOTENT: safe to re-run (IF NOT EXISTS / OR REPLACE / guarded revokes /
+--   COMMENT ON is replace-safe). No-ops data-wise on first run except the new
+--   empty tables and the changed column DEFAULT for future rows.
+-- NOTE (username oracle, verified 20261005): the 10 checks/hour/caller quota on
+--   whisper_check_username_available() is intact (20261003 §4, kept by 20261004).
+--   The open profiles_select_authenticated policy (using(true)) is INTENTIONALLY
+--   kept: public_key discovery via bundle-fetch/messaging needs it. Clients MUST
+--   use the quota-guarded RPC instead of direct exact-eq username probes. A
+--   lower(username) index below speeds the RPC's existence check.
+-- ============================================================================
+
+-- ── 1. Signup Sybil quota ─────────────────────────────────────────────
+-- Backing store for the whisper-signup-gate edge function: one row per
+-- (hashed client IP, day). The raw IP never reaches the database — the edge
+-- function hashes it first. RLS enabled with ZERO policies (SECURITY DEFINER
+-- gate only), mirroring whisper_bypass_attempts.
+create table if not exists public.whisper_signup_quota (
+    ip_hash text not null,
+    day date not null,
+    count int not null default 0,
+    primary key (ip_hash, day)
+);
+
+alter table public.whisper_signup_quota enable row level security;
+
+-- Deliberately NO policies: only the SECURITY DEFINER gate below touches this
+-- table (same posture as whisper_bypass_attempts / whisper_destructive_attempts).
+
+create or replace function public.whisper_check_signup_allowed(p_ip_hash text)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_count int;
+  v_limit int := 5; -- max signups per IP per day
+begin
+  if p_ip_hash is null or p_ip_hash = '' then
+    raise exception 'ip_hash required' using errcode = '42501';
+  end if;
+
+  -- Serialize concurrent signups from the same IP (auto-released at commit) so
+  -- parallel requests cannot race the count → allow → insert sequence.
+  perform pg_advisory_xact_lock(hashtextextended('signup-quota:' || p_ip_hash || ':' || current_date::text, 0));
+
+  insert into public.whisper_signup_quota(ip_hash, day, count)
+  values (p_ip_hash, current_date, 1)
+  on conflict (ip_hash, day) do update set count = whisper_signup_quota.count + 1
+  returning count into v_count;
+
+  -- Housekeeping piggybacked on every check: keep the table tiny without pg_cron.
+  delete from public.whisper_signup_quota where day < current_date - 7;
+
+  return v_count <= v_limit;
+end;
+$$;
+
+-- Signup is pre-auth: anon MUST be able to reach the gate (the edge function
+-- enforces it before creating the GoTrue user). Revoke-then-grant keeps
+-- public clean even after re-runs.
+revoke all on function public.whisper_check_signup_allowed(text) from public;
+grant execute on function public.whisper_check_signup_allowed(text) to anon;
+grant execute on function public.whisper_check_signup_allowed(text) to authenticated;
+grant execute on function public.whisper_check_signup_allowed(text) to service_role;
+
+-- ── 2. Discover opt-in: new profiles hidden by default ─────────────────
+-- Opt-IN instead of opt-out: hide_from_discover now defaults to true, so fresh
+-- accounts are invisible to Discover/search until the owner enables it.
+-- Deliberately NO backfill: existing rows keep their current value so nobody
+-- silently vanishes from search results on upgrade. is_private is untouched.
+alter table public.profiles add column if not exists hide_from_discover boolean;
+alter table public.profiles alter column hide_from_discover set default true;
+comment on column public.profiles.hide_from_discover is
+  '20261005 opt-in: new profiles default hidden from Discover; existing rows were NOT backfilled.';
+
+-- ── 3. Username oracle: document the RPC-only contract + speed the RPC ──
+-- profiles_select_authenticated (using(true)) is REQUIRED for public_key
+-- discovery via bundle-fetch/messaging — do NOT revoke it. Enumeration is
+-- budgeted at the RPC layer instead (10 checks/hour/caller).
+comment on policy "profiles_select_authenticated" on public.profiles is
+  '20261005: intentionally open for public_key discovery; clients MUST use the quota-guarded whisper_check_username_available() RPC instead of direct username probes.';
+comment on function public.whisper_check_username_available(text) is
+  '20261005 verified: 10 checks/hour/caller quota intact; the budgeted oracle — prefer over direct profiles(username) probes.';
+
+-- Case-insensitive handle lookup backing the RPC above.
+create index if not exists whisper_profiles_username_lower_idx
+    on public.profiles (lower(username));
+
+-- ── 4. Legacy-disable registry (admin kill-switch) ─────────────────────
+-- Rows are written by the whisper-legacy-migrate edge function (service role)
+-- AFTER it retires a pre-P1-15 GoTrue identity via the Auth admin API — SQL
+-- cannot delete GoTrue users, so this table records disable intent/state only.
+create table if not exists public.whisper_legacy_disabled (
+    email text primary key,
+    disabled_at timestamptz not null default now()
+);
+
+alter table public.whisper_legacy_disabled enable row level security;
+
+-- Deliberately NO policies: edge/admin service-role only (same posture as
+-- whisper_bypass_attempts).
+
+create or replace function public.whisper_is_legacy_disabled(p_email text)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  return exists(select 1 from public.whisper_legacy_disabled where email = p_email);
+end;
+$$;
+
+revoke all on function public.whisper_is_legacy_disabled(text) from public;
+revoke all on function public.whisper_is_legacy_disabled(text) from anon;
+revoke all on function public.whisper_is_legacy_disabled(text) from authenticated;
+grant execute on function public.whisper_is_legacy_disabled(text) to service_role;
