@@ -104,8 +104,9 @@ class WhisperRatchetChaosTest {
             }
         }
 
-        // Final drain. Messages whose chain keys were evicted past MAX_SKIPPED during
-        // extreme chaos are the documented bounded-loss tradeoff → tolerated here,
+        // Final drain. Far-future frames beyond MAX_SKIPPED are REJECTED outright
+        // (Phase 1B: no oldest-eviction — the window stays intact), so extreme
+        // chaos shows the documented bounded-loss tradeoff → tolerated here,
         // but any WRONG plaintext anywhere is a hard failure.
         var recoveredLate = 0
         var drainLoss = 0
