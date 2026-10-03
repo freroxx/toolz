@@ -118,19 +118,56 @@ class WhisperPrekeyManager @Inject constructor(
             opkOrder = prefs.getString(KEY_OPK_ORDER, null)?.split(',')?.filter { it.isNotBlank() }.orEmpty()
         }
 
-        // -- 1. Identity binding -------------------------------------------------
+        // -- 1. Identity binding + rotation certificate -------------------
         val ikPriv = getOrCreateIdentitySeed()
         val ikPub = SessionCrypto.publicFromPrivate(ikPriv)
         val signerX509 = crypto.protocolSigningPublicKeyBase64()
             ?: error("Protocol signing key unavailable")
+
+        // ROTv2 rotation-cert transport: when the hardware protocol
+        // signer rotated since the last publish, the NEW signer
+        // publishes an old-signer-signs-new certificate (ROTv2:
+        // monotonic counter + timestamp) so peers can chain the
+        // fresh signer to their pinned one instead of failing
+        // closed on an unexplained key change. The cert and its
+        // counter are written in the SAME profiles update as the
+        // identity binding, so a peer never sees a new signer
+        // without its proof. First publish (no recorded signer)
+        // only records the signer; same-signer republishes carry
+        // no new cert (the rotated one stays on the row).
+        val lastSigner = prefs.getString(KEY_PUBLISHED_SIGNER, null)
+        val rotationCert: String?
+        val rotationCounter: Long
+        if (lastSigner != null && lastSigner != signerX509) {
+            rotationCounter = prefs.getLong(KEY_ROTATION_COUNTER, 0L) + 1
+            val tsMs = System.currentTimeMillis()
+            rotationCert = crypto.signRotationCert(lastSigner, signerX509, rotationCounter, tsMs)
+                ?: error("Rotation cert signing failed — refusing to publish unsigned rotation")
+        } else {
+            rotationCert = null
+            rotationCounter = prefs.getLong(KEY_ROTATION_COUNTER, 0L)
+        }
         val binding = buildJsonObject {
             put("ik", android.util.Base64.encodeToString(ikPub, android.util.Base64.NO_WRAP))
             put("signer", signerX509)
             put("v", 1)
         }
         supabase.postgrest.from("profiles").update(
-            buildJsonObject { put("identity_binding", binding) },
+            buildJsonObject {
+                put("identity_binding", binding)
+                if (rotationCert != null) {
+                    put("rotation_cert", rotationCert)
+                    put("rotation_counter", rotationCounter)
+                }
+            },
         ) { filter { eq("id", currentUserId) } }
+        prefs.edit()
+            .putString(KEY_PUBLISHED_SIGNER, signerX509)
+            .putLong(KEY_ROTATION_COUNTER, rotationCounter)
+            .apply()
+        if (rotationCert != null) {
+            ProtocolDiagnostics.log("prekeys: rotation cert published (counter=$rotationCounter)")
+        }
 
         // -- 2. Signed prekey (weekly rotation) ----------------------------------
         val spkDue = System.currentTimeMillis() - lastPublishedAtMs > SPK_ROTATE_MS ||
@@ -209,6 +246,36 @@ class WhisperPrekeyManager @Inject constructor(
         signerPublicX509Base64 = signerPublicX509Base64,
     )
 
+    /**
+     * ROTv2 transport half: reads the rotation certificate (and its
+     * monotonic counter) a peer published to their profile row,
+     * keyed by their current public key. Used by
+     * [com.frerox.toolz.data.whisper.WhisperRepository] to look up
+     * whether a candidate key chains to the pinned one.
+     *
+     * Fail-closed: null unless the row publishes a non-blank cert
+     * AND a positive counter (see [WireProtocol.rotationCertRecordOf])
+     * — a malformed or missing record is "no cert", never a trusted
+     * rotation. Transport errors also read as null (callers then
+     * fail closed on the key change itself).
+     */
+    suspend fun fetchRotationStateForPublicKey(
+        candidatePubB64: String,
+    ): WireProtocol.RotationCertRecord? = runCatching {
+        if (candidatePubB64.isBlank()) return@runCatching null
+        val rows = supabase.postgrest.from("profiles")
+            .select { filter { eq("public_key", candidatePubB64) } }
+            .decodeList<RotationRow>()
+        val row = rows.firstOrNull() ?: return@runCatching null
+        WireProtocol.rotationCertRecordOf(row.rotation_cert, row.rotation_counter)
+    }.getOrNull()
+
+    @Serializable
+    private data class RotationRow(
+        @SerialName("rotation_cert") val rotation_cert: String? = null,
+        @SerialName("rotation_counter") val rotation_counter: Long? = null,
+    )
+
     // ------------------------------------------------------------------ internals
 
     private suspend fun countKind(userId: String, kind: String): Int =
@@ -264,6 +331,12 @@ class WhisperPrekeyManager @Inject constructor(
         private const val KEY_SPK_PUBLISHED_AT = "spk_published_at_ms"
         private const val KEY_OPK_ORDER = "opk_order"
         private const val OPK_PERSIST_CAP = 120
+
+        // ROTv2 rotation-cert transport: the signer X509 recorded at the
+        // last publish and the monotonic counter of the last published
+        // rotation cert (0 = no rotation published yet).
+        private const val KEY_PUBLISHED_SIGNER = "published_signer_x509"
+        private const val KEY_ROTATION_COUNTER = "rotation_counter"
     }
 
     private val prefs by lazy {

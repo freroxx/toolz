@@ -59,7 +59,7 @@ banned/low-order or all-zero peer points (Tink throws InvalidKeyException;
 mapped to null); callers treat that as an invalid key. Covered by
 `SessionCryptoVectorTest` with RFC 7748 §5.2/§6.1 vectors.
 
-`data/whisper/WhisperCrypto.kt` (866 lines) is the hardware identity:
+`data/whisper/WhisperCrypto.kt` (953 lines) is the hardware identity:
 
 - Active ECDH key on `secp256r1` in AndroidKeyStore. Legacy alias
   `whisper_e2ee_ec_key`, new keys under
@@ -239,8 +239,10 @@ sealing (`WhisperChatViewModel.compressImageForUpload`). Avatars are cropped to
 
 ## 5. Backend
 
-`supabase/migrations/main-whisper-sql.sql` (1797 lines) is the canonical single
-baseline, squashing 15 migrations (policy in `whisper-sql-info.md`). Tables:
+`supabase/migrations/main-whisper-sql.sql` (2092 lines) is the canonical single
+baseline, squashing 17 migrations (policy in `whisper-sql-info.md`; header banner
+lists all 17, `20260820`…`20261005_whisper_signup_discover_hardening.sql`).
+Tables:
 `messages` (with `content_hash` replay guard, block-aware insert guard, and a
 sender-authorized delete-for-everyone tombstone exception in the content guard),
 `message_reactions`, `friendships`/`friends` (pending-only transitions,
@@ -248,31 +250,74 @@ block-aware), `profiles` (identity binding, public key, last seen, avatar),
 `whisper_blocks`, `whisper_prekeys` (account, key ID, kind, public key,
 signature), `whisper_fcm_tokens` (user ID primary key), `whisper_typing_signals`
 (8-second freshness),
-upload/discover/bypass/destructive/username-check quotas, deleted
-tombstones, image ownership, and the `whisper_public_profiles` view (with direct
-`last_seen_at`). Includes
-the discover, bypass-attempt, quota-refund, username-availability, and account-purge RPCs, owner-scoped
-RLS, realtime publication, and full replica identity. Idempotent, safe to rerun.
+upload/discover/bypass/destructive/username-check/signup quotas, deleted
+tombstones, image ownership, the legacy-sunset registry
+(`whisper_legacy_disabled`), and the `whisper_public_profiles` view
+(with direct `last_seen_at`). Includes
+the discover, bypass-attempt, quota-refund, username-availability,
+account-purge, signup-gate, and legacy-disable RPCs, owner-scoped
+RLS, realtime publication, and full replica identity. Latest sections
+(per the banner order): `20261003` server enforcement (sender-authorized
+tombstone UPDATE, `whisper_check_username_available()` RPC at
+10 checks/hour/caller, purge coverage), `20261004` presence/typing
+opt-out removal (the `presence_enabled`/`typing_enabled` columns and
+the typing-suppress trigger are dropped — stamps and typing signals are
+unconditional again, same for everyone), and `20261005` signup Sybil
+quota (`whisper_signup_quota` + `whisper_check_signup_allowed()`,
+5 signups/day/IP, advisory-lock serialized, pre-auth executable),
+Discover opt-in (`profiles.hide_from_discover` now defaults to true —
+new rows are hidden from Discover/search until the owner enables it;
+existing rows deliberately NOT backfilled), and the legacy-disable
+registry (`whisper_legacy_disabled` + `whisper_is_legacy_disabled()`,
+service-role only). Idempotent, safe to rerun.
 
 Edge functions in `supabase/functions/whisper-*/index.ts`:
 
 | Function | Lines | Role |
 |---|---|---|
-| `whisper-bundle-fetch` | 114 | POST `{account}` returns identity binding, latest signed SPK, and consumes one OPK. Rejects self-bundles, no-store. |
+| `whisper-attest` | 356 | POST (user JWT) returns the caller's attestation verdict `{ok, mode:"cert"|"integrity"}`; 428 for unofficial builds. Single-file: the `_shared/attest.ts` gate is INLINED (dashboard deploys are single-file), no `_shared` imports. Optional Play Integrity strong path (env-gated, off by default). |
+| `whisper-bundle-fetch` | 280 | POST `{account}` returns identity binding, latest signed SPK, and consumes one OPK. Rejects self-bundles, no-store. Attest-gated (inlined `_shared/attest.ts`). |
 | `whisper-bypass-verify` | 151 | Constant-time screenshot-bypass password check, 5 failures per 15 minutes locks out with 429. |
 | `whisper-delete-account` | 243 | Verifies JWT plus password header plus 5-minute confirmation timestamp, wipes server data before deleting the GoTrue user. |
-| `whisper-image-upload` | 252 | Accepts base64 PNG with the ImgBB key held server-side, returns URL and ID. |
+| `whisper-image-upload` | 416 | Accepts base64 PNG with the ImgBB key held server-side, returns URL and ID. Attest-gated (inlined `_shared/attest.ts`). |
 | `whisper-image-delete` | 164 | Deletes an ImgBB blob by ID. |
-| `whisper-push-send` | 299 | Database webhook on message and friend inserts. Skips receivers seen within 60 seconds, sends one data-only FCM message per token, prunes dead tokens. Never logs tokens or payloads. |
+| `whisper-push-send` | 299 | Database webhook on message and friend inserts. Skips receivers seen within 60 seconds, sends one data-only FCM message per token, prunes dead tokens. Never logs tokens or payloads. Intentionally NOT attest-gated (webhook auth, never sees client headers). |
 
-`data/whisper/EdgeFunctionClient.kt` (127) is the single hardened transport
+Anti-mod gate: every `whisper-*` edge call carries
+`X-App-Package` / `X-App-Cert-Sha256` / `X-App-VersionCode`
+headers (`data/whisper/PlayIntegrityAttestor.kt`, 185 lines —
+local-only, FOSS-safe: PackageManager signing-cert SHA-256 vs
+`WhisperPinConfig.OFFICIAL_CERT_SHA256`, cached 1h; no Google API,
+no Play Integrity dependency). `supabase/functions/_shared/attest.ts`
+(156 lines) enforces package + cert + version (`MIN_VERSION_CODE`)
+server-side and answers 428 for unofficial builds; it is inlined
+verbatim into `whisper-bundle-fetch` and `whisper-image-upload`
+(single-file dashboard deploys). `PLAY_INTEGRITY_ENABLED` is optional
+and off by default — the FOSS-safe baseline is cert+package+version
+only. `WhisperPinConfig.kt` (98 lines) holds the identity constants
+(`OFFICIAL_PACKAGE=com.frerox.toolz`, `OFFICIAL_CERT_SHA256`
+placeholder `REPLACE_ME_WITH_RELEASE_SHA256` — the real release hash
+is deliberately not hardcoded, `MIN_VERSION_CODE=17L`, synced with
+`update_manifest.json` `minimumVersionCode`). `update_manifest.json`
+also carries an Ed25519 `signature` over the canonical manifest JSON
+(`UpdateRepository` verifies it fail-closed — until a real keypair is
+provisioned the manifest path is ignored for updates; the GitHub
+Release API path is unaffected). Locally, `ui/screens/whisper/WhisperBuildGate.kt`
+(404 lines) gates Whisper access at runtime: release-cert pin,
+`FLAG_DEBUGGABLE` in a non-debug build, and the version floor
+(max of the signature-verified manifest floor and
+`WhisperPinConfig.MIN_VERSION_CODE`) — blocked builds see a full-screen
+card with the reason and the official download URL, so no chat UI is
+reachable.
+
+`data/whisper/EdgeFunctionClient.kt` (154) is the single hardened transport
 (Ktor over OkHttp, anonymous/user/explicit-token bearers, mandatory timeouts, no
 body logging). `di/SupabaseModule.kt` falls back to an invalid URL when the
 build has no Supabase credentials, keeping Whisper offline with one log line.
 
 ## 6. Client repository
 
-`data/whisper/WhisperRepository.kt` (3129 lines) orchestrates everything.
+`data/whisper/WhisperRepository.kt` (3355 lines) orchestrates everything.
 Constants: 8,192-char message cap, JPEG/PNG/WebP images, disappearing images
 from 60 seconds to 180 days, event dedupe TTL 30 seconds (max 1024 IDs), up to
 6 realtime resubscribes at least 2.5 seconds apart, 8-second typing freshness,
@@ -305,7 +350,7 @@ from 60 seconds to 180 days, event dedupe TTL 30 seconds (max 1024 IDs), up to
   poll backoff ladder, sorted-pair conversation keys, last-seen pings mapping
   to online (2 min) / recent (1 h) / offline.
 - Social (`WhisperRepositorySocial.kt`, 467) and profile
-  (`WhisperRepositoryProfile.kt`, 398) splits cover friend requests, blocks
+  (`WhisperRepositoryProfile.kt`, 444) splits cover friend requests, blocks
   (client plus DB enforcement), discover paging with quota, hide/mute, typing
   broadcast, profile CRUD,
   username-availability checks (migrating to the quota-guarded RPC),
@@ -337,7 +382,7 @@ scheduler with 15-second exponential backoff (42).
 
 ## 7. Auth
 
-`data/whisper/WhisperAuthManager.kt` (307 lines):
+`data/whisper/WhisperAuthManager.kt` (432 lines):
 
 - Username path: 3-20 lowercase letters/digits/underscores, password of at least
   10 chars, display name 1-60 chars, mapped to `user@u.whisper.local` through
@@ -345,12 +390,21 @@ scheduler with 15-second exponential backoff (42).
   post-signup failure).
 - Token path: 32 random bytes as 64 hex. Email is `SHA-256(token)` at
   `whisper.toolz.app`, password is `SHA-256("pwd_" + token)`. Login makes a
-  SINGLE attempt with the current full-hash derivation (Phase 1B: the three
-  legacy truncated 32-bit derivations are removed). Invalid credentials fail
-  closed with "Legacy token accounts require one-time migration - contact
-  support / use recovery" (`migrateLegacyTokenAccounts`). Tokens are normalized
-  (non-hex stripped, lowercased) and validated as 64 hex. Credential errors are
-  detected structurally, not by bare status code.
+  SINGLE attempt with the current full-hash derivation; only when that misses
+  with invalid credentials does it probe the three pre-P1-15 legacy
+  derivations ONCE each (truncated-email + SHA-512/SHA-256 password
+  variants, paced 500 ms apart — `migrateLegacyTokenAccounts`) before
+  failing. A legacy hit does NOT log the legacy session in: it signs the
+  legacy session straight back out and fails with
+  `LegacyMigrationNeededException` (carrying the legacy username/display
+  name), which the UI surfaces as the "Legacy account found — tap Migrate"
+  banner (`st_Whisper_Legacy_Banner`) with a 30-day migration window
+  (`st_Whisper_Legacy_Warning`); the retiring edge function
+  (`whisper-legacy-migrate`) disables the legacy GoTrue identity via the
+  Auth admin API and records it in the `whisper_legacy_disabled` registry.
+  No legacy hit fails closed with "Invalid login credentials". Tokens are
+  normalized (non-hex stripped, lowercased) and validated as 64 hex.
+  Credential errors are detected structurally, not by bare status code.
 - Extras: restore from the Toolz password vault or an encrypted access file
   plus whisper code, clipboard auto-expiry for displayed tokens, username
   availability check, sign-out, and account deletion (re-auth for password
@@ -362,7 +416,7 @@ clipboard expiry, access-file import, and single-attempt token login.
 
 ## 8. UI and view models
 
-All 18 files under `ui/screens/whisper/`:
+All 19 files under `ui/screens/whisper/`:
 
 - `WhisperViewModel.kt` (910): hub state (conversations, friends, single-source
   incoming requests, outgoing requests, search, recommended and paged discover,
@@ -381,17 +435,24 @@ All 18 files under `ui/screens/whisper/`:
   pausing. History remains readable offline.
 - Screens: hub with chats/friends/requests/discover/profile tabs, unread badges,
   presence dots, key-change banners, and pull-refresh (`WhisperMainScreen`,
-  1945); row cards (`WhisperMainScreenComponents`, 376); full chat with bubbles,
+  1950); row cards (`WhisperMainScreenComponents`, 376) and chat-list
+  message merging (`ChatMessageMerger`, 89); full chat with bubbles,
   reply snippets, reactions, in-message search, typing indicator, online header,
   mute/block menus, expiring attachments, tombstone and locked placeholders,
-  and the undo bar (`WhisperChatScreen`, 2563); self profile with editing,
+  the per-message FS lock badge (`message.fsProtected` → Lock/LockOpen
+  icon, `WhisperChatScreen` L1932-1934), and the undo bar
+  (`WhisperChatScreen`, 2573); self profile with editing,
   avatar picker, fingerprints, rotation, access file, sign-out, deletion, and a
-  debug diagnostics export (`WhisperProfileTab`, 1199); peer profile with QR
+  debug diagnostics export (`WhisperProfileTab`, 1201); peer profile with QR
   verification and block/unfriend (562 + 232 + 522); friends-only onboarding
   explainer (629); username/password plus token auth UI with vault restore,
-  access-file import, and token-loss warnings (1888); re-auth banner (155);
+  access-file import, token-loss warnings, and the legacy-migration banner
+  (1893); re-auth banner (155);
   toasts (219); FLAG_SECURE window control (76) with a server-gated screenshot
-  bypass (116); and the bypass verifier mapping Granted/Denied/RateLimited/
+  bypass (116); the LOCAL runtime tamper gate (`WhisperBuildGate`, 404 —
+  release-cert pin, non-debug `FLAG_DEBUGGABLE`, version floor; blocked
+  builds get a full-screen card with the reason and the official download
+  URL, so no chat UI is reachable); and the bypass verifier mapping Granted/Denied/RateLimited/
   Unavailable with fail-closed behavior (125).
 
 ## 9. Push, workers, app wiring
@@ -445,23 +506,25 @@ check.
 
 ## 12. File inventory
 
-Client `data/whisper` (33 files): EdgeFunctionClient 127, ProtocolDiagnostics
-66, WhisperAubupManager 526, WhisperAuthManager 307, WhisperAvatarCodec 58,
-WhisperAvatarLoader 142, WhisperCrypto 866, WhisperDeletedMessagesStore 167,
-WhisperDeliveryScheduler 42, WhisperEncryptedImageHost 233, WhisperEnvelope 133,
-WhisperErrorMapper 286, WhisperHiddenChatsStore 99, WhisperImageCipherTransport
-183, WhisperImageDiskCache 228, WhisperKeyRotationStore 77, WhisperKeyTrustStore
-176, WhisperLocalTombstoneEntity 59, WhisperMessageDao 56, WhisperMessageEntity
-127, WhisperModels 540, WhisperMutePreferences 129, WhisperNotificationManager
-360, WhisperOutboxEntity 93, WhisperOutgoingQueue 146, WhisperPrekeyManager 272,
-WhisperProtocolConfig 20, WhisperRepository 3129, WhisperRepositoryProfile 398,
-WhisperRepositorySocial 467, WhisperSessionFactory 288, WhisperUndoBufferStore
-104, WireProtocol 146.
+Client `data/whisper` (35 files): EdgeFunctionClient 154, PlayIntegrityAttestor
+185, ProtocolDiagnostics 66, WhisperAubupManager 526, WhisperAuthManager 432,
+WhisperAvatarCodec 61, WhisperAvatarLoader 142, WhisperCrypto 953,
+WhisperDeletedMessagesStore 167, WhisperDeliveryScheduler 42,
+WhisperEncryptedImageHost 233, WhisperEnvelope 133, WhisperErrorMapper 292,
+WhisperHiddenChatsStore 99, WhisperImageCipherTransport 183,
+WhisperImageDiskCache 228, WhisperKeyRotationStore 77, WhisperKeyTrustStore
+202, WhisperLocalTombstoneEntity 59, WhisperMessageDao 56, WhisperMessageEntity
+127, WhisperModels 553, WhisperMutePreferences 129, WhisperNotificationManager
+369, WhisperOutboxEntity 93, WhisperOutgoingQueue 146, WhisperPinConfig 98,
+WhisperPrekeyManager 272, WhisperProtocolConfig 20, WhisperRepository 3355,
+WhisperRepositoryProfile 444, WhisperRepositorySocial 467,
+WhisperSessionFactory 288, WhisperUndoBufferStore 104, WireProtocol 379.
 
-Session subdir (4 files): WhisperRatchet 296, WhisperSessionSecretProtector 36,
-WhisperSessionStore 296, WhisperV3Codec 125.
+Session subdir (4 files): WhisperRatchet 393, WhisperSessionSecretProtector 36,
+WhisperSessionStore 341, WhisperV3Codec 144.
 
-Also: `crypto/SessionCrypto` 192, `push/WhisperPushService` 142, UI screens
-(18 files from 76 to 2563 lines, see section 8), workers for delivery (49),
-local cleanup (43), and token clipboard expiry (151), six edge functions
-(114/151/243/164/252/299 lines), and the 1417-line SQL baseline.
+Also: `crypto/SessionCrypto` 138, `push/WhisperPushService` 142, UI screens
+(19 files from 76 to 2573 lines, see section 8), workers for delivery (49),
+local cleanup (43), and token clipboard expiry (151), seven edge functions
+(280/151/243/416/164/299/356 lines) plus the inlined `_shared/attest.ts`
+gate (156), and the 2092-line SQL baseline.

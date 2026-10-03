@@ -96,7 +96,11 @@ sync (on by default, toggle in Settings — see Toolz News section below).
 ### Updates
 - `https://api.github.com/repos/freroxx/toolz/releases/latest` (GitHub Release API) +
   fallback `https://freroxx.github.io/toolz/update_manifest.json`
-  (`data/update/UpdateConstants.kt`). Trigger: Settings → update check / periodic
+  (`data/update/UpdateConstants.kt`). Manifest is Ed25519-signed; verification
+  is fail-closed (`UpdateRepository.kt`) — a missing/invalid signature means
+  "no update", so a tampered manifest can't forge the `minimumVersionCode`
+  floor (Whisper is blocked below it) or swap a download URL.
+  Trigger: Settings → update check / periodic
   `UpdateCheckWorker` (only if enabled). Downloads APK assets from GitHub Releases.
 
 ### Toolz News
@@ -117,8 +121,21 @@ sync (on by default, toggle in Settings — see Toolz News section below).
   `friendships`, `whisper_blocks`, `whisper_prekeys`, `whisper_fcm_tokens`,
   `whisper_typing_signals`, quotas), Realtime (broadcast + postgres changes as
   fallback), Storage bucket `whisper-avatars`, Edge Functions
-  (`whisper-bundle-fetch`, `whisper-bypass-verify`, `whisper-delete-account`,
-  `whisper-image-upload`, `whisper-image-delete`, `whisper-push-send`).
+  (`whisper-attest`, `whisper-bundle-fetch`, `whisper-bypass-verify`,
+  `whisper-delete-account`, `whisper-image-upload`, `whisper-image-delete`,
+  `whisper-push-send`).
+- Anti-mod attestation (no personal data): every `whisper-*` edge call
+  carries `X-App-Package` (applicationId), `X-App-Cert-Sha256` (SHA-256 of
+  the app's signing certificate) and `X-App-VersionCode` headers
+  (`data/whisper/PlayIntegrityAttestor.kt` — local-only, computed from the
+  platform PackageManager; no Google API, no Play Integrity dependency). The
+  server enforces package + cert + version (`supabase/functions/_shared/attest.ts`,
+  inlined into `whisper-bundle-fetch` and `whisper-image-upload`; the
+  standalone `whisper-attest` endpoint returns your build's verdict) and
+  answers 428 "Unofficial build blocked" otherwise. Headers carry no
+  personal data — package name, cert fingerprint, version code only.
+  `whisper-push-send` is a Database Webhook (service-role auth, never sees
+  client headers) and is deliberately not gated.
 - Push: Firebase Cloud Messaging data-only wake pings (`WhisperPushService`) carrying
   only `{whisper_new_message, senderId, messageId}` / friend-request pings — **no
   message text ever transits FCM**. Tokens stored in `whisper_fcm_tokens`.
@@ -136,6 +153,13 @@ sync (on by default, toggle in Settings — see Toolz News section below).
   + password (≥10 chars), or 64-char hex token → `SHA-256(token)@whisper.toolz.app`.
   Lose the token, lose the account. Delete Account calls `whisper-delete-account`
   (server wipes data before GoTrue deletion) then wipes local sessions/Room.
+  Legacy token accounts (pre-2026 truncated-email era): token login makes one
+  attempt with the current full-hash derivation and only then probes the three
+  legacy derivations once each; a legacy hit signs the legacy session straight
+  back out and shows a one-time "Legacy account found — tap Migrate" banner
+  (30-day window). Migrating retires the legacy GoTrue identity via the
+  `whisper-legacy-migrate` edge function (Auth admin API) and records it in
+  the `whisper_legacy_disabled` registry; the new credential keeps your chats.
 - Presence/typing (same for everyone): `last_seen_at` stamps update while the
   app is in the foreground and `whisper_public_profiles`/discover report them
   directly; typing signals are always sent while typing (8-second freshness).

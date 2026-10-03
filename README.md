@@ -118,7 +118,7 @@ The short version: you sign in with a username + password or a random 64-charact
 ### Key features
 
 - **End-to-end encryption** — P-256 identity + signing keys in AndroidKeyStore, X25519 sessions via X3DH → Double Ratchet, all sealed with AES-256-GCM (direction-bound AAD). New chats try the ratchet first (per-message forward secrecy); proven-v3 peers block insecure fallback with visible warning; new contacts try v3 first, fall back to envelope only while unproven (static ECDH, no FS). Uses custom E2EE, not independently audited. Only v3 ratchet messages have forward secrecy. Keys rotate every 30 days; verify fingerprints in person via QR
-- **No-email sign-in** — two ways in: username + password (≥10 chars, auto-saved to the Toolz Vault), or a random 64-char hex token (`SHA-256(token)@whisper.toolz.app`, hashed server-side). Save your token — lose it, lose the account
+- **No-email sign-in** — two ways in: username + password (≥10 chars, auto-saved to the Toolz Vault), or a random 64-char hex token (`SHA-256(token)@whisper.toolz.app`, hashed on-device before it leaves the phone — the server only ever sees the hash). Save your token — lose it, lose the account
 - **Friend-gated chats** — no messaging until the friend request is accepted; blocks are enforced client + DB-level, both sides know when they're blocked
 - **Realtime delivery** — messages, reactions, typing (8 s fresh), and presence arrive over broadcast channels, with postgres-change polling as the reliable fallback; FCM data-only wake pings (senderId/messageId, no content) cover killed apps
 - **Read receipts & presence** — pending/sent/read states, unread badges, online (≤2 min) / recent / last-seen

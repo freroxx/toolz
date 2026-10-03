@@ -161,6 +161,7 @@ fun ExpressiveSlider(
     )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ExpressiveSlider(
     value: () -> Float,
@@ -185,27 +186,34 @@ fun ExpressiveSlider(
     LaunchedEffect(isDragged) {
         if (isDragged) haptic.tick()
     }
-    
+
+    val sliderState = remember(valueRange) {
+        SliderState(
+            value = value(),
+            trackRange = valueRange
+        )
+    }
+    sliderState.value = value()
+
     Slider(
-        value = value(),
+        state = sliderState,
         onValueChange = currentOnValueChange,
-        modifier = modifier,
-        enabled = enabled,
-        valueRange = valueRange,
         onValueChangeFinished = {
             haptic.click()
             currentOnValueChangeFinished?.invoke()
         },
+        modifier = modifier,
+        enabled = enabled,
         colors = colors,
         interactionSource = interactionSource,
-        thumb = {
+        thumb = { _ ->
             val isPressed by interactionSource.collectIsPressedAsState()
             val scale by animateFloatAsState(
                 targetValue = if (isPressed) 1.4f else 1f,
                 animationSpec = spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMediumLow),
                 label = "slider_thumb_scale"
             )
-            
+
             Surface(
                 modifier = Modifier
                     .size(24.dp)

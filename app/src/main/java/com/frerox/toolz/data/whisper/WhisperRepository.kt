@@ -77,7 +77,10 @@ class WhisperRepository @Inject constructor(
     // budget (maxPixelsForDevice) — previously this class had no Context injection.
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
     internal val crypto: WhisperCrypto,
-    internal val encryptedImageHost: WhisperEncryptedImageHost,
+    // DI seam: interface-typed so an env-switched implementation (staging/test
+    // host) can be bound to EncryptedBlobHost via a Hilt @Binds module —
+    // WhisperEncryptedImageHost remains the production impl.
+    internal val encryptedImageHost: EncryptedBlobHost,
     private val deletedStore: WhisperDeletedMessagesStore,
     private val outgoingQueue: WhisperOutgoingQueue,
     private val deliveryScheduler: WhisperDeliveryScheduler,
@@ -534,8 +537,8 @@ class WhisperRepository @Inject constructor(
     /**
      * Phase-1A fail-closed chain filter. Only the pinned key — or a candidate
      * chaining to it via a valid rotation cert — may receive ciphertext.
-     * Rotation certs are looked up per-candidate via [rotationCertFor] (no
-     * transport yet → empty, so only the pin passes until certs ship).
+     * Rotation certs are looked up per-candidate via [rotationCertFor]
+     * (the peer's published profile record).
      */
     internal fun filterKeysChainedToPinned(
         pinnedKeyB64: String?,
@@ -543,8 +546,15 @@ class WhisperRepository @Inject constructor(
         certs: Map<String, String?> = emptyMap(),
     ): Map<String, String> = WireProtocol.filterKeysChainedToPinned(pinnedKeyB64, candidates, certs)
 
-    /** Phase-1A: rotation-cert lookup per candidate key (no wire transport yet). */
-    private fun rotationCertFor(candidatePubB64: String): String? = null
+    /**
+     * Phase-1A: rotation-cert lookup for a candidate public key, from
+     * the peer's published profile record (ROTv2 transport). Fail-closed:
+     * any transport error or unusable record reads as "no cert", so the
+     * candidate is treated as unchained (CHANGED) rather than trusted.
+     */
+    private suspend fun rotationCertFor(candidatePubB64: String): String? =
+        runCatchingCE { prekeyManager.fetchRotationStateForPublicKey(candidatePubB64)?.certB64 }
+            .getOrNull()
 
     /**
      * FIX-4 helper (Phase-1A fail-closed): builds a V5 envelope for [content]
@@ -564,7 +574,13 @@ class WhisperRepository @Inject constructor(
         val raw = recipientKeyCandidates(receiverId).toMutableMap()
         receiverPubKey?.let { raw.putIfAbsent(WhisperEnvelope.keyId(it), it) }
         val pinned = keyTrustStore.knownKey(receiverId)
-        val certs = raw.values.associateWith { rotationCertFor(it) }
+        // Explicit loop (not associateWith): rotationCertFor is suspend.
+        // The pinned key needs no cert — the chain filter keeps it
+        // unconditionally — so skip its round trip on the send hot path.
+        val certs = LinkedHashMap<String, String?>(raw.size)
+        for (pub in raw.values) {
+            certs[pub] = if (pub == pinned) null else rotationCertFor(pub)
+        }
         val candidates = filterKeysChainedToPinned(pinned, raw, certs).toMutableMap()
         val droppedUnchained = raw.size - candidates.size
         if (droppedUnchained > 0) {
@@ -1569,8 +1585,15 @@ class WhisperRepository @Inject constructor(
         // server key. A key mismatch here blocks like sendMessage (same review).
         val knownImg = keyTrustStore.knownKey(receiverId)
         val rawImg = recipientKeyCandidates(receiverId).toMutableMap()
+        // Explicit loop (not associateWith): rotationCertFor is suspend.
+        // The pinned key needs no cert (kept unconditionally by the
+        // chain filter) — skip its round trip on the send hot path.
+        val imgCerts = LinkedHashMap<String, String?>(rawImg.size)
+        for (pub in rawImg.values) {
+            imgCerts[pub] = if (pub == knownImg) null else rotationCertFor(pub)
+        }
         val imgCandidates = filterKeysChainedToPinned(
-            knownImg, rawImg, rawImg.values.associateWith { rotationCertFor(it) },
+            knownImg, rawImg, imgCerts,
         ).toMutableMap()
         if (rawImg.size > imgCandidates.size) {
             ProtocolDiagnostics.increment("send.unchainedKeyDropped")
@@ -3132,8 +3155,8 @@ class WhisperRepository @Inject constructor(
      *
      * ROTv2: when [rotationCounter]/[rotationTsMs] accompany the cert, the ROTv2
      * overload is used (counter must exceed the stored last counter, ts within
-     * 24h). Cert transport is not on the profile row yet, so the default path
-     * stays v1 (null cert = CHANGED by design, fail closed until certs ship).
+     * 24h). The peer's published record is fetched via [rotationCertFor]; a
+     * null cert (no usable record) is CHANGED by design (fail closed).
      */
     private suspend fun classifyKeyChange(
         otherUserId: String,
@@ -3145,8 +3168,8 @@ class WhisperRepository @Inject constructor(
         val current = profile.publicKey.orEmpty()
         val known = keyTrustStore.knownKey(otherUserId)
         if (known == null || known == current || current.isBlank()) return KeyTrustStatus.MATCH
-        // Rotation cert transport is not on the profile row yet — null means no
-        // proof, which is CHANGED by design (fail closed until certs ship).
+        // Null cert = no published proof, which is CHANGED by design
+        // (fail closed).
         val cert = rotationCert ?: rotationCertFor(current)
         if (cert != null && rotationCounter != null && rotationTsMs != null) {
             return WireProtocol.classifyKeyChangeStrict(

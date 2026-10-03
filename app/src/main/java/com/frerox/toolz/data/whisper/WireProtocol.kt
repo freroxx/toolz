@@ -223,6 +223,29 @@ object WireProtocol {
     const val ROTATION_CERT_MAX_AGE_MS: Long = 24L * 60 * 60 * 1_000
 
     /**
+     * One peer's published rotation-certificate transport record, as
+     * read from their profile row (`rotation_cert` + `rotation_counter`).
+     * All fields are public material.
+     */
+    data class RotationCertRecord(
+        val certB64: String,
+        val counter: Long,
+    )
+
+    /**
+     * Fail-closed decoder for a peer's published rotation record:
+     * a blank cert or a non-positive counter decodes to `null`
+     * ("no usable cert published") instead of a trusted-but-unproven
+     * rotation. Pure and total — never throws.
+     */
+    fun rotationCertRecordOf(certB64: String?, counter: Long?): RotationCertRecord? =
+        if (certB64.isNullOrBlank() || counter == null || counter <= 0L) {
+            null
+        } else {
+            RotationCertRecord(certB64.trim(), counter)
+        }
+
+    /**
      * Verifies `cert = sign(prevKey, newKey)` — an ECDSA/SHA256 signature over
      * [rotationPayload] verified with the PREVIOUS key as the P-256 signer
      * (old-key-signs-new chaining). Pure and total: any malformed input is

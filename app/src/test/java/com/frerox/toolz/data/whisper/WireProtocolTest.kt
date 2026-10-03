@@ -6,6 +6,8 @@ package com.frerox.toolz.data.whisper
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -354,6 +356,49 @@ class WireProtocolTest {
         )
         // Legacy v1 overload untouched: no cert still means CHANGED.
         assertEquals(KeyTrustStatus.CHANGED, WireProtocol.classifyKeyChangeStrict(prev, "NEW"))
+    }
+
+    // ───────────────────────── rotation-cert transport record ─────────────────────────
+
+    @Test
+    fun `rotation cert record round-trips and fails closed`() {
+        // Round-trip: a published record survives the transport decode.
+        val record = WireProtocol.rotationCertRecordOf("cert-b64", 3L)
+        assertEquals("cert-b64", record?.certB64)
+        assertEquals(3L, record?.counter)
+        // Fail-closed: blank cert, missing or non-positive counter
+        // are all "no cert published" — never a trusted rotation.
+        assertNull(WireProtocol.rotationCertRecordOf("", 3L))
+        assertNull(WireProtocol.rotationCertRecordOf("   ", 3L))
+        assertNull(WireProtocol.rotationCertRecordOf(null, 3L))
+        assertNull(WireProtocol.rotationCertRecordOf("cert-b64", null))
+        assertNull(WireProtocol.rotationCertRecordOf("cert-b64", 0L))
+        assertNull(WireProtocol.rotationCertRecordOf("cert-b64", -1L))
+    }
+
+    @Test
+    fun `rotation cert record carries a verifiable ROTv2 cert`() {
+        val (prev, priv, _) = genP256Signer()
+        val now = 1_700_000_000_000L
+        val cert = signEc(priv, WireProtocol.rotationPayloadV2(prev, "NEW", 1L, now))
+        // Transport decode → verification: the record read from a peer
+        // profile row feeds the ROTv2 verifier unchanged.
+        val record = WireProtocol.rotationCertRecordOf(cert, 1L)
+        assertNotNull(record)
+        assertTrue(
+            WireProtocol.verifyRotationCert(
+                prev, "NEW", record!!.certB64,
+                counter = record.counter, tsMs = now, lastCounter = 0L, nowMs = now,
+            ),
+        )
+        // A replayed counter (already accepted) fails verification
+        // even though the record itself decoded fine.
+        assertFalse(
+            WireProtocol.verifyRotationCert(
+                prev, "NEW", record.certB64,
+                counter = record.counter, tsMs = now, lastCounter = 1L, nowMs = now,
+            ),
+        )
     }
 
     // ───────────────────────── ratchet-gap fresh handshake ─────────────────────────

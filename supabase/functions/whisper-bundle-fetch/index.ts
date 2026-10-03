@@ -227,9 +227,12 @@ serve(async (request) => {
 
   try {
     // Identity binding anchors the bundle's trust chain.
+    // rotation_cert/rotation_counter (20261006): the peer's
+    // published ROTv2 rotation certificate, carried so clients
+    // can chain a fresh bundle signer to a pinned key.
     const { data: profile } = await admin
       .from("profiles")
-      .select("identity_binding")
+      .select("identity_binding, rotation_cert, rotation_counter")
       .eq("id", account)
       .single();
 
@@ -270,6 +273,8 @@ serve(async (request) => {
 
     return json({
       identity_binding: profile?.identity_binding ?? null,
+      rotation_cert: profile?.rotation_cert ?? null,
+      rotation_counter: profile?.rotation_counter ?? null,
       spk: spks[0],
       opk,
     });

@@ -85,6 +85,7 @@ Non-Whisper migrations (unrelated Supabase features) may still use timestamped f
 | 15 | `20261003_whisper_phase1_hardening.sql` | Sender-authorized tombstone UPDATE (amends content_v2), `presence_enabled`/`typing_enabled` toggles + typing-suppress trigger + presence-gated `last_seen_at` in `whisper_public_profiles`/discover, quota-guarded `whisper_check_username_available()` RPC + quota table + purge coverage |
 | 16 | `20261004_whisper_remove_presence_typing.sql` | REVERSAL (product same-rights): drops `presence_enabled`/`typing_enabled` columns + typing-suppress trigger/function, restores direct `last_seen_at` projection and ungated discover ranking; keeps tombstone UPDATE + username-check quota/RPC + purge coverage |
 | 17 | `20261005_whisper_signup_discover_hardening.sql` | Sybil-resistant signup gate (`whisper_signup_quota` + `whisper_check_signup_allowed()` 5/day/IP, anon-callable for the pre-auth edge gate), Discover opt-in (`hide_from_discover` default true for new rows, no backfill), username-oracle contract comments + `lower(username)` index (select policy intentionally kept for public_key discovery), legacy-disable registry (`whisper_legacy_disabled` + `whisper_is_legacy_disabled()`, service-role only) |
+| 18 | `20261006_whisper_rotation_cert_transport.sql` | ROTv2 rotation-cert transport: `profiles.rotation_cert` + `profiles.rotation_counter` (published by the device at protocol-signer rotation, in the same update as `identity_binding`); peers fetch the record per candidate key and verify with `WireProtocol.verifyRotationCert` (ROTv2: monotonic counter + 24h window); no new RLS policies — existing profiles policies are column-agnostic (SELECT via `profiles_select_authenticated`, owner UPDATE via `profiles_update_own`) |
 
 Each section keeps its original filename banner for `grep` traceability:
 
@@ -351,5 +352,5 @@ And add row 15 to the table in this doc.
 
 ---
 
-**Last updated:** 2026-10-05 — squashed to 17 (V6-R5 + P6 + 20261003-P1 + 20261004-RM + 20261005-P2). Keep this doc and `main-whisper-sql.sql` in sync.
+**Last updated:** 2026-10-06 — squashed to 18 (V6-R5 + P6 + 20261003-P1 + 20261004-RM + 20261005-P2 + 20261006-RCT). Keep this doc and `main-whisper-sql.sql` in sync.
 **Maintainer rule:** any change to `main-whisper-sql.sql` must be accompanied by an update to this doc's "What Is Squashed" table if you add a section.

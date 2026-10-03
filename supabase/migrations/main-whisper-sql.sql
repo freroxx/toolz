@@ -12,10 +12,11 @@
 --   20261003_whisper_phase1_hardening.sql
 --   20261004_whisper_remove_presence_typing.sql
 --   20261005_whisper_signup_discover_hardening.sql
+--   20261006_whisper_rotation_cert_transport.sql
 -- squashed VERBATIM in application order.
 -- See whisper-sql-info.md — ALL Whisper SQL changes MUST be merged into this single file.
 --
--- IDEMPOTENT (V6-R5 + P6 + 20261003-P1 + 20261004-RM + 20261005-P2): SAFE TO RE-RUN AT ANY TIME, on any state:
+-- IDEMPOTENT (V6-R5 + P6 + 20261003-P1 + 20261004-RM + 20261005-P2 + 20261006-RCT): SAFE TO RE-RUN AT ANY TIME, on any state:
 --   * fresh project → builds the full final schema;
 --   * production   → every statement is guarded or replace-compatible;
 --     superseded intermediate function versions were pruned so no replay ever
@@ -2090,3 +2091,35 @@ revoke all on function public.whisper_is_legacy_disabled(text) from public;
 revoke all on function public.whisper_is_legacy_disabled(text) from anon;
 revoke all on function public.whisper_is_legacy_disabled(text) from authenticated;
 grant execute on function public.whisper_is_legacy_disabled(text) to service_role;
+
+-- ═══════════════ 20261006_whisper_rotation_cert_transport.sql ═
+-- whisper_rotation_cert_transport.sql (20261006)
+-- Phase-1 rotation-cert transport: the ROTv2 rotation certificate a
+-- device publishes when its hardware protocol signer rotates now
+-- lives ON the profile row (rotation_cert + rotation_counter), so
+-- peers can fetch the proof for a candidate key and chain it to
+-- their pinned one (WireProtocol.verifyRotationCert ROTv2 overload:
+-- counter must strictly increase, cert age ≤ 24h). Clients read the
+-- record via the prekey manager / bundle fetch; the fail-closed
+-- decoder is WireProtocol.rotationCertRecordOf (blank cert or
+-- non-positive counter = "no cert published", never a trusted
+-- rotation).
+
+alter table public.profiles add column if not exists rotation_cert text;
+alter table public.profiles add column if not exists rotation_counter bigint;
+
+comment on column public.profiles.rotation_cert is
+  '20261006: ROTv2 rotation certificate (base64 ECDSA/SHA256 signature over "ROTv2:<prev>:<new>:<counter>:<ts>"), written by the device at protocol-signer rotation; null until the first rotation.';
+comment on column public.profiles.rotation_counter is
+  '20261006: monotonic counter of the published rotation certificate (null until the first rotation); peers require a strictly greater counter (anti-replay).';
+
+-- RLS: deliberately NO new policies. Existing profiles policies are
+-- column-agnostic, so they already cover the new columns:
+--   * profiles_select_authenticated (SELECT, using(true)) — every
+--     authenticated client may read any profile, including
+--     rotation_cert/rotation_counter (needed by bundle-fetch and
+--     per-candidate rotation-cert lookups);
+--   * profiles_update_own (UPDATE, using + check id = auth.uid()) —
+--     the owner publishes their own cert in the same profiles
+--     update that carries the identity binding.
+-- No index: lookups key on id / public_key, never on the cert.

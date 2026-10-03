@@ -33,7 +33,7 @@ class WhisperEncryptedImageHost @Inject constructor(
     private val supabase: SupabaseClient,
     // P2: shared hardened transport for upload/delete edge calls.
     private val edgeFunctions: EdgeFunctionClient,
-) {
+) : EncryptedBlobHost {
     private suspend fun getValidAccessToken(forceRefresh: Boolean = false): String {
         if (forceRefresh) {
             runCatching { supabase.auth.refreshCurrentSession() }
@@ -43,7 +43,7 @@ class WhisperEncryptedImageHost @Inject constructor(
     }
 
     /** Returns Pair(url, attachmentId) */
-    suspend fun upload(cipherBytes: ByteArray, name: String, expirationSeconds: Long?): Result<Pair<String, String?>> = runCatching {
+    override suspend fun upload(cipherBytes: ByteArray, name: String, expirationSeconds: Long?): Result<Pair<String, String?>> = runCatching {
         require(cipherBytes.isNotEmpty() && cipherBytes.size <= MAX_CIPHER_BYTES) { "Image is too large to send securely." }
         
         val pngBytes = WhisperImageCipherTransport.encode(cipherBytes)
@@ -94,7 +94,7 @@ class WhisperEncryptedImageHost @Inject constructor(
         url to id
     }
 
-    suspend fun delete(url: String, attachmentId: String?): Result<Unit> = runCatching {
+    override suspend fun delete(url: String, attachmentId: String?): Result<Unit> = runCatching {
         if (attachmentId == null) return@runCatching // Cannot delete without ID
 
         if (url.contains("supabase.co/storage/v1/object/public/whisper-avatars/")) {
@@ -132,7 +132,7 @@ class WhisperEncryptedImageHost @Inject constructor(
     }
 
 
-    suspend fun download(url: String): Result<ByteArray> = runCatching {
+    override suspend fun download(url: String): Result<ByteArray> = runCatching {
         require(url.startsWith("https://")) { "Invalid image URL." }
         // V6-R7c FIX (not-applied): bust query (?t=) from whisperAvatarModel and
         // fragment (#att=) from stored avatar_url must not affect the fetch —

@@ -225,6 +225,12 @@ class WhisperSessionFactory @Inject constructor(
         @SerialName("identity_binding") val identity_binding: BindingDto? = null,
         @SerialName("spk") val spk: SpkDto,
         @SerialName("opk") val opk: OpkDto? = null,
+        // ROTv2 rotation-cert transport: the peer's published
+        // certificate + counter (null until their first signer
+        // rotation). Carried for callers that need to chain a
+        // fresh bundle signer to a pinned one.
+        @SerialName("rotation_cert") val rotation_cert: String? = null,
+        @SerialName("rotation_counter") val rotation_counter: Long? = null,
     )
 
     @Serializable

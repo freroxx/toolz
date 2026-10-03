@@ -28,7 +28,10 @@ import javax.inject.Singleton
  */
 @Singleton
 class WhisperAvatarLoader @Inject constructor(
-    private val host: WhisperEncryptedImageHost,
+    // DI seam: interface-typed so an env-switched implementation (staging/test
+    // host) can be bound to EncryptedBlobHost via a Hilt @Binds module —
+    // WhisperEncryptedImageHost remains the production impl.
+    private val host: EncryptedBlobHost,
     @ApplicationScope private val appScope: CoroutineScope,
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) {
