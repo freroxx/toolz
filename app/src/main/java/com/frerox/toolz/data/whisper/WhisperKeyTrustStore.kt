@@ -59,8 +59,34 @@ class WhisperKeyTrustStore @Inject constructor(
     /** The public key the user explicitly verified for a user (base64), or null. */
     fun verifiedKey(userId: String): String? = prefs.getString("verified_$userId", null)
 
+    /**
+     * Phase-1A: true when this peer was QR-verified in person. Verified safety
+     * numbers never auto-rotate — any key difference (even with a valid rotation
+     * cert) stays CHANGED until the user manually re-verifies.
+     */
+    fun isVerified(userId: String): Boolean = verifiedKey(userId) != null
+
     /** Timestamp of when known key was last stored — for 7-day polished rotation. */
     fun knownKeyTimestamp(userId: String): Long = prefs.getLong("known_ts_$userId", 0L)
+
+    /**
+     * ROTv2 anti-replay: last accepted rotation counter for a peer (0 = no
+     * rotation accepted yet). A rotation cert is only valid when its counter is
+     * strictly greater than this value (see
+     * `WireProtocol.verifyRotationCert` ROTv2 overload); the repository persists
+     * the new counter whenever a ROTv2 cert chains successfully.
+     */
+    fun rotationCounter(userId: String): Long = prefs.getLong("rotation_counter_$userId", 0L)
+
+    /** Persists the accepted ROTv2 rotation counter. Durable, off-main. */
+    suspend fun rememberRotationCounter(userId: String, counter: Long) {
+        withContext(Dispatchers.IO) {
+            val ok = prefs.edit()
+                .putLong("rotation_counter_$userId", counter)
+                .commit()
+            if (!ok) Log.w(TAG, "rememberRotationCounter commit failed for $userId")
+        }
+    }
 
     /** Accept a key as "known" without marking it verified. Durable, off-main. */
     suspend fun rememberKey(userId: String, publicKey: String) {
@@ -97,7 +123,7 @@ class WhisperKeyTrustStore @Inject constructor(
         // M-7 FIX (reviewwhisper.md): commit() is fsync'd — must never run on Main.
         // V2-FIX (reviewwhisper.md): commit result checked, failure logged once.
         withContext(Dispatchers.IO) {
-            val ok = prefs.edit().remove("known_$userId").remove("verified_$userId").remove("known_ts_$userId").commit()
+            val ok = prefs.edit().remove("known_$userId").remove("verified_$userId").remove("known_ts_$userId").remove("rotation_counter_$userId").commit()
             if (!ok) Log.w(TAG, "forgetUser commit failed for $userId")
         }
     }

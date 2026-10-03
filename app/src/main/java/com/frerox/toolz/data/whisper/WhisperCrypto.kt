@@ -141,6 +141,54 @@ class WhisperCrypto @Inject constructor(
             "SPK:$spkKid$spkPublicKeyBase64".toByteArray()
 
         /**
+         * Phase-1A rotation certificate helpers (`cert = sign(prevKey, newKey)`).
+         * Canonical payload lives in [WireProtocol.rotationPayload] so signer and
+         * verifiers cannot drift; verification is pure/JVM-safe and fail-closed
+         * (any malformed input is false, never throws). Kept for v1 certs; new
+         * certs use the ROTv2 helpers below with counter + timestamp anti-replay.
+         */
+        fun rotationSignedPayload(prevKeyB64: String, newKeyB64: String): ByteArray =
+            com.frerox.toolz.data.whisper.WireProtocol.rotationPayload(prevKeyB64, newKeyB64)
+
+        fun verifyRotationCert(
+            prevKeyB64: String,
+            newKeyB64: String,
+            certB64: String?,
+            signerPubB64: String = prevKeyB64,
+        ): Boolean = com.frerox.toolz.data.whisper.WireProtocol.verifyRotationCert(
+            prevKeyB64, newKeyB64, certB64, signerPubB64,
+        )
+
+        /**
+         * ROTv2 rotation certificate helpers (`cert = sign(prev,new,counter,ts)`).
+         * Canonical payload lives in `WireProtocol.rotationPayloadV2`
+         * (`"ROTv2:<prev>:<new>:<counter>:<ts>"`); verification additionally
+         * requires `counter > lastCounter` and `|now - ts| <= 24h` (see the
+         * `WireProtocol.verifyRotationCert` ROTv2 overload). The v1 helpers above
+         * are kept for compat with certs issued before anti-replay existed.
+         */
+        fun rotationSignedPayloadV2(
+            prevKeyB64: String,
+            newKeyB64: String,
+            counter: Long,
+            tsMs: Long,
+        ): ByteArray =
+            com.frerox.toolz.data.whisper.WireProtocol.rotationPayloadV2(prevKeyB64, newKeyB64, counter, tsMs)
+
+        fun verifyRotationCert(
+            prevKeyB64: String,
+            newKeyB64: String,
+            certB64: String?,
+            counter: Long,
+            tsMs: Long,
+            lastCounter: Long,
+            signerPubB64: String = prevKeyB64,
+            nowMs: Long = System.currentTimeMillis(),
+        ): Boolean = com.frerox.toolz.data.whisper.WireProtocol.verifyRotationCert(
+            prevKeyB64, newKeyB64, certB64, counter, tsMs, lastCounter, signerPubB64, nowMs,
+        )
+
+        /**
          * P7a RETIREMENT GATE for [LEGACY_AAD_FALLBACK_ENABLED]. The flag may ONLY be
          * flipped to false in a dedicated release once BOTH hold:
          *  1. `legacyFallbackRetireAllowed()` == true (cutoff + 90-day grace window,
@@ -725,6 +773,45 @@ class WhisperCrypto @Inject constructor(
         signature.update(payload)
         signature.verify(Base64.decode(signatureBase64, Base64.NO_WRAP))
     }.getOrDefault(false)
+
+    /**
+     * Phase-1A: signs a key-rotation certificate `cert = sign(prevKey, newKey)`
+     * with the hardware P-256 protocol signer. The peer verifies it via
+     * [WhisperCrypto.verifyRotationCert] (or [WireProtocol.verifyRotationCert])
+     * using the publisher's signing pub. Null when the signer is unavailable
+     * (callers must fail closed — never auto-trust without the cert).
+     * Kept for v1 certs; new rotations should use the ROTv2 overload below.
+     */
+    fun signRotationCert(prevKeyB64: String, newKeyB64: String): String? =
+        signProtocol(rotationPayloadFor(prevKeyB64, newKeyB64))
+
+    /**
+     * ROTv2: signs a key-rotation certificate
+     * `cert = sign(prevKey, newKey, counter, ts)` with the hardware P-256
+     * protocol signer. [counter] must be strictly greater than the publisher's
+     * previous counter, [tsMs] is `System.currentTimeMillis()` at signing time.
+     * The peer verifies it via the ROTv2 `verifyRotationCert` overload, which
+     * additionally enforces counter monotonicity and the 24h freshness window.
+     * Null when the signer is unavailable (fail closed — never auto-trust).
+     */
+    fun signRotationCert(
+        prevKeyB64: String,
+        newKeyB64: String,
+        counter: Long,
+        tsMs: Long,
+    ): String? =
+        signProtocol(rotationPayloadFor(prevKeyB64, newKeyB64, counter, tsMs))
+
+    private fun rotationPayloadFor(prevKeyB64: String, newKeyB64: String): ByteArray =
+        WhisperCrypto.rotationSignedPayload(prevKeyB64, newKeyB64)
+
+    private fun rotationPayloadFor(
+        prevKeyB64: String,
+        newKeyB64: String,
+        counter: Long,
+        tsMs: Long,
+    ): ByteArray =
+        WhisperCrypto.rotationSignedPayloadV2(prevKeyB64, newKeyB64, counter, tsMs)
 
     /** X509 base64 of the protocol signing public key — published alongside prekeys. */
     fun protocolSigningPublicKeyBase64(): String? = runCatching {

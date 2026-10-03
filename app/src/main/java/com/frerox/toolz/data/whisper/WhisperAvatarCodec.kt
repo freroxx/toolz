@@ -9,7 +9,8 @@ import com.frerox.toolz.crypto.SessionCrypto
 import java.security.MessageDigest
 
 /**
- * V6-R7 AVATARS: deterministic encryption for profile avatars hosted on ImgBB.
+ * V6-R7 AVATARS: deterministic obfuscation (sealed blobs) for profile avatars
+ * hosted on ImgBB — NOT end-to-end encryption.
  *
  * WHY NOT PAIRWISE ECDH (like chat images)? Avatars are viewed by an OPEN set —
  * friends, discover browsers, strangers. Per-recipient envelopes would be unbounded.
@@ -23,10 +24,12 @@ import java.security.MessageDigest
  * row they are rendering — so anyone legitimate can derive the key and open the
  * image, while ImgBB hosts nothing but an opaque PNG.
  *
- * THREAT MODEL (honest): this is obfuscation-grade for third-party hosts, not
- * anonymity from whoever legitimately holds the profile row. It preserves the
- * roadmap promise "third-party image storage sees ciphertext only" without any
- * key-distribution infrastructure. AEAD still fails closed on wrong keys.
+ * THREAT MODEL (honest, obfuscation-grade): this hides avatar bytes from the
+ * third-party host only. It is NOT confidentiality from viewers: anyone with
+ * your public key can derive the sealing key (sealed — anyone with your public
+ * key can derive). It preserves the roadmap promise "third-party image storage
+ * sees ciphertext only" without any key-distribution infrastructure. AEAD still
+ * fails closed on wrong keys. Do not label this "encryption" in UI/docs.
  */
 object WhisperAvatarCodec {
 

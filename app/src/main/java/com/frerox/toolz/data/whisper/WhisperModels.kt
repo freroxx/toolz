@@ -267,6 +267,19 @@ data class WhisperMessage(
     // V6: wire protocol version (0 legacy pair, 2 envelope, 3 Double Ratchet frame).
     val protocolVersion: Int = 0,
 ) {
+    /**
+     * Phase-1A per-message forward-secrecy badge: true only for v3 Double
+     * Ratchet frames (`content_iv == "v3"` or protocolVersion 3 / v3-shaped
+     * content). v2 envelopes use static ECDH with no forward secrecy.
+     * Derived from wire shape so cached rows render without a session lookup;
+     * ViewModels may additionally AND it with the peer's `sessionProven` bit
+     * when live state is available.
+     */
+    val fsProtected: Boolean
+        get() = contentIv == com.frerox.toolz.data.whisper.session.WhisperV3Codec.IV_MARK ||
+            protocolVersion == com.frerox.toolz.data.whisper.session.WhisperV3Codec.VERSION ||
+            com.frerox.toolz.data.whisper.session.WhisperV3Codec.isV3(content)
+
     fun isSentByMe(myUserId: String) = senderId == myUserId
 
     /** Delivery & read receipt status */

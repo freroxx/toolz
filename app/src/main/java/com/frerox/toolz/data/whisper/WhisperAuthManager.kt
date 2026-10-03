@@ -13,6 +13,7 @@ import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.auth.exception.AuthErrorCode
 import io.github.jan.supabase.auth.exception.AuthRestException
 import io.github.jan.supabase.exceptions.RestException
+import io.github.jan.supabase.postgrest.postgrest
 import com.frerox.toolz.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -20,6 +21,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.net.HttpURLConnection
 import java.net.URL
@@ -63,6 +66,14 @@ class WhisperAuthManager @Inject constructor(
 
     val isCurrentEmailVerified: Boolean
         get() = supabase.auth.currentUserOrNull()?.emailConfirmedAt != null
+
+    /**
+     * Last legacy-migration prompt data seen this session (null when none).
+     * Set when a pre-P1-15 legacy derivation opens an account; the UI reads it
+     * for the "Legacy account found" warning banner (st_Whisper_Legacy_*).
+     */
+    @Volatile var pendingLegacyMigration: LegacyTokenLogin.MigrationNeeded? = null
+        private set
 
     suspend fun deleteAccount(password: String? = null): Result<Unit> = runCatching {
         val user = supabase.auth.currentUserOrNull() ?: error("Not authenticated")
@@ -221,55 +232,165 @@ class WhisperAuthManager @Inject constructor(
     }
 
     /**
-     * Signs in an anonymous-token user by trying the historically valid
-     * (virtualEmail, virtualPassword) derivation schemes, most-likely-first.
+     * Outcome of probing the pre-P1-15 legacy token derivations.
+     */
+    sealed interface LegacyTokenLogin {
+        /** No legacy derivation matched this token. */
+        data object NotFound : LegacyTokenLogin
+        /**
+         * A legacy derivation opened the account. The legacy session is already
+         * signed out again — the same token under the current scheme is a
+         * DIFFERENT GoTrue user with no data, so the UI must prompt for a
+         * username and migrate (create a current-scheme account for the same
+         * token, then copy the profile) instead of signing in. Never locks out:
+         * legacy holders always land here, with a warning banner, during the
+         * 30-day sunset window. When (and only when) the `whisper-legacy-migrate`
+         * edge function lands, it should consult `whisper_is_legacy_disabled()`
+         * (20261005 SQL) before retiring the legacy GoTrue identity via the Auth
+         * admin API — SQL alone cannot delete GoTrue users.
+         */
+        data class MigrationNeeded(
+            val username: String?,
+            val displayName: String?,
+        ) : LegacyTokenLogin
+    }
+
+    /**
+     * Typed failure surfaced through [loginWithToken] when a legacy derivation
+     * opens the account. The UI detects `it is LegacyMigrationNeededException`
+     * to show the "Legacy account found — tap Migrate" banner
+     * (st_Whisper_Legacy_*) instead of "token not recognized".
+     */
+    class LegacyMigrationNeededException(
+        val username: String?,
+        val displayName: String?,
+    ) : IllegalArgumentException(
+        "Legacy account found - tap Migrate to move to the new secure credential.",
+    )
+
+    /**
+     * Signs in an anonymous-token user with the single current
+     * (virtualEmail, virtualPassword) derivation:
+     * `SHA-256(token)@whisper.toolz.app` / `SHA-256("pwd_" + token)`.
      *
-     * V2-FIX W-A5: this legacy candidate list is FROZEN for backward compatibility —
-     * every entry maps to real accounts created under an older derivation scheme and
-     * must keep working. Prune entries ONLY after a deprecation window long enough to
-     * assume those account generations are gone (and never reorder/remove the current
-     * scheme entry).
+     * 20261005-P2: when the current derivation misses with invalid-credentials,
+     * the three pre-P1-15 legacy derivations are probed ONCE each (see
+     * [migrateLegacyTokenAccounts]) before failing. A legacy hit signs the
+     * legacy session straight back out and fails with
+     * [LegacyMigrationNeededException] carrying the legacy profile's
+     * username/displayName so the UI can prompt migration — the Result<Unit>
+     * shape is unchanged so existing callers keep compiling.
      */
     suspend fun loginWithToken(rawToken: String): Result<Unit> = runCatching {
         val cleanToken = normalizeToken(rawToken)
         require(isValidToken(cleanToken)) { "That token doesn't look right. Check for missing or extra characters." }
-        // P0-NOTE FIX (reviewwhisper.md): the old 2-emails × 5-passwords nested loop
-        // could fire up to TEN sequential GoTrue password grants per login, tripping
-        // Supabase's per-identity rate limits and locking legacy users out for an hour.
-        // Replaced with the four (email, password) combinations that actually existed
-        // historically, most-likely-first, with a hard cap of 4 network attempts.
         val fullHash = sha256(cleanToken)
-        val candidates: List<Pair<String, String>> = listOf(
-            // Current scheme (P1-15, 2026+): full 256-bit hash email.
-            fullHash + "@whisper.toolz.app" to sha256("pwd_" + cleanToken),
-            // Earliest era: truncated 128-bit email + SHA-512-truncated password.
-            fullHash.take(32) + "@whisper.toolz.app" to sha512(cleanToken).take(72),
-            fullHash.take(32) + "@whisper.toolz.app" to sha512(cleanToken),
-            fullHash.take(32) + "@whisper.toolz.app" to sha256(cleanToken).take(32),
-        ).distinctBy { it.first + it.second }
-
-        var lastException: Throwable? = null
-        for ((virtualEmail, virtualPassword) in candidates) {
-            val attempt = runCatching {
-                supabase.auth.signInWith(Email) {
-                    this.email = virtualEmail
-                    this.password = virtualPassword
-                }
-            }
-            if (attempt.isSuccess) {
-                return@runCatching
-            } else {
-                val ex = attempt.exceptionOrNull()
-                lastException = ex
-                if (ex != null && !isInvalidCredentials(ex)) {
-                    throw ex
-                }
-                // Slow down brute-force attempts over the derivation candidates.
-                delay(TOKEN_ATTEMPT_DELAY_MS)
+        val virtualEmail = fullHash + "@whisper.toolz.app"
+        val virtualPassword = sha256("pwd_" + cleanToken)
+        val attempt = runCatching {
+            supabase.auth.signInWith(Email) {
+                this.email = virtualEmail
+                this.password = virtualPassword
             }
         }
-        throw lastException ?: Exception("Invalid login credentials")
+        val ex = attempt.exceptionOrNull()
+        if (ex != null) {
+            if (!isInvalidCredentials(ex)) throw ex
+            when (val legacy = migrateLegacyTokenAccounts(cleanToken).getOrThrow()) {
+                is LegacyTokenLogin.MigrationNeeded ->
+                    throw LegacyMigrationNeededException(legacy.username, legacy.displayName)
+                LegacyTokenLogin.NotFound ->
+                    throw IllegalArgumentException(
+                        "Invalid login credentials. " + legacyLoginHint(),
+                        ex,
+                    )
+            }
+        }
     }
+
+    /**
+     * 20261005-P2 REAL implementation (replaces the Phase 1B fail-closed stub):
+     * tries the current scheme first (1 attempt), then the 3 legacy candidates
+     * ONCE each with [LEGACY_ATTEMPT_PACING_MS] pacing between probes.
+     *
+     * Legacy candidates (best-effort historical reconstruction of the
+     * truncated 128-bit email era): truncated-email + SHA-512/SHA-256 password
+     * variants. Each candidate costs exactly one GoTrue attempt, keeping login
+     * fast and clear of per-identity rate limits.
+     *
+     * On a legacy hit: reads the legacy profile's username/displayName
+     * (best-effort), immediately signs the legacy session back out, records
+     * [pendingLegacyMigration], and returns [LegacyTokenLogin.MigrationNeeded]
+     * so the UI can prompt "Legacy account found — tap Migrate to move to the
+     * new secure credential" with a username choice. Non-credential errors
+     * (network, provider_disabled, …) abort immediately — only
+     * invalid-credentials advances to the next candidate.
+     */
+    suspend fun migrateLegacyTokenAccounts(rawToken: String): Result<LegacyTokenLogin> = runCatching {
+        val cleanToken = normalizeToken(rawToken)
+        require(isValidToken(cleanToken)) { "That token doesn't look right. Check for missing or extra characters." }
+        val fullHash = sha256(cleanToken)
+        val truncatedEmail = fullHash.take(32) + "@whisper.toolz.app"
+        val candidates = listOf(
+            // L1: truncated email + current password derivation.
+            truncatedEmail to sha256("pwd_" + cleanToken),
+            // L2: truncated email + SHA-512 password variant.
+            truncatedEmail to sha512Hex("pwd_" + cleanToken),
+            // L3: truncated email + raw-token-hash password variant.
+            truncatedEmail to sha256(cleanToken),
+        )
+        for ((index, candidate) in candidates.withIndex()) {
+            if (index > 0) delay(LEGACY_ATTEMPT_PACING_MS)
+            val (email, password) = candidate
+            val probe = runCatching {
+                supabase.auth.signInWith(Email) {
+                    this.email = email
+                    this.password = password
+                }
+            }
+            if (probe.isSuccess) {
+                val (username, displayName) = readLegacyProfileInfo()
+                // Never linger in the legacy identity: sign straight back out.
+                runCatching { supabase.auth.signOut() }
+                val needed = LegacyTokenLogin.MigrationNeeded(username, displayName)
+                pendingLegacyMigration = needed
+                return@runCatching needed
+            }
+            val probeError = probe.exceptionOrNull()
+            if (probeError != null && !isInvalidCredentials(probeError)) throw probeError
+        }
+        LegacyTokenLogin.NotFound
+    }
+
+    /**
+     * Best-effort read of the just-opened legacy account's profile handle.
+     * Prefers the profiles row (same normalization the app uses everywhere);
+     * falls back to the GoTrue user_metadata stamped at registration.
+     */
+    private suspend fun readLegacyProfileInfo(): Pair<String?, String?> {
+        val uid = supabase.auth.currentUserOrNull()?.id
+        if (uid != null) {
+            runCatching {
+                supabase.postgrest.from("profiles")
+                    .select { filter { eq("id", uid) } }
+                    .decodeSingleOrNull<WhisperProfile>()
+            }.getOrNull()?.let { return it.username to it.displayName }
+        }
+        val metadata = supabase.auth.currentUserOrNull()?.userMetadata
+        val username = metadata?.get("username")?.jsonPrimitive?.contentOrNull
+            ?.takeIf { it != "null" && it.isNotBlank() }
+        val displayName = metadata?.get("display_name")?.jsonPrimitive?.contentOrNull
+            ?.takeIf { it != "null" && it.isNotBlank() }
+        return username to displayName
+    }
+
+    /**
+     * Preserved Phase 1B hint text for the pure not-found path: the account
+     * needs a one-time recovery/migration, not silent multi-candidate probing
+     * beyond the single legacy pass above.
+     */
+    private fun legacyLoginHint(): String =
+        "Legacy token accounts require one-time migration - contact support / use recovery."
 
     fun normalizeToken(raw: String): String = raw.trim().replace(Regex("[^0-9a-fA-F]"), "").lowercase()
     fun isValidToken(token: String): Boolean = token.length == 64 && token.all { it in '0'..'9' || it in 'a'..'f' }
@@ -296,12 +417,16 @@ class WhisperAuthManager @Inject constructor(
     }
 
     private fun sha256(input: String): String = MessageDigest.getInstance("SHA-256").digest(input.toByteArray(Charsets.UTF_8)).toHexString()
-    private fun sha512(input: String): String = MessageDigest.getInstance("SHA-512").digest(input.toByteArray(Charsets.UTF_8)).toHexString()
+    private fun sha512Hex(input: String): String = MessageDigest.getInstance("SHA-512").digest(input.toByteArray(Charsets.UTF_8)).toHexString()
     private fun ByteArray.toHexString(): String = joinToString("") { "%02x".format(it) }
 
     private companion object {
         const val MIN_PASSWORD_LENGTH = 10
-        const val TOKEN_ATTEMPT_DELAY_MS = 500L
+        // 20261005-P2: pacing between legacy-derivation probes — one 500ms beat
+        // per extra GoTrue attempt keeps the 3-candidate legacy pass from
+        // hammering auth under flaky networks. Current-scheme login stays single-attempt.
+        const val LEGACY_ATTEMPT_PACING_MS = 500L
+        // Phase 1B: single-attempt token login — no candidate pacing delay.
         val USERNAME_PATTERN = Regex("^[a-z0-9](?:[a-z0-9_]{1,18}[a-z0-9])?$")
     }
 }

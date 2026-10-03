@@ -261,17 +261,23 @@ class WhisperRepository @Inject constructor(
         "$senderId|$receiverId".toByteArray(Charsets.UTF_8)
 
     /**
-     * Outgoing ratchet seal. Returns (v3-frame-json, "v3") or null on ANY failure —
-     * callers fall back to the proven envelope path. NEVER blocks a message.
+     * Outgoing ratchet seal. Returns (v3-frame-json, "v3") or null on ANY failure.
      *
-     * FIX-2: when [insuranceEnvelope] is non-null (unproven session), the envelope
-     * copy rides alongside the ratchet ciphertext so the first message survives
-     * even if the responder's X3DH bundle was raced/stale.
+     * Phase-1A DOWNGRADE FAIL-CLOSED: null means "v3 unavailable" — the caller
+     * decides whether an envelope fallback is allowed. Proven v3 peers
+     * (sessionProven) must NEVER silently downgrade; only unproven peers may
+     * fall back to envelopes.
+     *
+     * Phase-1A also removed handshake-insurance: [insuranceEnvelope] is accepted
+     * for compat but IGNORED — new v3 frames never carry a v2 copy (a proven-FS
+     * frame must not smuggle a static-ECDH fallback). Legacy inbound rows with
+     * "env" still open via tryInsurance for backward compat.
      */
     private suspend fun sealWithRatchet(
         senderId: String,
         receiverId: String,
         plaintext: String,
+        // Phase-1A: new sends never carry insurance (param ignored, compat only).
         insuranceEnvelope: String? = null,
     ): Pair<String, String>? = try {
         sessionStore.mutexFor(receiverId).withLock {
@@ -286,31 +292,44 @@ class WhisperRepository @Inject constructor(
             live.dirty = true
             sessionStore.save(receiverId, live)
             ProtocolDiagnostics.increment("v3.sealed")
-            if (insuranceEnvelope != null) ProtocolDiagnostics.increment("v3.insuranceAttached")
             com.frerox.toolz.data.whisper.session.WhisperV3Codec.encode(
-                live.sessionId, sealed.header, sealed.ciphertextPacked, x3dh, insuranceEnvelope,
+                live.sessionId, sealed.header, sealed.ciphertextPacked, x3dh,
             ) to IV_V3
         }
     } catch (e: kotlinx.coroutines.CancellationException) {
         throw e
     } catch (e: Exception) {
         ProtocolDiagnostics.increment("v3.sealFail")
-        android.util.Log.w("WhisperRepo", "v3 seal failed — falling back to envelope", e)
+        android.util.Log.w("WhisperRepo", "v3 seal failed — fail-closed: no silent downgrade here", e)
         null
     }
+
+    /** Phase-1A: true once a frame from THIS session opened via the pure ratchet path. */
+    fun isPeerSessionProven(peerId: String): Boolean =
+        sessionStore.peek(peerId)?.sessionProven == true
+
+    /** Phase-1A per-message FS badge helper (v + sessionProven exposed for UI). */
+    fun messageFsProtected(msg: WhisperMessage): Boolean =
+        msg.fsProtected && (msg.contentIv == IV_V3 || isPeerSessionProven(if (msg.senderId == myId) msg.receiverId else msg.senderId))
 
     /**
      * X3DH initiate → Double Ratchet initiator state, persisted with its pending
      * handshake header. Caller MUST hold [sessionStore.mutexFor]. Null on any failure.
+     *
+     * Residual-downgrade bookkeeping: every failure path records one consecutive
+     * failure in the session store; success resets the count. At 3 consecutive
+     * failures the send path blocks the insecure envelope fallback (retry later).
      */
     private suspend fun establishOutboundLocked(peerId: String): com.frerox.toolz.data.whisper.session.WhisperSessionStore.Live? {
         establishAttemptAtMs[peerId] = System.currentTimeMillis()
         val initiated = sessionFactory.initiateSession(peerId).getOrNull() ?: run {
             ProtocolDiagnostics.increment("v3.establishFail")
+            sessionStore.recordEstablishFailure(peerId)
             return null
         }
         val skWrapped = crypto.wrapWithKeystoreAes(initiated.sessionKey) ?: run {
             ProtocolDiagnostics.increment("v3.establishFail")
+            sessionStore.recordEstablishFailure(peerId)
             return null
         }
         val ratchet = runCatching {
@@ -319,6 +338,7 @@ class WhisperRepository @Inject constructor(
             )
         }.getOrNull() ?: run {
             ProtocolDiagnostics.increment("v3.establishFail")
+            sessionStore.recordEstablishFailure(peerId)
             return null
         }
         val live = com.frerox.toolz.data.whisper.session.WhisperSessionStore.Live(
@@ -330,8 +350,39 @@ class WhisperRepository @Inject constructor(
             ratchet = ratchet,
         )
         sessionStore.save(peerId, live)
+        sessionStore.recordEstablishSuccess(peerId)
         ProtocolDiagnostics.log("v3: established outbound session ${live.sessionId}")
         return live
+    }
+
+    /**
+     * Ratchet-gap recovery: a `WhisperRatchetLostMessage` caused by a skipped-key
+     * gap overflow (> MAX_SKIPPED) means this session can never catch up — start a
+     * fresh handshake fire-and-forget (rate-limited to one attempt per 30s per
+     * peer) instead of leaving the conversation permanently locked. The current
+     * message still renders locked (honest placeholder); everything newer flows
+     * once the peer's next frame bootstraps the new session. Emits [ratchetGapNotice]
+     * so the UI can show "Missed too many messages - starting fresh session, ask
+     * peer to resend".
+     */
+    private val lastGapHandshakeAtMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val _ratchetGapNotice = MutableSharedFlow<String>(extraBufferCapacity = 8)
+
+    /** Emits a peerId whenever a ratchet gap overflow starts a fresh handshake. */
+    val ratchetGapNotice: Flow<String> = _ratchetGapNotice
+
+    internal fun handleRatchetGap(peerId: String) {
+        val now = System.currentTimeMillis()
+        if (!WireProtocol.shouldRefreshOnGap(lastGapHandshakeAtMs[peerId], now)) return
+        lastGapHandshakeAtMs[peerId] = now
+        ProtocolDiagnostics.increment("ratchet.gapHandshake")
+        ProtocolDiagnostics.log("ratchet.gap: Missed too many messages - starting fresh session, ask peer to resend")
+        _ratchetGapNotice.tryEmit(peerId)
+        appScope.launch {
+            runCatching {
+                sessionStore.mutexFor(peerId).withLock { establishOutboundLocked(peerId) }
+            }
+        }
     }
 
     /**
@@ -468,8 +519,10 @@ class WhisperRepository @Inject constructor(
         WhisperTombstone.LOCKED_OLDER_KEY
 
     /**
-     * Every recipient public key this device would plausibly need to encrypt for,
-     * keyed by kid (short hash) and capped: [trusted pinned] + [freshly seen server].
+     * Phase-1A FAIL-CLOSED recipient set: the pinned (TOFU) key plus in-memory
+     * views, BEFORE cert filtering. First contact (no pin) returns whatever is
+     * known (TOFU bootstrap); pinned peers are narrowed by
+     * [filterKeysChainedToPinned] in [buildEnvelopeString].
      */
     private fun recipientKeyCandidates(userId: String): LinkedHashMap<String, String> {
         val candidates = LinkedHashMap<String, String>()
@@ -479,10 +532,28 @@ class WhisperRepository @Inject constructor(
     }
 
     /**
-     * FIX-4 helper: builds a V5 envelope for [content] addressed to [receiverId],
-     * using every known candidate key plus an optional fresh server pub.
+     * Phase-1A fail-closed chain filter. Only the pinned key — or a candidate
+     * chaining to it via a valid rotation cert — may receive ciphertext.
+     * Rotation certs are looked up per-candidate via [rotationCertFor] (no
+     * transport yet → empty, so only the pin passes until certs ship).
+     */
+    internal fun filterKeysChainedToPinned(
+        pinnedKeyB64: String?,
+        candidates: Map<String, String>,
+        certs: Map<String, String?> = emptyMap(),
+    ): Map<String, String> = WireProtocol.filterKeysChainedToPinned(pinnedKeyB64, candidates, certs)
+
+    /** Phase-1A: rotation-cert lookup per candidate key (no wire transport yet). */
+    private fun rotationCertFor(candidatePubB64: String): String? = null
+
+    /**
+     * FIX-4 helper (Phase-1A fail-closed): builds a V5 envelope for [content]
+     * addressed to [receiverId], sealing ONLY to the pinned key or keys chaining
+     * to it via a valid rotation cert. A server "fresh" key that does not chain
+     * is DROPPED (never fan-out sealed) — callers must block the send and emit
+     * the key-change warning instead.
      * Drops are counted so the next diagnostics export names whether the fresh key
-     * was unusable (parse failure) vs. simply stale.
+     * was unusable (parse failure) vs. simply unchained.
      */
     private suspend fun buildEnvelopeString(
         content: String,
@@ -490,8 +561,22 @@ class WhisperRepository @Inject constructor(
         receiverPubKey: String?,
         senderId: String,
     ): String? {
-        val candidates = recipientKeyCandidates(receiverId).toMutableMap()
-        receiverPubKey?.let { candidates.putIfAbsent(WhisperEnvelope.keyId(it), it) }
+        val raw = recipientKeyCandidates(receiverId).toMutableMap()
+        receiverPubKey?.let { raw.putIfAbsent(WhisperEnvelope.keyId(it), it) }
+        val pinned = keyTrustStore.knownKey(receiverId)
+        val certs = raw.values.associateWith { rotationCertFor(it) }
+        val candidates = filterKeysChainedToPinned(pinned, raw, certs).toMutableMap()
+        val droppedUnchained = raw.size - candidates.size
+        if (droppedUnchained > 0) {
+            ProtocolDiagnostics.increment("send.unchainedKeyDropped")
+            ProtocolDiagnostics.log(
+                "send.unchainedDropped[$receiverId]: dropped $droppedUnchained/${raw.size} unchained kids=" +
+                    (raw.keys - candidates.keys),
+            )
+            if (receiveKeyNotified.add("$receiverId|${receiverPubKey ?: "?"}")) {
+                _receiveKeyChanged.tryEmit(receiverId)
+            }
+        }
         if (candidates.isEmpty()) return null
         var dropped = 0
         val entries = candidates.mapNotNull { (kid, pub) ->
@@ -510,31 +595,73 @@ class WhisperRepository @Inject constructor(
     }
 
     /**
-     * V5.1 RELIABILITY: when a decrypt succeeds against the FRESH server key while a
-     * different older key was pinned, adopt the fresh key automatically whenever the
-     * server classifies the rotation as recent. This is what removes the manual
-     * rotate-and-verify dance: peers converge on the new key transparently, and the
-     * UI shows only the passive "rotated automatically" notice.
+     * Phase-1A PROOF-GATED adoption: a fresh server/in-band key is pinned ONLY
+     * when it equals the trusted pin already, or chains to it via a valid
+     * rotation cert (old-key-signs-new). The in-band `ik` stays decrypt-trial
+     * material only — it is NEVER adopted on trial success alone. Verified
+     * (QR) peers never auto-adopt: any difference requires manual re-verify.
+     * Without a cert this is a no-op that emits the key-change warning.
+     *
+     * ROTv2: when [rotationCounter]/[rotationTsMs] accompany the cert, the ROTv2
+     * overload is used (counter must exceed [lastRotationCounterFor], ts within
+     * 24h) and the accepted counter is persisted via
+     * [WhisperKeyTrustStore.rememberRotationCounter]. The v1 path is kept for
+     * certs issued before anti-replay existed.
      */
-    private suspend fun adoptFreshKeyIfFresh(userId: String, freshPublicKey: String?) {
+    private suspend fun adoptFreshKeyIfFresh(
+        userId: String,
+        freshPublicKey: String?,
+        rotationCert: String? = null,
+        rotationCounter: Long? = null,
+        rotationTsMs: Long? = null,
+    ) {
         if (freshPublicKey.isNullOrBlank()) return
         val trusted = peerKeyFor(userId)
         if (trusted == freshPublicKey) return
-        val profile = profileCache[userId]
-        if (!isFreshServerRotation(profile ?: run {
-            // adopt path may be called right after a forced fetch that refreshed cache
-            profileCacheTs[userId]?.let { cachedProfile(userId) } ?: profileCache[userId]
-        })) {
-            ProtocolDiagnostics.log("keyAdopt: skipped (not fresh) for ${userId.take(6)}…")
+        if (trusted != null && keyTrustStore.isVerified(userId)) {
+            ProtocolDiagnostics.log("keyAdopt: blocked (verified peer) for ${userId.take(6)}…")
+            if (receiveKeyNotified.add("$userId|$freshPublicKey")) _receiveKeyChanged.tryEmit(userId)
             return
         }
-        runCatchingCE {
-            keyTrustStore.rememberKey(userId, freshPublicKey)
+        val cert = rotationCert ?: rotationCertFor(freshPublicKey)
+        val chainedV1 = trusted != null && cert != null &&
+            WireProtocol.verifyRotationCert(trusted, freshPublicKey, cert)
+        val chainedV2 = trusted != null && cert != null && rotationCounter != null && rotationTsMs != null &&
+            WireProtocol.verifyRotationCert(
+                trusted, freshPublicKey, cert,
+                rotationCounter, rotationTsMs, lastRotationCounterFor(userId),
+            )
+        if (trusted == null || chainedV1 || chainedV2) {
+            if (trusted == null) {
+                // First contact TOFU only — no prior pin to protect.
+                runCatchingCE {
+                    keyTrustStore.rememberKey(userId, freshPublicKey)
+                }
+                cachePeerKey(userId, freshPublicKey)
+                ProtocolDiagnostics.increment("key.autoAdopted")
+                ProtocolDiagnostics.log("keyAdopt: TOFU pinned fresh key for ${userId.take(6)}…")
+                return
+            }
+            runCatchingCE {
+                keyTrustStore.rememberKey(userId, freshPublicKey)
+            }
+            if (chainedV2 && rotationCounter != null) {
+                runCatchingCE {
+                    keyTrustStore.rememberRotationCounter(userId, rotationCounter)
+                }
+            }
+            cachePeerKey(userId, freshPublicKey)
+            ProtocolDiagnostics.increment("key.autoAdopted")
+            ProtocolDiagnostics.log("keyAdopt: adopted cert-chained key for ${userId.take(6)}…")
+            return
         }
-        cachePeerKey(userId, freshPublicKey)
-        ProtocolDiagnostics.increment("key.autoAdopted")
-        ProtocolDiagnostics.log("keyAdopt: adopted fresh key for ${userId.take(6)}…")
+        ProtocolDiagnostics.log("keyAdopt: skipped (no valid rotation cert) for ${userId.take(6)}…")
+        if (receiveKeyNotified.add("$userId|$freshPublicKey")) _receiveKeyChanged.tryEmit(userId)
     }
+
+    /** ROTv2 anti-replay: last accepted rotation counter for a peer (0 = none yet). */
+    private fun lastRotationCounterFor(userId: String): Long =
+        keyTrustStore.rotationCounter(userId)
 
     /**
      * Single decryption entry point for every stored form:
@@ -556,7 +683,7 @@ class WhisperRepository @Inject constructor(
         // V6 (planwhisper.md §3.4): v3 Double Ratchet frames open first; the entire
         // legacy ladder below stays intact for peers without a session.
         if (ivMark == IV_V3 || com.frerox.toolz.data.whisper.session.WhisperV3Codec.isV3(rawContent)) {
-            return openV3Frame(rawContent, partnerId, msgSenderId, msgReceiverId)
+            return openV3Frame(rawContent, partnerId, msgSenderId, msgReceiverId, createdAtEpochMs)
         }
         // V5.2 — THE decisive fix for the field-reported "[Encrypted with an older
         // key]" bug: candidate PEER keys are tried exhaustively per envelope entry.
@@ -582,8 +709,9 @@ class WhisperRepository @Inject constructor(
         }
 
         // Every partner public key we might need to derive with, most-likely-first.
-        // V6-R7: the envelope's IN-BAND sender key joins the trial set — delivery no
-        // longer depends on any server-stored view of the partner being fresh.
+        // Phase-1A: the envelope's IN-BAND sender key joins the TRIAL set only —
+        // it may open a row (availability) but is NEVER adopted into trust
+        // (see adoptFreshKeyIfFresh / decryptRealtimeMessage proof gating).
         val peerCandidates = buildList {
             add(peerKeyFor(partnerId))
             add(extraFreshPeerKey)
@@ -660,20 +788,37 @@ class WhisperRepository @Inject constructor(
      *  - same-session replay → skipped (re-running X3DH would reset advanced chains);
      *  - rejected racing handshake → frame renders locked once; the deterministic
      *    tie-break guarantees both sides converge on ONE session.
+     *
+     * Legacy `env` insurance (pre-Phase-1A rows) is additionally gated by
+     * [WhisperV3Codec.LEGACY_ENV_CUTOFF_MS]: rows created after 2026-12-01 never
+     * open via `env` (rejected fail-closed). A gap-overflow lock
+     * (`WhisperRatchetLostMessage` from a > MAX_SKIPPED gap) triggers
+     * [handleRatchetGap] — a fresh handshake — instead of a permanent lock.
      */
     private suspend fun openV3Frame(
         rawContent: String,
         partnerId: String,
         msgSenderId: String,
         msgReceiverId: String,
+        rowCreatedAtEpochMs: Long = Long.MAX_VALUE,
     ): String? {
         val codec = com.frerox.toolz.data.whisper.session.WhisperV3Codec
         val frame = codec.parse(rawContent) ?: run {
             ProtocolDiagnostics.increment("v3.parseFail")
             return null
         }
-        // FIX-2 helper: try the insurance envelope copy when the ratchet path fails.
+        // LEGACY insurance path (pre-Phase-1A): old v3 rows may carry a parallel
+        // v2 "env" copy. New sends never produce it (see sealWithRatchet), but
+        // inbound legacy frames still try it before rendering locked — unless the
+        // row was created after LEGACY_ENV_CUTOFF_MS (2026-12-01), in which case
+        // the insurance copy is rejected fail-closed (replay/misbehaving peer).
         suspend fun tryInsurance(): String? {
+            if (!codec.insuranceAllowed(rowCreatedAtEpochMs)) {
+                ProtocolDiagnostics.increment("v3.insuranceCutoff")
+                ProtocolDiagnostics.log("v3: insurance rejected (row past env cutoff) for ${partnerId.take(6)}…")
+                return null
+            }
+            @Suppress("DEPRECATION")
             val env = frame.insuranceEnvelope ?: return null
             val opened = decryptUnified(
                 rawContent = env,
@@ -773,6 +918,11 @@ class WhisperRepository @Inject constructor(
             } catch (e: com.frerox.toolz.data.whisper.session.WhisperRatchetLostMessage) {
                 ProtocolDiagnostics.increment("v3.locked")
                 android.util.Log.w("WhisperRepo", "v3 frame locked (${e.message})")
+                // Gap overflow (> MAX_SKIPPED) can never catch up — start a fresh
+                // handshake instead of leaving the conversation permanently locked.
+                // Other losses (retired key, bad AEAD) keep the honest placeholder
+                // and rely on server catch-up.
+                if (WireProtocol.isGapLoss(e.message)) handleRatchetGap(partnerId)
                 tryInsurance()?.let { return@withLock maybeHealFromPlaintext(it, msgSenderId, partnerId, System.currentTimeMillis()) }
                 return@withLock null
             }
@@ -1219,25 +1369,41 @@ class WhisperRepository @Inject constructor(
         val receiverProfile = getProfile(receiverId, forceRefresh = true).getOrNull()
         val receiverPubKey = receiverProfile?.publicKey
         val knownKey = keyTrustStore.knownKey(receiverId)
+        // Phase-1A FAIL-CLOSED key change: any server key that differs from the
+        // pinned TOFU key BLOCKS the send until the user reviews it — fan-out
+        // sealing to an unproven key would hand ciphertext to whoever controls
+        // the new row (MITM). First contact (no pin) proceeds via TOFU.
+        // ROTATED_AUTO now requires a rotation cert chaining to the pin;
+        // verified (QR) peers always require manual re-verify.
         if (knownKey != null && receiverPubKey != null && knownKey != receiverPubKey) {
-            // P0-1 FIX (reviewwhisper.md): previously EVERY key mismatch hard-blocked
-            // sending — including routine monthly fleet auto-rotations — bricking
-            // conversations until manual review.
-            // V6-R4 FIX (field report "texting requires rotate+verify on BOTH devices"):
-            // the remaining CHANGED branch still hard-blocked, which turned any stale
-            // divergence into a manual dance. Sending now NEVER blocks: the envelope
-            // carries copies for EVERY known candidate key (pinned + fresh below), so
-            // whichever key the recipient actually controls opens it. The mismatch is
-            // surfaced passively via receiveKeyChanged (banner), and the receiver's
-            // proof-of-decryption adopts the right key (see decryptRealtimeMessage).
-            if (receiveKeyNotified.add("$receiverId|$receiverPubKey")) {
-                _receiveKeyChanged.tryEmit(receiverId)
-                ProtocolDiagnostics.log("keyDrift: sending with both pinned+fresh candidates to ${receiverId.take(6)}…")
+            val rotationCert = rotationCertFor(receiverPubKey)
+            val strict = WireProtocol.classifyKeyChangeStrict(
+                knownKey = knownKey,
+                currentKey = receiverPubKey,
+                isVerified = keyTrustStore.isVerified(receiverId),
+                rotationCert = rotationCert,
+            )
+            if (strict == KeyTrustStatus.CHANGED) {
+                if (receiveKeyNotified.add("$receiverId|$receiverPubKey")) {
+                    _receiveKeyChanged.tryEmit(receiverId)
+                }
+                ProtocolDiagnostics.increment("send.fail.key_changed")
+                ProtocolDiagnostics.log("send.fail[key_changed]: pinned≠server for ${receiverId.take(6)}… — blocked until review")
+                sendFail(
+                    "key_changed",
+                    "Partner key changed. Review the safety number before sending.",
+                )
+            } else if (strict == KeyTrustStatus.ROTATED_AUTO) {
+                // Cert-chained rotation: informational only, send proceeds to the
+                // pinned+chained set below.
+                if (receiveKeyNotified.add("$receiverId|$receiverPubKey")) {
+                    _receiveKeyChanged.tryEmit(receiverId)
+                }
+                ProtocolDiagnostics.log("keyDrift: cert-chained rotation for ${receiverId.take(6)}…")
             }
         }
-        // V5: encrypt to EVERY recipient key we know (fresh + pinned). Whichever copy
-        // matches a key the recipient controls opens the message — key drift can no
-        // longer produce unreadable text.
+        // Phase-1A: envelopes seal ONLY to the pinned key (+ cert-chained keys).
+        // An unproven server key never receives a copy (see buildEnvelopeString).
         // V6-R6 (#2): identity triage BEFORE any encryption — a dangling active alias
         // (historic sweep bug) made getPrivateKey() null and failed every seal. Repair
         // inline, then republish so the server row matches the restored identity.
@@ -1255,28 +1421,53 @@ class WhisperRepository @Inject constructor(
         // ratchet-first / v3-mandatory decisions are gated on.
         ProtocolDiagnostics.increment("send.negotiated.v$negotiatedVersion")
         ProtocolDiagnostics.increment("send.negotiated.total")
-        // V6 (planwhisper.md §3.2): Double Ratchet first; ANY failure falls through to
-        // the proven V5 envelope — a handshake problem can never block a message.
-        // FIX-2: unverified sessions carry a handshake-insurance envelope copy.
+        // V6 (planwhisper.md §3.2): Double Ratchet first; Phase-1A DOWNGRADE
+        // FAIL-CLOSED — a proven v3 peer never silently falls back to the v2
+        // envelope. Only unproven peers may use the envelope path.
+        // Phase-1A: no insurance envelope on new frames (see sealWithRatchet).
         var encryptedPair: Pair<String, String>? = null
+        var v3AttemptedProven = false
         if (shouldUseV3(receiverId)) {
-            var insurance: String? = null
-            val peek = sessionStore.peek(receiverId)
-            val needsInsurance = peek == null || !peek.sessionProven
-            if (needsInsurance) {
-                insurance = buildEnvelopeString(content, receiverId, receiverPubKey, currentId)
-                if (insurance != null) {
-                    ProtocolDiagnostics.increment("v3.insuranceAttached")
-                } else {
-                    ProtocolDiagnostics.increment("v3.insuranceBuildFailed")
+            v3AttemptedProven = isPeerSessionProven(receiverId)
+            ProtocolDiagnostics.log("send: negotiated v3 to ${receiverId.take(6)}…")
+            encryptedPair = sealWithRatchet(currentId, receiverId, content)
+            if (encryptedPair == null && v3AttemptedProven) {
+                ProtocolDiagnostics.increment("send.fail.v3_downgrade_blocked")
+                ProtocolDiagnostics.log("send.fail[v3_downgrade_blocked]: proven v3 peer — blocked insecure fallback")
+                if (receiveKeyNotified.add("$receiverId|v3-downgrade")) {
+                    _receiveKeyChanged.tryEmit(receiverId)
                 }
+                sendFail(
+                    "v3_downgrade_blocked",
+                    "Peer supports v3, blocked insecure fallback. Retry when the session recovers.",
+                )
             }
-            ProtocolDiagnostics.log("send: negotiated v3 to ${receiverId.take(6)}…${if (insurance != null) " (+insurance)" else ""}")
-            encryptedPair = sealWithRatchet(currentId, receiverId, content, insurance)
         } else {
             ProtocolDiagnostics.log("send: negotiated v$negotiatedVersion to ${receiverId.take(6)}… (envelope)")
         }
         if (encryptedPair == null) {
+            // Envelope fallback is allowed ONLY for unproven peers (v3 was not
+            // attempted, or the session was never proven). Proven peers returned
+            // above instead of downgrading.
+            // Residual-downgrade N-block: with no live/proven session and 3
+            // consecutive handshake failures, the envelope fallback would silently
+            // drop to static-ECDH (no forward secrecy) under persistent failure —
+            // block with a retry-later warning instead (in-memory count, resets on
+            // the next successful establish or process restart).
+            val hasLiveSession = sessionStore.peek(receiverId) != null
+            val sessionProven = isPeerSessionProven(receiverId) || v3AttemptedProven
+            val failedEstablishes = sessionStore.failedEstablishCount(receiverId)
+            if (WireProtocol.shouldBlockDowngradeAfterFails(hasLiveSession, sessionProven, failedEstablishes)) {
+                ProtocolDiagnostics.increment("send.blocked.downgrade_N")
+                ProtocolDiagnostics.log("send.blocked[downgrade_N]: handshake failed ${failedEstablishes}x for ${receiverId.take(6)}… — blocked insecure fallback, retry later")
+                if (receiveKeyNotified.add("$receiverId|downgrade-N")) {
+                    _receiveKeyChanged.tryEmit(receiverId)
+                }
+                sendFail(
+                    "downgrade_blocked_N",
+                    "Handshake repeatedly failed (3x) - blocked insecure fallback, retry later",
+                )
+            }
             val hasAnyCandidate = recipientKeyCandidates(receiverId).isNotEmpty() || receiverPubKey != null
             val envelope = buildEnvelopeString(content, receiverId, receiverPubKey, currentId)
                 ?: sendFail(
@@ -1373,9 +1564,19 @@ class WhisperRepository @Inject constructor(
         }
         getProfile(receiverId, forceRefresh = true).getOrNull()?.publicKey
             ?: error("Secure image delivery is unavailable because this user has no encryption key.")
-        // V5: kid-tagged envelope over the attachment cipher bytes; the PNG transport is
-        // unaware — it just carries the envelope JSON instead of a single ciphertext.
-        val imgCandidates = recipientKeyCandidates(receiverId).toMutableMap()
+        // Phase-1A FAIL-CLOSED: image copies seal ONLY to the pinned key or keys
+        // chaining to it via a rotation cert — never fan-out to an unproven
+        // server key. A key mismatch here blocks like sendMessage (same review).
+        val knownImg = keyTrustStore.knownKey(receiverId)
+        val rawImg = recipientKeyCandidates(receiverId).toMutableMap()
+        val imgCandidates = filterKeysChainedToPinned(
+            knownImg, rawImg, rawImg.values.associateWith { rotationCertFor(it) },
+        ).toMutableMap()
+        if (rawImg.size > imgCandidates.size) {
+            ProtocolDiagnostics.increment("send.unchainedKeyDropped")
+            if (receiveKeyNotified.add("$receiverId|img-key-changed")) _receiveKeyChanged.tryEmit(receiverId)
+            error("Partner key changed. Review the safety number before sending.")
+        }
         if (imgCandidates.isEmpty()) error("Secure image delivery is unavailable because this user has no encryption key.")
         val imgEntries = imgCandidates.mapNotNull { (kid, pub) ->
             crypto.encryptAttachment(imageBytes, pub, myIdNow, receiverId)?.let {
@@ -1868,14 +2069,29 @@ class WhisperRepository @Inject constructor(
                 extraFreshPeerKey = fresh,
             )
             if (retried != null) {
-                // V6-R4 FIX: PROOF-based adoption — the fresh key just successfully
-                // authenticated a message from this peer, which is stronger evidence
-                // than any updated_at heuristic. Pin it immediately so every later
-                // send/preview uses the key the partner actually controls (this is
-                // what removes the manual rotate+verify dance end-to-end).
-                runCatchingCE { keyTrustStore.rememberKey(peerId, fresh) }
-                cachePeerKey(peerId, fresh)
-                ProtocolDiagnostics.increment("key.adoptedByProof")
+                // Phase-1A PROOF-GATED adoption: a successful trial decrypt with a
+                // fresh/in-band key is NOT trust — it only proves the sender holds
+                // the matching private half, not that the key is the pinned
+                // identity. Pin it ONLY when it equals the pin (no-op) or chains
+                // via a valid rotation cert; verified peers never auto-adopt.
+                // Trial plaintext is still returned (availability), but trust
+                // stays fail-closed and the key-change warning fires.
+                val cert = rotationCertFor(fresh)
+                val chained = trusted != null && cert != null &&
+                    WireProtocol.verifyRotationCert(trusted, fresh, cert)
+                if (trusted == null) {
+                    // First-contact TOFU: no pin yet, safe to pin the proven key.
+                    runCatchingCE { keyTrustStore.rememberKey(peerId, fresh) }
+                    cachePeerKey(peerId, fresh)
+                    ProtocolDiagnostics.increment("key.adoptedByProof")
+                } else if (!keyTrustStore.isVerified(peerId) && chained) {
+                    runCatchingCE { keyTrustStore.rememberKey(peerId, fresh) }
+                    cachePeerKey(peerId, fresh)
+                    ProtocolDiagnostics.increment("key.adoptedByProof")
+                } else {
+                    ProtocolDiagnostics.log("key.adoptBlocked: trial opened but no cert/verified for ${peerId.take(6)}…")
+                    if (receiveKeyNotified.add("$peerId|$fresh")) _receiveKeyChanged.tryEmit(peerId)
+                }
                 return retried
             }
         }
@@ -2906,56 +3122,63 @@ class WhisperRepository @Inject constructor(
     // ─────────────────────────────────────────────────────────────
 
     /**
-     * P0-1 FIX (reviewwhisper.md): single source of truth for classifying a partner key
-     * change. The old code had three contradictory signals (30-day rotation interval,
-     * a 6-day "expected" heuristic, and copy claiming weekly rotation), which made
-     * nearly every fleet-wide auto-rotation surface as a scary CHANGED warning AND
-     * hard-block sending until manual review.
+     * Phase-1A FAIL-CLOSED single source of truth for classifying a partner key
+     * change. Time windows never auto-accept (a MITM rotates "fresh" too):
+     * MATCH iff the server key equals the pinned TOFU key; any other difference
+     * is CHANGED unless a rotation cert chains the new key to the pin (and the
+     * peer was not QR-verified — verified safety numbers always need manual
+     * re-verify). Kept as a suspend adapter over the pure
+     * [WireProtocol.classifyKeyChangeStrict] for the trust store + profile row.
      *
-     * Classification now:
-     *  - known == current                     → MATCH
-     *  - server row updated < FRESH_WINDOW    → ROTATED_AUTO (just rotated — calm info)
-     *  - known key age ≥ interval − 24h       → ROTATED_AUTO (aged-out scheduled rotation)
-     *  - anything else                        → CHANGED (genuine unexpected change → warn)
+     * ROTv2: when [rotationCounter]/[rotationTsMs] accompany the cert, the ROTv2
+     * overload is used (counter must exceed the stored last counter, ts within
+     * 24h). Cert transport is not on the profile row yet, so the default path
+     * stays v1 (null cert = CHANGED by design, fail closed until certs ship).
      */
     private suspend fun classifyKeyChange(
         otherUserId: String,
         profile: WhisperProfile,
+        rotationCert: String? = null,
+        rotationCounter: Long? = null,
+        rotationTsMs: Long? = null,
     ): KeyTrustStatus {
         val current = profile.publicKey.orEmpty()
         val known = keyTrustStore.knownKey(otherUserId)
-
-        val serverUpdatedAgeMs = runCatching {
-            java.time.OffsetDateTime.parse(profile.updatedAt).toInstant().toEpochMilli()
-                .let { System.currentTimeMillis() - it }
-        }.getOrNull() ?: Long.MAX_VALUE
-
-        val knownTs = keyTrustStore.knownKeyTimestamp(otherUserId)
-        val knownAge = if (knownTs == 0L) Long.MAX_VALUE else System.currentTimeMillis() - knownTs
-
-        // P4a: pure decision — see [WireProtocol.classifyKeyChange] for the rule.
-        return WireProtocol.classifyKeyChange(
+        if (known == null || known == current || current.isBlank()) return KeyTrustStatus.MATCH
+        // Rotation cert transport is not on the profile row yet — null means no
+        // proof, which is CHANGED by design (fail closed until certs ship).
+        val cert = rotationCert ?: rotationCertFor(current)
+        if (cert != null && rotationCounter != null && rotationTsMs != null) {
+            return WireProtocol.classifyKeyChangeStrict(
+                knownKey = known,
+                currentKey = current,
+                isVerified = keyTrustStore.isVerified(otherUserId),
+                rotationCert = cert,
+                counter = rotationCounter,
+                tsMs = rotationTsMs,
+                lastCounter = lastRotationCounterFor(otherUserId),
+            )
+        }
+        return WireProtocol.classifyKeyChangeStrict(
             knownKey = known,
             currentKey = current,
-            serverRowUpdateAgeMs = serverUpdatedAgeMs,
-            knownKeyAgeMs = knownAge,
-            freshRotationWindowMs = WhisperKeyRotationStore.FRESH_ROTATION_WINDOW_MS,
-            rotationIntervalMs = WhisperKeyRotationStore.ROTATE_INTERVAL_MS,
+            isVerified = keyTrustStore.isVerified(otherUserId),
+            rotationCert = cert,
         )
     }
 
     /**
-     * True when a partner key mismatch is a routine fresh rotation and messaging may
-     * continue without a manual safety-number review. Used by [sendMessage] so monthly
-     * fleet rotations no longer brick conversations (P0-1).
+     * Phase-1A deprecated: time-window freshness no longer confers trust.
+     * Kept for compat; always consult [classifyKeyChangeStrict] instead.
      */
+    @Deprecated("Fail-closed: freshness no longer auto-accepts. Use strict classification.")
     private fun isFreshServerRotation(profile: WhisperProfile?): Boolean {
         val updatedAt = profile?.updatedAt ?: return false
         val ageMs = runCatching {
             java.time.OffsetDateTime.parse(updatedAt).toInstant().toEpochMilli()
                 .let { System.currentTimeMillis() - it }
         }.getOrNull()
-        // P4a: pure decision — see [WireProtocol.isFreshServerRotation].
+        @Suppress("DEPRECATION")
         return WireProtocol.isFreshServerRotation(ageMs, WhisperKeyRotationStore.FRESH_ROTATION_WINDOW_MS)
     }
 
@@ -2994,10 +3217,13 @@ class WhisperRepository @Inject constructor(
                 "staged=${crypto.hasStagedAliases()}",
         )
 
-        // V2-FIX (reviewwhisper.md) R-H1: an auto-accepted rotation detected here also
-        // emits the passive key-change signal — once per (user,key) via receiveKeyNotified,
-        // matching cachePeerKey/sendMessage so the UI can show a non-blocking banner.
-        if (status == KeyTrustStatus.ROTATED_AUTO && receiveKeyNotified.add("$otherUserId|$currentKey")) {
+        // Phase-1A: ANY non-MATCH (CHANGED or cert-chained ROTATED_AUTO) emits the
+        // key-change signal once per (user,key) so the UI banner + send-block
+        // stay in sync with cachePeerKey/sendMessage. CHANGED blocks sends until
+        // review; ROTATED_AUTO (valid cert only) is informational.
+        if ((status == KeyTrustStatus.ROTATED_AUTO || status == KeyTrustStatus.CHANGED) &&
+            receiveKeyNotified.add("$otherUserId|$currentKey")
+        ) {
             _receiveKeyChanged.tryEmit(otherUserId)
         }
 

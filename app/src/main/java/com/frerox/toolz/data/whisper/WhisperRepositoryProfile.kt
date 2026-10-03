@@ -15,6 +15,8 @@ package com.frerox.toolz.data.whisper
  * cachedProfile/cacheProfile, updateProfileRowWithFreshness.
  */
 import io.github.jan.supabase.auth.auth
+import io.github.jan.supabase.exceptions.RestException
+import io.github.jan.supabase.postgrest.rpc
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
@@ -164,6 +166,10 @@ suspend fun WhisperRepository.getMyProfile(forceRefresh: Boolean = false): Resul
         val q = query.trim()
         // Gate trivial queries: a single-char ilike '%x%' scan per debounce wastes DB
         // cycles and produces noisy result churn while typing.
+        // 20261003-P1 note: the <2-char gate above stays (enumeration hardening);
+        // direct ilike search remains client-side-filtered with the same privacy
+        // contract as the discover RPC fallback (private/hidden excluded). No dedicated
+        // server search RPC exists yet — if one lands, migrate this call site to it.
         if (q.length < 2) return@runCatching emptyList()
         // M-13 FIX (reviewwhisper.md): escape the backslash FIRST — a literal "\" in the
         // query would otherwise neutralize the %/_ escapes that follow it.
@@ -185,10 +191,50 @@ suspend fun WhisperRepository.getMyProfile(forceRefresh: Boolean = false): Resul
     }
 
     suspend fun WhisperRepository.checkUsernameAvailable(username: String): Result<Boolean> = runCatching {
+        // 20261005-P2 (enumeration hardening): prefer the quota-guarded
+        // `whisper_check_username_available(p_username)` RPC (10 checks/hour/caller,
+        // 1-bit boolean oracle, canonical-charset validation) over the direct
+        // exact-eq probe on profiles(username), which is an unbudgeted enumeration
+        // oracle. Normalization (trim + lowercase) matches the RPC exactly.
+        // TODO 20261003-P1 (preserved): pre-migration backends lack the RPC — the
+        // direct probe below stays as the fallback until the 20261003 SQL ships
+        // everywhere. Fall back ONLY when the function is absent (PostgREST 404 /
+        // PGRST202); budget/invalid-charset rejections propagate so the 10/hr
+        // quota cannot be bypassed through the fallback lane.
+        // RPC shape: db.rpc("whisper_check_username_available", buildJsonObject { put("p_username", clean) }).decodeAs<Boolean>().
+        val clean = username.trim().lowercase()
+        // <2-char gate (mirrors searchProfiles): shorter than any registrable
+        // handle (3-20 chars) can never be taken — refuse without spending RPC
+        // budget or touching the table.
+        if (clean.length < 2) return@runCatching false
+        val rpcAttempt = runCatchingCE {
+            db.rpc("whisper_check_username_available", buildJsonObject { put("p_username", clean) })
+                .decodeAs<Boolean>()
+        }
+        rpcAttempt.getOrNull()?.let { return@runCatching it }
+        val rpcError = rpcAttempt.exceptionOrNull()
+        if (rpcError != null && !isMissingUsernameRpc(rpcError)) throw rpcError
+        // Fallback (pre-migration backend only): direct exact-eq probe.
+        // NOTE: profiles_select_authenticated stays open ONLY for public_key
+        // discovery (bundle-fetch/messaging) — do NOT build new probes on it;
+        // the RPC above is the budgeted oracle (see 20261005 SQL comments).
         val results = db.from("profiles")
-            .select { filter { eq("username", username.trim().lowercase()) } }
+            .select { filter { eq("username", clean) } }
             .decodeList<WhisperProfile>()
         results.isEmpty()
+    }
+
+    /**
+     * 20261005-P2: true when the username-availability RPC itself is absent on
+     * this backend (PostgREST PGRST202 / HTTP 404) — the only case that unlocks
+     * the direct-probe fallback. Every other RPC failure (rate_limited P0002,
+     * invalid_username P0001, network) propagates to the caller.
+     */
+    private fun isMissingUsernameRpc(throwable: Throwable): Boolean {
+        if ((throwable as? RestException)?.statusCode == 404) return true
+        val msg = throwable.message.orEmpty()
+        return msg.contains("PGRST202", ignoreCase = true) ||
+            msg.contains("Could not find the function", ignoreCase = true)
     }
 
     suspend fun WhisperRepository.updateProfile(update: WhisperProfileUpdate): Result<Unit> = runCatching {

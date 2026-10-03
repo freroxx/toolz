@@ -132,6 +132,12 @@ object WhisperErrorMapper {
             // Permission must also outrank generic 4xx/5xx
             msg.contains("row-level security", ignoreCase = true) || msg.contains("42501") ->
                 UiText.StringResource(R.string.st_Whisper_Error_NotPermitted)
+            // Anti-mod gate (edge HTTP 428): unofficial build — never retry, point
+            // at the official APK. Outranks the generic 4xx bucket below.
+            throwable is RestException && throwable.statusCode == 428 ->
+                UiText.StringResource(R.string.st_Whisper_Error_UnofficialBuild)
+            msg.contains("Unofficial build blocked", ignoreCase = true) ->
+                UiText.StringResource(R.string.st_Whisper_Error_UnofficialBuild)
             // ——— AUTH-SPECIFIC checks BEFORE generic 400/500 ———
             isInvalidCredentials(throwable) ->
                 UiText.StringResource(R.string.st_Whisper_Error_InvalidCredentials)
