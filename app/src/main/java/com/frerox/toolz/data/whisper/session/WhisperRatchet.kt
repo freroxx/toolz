@@ -15,7 +15,11 @@ import java.util.Base64
  *
  * - Header rides inside the v3 message JSON: {"v":3,"dh","pn","n",…}.
  * - Associated data binds sessionId + header bytes → routing tamper = auth fail.
- * - Skipped-message keys bounded ([MAX_SKIPPED]); oldest evicted first.
+ * - Skipped-message keys bounded ([MAX_SKIPPED]); far-future `n` is REJECTED
+ *   (never evicts the existing window — see [skipKeys]).
+ * - Copy-commit decrypt (Phase 1B): [decrypt] derives on a trial copy and only
+ *   commits after AEAD verifies, so a forged header/ciphertext can neither
+ *   advance chains nor trigger a DH step ([tryDecryptOnCopy]).
  *
  * Pure Kotlin/JVM: the chaos suite exercises this class directly on CI.
  */
@@ -136,14 +140,17 @@ class WhisperRatchet private constructor(
     // --------------------------------------------------------------- decrypt
 
     fun decrypt(header: Header, packed: ByteArray, extraAd: ByteArray = ByteArray(0)): ByteArray {
-        // Primary path (spec §4): skipped-window → same-chain → ratchet step.
-        val primary = runCatching { decryptPrimary(header, packed, extraAd) }
+        // Phase 1B copy-commit: the primary path derives on a trial copy and only
+        // commits after AEAD verifies, so a forged header/ciphertext leaves
+        // rootKey/ckRecv/ckSend/ns/nr/skipped/consumed/retired/dhRemotePub intact.
+        val primary = runCatching { tryDecryptOnCopy(header, packed, extraAd) }
         primary.getOrNull()?.let { return it }
 
         // V5.2-style authenticated brute-fallback: try EVERY remembered message key
         // (skipped + consumed). Wrong keys cannot falsely authenticate — AEAD decides.
         // This converts residual desync corner cases (crossed sends, replayed old
         // chains) into successful opens without weakening anything.
+        // Runs on the UNMUTATED state (primary failure committed nothing).
         val allKeys = skipped.asIterable() + consumed.asIterable()
         for ((keyId, mk) in allKeys) {
             SessionCrypto.aesGcmOpen(mk, packed, adFor(header, extraAd))?.let {
@@ -164,11 +171,67 @@ class WhisperRatchet private constructor(
         )
     }
 
+    /**
+     * Phase 1B copy-commit: deep-copy all mutable ratchet state, run the existing
+     * [decryptPrimary] logic on the clone, and only commit clone→this after AEAD
+     * verifies. A forged header (bad n/pn/dhPub) or tampered ciphertext throws
+     * without mutating chains, skipped window, consumed memory, retired set, or
+     * the remote DH key — no DH step is triggered by unauthenticated input.
+     */
+    private fun tryDecryptOnCopy(
+        header: Header,
+        packed: ByteArray,
+        extraAd: ByteArray,
+    ): ByteArray {
+        val trial = copyForTrial()
+        val plain = trial.decryptPrimary(header, packed, extraAd)
+        commitFrom(trial)
+        return plain
+    }
+
+    /** Deep copy of every mutable field for trial decrypt (no shared arrays). */
+    private fun copyForTrial(): WhisperRatchet = WhisperRatchet(
+        rootKey = rootKey.copyOf(),
+        dhSelfPriv = dhSelfPriv.copyOf(),
+        dhSelfPub = dhSelfPub.copyOf(),
+        dhRemotePub = dhRemotePub?.copyOf(),
+        ckSend = ckSend?.copyOf(),
+        ckRecv = ckRecv?.copyOf(),
+        ns = ns,
+        nr = nr,
+        pn = pn,
+        skipped = LinkedHashMap(skipped.mapValues { (_, v) -> v.copyOf() }),
+        consumed = LinkedHashMap(consumed.mapValues { (_, v) -> v.copyOf() }),
+        retiredRemotePubs = LinkedHashSet(retiredRemotePubs),
+    )
+
+    /** Commit a verified trial copy back into this ratchet (AEAD already passed). */
+    private fun commitFrom(other: WhisperRatchet) {
+        rootKey = other.rootKey.copyOf()
+        dhSelfPriv = other.dhSelfPriv.copyOf()
+        dhSelfPub = other.dhSelfPub.copyOf()
+        dhRemotePub = other.dhRemotePub?.copyOf()
+        ckSend = other.ckSend?.copyOf()
+        ckRecv = other.ckRecv?.copyOf()
+        ns = other.ns
+        nr = other.nr
+        pn = other.pn
+        skipped.clear()
+        other.skipped.forEach { (k, v) -> skipped[k] = v.copyOf() }
+        consumed.clear()
+        other.consumed.forEach { (k, v) -> consumed[k] = v.copyOf() }
+        retiredRemotePubs.clear()
+        retiredRemotePubs.addAll(other.retiredRemotePubs)
+    }
+
     private fun decryptPrimary(
         header: Header,
         packed: ByteArray,
         extraAd: ByteArray,
     ): ByteArray {
+        if (header.n < 0 || header.pn < 0) {
+            throw WhisperRatchetLostMessage("negative ratchet counter n=${header.n} pn=${header.pn}")
+        }
         // 1. Late delivery within stored window.
         // V5.2 FIX: promote to consumed-memory (not delete) so DUPLICATES of this same
         // late message also open — the chaos harness proved deletion was the killer.
@@ -182,6 +245,8 @@ class WhisperRatchet private constructor(
         if (header.dhPub.contentEquals(dhRemotePub ?: ByteArray(0))) {
             val dupKey = keyFor(header.dhPub, header.n)
             consumed[dupKey]?.let { return open(it, header, packed, extraAd) }
+            // Phase 1B: far-future n is rejected BEFORE deriving keys (skipKeys
+            // throws without mutation); the trial copy is then discarded.
             skipKeys(header.dhPub, header.n)
             val ck = requireNotNull(ckRecv) { "receive chain missing" }
             val (mk, nextCk) = kdfChainKey(ck)
@@ -194,7 +259,22 @@ class WhisperRatchet private constructor(
         // 3. Genuine DH ratchet step (spec §4.2 ordering):
         // Old receiving chain leftovers: the incoming header.pn declares exactly how
         // many messages the peer sent in the chain being retired.
+        // Phase 1B: pn/n beyond the skip window are rejected before ANY DH work,
+        // so a forged new-dhPub header cannot poison rootKey or dhRemotePub.
         dhRemotePub?.let { skipKeys(it, header.pn) }
+        // Pre-validate the incoming chain gap too, before touching state.
+        val incomingGap = header.n - 0 // nr resets to 0 after the DH step
+        if (incomingGap > MAX_SKIPPED) {
+            throw WhisperRatchetLostMessage(
+                "skipped-key limit exceeded: n=${header.n} beyond window $MAX_SKIPPED",
+            )
+        }
+        // Retired-chain straggler guard: a header sealed to a key we already
+        // stepped past must not trigger a second ratchet step (session poison).
+        val incomingB64 = b64(header.dhPub)
+        if (retiredRemotePubs.contains(incomingB64)) {
+            throw WhisperRatchetLostMessage("message sealed to retired ratchet key")
+        }
         dhRemotePub?.let { retired ->
             retiredRemotePubs.add(b64(retired))
             if (retiredRemotePubs.size > 8) retiredRemotePubs.remove(retiredRemotePubs.first())
@@ -238,17 +318,34 @@ class WhisperRatchet private constructor(
         consumed[keyId] = mk
     }
 
-    /** Advance the CURRENT receive chain, storing every skipped message key. */
+    /**
+     * Advance the CURRENT receive chain, storing every skipped message key.
+     *
+     * Phase 1B bounded-loss policy: a gap beyond [MAX_SKIPPED] is REJECTED with
+     * [WhisperRatchetLostMessage] — no keys are derived and the existing window
+     * is left intact. The old oldest-evicted-first policy is removed: when the
+     * window is full, further skips throw instead of silently dropping the
+     * oldest unreceived key.
+     */
     private fun skipKeys(chainPub: ByteArray, untilExclusive: Int) {
         val ckStart = ckRecv ?: return
         if (nr >= untilExclusive) return
+        val gap = untilExclusive - nr
+        if (gap > MAX_SKIPPED) {
+            throw WhisperRatchetLostMessage(
+                "skipped-key limit exceeded: gap $gap beyond window $MAX_SKIPPED " +
+                    "(nr=$nr until=$untilExclusive)",
+            )
+        }
+        if (skipped.size + gap > MAX_SKIPPED) {
+            throw WhisperRatchetLostMessage(
+                "skipped-key window full: ${skipped.size} stored + $gap new beyond $MAX_SKIPPED",
+            )
+        }
         var chain = ckStart
         var index = nr
         while (index < untilExclusive) {
             val (mk, next) = kdfChainKey(chain)
-            if (skipped.size >= MAX_SKIPPED) {
-                skipped.remove(skipped.keys.first())
-            }
             skipped[keyFor(chainPub, index)] = mk
             chain = next
             index++

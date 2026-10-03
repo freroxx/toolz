@@ -5,9 +5,8 @@
 
 package com.frerox.toolz.crypto
 
-import java.math.BigInteger
+import com.google.crypto.tink.subtle.X25519 as TinkX25519
 import java.security.MessageDigest
-import java.security.SecureRandom
 import javax.crypto.Cipher
 import javax.crypto.Mac
 import javax.crypto.spec.GCMParameterSpec
@@ -23,15 +22,17 @@ import javax.crypto.spec.SecretKeySpec
  *   keys, which never live in AndroidKeyStore (ephemeral keys must be cheap,
  *   numerous, and disposable).
  *
- * X25519 implementation notes:
- *  - Montgomery ladder over Curve25519 per RFC 7748, implemented with
- *    java.math.BigInteger. Correctness is pinned by the RFC 7748 §5.2 and
- *    §6.1 test vectors in `SessionCryptoVectorTest`.
- *  - PERFORMANCE (known limitation, documented in the roadmap): BigInteger is not
- *    constant-time and slower than table-based implementations. Handshake-time use
- *    (Phase 2) is unaffected; if Phase 3 profiling shows per-message cost matters,
- *    swap the internals for Tink's `subtle.X25519` behind this exact interface —
- *    callers will not change.
+ * X25519 implementation notes (Phase 1B, constant-time):
+ *  - All Diffie-Hellman ops delegate to Tink's `subtle.X25519`
+ *    (`com.google.crypto.tink:tink-android`), a constant-time curve25519-donna
+ *    port (data-invariant cswap, long-limb field ops — no BigInteger branches on
+ *    secret material). The old java.math.BigInteger Montgomery ladder is removed.
+ *  - Correctness is pinned by the RFC 7748 §5.2 and §6.1 test vectors in
+ *    `SessionCryptoVectorTest` (including the non-canonical MSB-set input, which
+ *    Tink accepts by masking the high bit per RFC 7748 §5).
+ *  - `sharedSecret` returns null for banned/low-order peer points: Tink throws
+ *    InvalidKeyException for those (plus an explicit all-zero guard below).
+ *    Callers MUST treat null as an invalid peer key, never as a valid secret.
  */
 object SessionCrypto {
 
@@ -42,96 +43,41 @@ object SessionCrypto {
     private const val GCM_TAG_BITS = 128
     private const val IV_LEN = 12
 
-    private val P = BigInteger.TWO.pow(255).subtract(BigInteger.valueOf(19))
-    private val A24 = BigInteger.valueOf(121665)
-    private val BASE_POINT: ByteArray = ByteArray(32).also { it[0] = 9 }
-
     // ------------------------------------------------------------------ X25519
 
-    /** Generates a cryptographically random X25519 private scalar (clamped on use). */
+    /** Generates a cryptographically random X25519 private scalar (clamped on use by Tink). */
     fun generatePrivateKey(): ByteArray =
-        ByteArray(PRIVATE_KEY_SIZE).also { SecureRandom().nextBytes(it) }
+        TinkX25519.generatePrivateKey()
 
-    /** RFC 7748 §6.1: public = scalarMult(clamped private, base point 9). */
-    fun publicFromPrivate(privateKey: ByteArray): ByteArray =
-        scalarMult(privateKey, BASE_POINT)
+    /** RFC 7748 §6.1: public = scalarMult(clamped private, base point 9) via Tink. */
+    fun publicFromPrivate(privateKey: ByteArray): ByteArray {
+        require(privateKey.size == PRIVATE_KEY_SIZE) { "X25519 private key must be 32 bytes" }
+        try {
+            return TinkX25519.publicFromPrivate(privateKey)
+        } catch (e: java.security.InvalidKeyException) {
+            throw IllegalArgumentException("Invalid X25519 private key", e)
+        }
+    }
 
     /**
      * RFC 7748 §5: X25519(k, u). Returns null when the peer point has low order
-     * (all-zero shared secret) — the RFC-mandated check; callers MUST treat null
-     * as an invalid peer key, never as a valid all-zero secret.
+     * (banned point per Tink's Curve25519 list, or all-zero shared secret) — the
+     * RFC-mandated check; callers MUST treat null as an invalid peer key, never
+     * as a valid all-zero secret.
      */
     fun sharedSecret(privateKey: ByteArray, peerPublicKey: ByteArray): ByteArray? {
-        val k = scalarMult(privateKey, peerPublicKey)
-        if (k.all { it == 0.toByte() }) return null
-        return k
-    }
-
-    private fun scalarMult(privateKey: ByteArray, publicKey: ByteArray): ByteArray {
-        // RFC 7748 §5: "implementations of X25519 MUST mask the most significant bit
-        // in the final byte" of u — non-canonical inputs (MSB set) are legal and must
-        // be accepted (caught live by RFC vector 2).
-        val u = publicKey.copyOf()
-        u[31] = (u[31].toInt() and 0x7f).toByte()
-        var x1 = decodeLittleEndian(u).mod(P)
-        var x2 = BigInteger.ONE
-        var z2 = BigInteger.ZERO
-        var x3 = x1
-        var z3 = BigInteger.ONE
-        var swap = false
-        // RFC 7748 §5 clamping applied to the scalar before the Montgomery ladder.
-        val clampedBytes = privateKey.copyOf()
-        clampedBytes[0] = (clampedBytes[0].toInt() and 248).toByte()
-        clampedBytes[31] = ((clampedBytes[31].toInt() and 127) or 64).toByte()
-        val k = decodeLittleEndian(clampedBytes)
-
-        for (t in 254 downTo 0) {
-            val kt = k.testBit(t)
-            if (kt != swap) {
-                var tmp = x2; x2 = x3; x3 = tmp
-                tmp = z2; z2 = z3; z3 = tmp
-                swap = kt
-            }
-            val a = x2.add(z2).mod(P)
-            val aa = a.multiply(a).mod(P)
-            val b = x2.subtract(z2).mod(P)
-            val bb = b.multiply(b).mod(P)
-            val e = aa.subtract(bb).mod(P)
-            val c = x3.add(z3).mod(P)
-            val d = x3.subtract(z3).mod(P)
-            val da = d.multiply(a).mod(P)
-            val cb = c.multiply(b).mod(P)
-            val t0 = da.add(cb).mod(P)
-            val t1 = da.subtract(cb).mod(P)
-            x3 = t0.multiply(t0).mod(P)
-            z3 = x1.multiply(t1.multiply(t1)).mod(P)
-            x2 = aa.multiply(bb).mod(P)
-            z2 = e.multiply(aa.add(A24.multiply(e)).mod(P)).mod(P)
+        if (privateKey.size != PRIVATE_KEY_SIZE || peerPublicKey.size != PUBLIC_KEY_SIZE) return null
+        return try {
+            val s = TinkX25519.computeSharedSecret(privateKey, peerPublicKey)
+            if (s.all { it == 0.toByte() }) null else s
+        } catch (_: java.security.InvalidKeyException) {
+            // Banned/low-order peer point (includes all-zero, 1, and the small-order
+            // catalogue in Tink's Curve25519.BANNED_PUBLIC_KEYS). Fail closed.
+            null
+        } catch (_: IllegalStateException) {
+            // Tink's fault-attack collinearity guard tripped — treat as invalid.
+            null
         }
-        if (swap) {
-            var tmp = x2; x2 = x3; x3 = tmp
-            tmp = z2; z2 = z3; z3 = tmp
-        }
-        val result = encodeLittleEndian(x2.multiply(z2.modPow(P.subtract(BigInteger.TWO), P)).mod(P))
-        // scrub
-        x1 = BigInteger.ZERO; x2 = BigInteger.ZERO; x3 = BigInteger.ZERO
-        z2 = BigInteger.ZERO; z3 = BigInteger.ZERO
-        return result
-    }
-
-    private fun decodeLittleEndian(bytes: ByteArray): BigInteger =
-        BigInteger(1, bytes.reversedArray())
-
-    private fun encodeLittleEndian(v: BigInteger): ByteArray {
-        val out = ByteArray(32)
-        val raw = v.toByteArray()
-        // BigInteger is big-endian two's complement; take low 32 bytes little-endian.
-        var i = raw.size - 1
-        var o = 0
-        while (i >= 0 && o < 32) {
-            out[o++] = raw[i--]
-        }
-        return out
     }
 
     // ------------------------------------------------------------- KDF & AEAD
@@ -166,7 +112,7 @@ object SessionCrypto {
     /** AES-256-GCM encrypt; returns iv‖ciphertext‖tag packed (iv first, 12 bytes). */
     fun aesGcmSeal(key: ByteArray, plaintext: ByteArray, aad: ByteArray): ByteArray {
         require(key.size == 32) { "AES-256 key must be 32 bytes" }
-        val iv = ByteArray(IV_LEN).also { SecureRandom().nextBytes(it) }
+        val iv = ByteArray(IV_LEN).also { java.security.SecureRandom().nextBytes(it) }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(GCM_TAG_BITS, iv))
         if (aad.isNotEmpty()) cipher.updateAAD(aad)

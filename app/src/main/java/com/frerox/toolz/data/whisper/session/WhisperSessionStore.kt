@@ -49,6 +49,15 @@ class WhisperSessionStore @Inject constructor(
         private const val TAG = "WhisperSessionStore"
         private const val DIR_NAME = "whisper_sessions"
         private const val FILE_EXT = ".json"
+
+        /**
+         * Residual-downgrade block threshold: after this many consecutive X3DH
+         * establish failures (no live/proven session), the repository blocks the
+         * insecure envelope fallback instead of retrying it forever. Mirrors
+         * `WireProtocol.DOWNGRADE_BLOCK_AFTER_N_FAILS`; the pure block rule lives
+         * there (`WireProtocol.shouldBlockDowngradeAfterFails`).
+         */
+        const val MAX_FAILED_ESTABLISH_BEFORE_DOWNGRADE_BLOCK = 3
     }
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -121,6 +130,41 @@ class WhisperSessionStore @Inject constructor(
     private val memory = ConcurrentHashMap<String, Live>()
     private val lastWrittenJson = ConcurrentHashMap<String, String>()
 
+    /**
+     * Residual-downgrade bookkeeping: consecutive X3DH establish failures per
+     * peer (in-memory only by design — a process restart resets the count and
+     * the envelope fallback is attempted again, so a block can never wedge
+     * across reboots). Incremented by the repository on every establish
+     * failure, reset on establish success. At
+     * [MAX_FAILED_ESTABLISH_BEFORE_DOWNGRADE_BLOCK] with no live/proven session,
+     * the send path blocks the insecure envelope fallback (see
+     * `WireProtocol.shouldBlockDowngradeAfterFails`) with a retry-later warning
+     * and the `send.blocked.downgrade_N` diagnostics counter.
+     */
+    private val failedEstablishCounts = ConcurrentHashMap<String, Int>()
+
+    /** Consecutive establish failures for [peerId] (0 when never failed). */
+    fun failedEstablishCount(peerId: String): Int = failedEstablishCounts[peerId] ?: 0
+
+    /** Records one establish failure; returns the new consecutive count. */
+    fun recordEstablishFailure(peerId: String): Int {
+        val n = (failedEstablishCounts[peerId] ?: 0) + 1
+        failedEstablishCounts[peerId] = n
+        ProtocolDiagnostics.increment("v3.establishFailCount")
+        if (n >= MAX_FAILED_ESTABLISH_BEFORE_DOWNGRADE_BLOCK) {
+            android.util.Log.w(TAG, "Handshake repeatedly failed (${n}x) — insecure fallback will block, retry later")
+            ProtocolDiagnostics.log("v3: establish failed ${n}x — insecure fallback blocked until success")
+        }
+        return n
+    }
+
+    /** Resets the failure count after a successful establish (or proven session). */
+    fun recordEstablishSuccess(peerId: String) {
+        if (failedEstablishCounts.remove(peerId) != null) {
+            ProtocolDiagnostics.increment("v3.establishRecovered")
+        }
+    }
+
     // One writer at a time per peer; encrypt/decrypt callers ALSO hold this mutex so
     // concurrent flow collectors can never advance one ratchet from two threads.
     private val locks = ConcurrentHashMap<String, Mutex>()
@@ -182,6 +226,7 @@ class WhisperSessionStore @Inject constructor(
     suspend fun deleteAll() {
         memory.clear()
         lastWrittenJson.clear()
+        failedEstablishCounts.clear()
         kotlinx.coroutines.withContext(Dispatchers.IO) {
             dir.listFiles()?.forEach { it.delete() }
             dir.delete()

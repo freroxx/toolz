@@ -257,6 +257,10 @@ dependencies {
     // Security Crypto
     implementation(libs.androidx.security.crypto)
 
+    // Tink (Whisper X25519): constant-time curve25519-donna via subtle.X25519.
+    // SessionCrypto delegates all DH ops here; BigInteger ladder removed.
+    implementation(libs.tink.android)
+
     // Shizuku
     implementation(libs.shizuku.api)
     implementation(libs.shizuku.provider)

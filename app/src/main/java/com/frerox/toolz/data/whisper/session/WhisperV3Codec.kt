@@ -36,6 +36,22 @@ object WhisperV3Codec {
     /** Sentinel stored in the `content_iv` column for v3 ratchet rows. */
     const val IV_MARK = "v3"
 
+    /**
+     * Legacy handshake-insurance (`env`) retirement cutoff: 2026-12-01T00:00:00Z.
+     * Rows created strictly after this instant must never open via the `env`
+     * insurance path (see [insuranceAllowed]) — new sends never populate `env`,
+     * so any post-cutoff `env` is either a replay or a misbehaving peer and is
+     * rejected fail-closed. Pre-cutoff rows keep decoding for backward compat.
+     */
+    const val LEGACY_ENV_CUTOFF_MS: Long = 1_796_083_200_000L
+
+    /**
+     * Pure, unit-test-friendly eligibility rule for the `env` insurance path.
+     * Lives beside the cutoff constant so the policy can never drift from it.
+     */
+    fun insuranceAllowed(rowCreatedAtEpochMs: Long): Boolean =
+        rowCreatedAtEpochMs <= LEGACY_ENV_CUTOFF_MS
+
     private val json = Json { ignoreUnknownKeys = true }
     private val b64 = Base64.getEncoder()
     private val unb64 = Base64.getDecoder()
@@ -51,13 +67,13 @@ object WhisperV3Codec {
         @SerialName("ct") val ctB64: String,
         @SerialName("x3dh") val x3dh: X3dhWire? = null,
         /**
-         * FIX-2 HANDSHAKE INSURANCE: parallel V5 envelope copy riding ONLY on frames
-         * of a not-yet-proven session. If the responder cannot complete the ratchet
-         * side (SPK/OPK raced, rotation mid-flight, lost private half), the message
-         * still opens through the proven envelope ladder instead of locking forever.
-         * Old clients ignore this unknown key (ignoreUnknownKeys); proven sessions
-         * never carry it (single-copy efficiency restored after first clean open).
+         * LEGACY handshake insurance (pre-Phase-1A): a parallel v2 copy that rode
+         * ONLY on unproven-session frames. New sends NEVER populate it (see
+         * [encode] — the param is accepted for compat but ignored). Kept as a
+         * decode-only field so old rows still open via the legacy insurance path
+         * in WhisperRepository.tryInsurance; removal would orphan that history.
          */
+        @Deprecated("Decode-only legacy. New sends never populate env.")
         @SerialName("env") val insuranceEnvelope: String? = null,
     ) {
         fun dhPub(): ByteArray = unb64.decode(dhPubB64)
@@ -78,6 +94,7 @@ object WhisperV3Codec {
         header: WhisperRatchet.Header,
         ciphertextPacked: ByteArray,
         x3dh: WhisperSessionFactory.X3dhHeader?,
+        // Phase-1A: new sends never carry env (param ignored; legacy decode only).
         insuranceEnvelope: String? = null,
     ): String {
         val obj = buildJsonObject {
@@ -88,7 +105,9 @@ object WhisperV3Codec {
             put("n", header.n)
             put("ct", b64.encodeToString(ciphertextPacked))
             if (x3dh != null) put("x3dh", x3dhJson(x3dh))
-            if (!insuranceEnvelope.isNullOrBlank()) put("env", insuranceEnvelope)
+            // Phase-1A: no v2 copy on first v3 frames — a proven-FS frame must
+            // never smuggle a static-ECDH fallback copy. Legacy rows carrying
+            // "env" still decode (Frame.insuranceEnvelope) for backward compat.
         }
         return obj.toString()
     }

@@ -2,6 +2,7 @@
 agp = "9.4.0"
 googleServices = "4.5.0"
 firebaseBom = "34.18.0"
+tinkAndroid = "1.12.0"
 coreKtx = "1.19.0"
 junit = "4.13.2"
 junitVersion = "1.3.0"
@@ -185,6 +186,7 @@ shizuku-provider = { group = "dev.rikka.shizuku", name = "provider", version = "
 # Supabase
 supabase-bom = { group = "io.github.jan-tennert.supabase", name = "bom", version.ref = "supabaseBom" }
 supabase-auth-kt = { group = "io.github.jan-tennert.supabase", name = "auth-kt" }
+tink-android = { group = "com.google.crypto.tink", name = "tink-android", version.ref = "tinkAndroid" }
 supabase-postgrest-kt = { group = "io.github.jan-tennert.supabase", name = "postgrest-kt" }
 supabase-realtime-kt = { group = "io.github.jan-tennert.supabase", name = "realtime-kt" }
 supabase-storage-kt = { group = "io.github.jan-tennert.supabase", name = "storage-kt" }
