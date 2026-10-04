@@ -169,18 +169,6 @@ private fun ModelCard(
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
                         )
-                        if (model.isRecommended && !isDownloaded) {
-                            Spacer(Modifier.width(6.dp))
-                            Surface(shape = SquircleShape, color = MaterialTheme.colorScheme.tertiaryContainer) {
-                                Text(
-                                    stringResource(R.string.st_BackgroundRemover_Recommended),
-                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
-                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, lineHeight = 10.sp),
-                                    fontWeight = FontWeight.Black,
-                                    color = MaterialTheme.colorScheme.onTertiaryContainer,
-                                )
-                            }
-                        }
                         if (model.id == BackgroundModel.default().id) {
                             Spacer(Modifier.width(6.dp))
                             Surface(shape = SquircleShape, color = MaterialTheme.colorScheme.secondaryContainer) {

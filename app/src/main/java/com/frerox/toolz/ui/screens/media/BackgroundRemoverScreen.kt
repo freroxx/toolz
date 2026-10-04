@@ -124,6 +124,7 @@ fun BackgroundRemoverScreen(
     var isBgPickerOpen by remember { mutableStateOf(false) }
     var showOriginal by remember { mutableStateOf(false) }
     var meteredAsk by remember { mutableStateOf<BackgroundModel?>(null) }
+    var proConsentAsk by remember { mutableStateOf<BackgroundModel?>(null) }
 
     val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) {
@@ -137,8 +138,23 @@ fun BackgroundRemoverScreen(
         // Select first so progress, naming, and post-download auto-run all refer
         // to the model the user actually tapped — never a stale selection.
         if (viewModel.uiState.value.selectedModel != model) viewModel.selectModel(model)
-        if (viewModel.downloadNeedsMeteredConsent(model)) meteredAsk = model
-        else viewModel.downloadModel(model)
+        // Research/non-commercial gate first (persisted show-once): the download
+        // path refuses without it, so never start a doomed download.
+        if (viewModel.requiresProConsent(model)) proConsentAsk = model
+        else if (viewModel.downloadNeedsMeteredConsent(model)) meteredAsk = model
+        else viewModel.downloadModel(
+            model,
+            proNonCommercialConsentAccepted = viewModel.isProNonCommercialConsentAccepted(),
+        )
+    }
+
+    fun startDownloadAfterConsent(model: BackgroundModel, allowMetered: Boolean = false) {
+        if (viewModel.downloadNeedsMeteredConsent(model) && !allowMetered) meteredAsk = model
+        else viewModel.downloadModel(
+            model,
+            allowMetered = allowMetered,
+            proNonCommercialConsentAccepted = true,
+        )
     }
 
     LaunchedEffect(initialUri) {
@@ -265,7 +281,15 @@ fun BackgroundRemoverScreen(
                                 viewModel.dismissError()
                                 pick()
                             }
-                            else -> viewModel.retryFromFailure()
+                            // Consent refusal also surfaces as RETRY_DOWNLOAD: reopen the
+                            // accept dialog instead of looping a doomed download.
+                            else -> {
+                                val pending = uiState.selectedModel
+                                if (pending != null && viewModel.requiresProConsent(pending)) {
+                                    viewModel.dismissError()
+                                    proConsentAsk = pending
+                                } else viewModel.retryFromFailure()
+                            }
                         }
                     },
                     modifier = Modifier.fillMaxSize(),
@@ -291,11 +315,35 @@ fun BackgroundRemoverScreen(
             confirmButton = {
                 TextButton(onClick = {
                     meteredAsk = null
-                    viewModel.downloadModel(model, allowMetered = true)
+                    viewModel.downloadModel(
+                        model,
+                        allowMetered = true,
+                        proNonCommercialConsentAccepted = viewModel.isProNonCommercialConsentAccepted(),
+                    )
                 }) { Text(stringResource(R.string.st_BackgroundRemover_MeteredAllow)) }
             },
             dismissButton = {
                 TextButton(onClick = { meteredAsk = null }) {
+                    Text(stringResource(R.string.st_Common_Cancel))
+                }
+            },
+        )
+    }
+
+    proConsentAsk?.let { model ->
+        AlertDialog(
+            onDismissRequest = { proConsentAsk = null },
+            title = { Text(stringResource(R.string.st_BackgroundRemover_ProConsentTitle)) },
+            text = { Text(stringResource(R.string.st_BackgroundRemover_ProConsentDesc)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    val target = proConsentAsk
+                    proConsentAsk = null
+                    if (target != null) startDownloadAfterConsent(target)
+                }) { Text(stringResource(R.string.st_BackgroundRemover_ProConsentAccept)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { proConsentAsk = null }) {
                     Text(stringResource(R.string.st_Common_Cancel))
                 }
             },

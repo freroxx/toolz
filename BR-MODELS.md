@@ -9,7 +9,7 @@ download time (`data/media/ModelDownloadManager.kt`) and cached via a
 `.sha256.ok` marker so large files are never re-hashed on cold start.
 
 One runtime: **ONNX Runtime Mobile** (`com.microsoft.onnxruntime:onnxruntime-android`
-1.29.0, MIT, ~+32 MB arm64-v8a via ABI splits) for all quality tiers. The former LiteRT
+1.30.0, MIT, ~+32 MB arm64-v8a via ABI splits) for all quality tiers. The former LiteRT
 Instant fallback was removed: Fast ONNX at 4.4 MB covers the tiny/fast role at
 strictly better quality.
 
@@ -51,7 +51,9 @@ Model Hub behavior (`data/media/ModelDownloadManager.kt`, UI in
   `requiresNonCommercialConsent = true` — the download path refuses without an
   explicit research/non-commercial opt-in (`proNonCommercialConsentAccepted`,
   persisted as `pro_noncommercial_consent_accepted` in `bg_remover_prefs`;
-  error "Pro requires non-commercial consent"). Free-space precheck
+  error "Pro requires non-commercial consent"). The hub shows a one-time Accept
+  dialog (`BackgroundRemoverScreen` `proConsentAsk`) before starting the Pro
+  download; consent failures reopen the dialog instead of looping. Free-space precheck
   (`need + 16 MB`) before starting. Dedicated OkHttp client without logging interceptor
   (shared client would buffer 178 MB into RAM). Timeouts: connect 30 s, read 5 min,
   write 60 s. `User-Agent: Toolz-ModelHub/1.0`, `Accept-Encoding: identity`.

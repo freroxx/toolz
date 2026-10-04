@@ -12,7 +12,7 @@
 <p align="center">
   <img alt="Latest release" src="https://img.shields.io/github/v/release/freroxx/toolz?display_name=tag" />
   <img alt="Android 12+" src="https://img.shields.io/badge/Android-12%2B-3DDC84?logo=android&logoColor=white" />
-  <img alt="Kotlin 2.4.0" src="https://img.shields.io/badge/Kotlin-2.4.0-7F52FF?logo=kotlin&logoColor=white" />
+  <img alt="Kotlin 2.4.20" src="https://img.shields.io/badge/Kotlin-2.4.20-7F52FF?logo=kotlin&logoColor=white" />
   <img alt="Jetpack Compose" src="https://img.shields.io/badge/Jetpack%20Compose-UI-4285F4?logo=jetpackcompose&logoColor=white" />
 </p>
 
@@ -182,12 +182,12 @@ Import the project into Android Studio, let Gradle sync, and the debug APK will 
 ## 🛠️ Tech Stack
 
 Verified from `gradle/libs.versions.toml` + `app/build.gradle.kts`
-(compileSdk 37, targetSdk 36, minSdk 31, JDK 17, AGP 9.4.0).
+(compileSdk 37, targetSdk 36, minSdk 31, JDK 17, AGP 9.4.1).
 
-- **Language / Build** — Kotlin 2.4.0, KSP 2.3.10, Hilt 2.60.1 (DI + WorkManager),
+- **Language / Build** — Kotlin 2.4.20, KSP 2.3.10, Hilt 2.60.1 (DI + WorkManager),
   kotlinx-coroutines 1.11.0, kotlinx-serialization 1.11.0, desugar JDK libs
-- **UI** — Jetpack Compose BOM 2026.08.00, Material 3 Expressive
-  (`1.5.0-alpha27`) + adaptive/navigation-suite, Navigation Compose 2.9.8,
+- **UI** — Jetpack Compose BOM 2026.09.00, Material 3 Expressive
+  (`1.5.0-alpha29`) + adaptive/navigation-suite, Navigation Compose 2.9.8,
   Coil 3.5.0 (compose/okhttp/video), Glance 1.3.0-alpha02 (widgets),
   graphics-shapes, Accompanist permissions, Material 1.14.0
 - **Data (encrypted local-first)** — Room 2.8.4 (schemas exported in
@@ -205,7 +205,7 @@ Verified from `gradle/libs.versions.toml` + `app/build.gradle.kts`
   text), `android.graphics.pdf.PdfRenderer` + pdfbox-android 2.0.27.0 (text/TOC —
   `androidx.pdf` viewer removed), AndroidSVG 1.4, CommonMark 0.30.0, Jsoup 1.23.1,
   Exp4j 0.4.8, AndroidX WebKit 1.14.0
-- **Background Remover** — ONNX Runtime Mobile 1.29.0 (`onnxruntime-android`, MIT),
+- **Background Remover** — ONNX Runtime Mobile 1.30.0 (`onnxruntime-android`, MIT),
   per-ABI `.so` via splits (~+32 MB arm64-v8a). Models download on demand,
   SHA-256 pinned (see `BR-MODELS.md`)
 - **Backend (Whisper only)** — Supabase BOM 3.7.0

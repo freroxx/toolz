@@ -56,7 +56,6 @@ enum class BackgroundModel(
     val onnxPostSigmoid: Boolean = false,
     val licenseName: String,
     val licenseUrl: String,
-    val isRecommended: Boolean = false,
     /**
      * Actual inference resolution fed to the model, which may differ from [inputSize].
      * Ultra always runs at the full 1024: the BiRefNet export fixes its input at
@@ -90,7 +89,6 @@ enum class BackgroundModel(
         expectedSizeBytes = 4574861L,
         licenseName = "Apache-2.0 (U-2-Net)",
         licenseUrl = "https://github.com/xuebinqin/U-2-Net/blob/master/LICENSE",
-        isRecommended = true,
     ),
 
     PORTRAIT_RVM(

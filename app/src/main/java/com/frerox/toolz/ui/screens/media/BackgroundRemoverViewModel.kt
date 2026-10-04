@@ -949,7 +949,12 @@ class BackgroundRemoverViewModel @Inject constructor(
     fun retryFromFailure() {
         val retry = _uiState.value.failure?.retry ?: return
         when (retry) {
-            RetryAction.RETRY_DOWNLOAD -> _uiState.value.selectedModel?.let { downloadModel(it) }
+            RetryAction.RETRY_DOWNLOAD -> _uiState.value.selectedModel?.let {
+                downloadModel(
+                    it,
+                    proNonCommercialConsentAccepted = isProNonCommercialConsentAccepted(),
+                )
+            }
             RetryAction.RETRY_PROCESS -> _uiState.value.originalBitmap?.let {
                 activeJob?.cancel()
                 activeJob = viewModelScope.launch { processImage(it) }

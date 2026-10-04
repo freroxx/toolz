@@ -167,6 +167,12 @@ enabled.
   identity key plus P-256 signer) to `profiles`, rotates the signed prekey
   weekly, tops the one-time pool to 50 (persisted cap 120). Private halves are
   Keystore-wrapped and persisted so process death cannot break handshakes.
+- Rotation cert transport (`20261006` SQL: `profiles.rotation_cert` +
+  `rotation_counter`): `WhisperPrekeyManager` publishes the ROTv2 cert
+  (`ROTv2:<prev>:<new>:<counter>:<ts>`, old-key P-256 signed) on rotation;
+  peers fetch it via bundle/profile rows and `rotationCertFor` feeds
+  `classifyKeyChangeStrict` — counter replay and stale timestamps reject.
+  RLS owner-write, authenticated-read.
 - `WhisperKeyTrustStore.kt` (202): TOFU anchors plus user-verified keys in
   `EncryptedSharedPreferences` (migrated once from the old plaintext file),
   durable fsync writes off the main thread, plus the ROTv2 anti-replay counter
@@ -222,6 +228,10 @@ populate it); new sends never populate it, and per-message FS state
   query and fragment, allowlist `i.ibb.co`, `ibb.co`, and the project's
   `whisper-avatars` storage path (one redirect followed), cap 7 MiB, and map
   403/404 to an expired-image signal.
+- `EncryptedBlobHost.kt` (57): interface (upload/delete/download) decoupling
+  callers (`WhisperRepository`, `WhisperAvatarLoader` hold the interface
+  type) from the ImgBB implementation; R2/B2 is a future impl behind the
+  same seam.
 - `WhisperAvatarCodec.kt`: deterministic per-owner OBFUSCATION (sealed blobs),
   not encryption — key from `HKDF(SHA-256(ownerPub + ":whisper-avatar-v1"),
   info "whisper-avatar-key")`, owner key as AAD. Sealed: anyone with your
@@ -239,8 +249,8 @@ sealing (`WhisperChatViewModel.compressImageForUpload`). Avatars are cropped to
 
 ## 5. Backend
 
-`supabase/migrations/main-whisper-sql.sql` (2092 lines) is the canonical single
-baseline, squashing 17 migrations (policy in `whisper-sql-info.md`; header banner
+`supabase/migrations/main-whisper-sql.sql` (2125 lines) is the canonical single
+baseline, squashing 18 migrations (policy in `whisper-sql-info.md`; header banner
 lists all 17, `20260820`…`20261005_whisper_signup_discover_hardening.sql`).
 Tables:
 `messages` (with `content_hash` replay guard, block-aware insert guard, and a
@@ -282,6 +292,8 @@ Edge functions in `supabase/functions/whisper-*/index.ts`:
 | `whisper-image-upload` | 416 | Accepts base64 PNG with the ImgBB key held server-side, returns URL and ID. Attest-gated (inlined `_shared/attest.ts`). |
 | `whisper-image-delete` | 164 | Deletes an ImgBB blob by ID. |
 | `whisper-push-send` | 299 | Database webhook on message and friend inserts. Skips receivers seen within 60 seconds, sends one data-only FCM message per token, prunes dead tokens. Never logs tokens or payloads. Intentionally NOT attest-gated (webhook auth, never sees client headers). |
+| `whisper-signup-gate` | 256 | Pre-auth IP-budgeted signup gate (5/day/IP via `whisper_check_signup_allowed`); server-side IP hash, 429 over quota. Attest-gated (inlined `_shared/attest.ts`). |
+| `whisper-legacy-migrate` | 180 | Service-role legacy token migration (copies the profile to the full-hash user, deletes the legacy GoTrue user, records `whisper_legacy_disabled`). |
 
 Anti-mod gate: every `whisper-*` edge call carries
 `X-App-Package` / `X-App-Cert-Sha256` / `X-App-VersionCode`
@@ -296,13 +308,12 @@ verbatim into `whisper-bundle-fetch` and `whisper-image-upload`
 and off by default — the FOSS-safe baseline is cert+package+version
 only. `WhisperPinConfig.kt` (98 lines) holds the identity constants
 (`OFFICIAL_PACKAGE=com.frerox.toolz`, `OFFICIAL_CERT_SHA256`
-placeholder `REPLACE_ME_WITH_RELEASE_SHA256` — the real release hash
-is deliberately not hardcoded, `MIN_VERSION_CODE=17L`, synced with
+pinned to the release signing cert (`58A16BCD6E9CEF75706A957B19A15BED19BD47F0B7FDB602364D9EBFC5C369F9` — public value, readable from any official APK; the private key never leaves the release machine), `MIN_VERSION_CODE=17L`, synced with
 `update_manifest.json` `minimumVersionCode`). `update_manifest.json`
 also carries an Ed25519 `signature` over the canonical manifest JSON
-(`UpdateRepository` verifies it fail-closed — until a real keypair is
-provisioned the manifest path is ignored for updates; the GitHub
-Release API path is unaffected). Locally, `ui/screens/whisper/WhisperBuildGate.kt`
+(`UpdateRepository` verifies it fail-closed — the Ed25519 keypair is
+provisioned (pubkey embedded, manifest signed); unverified manifests are
+ignored and the GitHub Release API path is unaffected). Locally, `ui/screens/whisper/WhisperBuildGate.kt`
 (404 lines) gates Whisper access at runtime: release-cert pin,
 `FLAG_DEBUGGABLE` in a non-debug build, and the version floor
 (max of the signature-verified manifest floor and
@@ -506,7 +517,7 @@ check.
 
 ## 12. File inventory
 
-Client `data/whisper` (35 files): EdgeFunctionClient 154, PlayIntegrityAttestor
+Client `data/whisper` (36 files): EdgeFunctionClient 154, EncryptedBlobHost 57, PlayIntegrityAttestor
 185, ProtocolDiagnostics 66, WhisperAubupManager 526, WhisperAuthManager 432,
 WhisperAvatarCodec 61, WhisperAvatarLoader 142, WhisperCrypto 953,
 WhisperDeletedMessagesStore 167, WhisperDeliveryScheduler 42,
@@ -525,6 +536,6 @@ WhisperSessionStore 341, WhisperV3Codec 144.
 
 Also: `crypto/SessionCrypto` 138, `push/WhisperPushService` 142, UI screens
 (19 files from 76 to 2573 lines, see section 8), workers for delivery (49),
-local cleanup (43), and token clipboard expiry (151), seven edge functions
-(280/151/243/416/164/299/356 lines) plus the inlined `_shared/attest.ts`
-gate (156), and the 2092-line SQL baseline.
+local cleanup (43), and token clipboard expiry (151), nine edge functions
+(280/151/243/416/164/299/356/256/180 lines) plus the inlined `_shared/attest.ts`
+gate (156), and the 2125-line SQL baseline.
