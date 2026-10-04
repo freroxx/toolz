@@ -2123,3 +2123,350 @@ comment on column public.profiles.rotation_counter is
 --     the owner publishes their own cert in the same profiles
 --     update that carries the identity binding.
 -- No index: lookups key on id / public_key, never on the cert.
+
+-- ═══════════════ 20261007_whisper_groups_phase2.sql ═
+-- whisper_groups_phase2.sql (20261007)
+-- Phase-2 groups (pairwise fan-out, ≤12 members, v1.1.7 dev, flag OFF).
+-- ADDITIVE ONLY: four new tables + one quota table + gates/triggers. Zero
+-- alters to existing tables, zero changes to 1:1 policies — current users
+-- are unaffected by re-running this file (all objects IF NOT EXISTS,
+-- policies dropped + recreated for idempotency).
+--
+-- Trust model: the server is an ordered log + notifier, NEVER the
+-- membership authority. Clients build membership from verified
+-- whisper_group_events only (admin-signed, epoch-chained) and fail closed
+-- on epoch mismatch. RLS enforces coarse membership; signatures are
+-- verified client-side (mods can spoof SQL but cannot forge admin_sig,
+-- and the ship-day global floor blocks <18 clients entirely).
+--
+-- Version gating: every group write row carries client_version_code with
+-- CHECK (>= 18). Official ≤1.1.6 clients never write these tables, so old
+-- versions are rejected at the schema layer even before the ship-day
+-- MIN_VERSION_CODE flip. (A mod can lie in this column — accepted and
+-- documented; the attest edge gate + ship floor are the real walls.)
+
+-- ── 1. Groups + membership ──────────────────────────────────────────
+create table if not exists public.whisper_groups (
+    id uuid not null default gen_random_uuid() primary key,
+    name text not null default '',
+    epoch bigint not null default 0,
+    created_by uuid not null,
+    created_at timestamptz not null default now()
+);
+
+create table if not exists public.whisper_group_members (
+    group_id uuid not null references public.whisper_groups(id) on delete cascade,
+    user_id uuid not null,
+    role text not null default 'member' check (role in ('admin', 'member')),
+    joined_at timestamptz not null default now(),
+    invited_by uuid,
+    primary key (group_id, user_id)
+);
+
+alter table public.whisper_groups enable row level security;
+alter table public.whisper_group_members enable row level security;
+
+-- Own membership rows are self-readable (no self-referential policy: group /
+-- event / message policies probe this table and the caller's own row always
+-- satisfies user_id = auth.uid()).
+drop policy if exists "whisper_group_members_select_own" on public.whisper_group_members;
+create policy "whisper_group_members_select_own" on public.whisper_group_members
+    for select using (user_id = auth.uid());
+
+-- Invite-accept = insert own row; admin-add = admin inserts a friend's row
+-- (friends-only is enforced client-side; server sees membership only).
+drop policy if exists "whisper_group_members_insert" on public.whisper_group_members;
+create policy "whisper_group_members_insert" on public.whisper_group_members
+    for insert with check (
+        user_id = auth.uid()
+        or exists (
+            select 1 from public.whisper_group_members m
+            where m.group_id = whisper_group_members.group_id
+              and m.user_id = auth.uid() and m.role = 'admin'
+        )
+    );
+
+-- Leave = delete own row; remove = admin deletes any row.
+drop policy if exists "whisper_group_members_delete" on public.whisper_group_members;
+create policy "whisper_group_members_delete" on public.whisper_group_members
+    for delete using (
+        user_id = auth.uid()
+        or exists (
+            select 1 from public.whisper_group_members m
+            where m.group_id = whisper_group_members.group_id
+              and m.user_id = auth.uid() and m.role = 'admin'
+        )
+    );
+
+-- Role changes are admin-only (member rows are otherwise immutable).
+drop policy if exists "whisper_group_members_update_admin" on public.whisper_group_members;
+create policy "whisper_group_members_update_admin" on public.whisper_group_members
+    for update using (
+        exists (
+            select 1 from public.whisper_group_members m
+            where m.group_id = whisper_group_members.group_id
+              and m.user_id = auth.uid() and m.role = 'admin'
+        )
+    );
+
+drop policy if exists "whisper_groups_select_member" on public.whisper_groups;
+create policy "whisper_groups_select_member" on public.whisper_groups
+    for select using (
+        exists (
+            select 1 from public.whisper_group_members m
+            where m.group_id = whisper_groups.id and m.user_id = auth.uid()
+        )
+    );
+
+drop policy if exists "whisper_groups_insert_own" on public.whisper_groups;
+create policy "whisper_groups_insert_own" on public.whisper_groups
+    for insert with check (created_by = auth.uid());
+
+drop policy if exists "whisper_groups_update_admin" on public.whisper_groups;
+create policy "whisper_groups_update_admin" on public.whisper_groups
+    for update using (
+        exists (
+            select 1 from public.whisper_group_members m
+            where m.group_id = whisper_groups.id
+              and m.user_id = auth.uid() and m.role = 'admin'
+        )
+    );
+
+-- No group DELETE policy: groups die when the last member leaves (client
+-- deletes its row; an orphan group with zero members is invisible to every
+-- SELECT policy and harmless). Server-side expiry is out of scope for v1.
+
+-- ── 2. Signed admin events (the membership source of truth) ─────────
+create table if not exists public.whisper_group_events (
+    id uuid not null default gen_random_uuid() primary key,
+    group_id uuid not null references public.whisper_groups(id) on delete cascade,
+    seq bigint not null check (seq > 0),
+    epoch bigint not null check (epoch >= 0),
+    type text not null check (type in ('create', 'add', 'remove', 'leave', 'rename', 'promote')),
+    actor uuid not null,
+    payload jsonb not null default '{}'::jsonb,
+    admin_sig text not null default '',
+    client_version_code int not null check (client_version_code >= 18),
+    created_at timestamptz not null default now(),
+    unique (group_id, seq)
+);
+
+alter table public.whisper_group_events enable row level security;
+
+drop policy if exists "whisper_group_events_select_member" on public.whisper_group_events;
+create policy "whisper_group_events_select_member" on public.whisper_group_events
+    for select using (
+        exists (
+            select 1 from public.whisper_group_members m
+            where m.group_id = whisper_group_events.group_id and m.user_id = auth.uid()
+        )
+    );
+
+drop policy if exists "whisper_group_events_insert_member" on public.whisper_group_events;
+create policy "whisper_group_events_insert_member" on public.whisper_group_events
+    for insert with check (
+        actor = auth.uid()
+        and exists (
+            select 1 from public.whisper_group_members m
+            where m.group_id = whisper_group_events.group_id and m.user_id = auth.uid()
+        )
+    );
+
+-- No UPDATE/DELETE policies: the event log is append-only. A forged seq
+-- collides on unique(group_id, seq) → 23505 → the client retries with the
+-- next seq (documented in WhisperRepositoryGroups).
+
+create index if not exists whisper_group_events_group_seq_idx
+    on public.whisper_group_events (group_id, seq);
+
+-- ── 3. Group messages (ciphertext only, epoch-bound) ────────────────
+create table if not exists public.whisper_group_messages (
+    id uuid not null default gen_random_uuid() primary key,
+    group_id uuid not null references public.whisper_groups(id) on delete cascade,
+    sender_id uuid not null,
+    client_id text not null unique,
+    content text not null,
+    content_iv text not null default '',
+    epoch bigint not null check (epoch >= 0),
+    client_version_code int not null check (client_version_code >= 18),
+    created_at timestamptz not null default now()
+);
+
+alter table public.whisper_group_messages enable row level security;
+
+drop policy if exists "whisper_group_messages_select_member" on public.whisper_group_messages;
+create policy "whisper_group_messages_select_member" on public.whisper_group_messages
+    for select using (
+        exists (
+            select 1 from public.whisper_group_members m
+            where m.group_id = whisper_group_messages.group_id and m.user_id = auth.uid()
+        )
+    );
+
+drop policy if exists "whisper_group_messages_insert_member" on public.whisper_group_messages;
+create policy "whisper_group_messages_insert_member" on public.whisper_group_messages
+    for insert with check (
+        sender_id = auth.uid()
+        and exists (
+            select 1 from public.whisper_group_members m
+            where m.group_id = whisper_group_messages.group_id and m.user_id = auth.uid()
+        )
+    );
+
+-- No UPDATE policies: messages are immutable (delete-for-everyone reuses the
+-- 1:1 tombstone convention in a later slice, not this one).
+-- Deletes are sender-only (sender-side wipe; best-effort, like 1:1).
+drop policy if exists "whisper_group_messages_delete_sender" on public.whisper_group_messages;
+create policy "whisper_group_messages_delete_sender" on public.whisper_group_messages
+    for delete using (sender_id = auth.uid());
+
+create index if not exists whisper_group_messages_group_created_idx
+    on public.whisper_group_messages (group_id, created_at);
+
+-- ── 4. Fan-out quota: 50 envelopes/day × member count ───────────────
+-- 1→N sends cost N envelopes; the budget scales with fan-out (max 12 → 600).
+-- Mirrors whisper_signup_quota posture: RLS on, ZERO policies, gate only.
+create table if not exists public.whisper_group_send_quota (
+    sender_id uuid not null,
+    day date not null,
+    count int not null default 0,
+    primary key (sender_id, day)
+);
+
+alter table public.whisper_group_send_quota enable row level security;
+
+create or replace function public.whisper_check_group_send_allowed(p_sender uuid, p_fanout int)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_count int;
+  v_limit int := 600; -- 50 msgs/day x 12 max members (1→N envelope budget)
+  v_cost int;
+begin
+  if p_sender is null then
+    raise exception 'sender required' using errcode = '42501';
+  end if;
+  v_cost := greatest(coalesce(p_fanout, 1), 1);
+
+  perform pg_advisory_xact_lock(hashtextextended('group-quota:' || p_sender::text || ':' || current_date::text, 0));
+
+  insert into public.whisper_group_send_quota(sender_id, day, count)
+  values (p_sender, current_date, v_cost)
+  on conflict (sender_id, day) do update set count = whisper_group_send_quota.count + v_cost
+  returning count into v_count;
+
+  delete from public.whisper_group_send_quota where day < current_date - 7;
+
+  return v_count <= v_limit;
+end;
+$$;
+
+revoke all on function public.whisper_check_group_send_allowed(uuid, int) from public;
+revoke all on function public.whisper_check_group_send_allowed(uuid, int) from anon;
+revoke all on function public.whisper_check_group_send_allowed(uuid, int) from authenticated;
+grant execute on function public.whisper_check_group_send_allowed(uuid, int) to service_role;
+
+-- ── 5. Guard triggers (fail closed, group tables only) ─────────────
+-- Member cap: 12 max (mirrors WhisperGroupsConfig.MAX_MEMBERS).
+create or replace function public.whisper_group_enforce_member_cap()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_count int;
+begin
+  select count(*) into v_count
+  from public.whisper_group_members where group_id = new.group_id;
+  if v_count >= 12 then
+    raise exception 'group full (12 max)' using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_group_members_cap on public.whisper_group_members;
+create trigger trg_group_members_cap
+  before insert on public.whisper_group_members
+  for each row execute function public.whisper_group_enforce_member_cap();
+
+-- Epoch chain: events must carry epoch >= current; the group epoch ratchets
+-- forward. A stale-epoch write is rejected — clients fail closed on mismatch.
+create or replace function public.whisper_group_chain_event_epoch()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_epoch bigint;
+begin
+  select epoch into v_epoch from public.whisper_groups where id = new.group_id;
+  if not found then
+    raise exception 'unknown group' using errcode = '42501';
+  end if;
+  if new.epoch < v_epoch then
+    raise exception 'stale epoch' using errcode = '42501';
+  end if;
+  if new.epoch > v_epoch then
+    update public.whisper_groups set epoch = new.epoch where id = new.group_id;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_group_events_epoch on public.whisper_group_events;
+create trigger trg_group_events_epoch
+  before insert on public.whisper_group_events
+  for each row execute function public.whisper_group_chain_event_epoch();
+
+-- Message guard: sender must still be a member, message epoch must equal the
+-- live group epoch (a removed member's stale client fails closed here), and
+-- the fan-out quota is consumed (fail closed when over budget).
+create or replace function public.whisper_group_guard_message()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_epoch bigint;
+  v_members int;
+  v_ok boolean;
+begin
+  select epoch into v_epoch from public.whisper_groups where id = new.group_id;
+  if not found then
+    raise exception 'unknown group' using errcode = '42501';
+  end if;
+  if not exists (
+    select 1 from public.whisper_group_members m
+    where m.group_id = new.group_id and m.user_id = new.sender_id
+  ) then
+    raise exception 'not a member' using errcode = '42501';
+  end if;
+  if new.epoch <> v_epoch then
+    raise exception 'stale epoch' using errcode = '42501';
+  end if;
+  select count(*) into v_members
+  from public.whisper_group_members where group_id = new.group_id;
+  select public.whisper_check_group_send_allowed(new.sender_id, v_members) into v_ok;
+  if not v_ok then
+    raise exception 'group send quota exceeded' using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_group_messages_guard on public.whisper_group_messages;
+create trigger trg_group_messages_guard
+  before insert on public.whisper_group_messages
+  for each row execute function public.whisper_group_guard_message();
+
+comment on table public.whisper_groups is
+  '20261007 Phase-2 groups: ordered-log metadata only; clients build membership from verified whisper_group_events, never from this table alone.';
+comment on function public.whisper_check_group_send_allowed(uuid, int) is
+  '20261007: 600 envelopes/day/sender (50 x 12 max fan-out); fail-closed trigger gate on whisper_group_messages.';
