@@ -152,7 +152,10 @@ class PlayIntegrityAttestor @Inject constructor(
         }
     }
 
-    /** SHA-256 of the first signing cert, upper-case hex without colons. */
+    /** SHA-256 of the CURRENT signing cert, upper-case hex without colons.
+     * Rotation-safe: apkContentsSigners (this platform's active signer) comes
+     * first; signingCertificateHistory order is oldest-first on some
+     * releases, so history-first would pin a rotated-out ancestor. */
     fun signingCertSha256(): String {
         return try {
             val pm = context.packageManager
@@ -164,8 +167,9 @@ class PlayIntegrityAttestor @Inject constructor(
                     )
                     val signing = pi.signingInfo
                     if (signing != null) {
-                        if (signing.hasMultipleSigners()) signing.apkContentsSigners
-                        else signing.signingCertificateHistory
+                        (signing.apkContentsSigners.toList() + signing.signingCertificateHistory.toList())
+                            .distinctBy { it.toByteArray().contentHashCode() }
+                            .toTypedArray()
                     } else null
                 } else {
                     @Suppress("DEPRECATION")

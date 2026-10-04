@@ -135,9 +135,9 @@ object WhisperErrorMapper {
             // Anti-mod gate (edge HTTP 428): unofficial build — never retry, point
             // at the official APK. Outranks the generic 4xx bucket below.
             throwable is RestException && throwable.statusCode == 428 ->
-                UiText.StringResource(R.string.st_Whisper_Error_UnofficialBuild)
+                attestReasonText(msg)
             msg.contains("Unofficial build blocked", ignoreCase = true) ->
-                UiText.StringResource(R.string.st_Whisper_Error_UnofficialBuild)
+                attestReasonText(msg)
             // ——— AUTH-SPECIFIC checks BEFORE generic 400/500 ———
             isInvalidCredentials(throwable) ->
                 UiText.StringResource(R.string.st_Whisper_Error_InvalidCredentials)
@@ -250,6 +250,27 @@ object WhisperErrorMapper {
     }
 
     /** Logs an error without mapping it (for non-user-facing errors). */
+    /**
+     * Anti-mod 428 diagnostics: the edge body carries a machine `reason`
+     * (cert_mismatch / stale_version / package_mismatch /
+     * integrity_token_missing). Surfacing it turns "unofficial build
+     * blocked" from a dead end into an actionable fix (wrong secret vs
+     * stale build). Falls back to the localized generic string.
+     */
+    private fun attestReasonText(msg: String): UiText {
+        val reason = listOf(
+            "cert_mismatch",
+            "stale_version",
+            "package_mismatch",
+            "integrity_token_missing",
+        ).firstOrNull { msg.contains(it, ignoreCase = true) }
+        return if (reason != null) {
+            UiText.DynamicString("Unofficial build blocked ($reason)")
+        } else {
+            UiText.StringResource(R.string.st_Whisper_Error_UnofficialBuild)
+        }
+    }
+
     fun log(throwable: Throwable, context: String = "") {
         // V2-FIX (reviewwhisper.md) L-13: cancellation is control flow — never log, rethrow.
         if (throwable is kotlinx.coroutines.CancellationException) throw throwable
