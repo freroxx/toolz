@@ -20,8 +20,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.net.HttpURLConnection
@@ -136,6 +139,55 @@ class WhisperAuthManager @Inject constructor(
         supabase.auth.signOut()
     }
 
+    /**
+     * Sybil gate for account creation (20261005): asks `whisper-signup-gate`
+     * whether this IP may create another account (5/day). Fail-open on
+     * transport errors (edge not deployed yet, offline) so a broken gate
+     * never bricks signup; fail-closed ONLY on an explicit 429, which
+     * means the quota service is healthy and the caller is over budget.
+     */
+    private suspend fun checkSignupAllowed(): Result<Unit> = runCatching {
+        val response = runCatching {
+            edgeFunctions.execute(
+                EdgeFunctionClient.Request(
+                    function = "whisper-signup-gate",
+                    jsonBody = "{}",
+                    authMode = EdgeFunctionClient.AuthMode.ANON,
+                    extraHeaders = emptyMap(),
+                    connectTimeoutMs = 10_000,
+                    readTimeoutMs = 15_000,
+                ),
+            )
+        }.getOrElse { return@runCatching }
+        if (response.code == 429) {
+            error("Too many signups from your network right now. Please try again tomorrow.")
+        }
+    }
+
+    /**
+     * One-shot server migration for legacy token accounts: the edge moves the
+     * profile handle to a fresh current-scheme user and disables the weak
+     * legacy credential. Returns true when the caller should retry the
+     * current-scheme login immediately. Any transport/backend failure returns
+     * false so callers fall back to the manual migration prompt.
+     */
+    private suspend fun tryServerLegacyMigrate(cleanToken: String): Result<Boolean> = runCatching {
+        val response = edgeFunctions.execute(
+            EdgeFunctionClient.Request(
+                function = "whisper-legacy-migrate",
+                jsonBody = buildJsonObject { put("token", cleanToken) }.toString(),
+                authMode = EdgeFunctionClient.AuthMode.ANON,
+                extraHeaders = emptyMap(),
+                connectTimeoutMs = 10_000,
+                readTimeoutMs = 30_000,
+            ),
+        )
+        if (!response.is2xx) return@runCatching false
+        val obj = runCatching { Json.parseToJsonElement(response.body).jsonObject }.getOrNull()
+            ?: return@runCatching false
+        obj["migrated"]?.jsonPrimitive?.booleanOrNull == true
+    }
+
     suspend fun registerWithUsername(username: String, password: String, displayName: String): Result<Unit> = runCatching {
         val cleanUsername = username.trim().lowercase()
         val cleanDisplayName = displayName.trim()
@@ -144,6 +196,7 @@ class WhisperAuthManager @Inject constructor(
         require(password.length >= MIN_PASSWORD_LENGTH) { "Password must be at least $MIN_PASSWORD_LENGTH characters." }
         require(USERNAME_PATTERN.matches(cleanUsername)) { "Username must be 3-20 lowercase letters, numbers, or underscores." }
         require(cleanDisplayName.length in 1..60) { "Display name must be 1-60 characters." }
+        checkSignupAllowed().getOrThrow()
         
         supabase.auth.signUpWith(Email) {
             this.email = virtualEmail
@@ -210,6 +263,7 @@ class WhisperAuthManager @Inject constructor(
     suspend fun registerWithToken(anonToken: WhisperAnonToken, username: String, displayName: String): Result<Unit> = runCatching {
         val cleanToken = normalizeToken(anonToken.token)
         require(isValidToken(cleanToken)) { "Token must be a valid 64-character hex string." }
+        checkSignupAllowed().getOrThrow()
         val virtualEmail = sha256(cleanToken) + "@whisper.toolz.app"
         val virtualPassword = sha256("pwd_" + cleanToken)
         val cleanUsername = username.trim().lowercase()
@@ -297,8 +351,20 @@ class WhisperAuthManager @Inject constructor(
         if (ex != null) {
             if (!isInvalidCredentials(ex)) throw ex
             when (val legacy = migrateLegacyTokenAccounts(cleanToken).getOrThrow()) {
-                is LegacyTokenLogin.MigrationNeeded ->
-                    throw LegacyMigrationNeededException(legacy.username, legacy.displayName)
+                is LegacyTokenLogin.MigrationNeeded -> {
+                    // Server migration first: one call moves the handle and
+                    // disables the weak credential, then the current-scheme
+                    // login below just works. Undeployed/unreachable edge
+                    // falls back to the manual prompt.
+                    if (tryServerLegacyMigrate(cleanToken).getOrNull() == true) {
+                        supabase.auth.signInWith(Email) {
+                            this.email = virtualEmail
+                            this.password = virtualPassword
+                        }
+                    } else {
+                        throw LegacyMigrationNeededException(legacy.username, legacy.displayName)
+                    }
+                }
                 LegacyTokenLogin.NotFound ->
                     throw IllegalArgumentException(
                         "Invalid login credentials. " + legacyLoginHint(),
