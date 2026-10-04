@@ -139,7 +139,7 @@ Whisper is early-access software (beta): expect rough edges. It is centralized â
 Toolz is distributed through **GitHub Releases**:
 
 - **Releases page:** [github.com/freroxx/toolz/releases](https://github.com/freroxx/toolz/releases)
-- **Current version:** `1.1.6`
+- **Current version:** `1.1.7` (in development â€” latest published release is `1.1.6`)
 
 ### Choose your architecture:
 
