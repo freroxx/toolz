@@ -61,8 +61,8 @@ import kotlin.math.min
 /**
  * ViewModel for Background Remover — 2026 revamp.
  *
- * ONNX Runtime backend for all quality tiers (Fast default, commercial-safe;
- * Pro is opt-in research/non-commercial with an explicit consent gate).
+ * ONNX Runtime backend for all quality tiers (Pro default for best quality;
+ * research/non-commercial with an explicit consent gate).
  * The UI reads [BgStage] — it never guesses what "processing" means anymore.
  */
 @HiltViewModel

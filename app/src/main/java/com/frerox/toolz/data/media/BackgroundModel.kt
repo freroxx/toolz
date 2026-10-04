@@ -28,9 +28,9 @@ package com.frerox.toolz.data.media
  * - PORTRAIT— Robust Video Matting (MobileNetV3, fp32 ONNX): people/pets, hair-level
  *             alpha, single-pass still mode with zero recurrent states.
  * - PRO     — ISNet general-use ONNX: best general quality, large + slow, Wi-Fi gated.
- *             Opt-in quality tier, research/non-commercial only — requires explicit
- *             consent (see requiresNonCommercialConsent). Never the default: the
- *             commercial-safe default for new installs is FAST (Apache-2.0).
+ *             Default quality tier, research/non-commercial only — requires explicit
+ *             consent (see requiresNonCommercialConsent). The default for new installs
+ *             is PRO (best quality); FAST (Apache-2.0) remains the small/fast fallback.
  */
 enum class BackgroundModel(
     val id: String,
@@ -149,7 +149,7 @@ enum class BackgroundModel(
 
     companion object {
         fun fromId(id: String): BackgroundModel? = entries.find { it.id == id }
-        fun default(): BackgroundModel = FAST_GENERAL
+        fun default(): BackgroundModel = PRO_DETAIL
 
         /** Retired pre-revamp ids → their migration target (null = default). */
         fun migrateLegacyId(oldId: String): BackgroundModel = when (oldId) {

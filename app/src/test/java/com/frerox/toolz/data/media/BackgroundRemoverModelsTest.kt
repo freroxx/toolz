@@ -23,9 +23,9 @@ class BackgroundModelTest {
     }
 
     @Test
-    fun defaultIsFastGeneralOnnx() {
+    fun defaultIsProDetailOnnx() {
         val d = BackgroundModel.default()
-        assertEquals("fast_general", d.id)
+        assertEquals("pro_detail", d.id)
     }
 
     @Test

@@ -15,9 +15,9 @@ strictly better quality.
 
 ## Shipped lineup
 
-**Fast is the default for new installs** (`BackgroundModel.default() = FAST`,
-Apache-2.0 commercial-safe lineup); Pro is the opt-in quality tier
-(research/non-commercial, requires explicit consent) and Ultra is the opt-in
+**Pro is the default for new installs** (`BackgroundModel.default() = PRO_DETAIL`,
+best general quality); Fast is the small/fast fallback (Apache-2.0
+commercial-safe) and Ultra is the opt-in
 max-quality tier (MIT). Ultra runs at the full
 native 1024 — the BiRefNet export fixes its input at [1,3,1024,1024] (verified from
 the file with the `onnx` package), so ORT rejects any other feed size and
@@ -31,7 +31,7 @@ fallback) and goes straight to XNNPACK → CPU (`data/media/OnnxInferenceEngine.
 |---|---|---|---|---|---|
 | Fast | `u2netp.onnx` | `u2netp.onnx` ([rembg releases](https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx), [U-2-Net](https://github.com/xuebinqin/U-2-Net)) | 4,574,861 B | `309c8469258dda742793dce0ebea8e6dd393174f89934733ecc8b14c76f4ddd8` | Apache-2.0 — [LICENSE](https://github.com/xuebinqin/U-2-Net/blob/master/LICENSE) |
 | Portrait | `rvm_mobilenetv3_fp32.onnx` | `rvm_mobilenetv3_fp32.onnx` ([RVM v1.0.0](https://github.com/PeterL1n/RobustVideoMatting/releases/download/v1.0.0/rvm_mobilenetv3_fp32.onnx)) | 14,975,696 B | `88d4531297118f595bf2fd60f6f566aec2e559393802d1f436c380f0cbbd2828` | GPL-3.0 — [LICENSE.txt](https://github.com/PeterL1n/RobustVideoMatting/blob/master/LICENSE.txt) |
-| Pro (opt-in, non-commercial consent required) | `isnet-general-use.onnx` | `isnet-general-use.onnx` ([rembg releases](https://github.com/danielgatis/rembg/releases/download/v0.0.0/isnet-general-use.onnx), [DIS/ISNet](https://github.com/xuebinqin/DIS)) | 178,648,008 B | `60920e99c45464f2ba57bee2ad08c919a52bbf852739e96947fbb4358c0d964a` | Research-only / non-commercial — see https://github.com/xuebinqin/DIS (no OSI license; commercial use requires author permission), redistributed via rembg (MIT) |
+| Pro (default, non-commercial consent required) | `isnet-general-use.onnx` | `isnet-general-use.onnx` ([rembg releases](https://github.com/danielgatis/rembg/releases/download/v0.0.0/isnet-general-use.onnx), [DIS/ISNet](https://github.com/xuebinqin/DIS)) | 178,648,008 B | `60920e99c45464f2ba57bee2ad08c919a52bbf852739e96947fbb4358c0d964a` | Research-only / non-commercial — see https://github.com/xuebinqin/DIS (no OSI license; commercial use requires author permission), redistributed via rembg (MIT) |
 | Ultra | `birefnet-general-bb_swin_v1_tiny-epoch_232.onnx` (lowercase stored name; URL basename is `BiRefNet-general-bb_swin_v1_tiny-epoch_232.onnx`) | [rembg releases](https://github.com/danielgatis/rembg/releases/download/v0.0.0/BiRefNet-general-bb_swin_v1_tiny-epoch_232.onnx) ([BiRefNet](https://github.com/ZhengPeng7/BiRefNet)) | 224,005,088 B | `5600024376f572a557870a5eb0afb1e5961636bef4e1e22132025467d0f03333` | MIT — [LICENSE](https://github.com/ZhengPeng7/BiRefNet/blob/main/LICENSE) |
 
 Source of truth for the table: `data/media/BackgroundModel.kt`
