@@ -1530,6 +1530,9 @@ fun ToolzNavHost(
                     onNavigateToProfile = { userId ->
                         navController.navigate(Screen.WhisperUserProfile.createRoute(userId))
                     },
+                    onNavigateToGroup = { groupId ->
+                        navController.navigate(Screen.WhisperGroupChat.createRoute(groupId))
+                    },
                     onLoggedOut = {
                         navController.navigate(Screen.WhisperAuth.route) {
                             popUpTo(Screen.Whisper.route) { inclusive = true }
@@ -1545,6 +1548,19 @@ fun ToolzNavHost(
                 onNavigateToProfile = { userId ->
                     navController.navigate(Screen.WhisperUserProfile.createRoute(userId))
                 }
+            )
+        }
+        composable(Screen.WhisperGroupChat.route) {
+            WhisperGroupChatScreen(
+                onNavigateBack = { toolOnBack() },
+                onNavigateToInfo = { groupId ->
+                    navController.navigate(Screen.WhisperGroupInfo.createRoute(groupId))
+                }
+            )
+        }
+        composable(Screen.WhisperGroupInfo.route) {
+            WhisperGroupInfoScreen(
+                onNavigateBack = { toolOnBack() },
             )
         }
 

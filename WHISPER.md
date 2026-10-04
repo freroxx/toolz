@@ -543,21 +543,46 @@ local cleanup (43), and token clipboard expiry (151), nine edge functions
 (280/151/243/416/164/299/356/256/180 lines) plus the inlined `_shared/attest.ts`
 gate (156), and the SQL baseline (groups section included).
 
-## 13. Groups (Phase 2, v1.1.7 in development — flag OFF)
+## 13. Groups (Phase 2, v1.1.7 in development)
 
-Not reachable in any build: `WhisperGroupsConfig.ENABLED = false` and every
-group entry point requires it. 1:1 behavior is byte-identical with the flag
-off (no shared code path was modified — only additive files plus a nullable
-`whisper_outbox.groupId` that stays null for 1:1 rows).
+`WhisperGroupsConfig.ENABLED = true` in dev builds (1.1.7 is unshipped, so
+only dev devices carry it); every entry point still requires it, and the
+Chats-tab section returns early otherwise. Server-side, every group write
+requires `client_version_code >= 18`, and the ship-day floor flip blocks
+<1.1.7 clients from all of Whisper — so the flag stays true after ship.
+1:1 behavior is unchanged (no shared code path was
+rewritten — three functions were widened private→internal, one DAO was added
+to the repository constructor, one field to `VerifiedBundle`).
 
-Design: pairwise fan-out, ≤12 members. The sender seals one inner frame per
-member through the unmodified 1:1 session; groupId + epoch ride inside the
-AEAD plaintext (`WhisperGroupFrameBody`), so there is no separate group AAD
-domain. The server is an ordered log (`whisper_groups` / `whisper_group_members`
-/ `whisper_group_events` / `whisper_group_messages` + fan-out quota
-`whisper_check_group_send_allowed`, 600 envelopes/day/sender) — clients build
-membership from verified admin-signed events only (`applyEvents`,
-fail-closed). Group writes require `client_version_code >= 18` at the schema
-layer; the global Whisper floor stays 17 until ship day, when the manifest,
-edge secret, and `WhisperPinConfig.MIN_VERSION_CODE` all flip to 18 and
-<1.1.7 clients lose Whisper access entirely.
+Transport (`WhisperRepositoryGroups.kt`, ~800 lines): pairwise fan-out, ≤12
+members. The sender seals one inner frame per member (self included, so the
+sender's own lines open through the same path) through the unmodified 1:1
+`sealWithRatchet`; groupId + epoch ride inside the AEAD plaintext
+(`WhisperGroupFrameBody`, version field required on the wire). Each member
+opens only their frame (`openV3Frame` + `openGroupFrameBody`) and rows open
+only for epochs the reader belonged to (`isMemberAt` ranges — re-added
+members keep a gap for missed epochs). Membership derives from verified
+admin-signed events only (`applyEvents`, fail-closed: bad sig, non-admin op,
+last-admin removal, over-cap, stale epoch, unordered log). Signatures use the
+admin's protocol signing key (`signProtocol`/`verifyProtocol`), keys fetched
+from verified bundles (TOFU per sync — a post-rotation full re-sync fails
+closed with a clear error; warm caches keep working). Event payloads are TEXT
+(jsonb would normalize key order and break signature round-trips).
+
+Server (`main-whisper-sql.sql` groups sections): `whisper_groups` /
+`whisper_group_members` / `whisper_group_events` / `whisper_group_messages` +
+fan-out quota `whisper_check_group_send_allowed` (600 envelopes/day/sender) +
+guard triggers (12-cap, epoch chain, member+epoch+quota message guard, all
+fail-closed 42501). Group writes require `client_version_code >= 18`.
+
+UI: Chats-tab `WhisperGroupsSection` (list + create dialog with friend
+multi-select and invite-mode choice), `WhisperGroupChatScreen` (bubbles with
+sender names, send, mute, refresh), `WhisperGroupInfoScreen` (rename, add,
+promote, remove, block-a-member, mute, leave — all admin-gated client-side
+AND server-side). Group mutes reuse `WhisperMutePreferences` under
+`group:<id>`.
+
+v1 limits (documented, not bugs): sends are online-only (outbox `groupId`
+legs land next); no realtime subscription (open + manual refresh);
+invite mode is fixed at creation; report = block + leave; images in groups
+come after 1:1 image parity review.

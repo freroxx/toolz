@@ -3831,4 +3831,29 @@
     <string name="st_Whisper_UpdateRequired_UpdateNow">Update now</string>
     <string name="st_Whisper_Debuggable_Blocked">This build is debuggable and did not pass official-build verification, so Whisper is disabled. Install the official Toolz release.</string>
     <string name="st_Whisper_UpdateRequired_Local">This Toolz build is below the minimum required version, so Whisper is disabled. Update to keep chatting.</string>
+    <!-- Whisper: groups (Phase 2, v1.1.7 dev) -->
+    <string name="st_Whisper_Groups_Title">Groups</string>
+    <string name="st_Whisper_Groups_New">New group</string>
+    <string name="st_Whisper_Groups_CreateTitle">New group</string>
+    <string name="st_Whisper_Groups_NameHint">Group name</string>
+    <string name="st_Whisper_Groups_AddMembers">Add members (friends only)</string>
+    <string name="st_Whisper_Groups_WhoCanInvite">Who can invite</string>
+    <string name="st_Whisper_Groups_InviteAdmins">Admins only</string>
+    <string name="st_Whisper_Groups_InviteAll">All members</string>
+    <string name="st_Whisper_Groups_Create">Create group</string>
+    <string name="st_Whisper_Groups_Empty">No groups yet — start one with your friends.</string>
+    <string name="st_Whisper_Groups_Members">Members</string>
+    <string name="st_Whisper_Groups_Admin">Admin</string>
+    <string name="st_Whisper_Groups_MakeAdmin">Make admin</string>
+    <string name="st_Whisper_Groups_Remove">Remove</string>
+    <string name="st_Whisper_Groups_Block">Block</string>
+    <string name="st_Whisper_Groups_Rename">Rename group</string>
+    <string name="st_Whisper_Groups_Leave">Leave group</string>
+    <string name="st_Whisper_Groups_LeaveConfirm">Leave this group? You will stop receiving its messages.</string>
+    <string name="st_Whisper_Groups_Mute">Mute</string>
+    <string name="st_Whisper_Groups_Unmute">Unmute</string>
+    <string name="st_Whisper_Groups_MessageHint">Message</string>
+    <string name="st_Whisper_Groups_Info">Group info</string>
+    <string name="st_Whisper_Groups_BlockConfirm">Block this member? You will stop receiving their messages everywhere, not just here.</string>
+    <string name="st_Whisper_Groups_Removed">You are no longer a member of this group.</string>
 </resources>

@@ -152,6 +152,12 @@ sealed class Screen(val route: String) {
     object WhisperChat : Screen("whisper_chat/{otherUserId}") {
         fun createRoute(otherUserId: String) = "whisper_chat/$otherUserId"
     }
+    object WhisperGroupChat : Screen("whisper_group_chat/{groupId}") {
+        fun createRoute(groupId: String) = "whisper_group_chat/$groupId"
+    }
+    object WhisperGroupInfo : Screen("whisper_group_info/{groupId}") {
+        fun createRoute(groupId: String) = "whisper_group_info/$groupId"
+    }
     object WhisperUserProfile : Screen("whisper_profile/{userId}") {
         fun createRoute(userId: String) = "whisper_profile/$userId"
     }

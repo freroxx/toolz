@@ -72,7 +72,40 @@ class WhisperGroupsTest {
             applyEvents(gid, log, verify, keys)
             fail("must throw")
         } catch (e: IllegalArgumentException) {
-            assertTrue((e.message ?: "").contains("admin"))
+            // u2 is not a member at all: rejected before the admin/open-invite check.
+            assertTrue((e.message ?: "").contains("signed by inviter"))
+        }
+    }
+
+    @Test
+    fun `open invites let members add, strangers still blocked`() {
+        val openCreate = create().copy(payloadJson = """{"name":"Crew","invite":"all"}""")
+        val memberAdd = listOf(openCreate, ev(2, 1, WhisperGroupEventType.ADD, admin, "\"u2\""))
+        val m = applyEvents(gid, memberAdd, verify, keys)
+        assertTrue(!m.inviteAdminsOnly)
+        assertTrue(m.canInvite("u2"))
+        // u2 (member, stub-verified) adds u3.
+        val keys2: (String) -> String? = { "KEY" }
+        val m2 = applyEvents(gid, memberAdd + ev(3, 1, WhisperGroupEventType.ADD, "u2", "\"u3\""), verify, keys2)
+        assertTrue(m2.isMember("u3"))
+        // A stranger (never a member) cannot add even with a valid signature.
+        try {
+            applyEvents(gid, memberAdd + ev(3, 1, WhisperGroupEventType.ADD, "stranger", "\"u4\""), verify, keys2)
+            fail("must throw")
+        } catch (e: IllegalArgumentException) {
+            assertTrue((e.message ?: "").contains("signed by inviter"))
+        }
+    }
+
+    @Test
+    fun `member add under closed invites fails closed`() {
+        val keys2: (String) -> String? = { "KEY" }
+        val log = listOf(create(), ev(2, 1, WhisperGroupEventType.ADD, admin, "\"u2\""))
+        try {
+            applyEvents(gid, log + ev(3, 1, WhisperGroupEventType.ADD, "u2", "\"u3\""), verify, keys2)
+            fail("must throw")
+        } catch (e: IllegalArgumentException) {
+            assertTrue((e.message ?: "").contains("not admin-signed"))
         }
     }
 
@@ -127,6 +160,29 @@ class WhisperGroupsTest {
     }
 
     @Test
+    fun `epoch ranges gate history across remove and re-add`() {
+        val keys2: (String) -> String? = { "KEY" }
+        val log = listOf(
+            create(),
+            ev(2, 1, WhisperGroupEventType.ADD, admin, "\"u2\""),
+            ev(3, 2, WhisperGroupEventType.REMOVE, admin, "\"u2\""),
+            ev(4, 3, WhisperGroupEventType.ADD, admin, "\"u2\""),
+        )
+        val m = applyEvents(gid, log, verify, keys2)
+        assertTrue(m.isMember("u2"))
+        // Epoch 1 (first tenure) and 3+ (second tenure) open; epoch 2 (removed) shut.
+        assertTrue(m.isMemberAt("u2", 1))
+        assertTrue(!m.isMemberAt("u2", 2))
+        assertTrue(m.isMemberAt("u2", 3))
+        assertTrue(m.isMemberAt("u2", 1_000_000))
+        // The admin never left: every epoch open.
+        assertTrue(m.isMemberAt(admin, 0))
+        assertTrue(m.isMemberAt(admin, 2))
+        // A stranger was never a member at any epoch.
+        assertTrue(!m.isMemberAt("stranger", 1))
+    }
+
+    @Test
     fun `event from another group rejected`() {
         val other = create().copy(groupId = "group-2")
         try {
@@ -170,7 +226,7 @@ class WhisperGroupsTest {
     }
 
     @Test
-    fun `flag defaults off`() {
-        assertTrue(!groupsEnabled())
+    fun `flag on in dev builds`() {
+        assertTrue(groupsEnabled())
     }
 }

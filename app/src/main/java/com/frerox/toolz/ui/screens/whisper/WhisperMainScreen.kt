@@ -107,6 +107,7 @@ import kotlinx.coroutines.launch
 fun WhisperMainScreen(
     onNavigateToChat: (String) -> Unit,
     onNavigateToProfile: (String) -> Unit,
+    onNavigateToGroup: (String) -> Unit = {},
     onLoggedOut: () -> Unit,
     viewModel: WhisperViewModel = hiltViewModel(),
 ) {
@@ -356,6 +357,7 @@ fun WhisperMainScreen(
                             viewModel = viewModel,
                             onNavigateToChat = onNavigateToChat,
                             onNavigateToProfile = onNavigateToProfile,
+                            onNavigateToGroup = onNavigateToGroup,
                             onLongClickConvo = { selectedConvoForOptions = it },
                             onLongClickFriend = { selectedFriendForOptions = it },
                             onViewAvatarFull = { profileForFullView = it },
@@ -823,6 +825,7 @@ private fun MergedChatsAndFriendsTab(
     viewModel: WhisperViewModel,
     onNavigateToChat: (String) -> Unit,
     onNavigateToProfile: (String) -> Unit,
+    onNavigateToGroup: (String) -> Unit = {},
     onLongClickConvo: (WhisperConversation) -> Unit,
     onLongClickFriend: (WhisperProfile) -> Unit,
     onViewAvatarFull: (WhisperProfile) -> Unit,
@@ -904,6 +907,13 @@ private fun MergedChatsAndFriendsTab(
                     onDismiss = onDismissBanner,
                     modifier = Modifier.padding(bottom = 2.dp)
                 )
+            }
+        }
+        // Phase-2 groups: section lives at the top of Chats; renders nothing
+        // while the flag is off, so 1:1 layout is byte-identical until ship.
+        if (com.frerox.toolz.data.whisper.groupsEnabled()) {
+            item {
+                WhisperGroupsSection(onNavigateToGroup = onNavigateToGroup)
             }
         }
         // Incoming Friend Requests Banner — pendingIncomingRequests is the single source

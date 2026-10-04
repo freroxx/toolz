@@ -2470,3 +2470,13 @@ comment on table public.whisper_groups is
   '20261007 Phase-2 groups: ordered-log metadata only; clients build membership from verified whisper_group_events, never from this table alone.';
 comment on function public.whisper_check_group_send_allowed(uuid, int) is
   '20261007: 600 envelopes/day/sender (50 x 12 max fan-out); fail-closed trigger gate on whisper_group_messages.';
+
+-- ═══════════════ 20261007_whisper_groups_payload_text_fix ═
+-- The event payload MUST round-trip byte-identically: clients sign the exact
+-- string at write time and re-verify it on every fetch. jsonb normalizes key
+-- order, which would break signature checks after a server round-trip — so the
+-- column is TEXT (opaque signed blob; the server never queries inside it).
+-- Safe to re-run (fresh v1.1.7-dev table, no production rows behind the flag).
+alter table public.whisper_group_events alter column payload type text using payload::text;
+alter table public.whisper_group_events alter column payload set default '{}';
+alter table public.whisper_group_events alter column payload set not null;

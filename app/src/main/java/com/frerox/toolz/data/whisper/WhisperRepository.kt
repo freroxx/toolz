@@ -98,8 +98,10 @@ class WhisperRepository @Inject constructor(
     // V6 (planwhisper.md §3.2): Double Ratchet live transport — persistent session
     // state, X3DH factory and SPK private halves for responder bootstrap.
     private val sessionStore: com.frerox.toolz.data.whisper.session.WhisperSessionStore,
-    private val sessionFactory: WhisperSessionFactory,
+    internal val sessionFactory: WhisperSessionFactory,
     private val prekeyManager: WhisperPrekeyManager,
+    // Phase-2 groups: local event-log cache DAO (provided by DatabaseModule).
+    internal val groupDao: WhisperGroupDao,
     // V6-R7 AVATARS: encrypted-avatar resolver (memory+disk cache) for wipe hooks.
     internal val avatarLoader: com.frerox.toolz.data.whisper.WhisperAvatarLoader,
 ) {
@@ -276,7 +278,9 @@ class WhisperRepository @Inject constructor(
      * frame must not smuggle a static-ECDH fallback). Legacy inbound rows with
      * "env" still open via tryInsurance for backward compat.
      */
-    private suspend fun sealWithRatchet(
+    // Phase-2 groups: extension domain (WhisperRepositoryGroups) seals one inner
+    // frame per member through this unmodified 1:1 path — widened, not rewritten.
+    internal suspend fun sealWithRatchet(
         senderId: String,
         receiverId: String,
         plaintext: String,
@@ -811,7 +815,8 @@ class WhisperRepository @Inject constructor(
      * (`WhisperRatchetLostMessage` from a > MAX_SKIPPED gap) triggers
      * [handleRatchetGap] — a fresh handshake — instead of a permanent lock.
      */
-    private suspend fun openV3Frame(
+    // Phase-2 groups: same widening — each fan-out frame opens here verbatim.
+    internal suspend fun openV3Frame(
         rawContent: String,
         partnerId: String,
         msgSenderId: String,

@@ -206,6 +206,7 @@ class WhisperSessionFactory @Inject constructor(
             opkKid = bundle.opk?.kid,
             opkPubB64 = bundle.opk?.public_key,
             identityIkB64 = binding.ik,
+            signerX509B64 = binding.signer,
         )
     }.onFailure {
         ProtocolDiagnostics.increment("x3dh.bundleVerifyFail")
@@ -218,6 +219,8 @@ class WhisperSessionFactory @Inject constructor(
         val opkKid: String?,
         val opkPubB64: String?,
         val identityIkB64: String,
+        /** Phase-2 groups: the peer's protocol signer (verifies group admin_sig). */
+        val signerX509B64: String,
     )
 
     @Serializable
