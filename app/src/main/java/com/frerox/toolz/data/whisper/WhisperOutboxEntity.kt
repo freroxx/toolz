@@ -28,6 +28,7 @@ import androidx.room.Query
     indices = [
         Index(value = ["enqueuedAtMs"]),
         Index(value = ["receiverId"]),
+        Index(value = ["groupId"]),
     ],
 )
 data class WhisperOutboxEntity(
@@ -41,6 +42,14 @@ data class WhisperOutboxEntity(
     /** Wall-clock insert time — drives stable FIFO ordering and oldest-first eviction. */
     val enqueuedAtMs: Long,
     val attempts: Int = 0,
+    /**
+     * Phase-2 groups: non-null when this row is one fan-out leg of a group
+     * send (one row per member; receiverId is that leg's member). Null for
+     * 1:1 rows. Nullable + DEFAULT NULL in MIGRATION_61_62 so every existing
+     * 1:1 row migrates untouched (Room validates the default on both sides —
+     * no @ColumnInfo needed for a null default).
+     */
+    val groupId: String? = null,
 ) {
     fun toQueued(): WhisperQueuedMessage = WhisperQueuedMessage(
         clientId = clientId,
@@ -51,6 +60,7 @@ data class WhisperOutboxEntity(
         replyToId = replyToId,
         createdAt = createdAt,
         attempts = attempts,
+        groupId = groupId,
     )
 
     companion object {
@@ -65,6 +75,7 @@ data class WhisperOutboxEntity(
                 createdAt = q.createdAt,
                 enqueuedAtMs = enqueuedAtMs,
                 attempts = q.attempts,
+                groupId = q.groupId,
             )
     }
 }

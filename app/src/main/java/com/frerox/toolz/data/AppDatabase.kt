@@ -67,6 +67,10 @@ import com.frerox.toolz.data.whisper.WhisperOutboxEntity
 import com.frerox.toolz.data.whisper.WhisperOutboxDao
 import com.frerox.toolz.data.whisper.WhisperLocalTombstoneEntity
 import com.frerox.toolz.data.whisper.WhisperLocalTombstoneDao
+import com.frerox.toolz.data.whisper.WhisperGroupEntity
+import com.frerox.toolz.data.whisper.WhisperGroupMemberEntity
+import com.frerox.toolz.data.whisper.WhisperGroupEventEntity
+import com.frerox.toolz.data.whisper.WhisperGroupDao
 import com.frerox.toolz.data.device.cache.DeviceSpecCacheEntity
 import com.frerox.toolz.data.device.cache.DeviceSpecsDao
 import com.frerox.toolz.data.device.cache.DeviceSpecConverters
@@ -109,6 +113,10 @@ import com.frerox.toolz.data.purgeshot.PurgeShotEntity
         // P3: whisper prefs→Room consolidation (outbox + local tombstones).
         WhisperOutboxEntity::class,
         WhisperLocalTombstoneEntity::class,
+        // Phase-2 groups (v62): local event-log cache; server log stays authoritative.
+        WhisperGroupEntity::class,
+        WhisperGroupMemberEntity::class,
+        WhisperGroupEventEntity::class,
         SpeedHistoryEntity::class,
         DeviceInventoryEntity::class,
         ScanSnapshotEntity::class,
@@ -138,7 +146,12 @@ import com.frerox.toolz.data.purgeshot.PurgeShotEntity
     // Notepad V3 (61): notes gains createdAt/updatedAt + query indices;
     // note_attachments gains mimeType/durationMs + (noteId,kind)/(uri)/
     // (noteId,uri) indices (see MIGRATION_60_61).
-    version = 61,
+    // Phase-2 groups (62): whisper_groups_local + whisper_group_members_local
+    // + whisper_group_events_local caches; whisper_outbox gains nullable
+    // groupId (1:1 rows migrate untouched, DEFAULT NULL) + index
+    // (see MIGRATION_61_62). Purely additive — no existing table altered
+    // beyond the nullable outbox column.
+    version = 62,
     // H-10 FIX (reviewwhisper.md): schemas are now exported to app/schemas (see
     // build.gradle.kts room.schemaLocation). Every future bump MUST ship a Migration —
     // the DatabaseModule comment documents this contract too.
@@ -167,6 +180,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun whisperMessageDao(): WhisperMessageDao
     abstract fun whisperOutboxDao(): WhisperOutboxDao
     abstract fun whisperLocalTombstoneDao(): WhisperLocalTombstoneDao
+    abstract fun whisperGroupDao(): WhisperGroupDao
     abstract fun speedHistoryDao(): SpeedHistoryDao
     abstract fun deviceInventoryDao(): DeviceInventoryDao
     abstract fun scanSnapshotDao(): ScanSnapshotDao

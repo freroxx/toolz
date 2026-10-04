@@ -510,7 +510,10 @@ Ciphertext and IV markers, sender and receiver IDs, timestamps, profile fields
 (username, display name, bio, avatar URL), the friend and block graph, last-seen
 presence, typing signals, reaction rows, FCM tokens, prekey material and
 signatures, and image URLs with IDs. Usernames reveal who talks to whom;
-message and image bytes stay opaque. FCM sees sender/message IDs and friend
+message and image bytes stay opaque. Group rows additionally reveal group IDs,
+member lists, epochs, and per-member frame sizes (frames themselves stay
+opaque — one v3 frame per member, each sealed through that member's 1:1
+session). FCM sees sender/message IDs and friend
 pings. ImgBB sees opaque PNGs with expiry. Passwords travel only to GoTrue over
 TLS at auth and deletion time; the bypass password goes only to the edge secret
 check.
@@ -538,4 +541,23 @@ Also: `crypto/SessionCrypto` 138, `push/WhisperPushService` 142, UI screens
 (19 files from 76 to 2573 lines, see section 8), workers for delivery (49),
 local cleanup (43), and token clipboard expiry (151), nine edge functions
 (280/151/243/416/164/299/356/256/180 lines) plus the inlined `_shared/attest.ts`
-gate (156), and the 2125-line SQL baseline.
+gate (156), and the SQL baseline (groups section included).
+
+## 13. Groups (Phase 2, v1.1.7 in development — flag OFF)
+
+Not reachable in any build: `WhisperGroupsConfig.ENABLED = false` and every
+group entry point requires it. 1:1 behavior is byte-identical with the flag
+off (no shared code path was modified — only additive files plus a nullable
+`whisper_outbox.groupId` that stays null for 1:1 rows).
+
+Design: pairwise fan-out, ≤12 members. The sender seals one inner frame per
+member through the unmodified 1:1 session; groupId + epoch ride inside the
+AEAD plaintext (`WhisperGroupFrameBody`), so there is no separate group AAD
+domain. The server is an ordered log (`whisper_groups` / `whisper_group_members`
+/ `whisper_group_events` / `whisper_group_messages` + fan-out quota
+`whisper_check_group_send_allowed`, 600 envelopes/day/sender) — clients build
+membership from verified admin-signed events only (`applyEvents`,
+fail-closed). Group writes require `client_version_code >= 18` at the schema
+layer; the global Whisper floor stays 17 until ship day, when the manifest,
+edge secret, and `WhisperPinConfig.MIN_VERSION_CODE` all flip to 18 and
+<1.1.7 clients lose Whisper access entirely.

@@ -335,6 +335,22 @@ object DatabaseModule {
         }
     }
 
+    // Phase-2 groups 61->62: three new local cache tables (fresh CREATEs, no
+    // backfill — a wiped cache only costs a re-sync from the server log) plus
+    // the nullable whisper_outbox.groupId column (DEFAULT NULL: every existing
+    // 1:1 row migrates untouched) and its index. Purely additive.
+    private val MIGRATION_61_62 = object : Migration(61, 62) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("CREATE TABLE IF NOT EXISTS `whisper_groups_local` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `epoch` INTEGER NOT NULL, `createdBy` TEXT NOT NULL, `updatedAtMs` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+            db.execSQL("CREATE TABLE IF NOT EXISTS `whisper_group_members_local` (`groupId` TEXT NOT NULL, `memberId` TEXT NOT NULL, `role` TEXT NOT NULL, `invitedBy` TEXT, PRIMARY KEY(`groupId`, `memberId`))")
+            db.execSQL("CREATE TABLE IF NOT EXISTS `whisper_group_events_local` (`id` TEXT NOT NULL, `groupId` TEXT NOT NULL, `seq` INTEGER NOT NULL, `epoch` INTEGER NOT NULL, `type` TEXT NOT NULL, `actor` TEXT NOT NULL, `payload` TEXT NOT NULL, `adminSig` TEXT NOT NULL, `createdAtMs` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_whisper_group_members_local_groupId` ON `whisper_group_members_local` (`groupId`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_whisper_group_events_local_groupId_seq` ON `whisper_group_events_local` (`groupId`, `seq`)")
+            db.execSQL("ALTER TABLE whisper_outbox ADD COLUMN groupId TEXT DEFAULT NULL")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_whisper_outbox_groupId` ON `whisper_outbox` (`groupId`)")
+        }
+    }
+
     // Notepad V3 60->61: createdAt/updatedAt + query indices; attachment
     // metadata + lookup indices. Purely additive, backfills from timestamp.
     private val MIGRATION_60_61 = object : Migration(60, 61) {
@@ -380,7 +396,7 @@ object DatabaseModule {
         .openHelperFactory(factory)
         // V2-FIX (reviewwhisper.md) H-10: explicit migrations only — every version bump
         // must ship one (see AppDatabase comment).
-        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56, MIGRATION_56_57, MIGRATION_57_58, MIGRATION_58_59, MIGRATION_59_60, MIGRATION_60_61)
+        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56, MIGRATION_56_57, MIGRATION_57_58, MIGRATION_58_59, MIGRATION_59_60, MIGRATION_60_61, MIGRATION_61_62)
         .fallbackToDestructiveMigrationOnDowngrade()
         // NOTE: Add explicit Migration objects here when schema changes. Schemas are now
         // EXPORTED to app/schemas (H-10 fix) so diffs are reviewable — never re-introduce
@@ -444,7 +460,7 @@ object DatabaseModule {
                 // Fresh builder avoids leaking the first helper's connection.
                 return Room.databaseBuilder(context, AppDatabase::class.java, dbName)
                     .openHelperFactory(factory)
-        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56, MIGRATION_56_57, MIGRATION_57_58, MIGRATION_58_59, MIGRATION_59_60, MIGRATION_60_61)
+        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56, MIGRATION_56_57, MIGRATION_57_58, MIGRATION_58_59, MIGRATION_59_60, MIGRATION_60_61, MIGRATION_61_62)
                     .fallbackToDestructiveMigrationOnDowngrade()
                     .build()
             }
@@ -552,6 +568,11 @@ object DatabaseModule {
     @Provides
     fun provideWhisperLocalTombstoneDao(database: AppDatabase): com.frerox.toolz.data.whisper.WhisperLocalTombstoneDao {
         return database.whisperLocalTombstoneDao()
+    }
+
+    @Provides
+    fun provideWhisperGroupDao(database: AppDatabase): com.frerox.toolz.data.whisper.WhisperGroupDao {
+        return database.whisperGroupDao()
     }
 
     @Provides

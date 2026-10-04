@@ -319,6 +319,8 @@ data class WhisperQueuedMessage(
     val replyToId: String? = null,
     val createdAt: String,
     val attempts: Int = 0,
+    /** Phase-2 groups: set when this entry is one fan-out leg of a group send. Null = 1:1. */
+    val groupId: String? = null,
 )
 
 /** Encrypted-image metadata. This envelope itself is sent as an encrypted Whisper message. */
