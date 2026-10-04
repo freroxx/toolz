@@ -29,5 +29,7 @@ for a in "$APK_DIR"/app-*-release.apk; do
     --out "${a%.apk}-rot.apk" "$a"
   mv "${a%.apk}-rot.apk" "$a"
   echo "rotated: $a"
-  "$BT" verify --print-certs "$a" | grep -c 'SHA-256 digest' | xargs -I{} echo "  certs={} (expect 2)"
+  n=$("$BT" verify --print-certs "$a" | grep -c 'SHA-256 digest' || true)
+  echo "  certs=$n (expect 2)"
+  if [ "$n" -lt 2 ]; then echo "rotation missing in $a" >&2; exit 1; fi
 done

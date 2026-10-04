@@ -305,3 +305,50 @@ dependencies {
     // Shapes and stuff - Used by the Timer thingy
     implementation("androidx.graphics:graphics-shapes:1.1.0")
 }
+// Release rotation re-sign (v3.1 debug -> release lineage).
+// WHY: Gradle signs release APKs with the release key only. Devices holding
+// older debug-signed installs reject such updates with
+// INSTALL_FAILED_UPDATE_INCOMPATIBLE. The rotation lineage makes updates
+// install cleanly on every API level (31-32 verify the debug signer, 33+
+// verify the rotation proof). This hook runs automatically after every
+// `assemble*Release` and FAILS the build if rotation cannot be applied, so
+// an unrotated APK can never be published by accident. The heavy lifting
+// lives in scripts/release-rotate.sh (same apksigner invocation, usable
+// standalone: ./scripts/release-rotate.sh [apk-dir]).
+tasks.register("rotateReleaseApks") {
+    group = "distribution"
+    description = "Re-signs release APKs with the v3.1 rotation lineage (debug -> release)."
+    doLast {
+        val ksFile = project.rootProject.file("keystore.properties")
+        var hasReleaseKey = false
+        if (ksFile.isFile) {
+            for (line in ksFile.readLines()) {
+                if (line.trim().startsWith("storeFile")) { hasReleaseKey = true; break }
+            }
+        }
+        if (!hasReleaseKey) {
+            logger.warn("rotateReleaseApks: no release key in keystore.properties (debug-signed build) — rotation skipped.")
+            return@doLast
+        }
+        val script = project.rootProject.file("scripts/release-rotate.sh")
+        if (!script.isFile) {
+            error("rotateReleaseApks: missing " + script.absolutePath + " — refusing to leave an unrotated release APK behind.")
+        }
+        val outDir = project.projectDir.resolve("build/outputs/apk/release")
+        val pb = ProcessBuilder("bash", script.absolutePath, outDir.absolutePath)
+        pb.redirectErrorStream(true)
+        val proc = pb.start()
+        val out = proc.inputStream.bufferedReader().readText()
+        val code = proc.waitFor()
+        logger.lifecycle(out.trim())
+        if (code != 0) {
+            error("rotateReleaseApks: rotation script failed (exit " + code + ") — release APKs are NOT update-safe.")
+        }
+    }
+}
+
+tasks.configureEach {
+    if (name.matches(Regex("^assemble.*Release$")) && !name.contains("Bundle", ignoreCase = true)) {
+        finalizedBy("rotateReleaseApks")
+    }
+}
