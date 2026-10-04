@@ -2,8 +2,8 @@
   "versionName": "1.1.6",
   "versionCode": 17,
   "minimumVersionCode": 17,
-  "signature": "REPLACE_ME_ED25519_SIG",
-  "_comment": "REPLACE_ME: 'signature' must be an Ed25519 signature (base64, 64 bytes) over the canonical manifest JSON — this object with the 'signature' and '_comment' fields removed, minified with no whitespace, keys in their original order (python: json.dumps(m, separators=(',',':'))). Signing/verification details: see UpdateRepository.verifyManifestSignature in the app. Until a real keypair is provisioned the app fails closed and ignores this manifest for updates.",
+  "signature": "r0/4BOlZNlFN8O/AYRt678230ms2DQOGZKCi7f/scVUYKkse1ua/l29q9+gCi5n5Z92b7ioxssyMV7MKj12HAg==",
+  "_comment": "Ed25519 signature (base64) over canonical JSON without signature/_comment fields.",
   "releases": [
     {
       "abi": "arm64-v8a",

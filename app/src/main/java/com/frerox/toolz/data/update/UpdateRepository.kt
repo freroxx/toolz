@@ -322,7 +322,7 @@ class UpdateRepository @Inject constructor(
          * Keep the private key offline; sign every released
          * update_manifest.json with it (see verifyManifestSignature).
          */
-        const val ED25519_PUBLIC_KEY_B64 = "REPLACE_ME_ED25519_PUBKEY"
+        const val ED25519_PUBLIC_KEY_B64 = "pLIOx0vcMq4/JWQhrsNl97x8cTIYHvtYwP7NGnLkYBM="
 
         /** X.509 SubjectPublicKeyInfo header wrapping a raw Ed25519 key. */
         private val ED25519_X509_PREFIX = byteArrayOf(
