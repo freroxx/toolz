@@ -318,8 +318,12 @@ dependencies {
 tasks.register("rotateReleaseApks") {
     group = "distribution"
     description = "Re-signs release APKs with the v3.1 rotation lineage (debug -> release)."
+    // Captured at configuration time: Task.project at execution time breaks
+    // the configuration cache.
+    val ksFile = rootProject.file("keystore.properties")
+    val scriptFile = rootProject.file("scripts/release-rotate.sh")
+    val outDir = project.projectDir.resolve("build/outputs/apk/release")
     doLast {
-        val ksFile = project.rootProject.file("keystore.properties")
         var hasReleaseKey = false
         if (ksFile.isFile) {
             for (line in ksFile.readLines()) {
@@ -330,12 +334,10 @@ tasks.register("rotateReleaseApks") {
             logger.warn("rotateReleaseApks: no release key in keystore.properties (debug-signed build) — rotation skipped.")
             return@doLast
         }
-        val script = project.rootProject.file("scripts/release-rotate.sh")
-        if (!script.isFile) {
-            error("rotateReleaseApks: missing " + script.absolutePath + " — refusing to leave an unrotated release APK behind.")
+        if (!scriptFile.isFile) {
+            error("rotateReleaseApks: missing " + scriptFile.absolutePath + " — refusing to leave an unrotated release APK behind.")
         }
-        val outDir = project.projectDir.resolve("build/outputs/apk/release")
-        val pb = ProcessBuilder("bash", script.absolutePath, outDir.absolutePath)
+        val pb = ProcessBuilder("bash", scriptFile.absolutePath, outDir.absolutePath)
         pb.redirectErrorStream(true)
         val proc = pb.start()
         val out = proc.inputStream.bufferedReader().readText()

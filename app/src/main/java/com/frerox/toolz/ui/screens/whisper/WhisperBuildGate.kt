@@ -62,7 +62,7 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /** Official release page offered from every locally blocked card. */
-private const val OFFICIAL_RELEASES_URL = "https://github.com/ferroxx/toolz/releases"
+private const val OFFICIAL_RELEASES_URL = "https://github.com/freroxx/toolz/releases"
 
 // Block reasons surfaced by [gateWhisperAccess] (LOCAL-ONLY runtime tamper gate).
 const val REASON_UNOFFICIAL_BUILD = "unofficial build"

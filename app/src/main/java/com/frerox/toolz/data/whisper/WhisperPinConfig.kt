@@ -43,23 +43,16 @@ object WhisperPinConfig {
     /**
      * Release signing-certificate SHA-256, upper-case hex, no colons.
      *
-     * PLACEHOLDER — the real release hash is deliberately NOT hardcoded
-     * here (the release keystore is not part of the source tree). Replace
-     * with the actual value before cutting a release build:
+     * Public value (derived from the signed APK, not a secret):
+     *   apksigner verify --print-certs app-release.apk | grep -i 'SHA-256'
      *
-     *   # From the release keystore:
-     *   keytool -list -v -keystore <release.keystore> -alias <keyAlias> \
-     *     | grep -i 'SHA256'     # strip ':' and upper-case
-     *
-     *   # Or straight from the signed APK:
-     *   apksigner verify --print-certs app-release.apk \
-     *     | grep -i 'SHA-256'     # strip ':' and upper-case
-     *
-     * While this holds the placeholder the attestor's local verdict is
-     * "not official" on every build; headers still go out and the
-     * server-side OFFICIAL_CERT_SHA256 secret makes the final call.
+     * The release keystore itself stays off-source; only this fingerprint
+     * ships. Rotation lineage (debug -> release, v3.1, minSdk 33) keeps
+     * updates installable: API 33+ reports the release cert, API 31-32
+     * still sees the debug ancestor and must reinstall once to migrate.
+     * The server-side OFFICIAL_CERT_SHA256 secret makes the final call.
      */
-    const val OFFICIAL_CERT_SHA256 = "REPLACE_ME_WITH_RELEASE_SHA256"
+    const val OFFICIAL_CERT_SHA256 = "58A16BCD6E9CEF75706A957B19A15BED19BD47F0B7FDB602364D9EBFC5C369F9"
 
     /**
      * Minimum versionCode accepted by the anti-mod gate. Synced with
