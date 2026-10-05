@@ -13,9 +13,16 @@ object NewsNotifier {
     fun notificationId(itemId: String): Int =
         NotificationHelper.ID_NEWS_BASE + ((itemId.hashCode() and 0x7fffffff) % 800)
 
-    /** Stable per-item PendingIntent request code (28100/28200 bands, unused elsewhere). */
-    fun requestCode(itemId: String, base: Int): Int =
-        base + ((itemId.hashCode() and 0x7fffffff) % 100)
+    /**
+     * Stable per-item PendingIntent request code. Content uses 28100–28899,
+     * dismiss uses 29100–29899 (both 800-wide, non-overlapping, unused
+     * elsewhere). 800 slots match the notification band so View/Dismiss never
+     * alias the wrong item after 100+ announcements (the old %100 did).
+     */
+    fun requestCode(itemId: String, base: Int): Int {
+        val slot = (itemId.hashCode() and 0x7fffffff) % 800
+        return base + slot
+    }
 
     fun post(context: Context, item: NewsEntity) {
         try {
@@ -36,7 +43,7 @@ object NewsNotifier {
                 putExtra("news_id", item.id)
             }
             val dismissPi = PendingIntent.getBroadcast(
-                context, requestCode(item.id, 28200),
+                context, requestCode(item.id, 29100),
                 dismissIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
             val preview = item.body.take(140)

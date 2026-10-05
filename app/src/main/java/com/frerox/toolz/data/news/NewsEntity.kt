@@ -84,6 +84,9 @@ interface NewsDao {
     @Query("SELECT * FROM news_items WHERE status = 'published' ORDER BY pinned DESC, publishAt DESC")
     suspend fun publishedOrdered(): List<NewsEntity>
 
+    @Query("SELECT id FROM news_items WHERE status = 'published'")
+    suspend fun publishedIds(): List<String>
+
     @Query("UPDATE news_items SET status = 'archived' WHERE id IN (:ids)")
     suspend fun markArchived(ids: List<String>)
 

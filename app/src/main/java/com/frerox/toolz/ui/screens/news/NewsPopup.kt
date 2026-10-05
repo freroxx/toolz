@@ -185,7 +185,7 @@ fun ToolzNewsPopup(
                             context.startActivity(
                                 Intent(
                                     Intent.ACTION_VIEW,
-                                    com.frerox.toolz.data.news.NewsConstants.WEBSITE_NEWS_URL.toUri()
+                                    "${com.frerox.toolz.data.news.NewsConstants.WEBSITE_NEWS_URL}#news-${item.id}".toUri()
                                 )
                             )
                         } catch (_: Exception) { }

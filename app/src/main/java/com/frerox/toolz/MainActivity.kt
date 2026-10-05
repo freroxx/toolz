@@ -488,7 +488,7 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
 
     private fun scheduleNewsCheck() {
         val newsCheckRequest = PeriodicWorkRequestBuilder<NewsCheckWorker>(
-            12, TimeUnit.HOURS
+            6, TimeUnit.HOURS
         ).setConstraints(
             Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED)
@@ -498,7 +498,7 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
 
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
             "NewsCheck",
-            ExistingPeriodicWorkPolicy.KEEP,
+            ExistingPeriodicWorkPolicy.UPDATE,
             newsCheckRequest
         )
     }

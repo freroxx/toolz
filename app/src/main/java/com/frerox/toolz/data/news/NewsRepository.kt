@@ -2,6 +2,7 @@ package com.frerox.toolz.data.news
 
 import android.content.Context
 import com.frerox.toolz.data.settings.SettingsRepository
+import com.frerox.toolz.worker.NewsCheckWorker
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
@@ -58,12 +59,25 @@ class NewsRepository @Inject constructor(
                 // Deleted upstream: hard-delete cached copies everywhere
                 // (popup, notifications, history) before reconciling the rest.
                 if (feed.removedIds.isNotEmpty()) {
-                    newsDao.deleteByIds(feed.removedIds.take(200))
+                    val gone = feed.removedIds.take(200)
+                    newsDao.deleteByIds(gone)
+                    // Dismiss any shade rows for deleted items (best effort).
+                    for (id in gone) {
+                        try { NewsNotifier.cancel(context, id) } catch (_: Exception) { }
+                    }
                 }
                 reconcileRemovals(feedIds = feed.news.map { it.id }.toSet(), appVersion = av, now = now)
                 newsDao.prune(now, now - PRUNE_AFTER_MS)
                 settingsRepository.setNewsLastSync(now)
                 if (feed.feedVersion >= 0) settingsRepository.setNewsFeedVersion(feed.feedVersion)
+                // Persist + schedule the next scheduled transition (publish/expiry
+                // flips with zero mutations — otherwise devices would miss it).
+                parseTransition(feed.nextTransitionAt, now)?.let { at ->
+                    try { settingsRepository.setNewsNextTransition(at) } catch (_: Exception) { }
+                    scheduleTransition(at)
+                } ?: run {
+                    try { settingsRepository.setNewsNextTransition(0L) } catch (_: Exception) { }
+                }
                 true
             }
         } catch (_: Exception) {
@@ -71,11 +85,39 @@ class NewsRepository @Inject constructor(
         }
     }
 
+    private fun parseTransition(iso: String?, now: Long): Long? {
+        if (iso.isNullOrBlank()) return null
+        return try {
+            val t = java.time.Instant.parse(iso).toEpochMilli()
+            if (t > now && t - now <= 30L * 24 * 60 * 60 * 1000L) t else null
+        } catch (_: Exception) { null }
+    }
+
+    /** One-shot wake at the next publish/expiry so scheduled items land on time. */
+    private fun scheduleTransition(atMs: Long) {
+        try {
+            val delay = atMs - System.currentTimeMillis() + 30_000L
+            if (delay <= 0) return
+            val req = androidx.work.OneTimeWorkRequestBuilder<NewsCheckWorker>()
+                .setInitialDelay(delay, java.util.concurrent.TimeUnit.MILLISECONDS)
+                .setConstraints(
+                    androidx.work.Constraints.Builder()
+                        .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
+                        .build()
+                )
+                .addTag("NewsTransition")
+                .build()
+            androidx.work.WorkManager.getInstance(context)
+                .enqueueUniqueWork("NewsTransition", androidx.work.ExistingWorkPolicy.REPLACE, req)
+        } catch (_: Exception) { /* never break sync on scheduling */ }
+    }
+
     /**
      * Change-driven sync: compares the cheap `news:version` generation counter
      * and force-syncs only when the server moved. Falls back to the stale gate
      * when the version check fails. This is what makes deletes and edits land
-     * within minutes instead of waiting out the 6-hour window.
+     * within minutes instead of waiting out the 6-hour window. Also force-syncs
+     * when a scheduled transition became due (publish/expiry flips no counter).
      */
     suspend fun syncIfChanged(): Boolean {
         return try {
@@ -83,6 +125,15 @@ class NewsRepository @Inject constructor(
             if (remote != null && !remote.degraded && remote.v >= 0) {
                 val local = settingsRepository.newsFeedVersion.first()
                 if (remote.v != local) return syncIfStale(force = true)
+                // Version unchanged — but a scheduled transition may be due.
+                parseTransition(remote.nextTransitionAt, System.currentTimeMillis())?.let { at ->
+                    try { settingsRepository.setNewsNextTransition(at) } catch (_: Exception) { }
+                    scheduleTransition(at)
+                }
+                val due = try { settingsRepository.newsNextTransition.first() } catch (_: Exception) { 0L }
+                if (due > 0 && System.currentTimeMillis() >= due - 30_000L) {
+                    return syncIfStale(force = true)
+                }
                 return true
             }
             syncIfStale()
@@ -157,8 +208,13 @@ class NewsRepository @Inject constructor(
     suspend fun unreadCount(): Int {
         return try {
             val seen = settingsRepository.newsSeenIds.first()
-            val all = newsDao.publishedOrdered()
-            all.count { it.id !in seen }
+            if (seen.isEmpty()) {
+                // Fast path: no need to load full rows when nothing is seen.
+                newsDao.publishedIds().size
+            } else {
+                val all = newsDao.publishedOrdered()
+                all.count { it.id !in seen }
+            }
         } catch (_: Exception) { 0 }
     }
 

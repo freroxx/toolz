@@ -42,11 +42,13 @@ data class NewsFeedDto(
     @SerialName("news") val news: List<NewsDto> = emptyList(),
     @SerialName("removedIds") val removedIds: List<String> = emptyList(),
     @SerialName("v") val feedVersion: Int = -1,
+    @SerialName("nextTransitionAt") val nextTransitionAt: String? = null,
     @SerialName("degraded") val degraded: Boolean = false
 )
 
 @Serializable
 data class NewsVersionDto(
     @SerialName("v") val v: Int = -1,
+    @SerialName("nextTransitionAt") val nextTransitionAt: String? = null,
     @SerialName("degraded") val degraded: Boolean = false
 )

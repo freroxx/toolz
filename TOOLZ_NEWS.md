@@ -25,7 +25,8 @@ Contents:
 ## 1. Overview and honesty notes
 
 The flow is one-directional: admin publishes in the website panel → JSON lives
-in Redis → the app polls a public feed (boot, every 12 h via WorkManager,
+in Redis → the app polls a public feed (boot, every 6 h via WorkManager,
+dashboard foreground version check, one-shot wake at scheduled transitions,
 manual refresh) → a local eligibility engine decides what pops up, what
 notifies, and what lands in history. There is no push channel and no
 per-device targeting; "targeting" means app-version rules evaluated on both
@@ -42,10 +43,16 @@ Corrections and limits worth knowing up front:
   the retry timestamp. Items targeting other versions are never touched.
 - Propagation is version-driven, not window-driven: every admin mutation bumps
   the `news:version` generation counter (served as feed `v` and by the tiny
-  `GET /api/news-version`, CDN-cached 60 s). The app compares it via
-  `syncIfChanged()` on dashboard foreground and in the 12 h worker, force-syncing
+  `GET /api/news-version`, CDN-cached 60 s, with `ETag` support on both).
+  The app compares it via
+  `syncIfChanged()` on dashboard foreground and in the 6 h worker, force-syncing
   only when the generation moved — deletes and edits land within minutes with
   no manual refresh. The 6 h stale gate remains as a backstop.
+- Scheduled publish/expiry flips no counter, so both feed surfaces also serve
+  `nextTransitionAt` (earliest future `publishAt`/`expiresAt`). The website
+  refetches when it passes; the app persists it (`news_next_transition`) and
+  enqueues a one-shot `NewsTransition` worker (+30 s slack) plus a due-check
+  in `syncIfChanged()`. Horizon capped at 30 days; failures never break sync.
 - The public feed is CDN-cached for ~1 minute (`s-maxage=60`), so a publish
   takes about a minute to reach devices (and the website home section / `/news`
   page). The app additionally syncs on version change (see above), so the 6 h
@@ -128,19 +135,26 @@ admin live preview, all verified against the renderers):
 (`vercel.json`: `maxDuration` 10):
 
 - Public CORS (`*`), `GET`/`OPTIONS` only. Cache headers carry an explicit
-  browser `max-age=60` alongside `s-maxage=300`: without it browsers may
+  browser `max-age=60` alongside `s-maxage=60`: without it browsers may
   heuristically cache an empty feed far beyond `s-maxage` and `/news` looks
   permanently empty. The website hook additionally fetches with
-  `cache: 'no-store'` (tiny payload, freshness wins).
+  `cache: 'no-store'` (tiny payload, freshness wins). `ETag` (`W/"v…"` ) +
+  `If-None-Match` → `304` saves mobile data; fail-open per-IP fixed-window
+  throttle (120 req/min, Redis-backed, `429` + `Retry-After`).
 - Reads `news:index` (ZSET, score = publish time), pipelined `MGET` of up to
   100 items, filters `published` + time window + version eligibility (`all=1`
   skips the version gate for the website surface), sorts pinned-first then
   newest, slices 20. `removedIds` carries up
   to 200 recent deletion tombstones for device cache eviction.
+  `nextTransitionAt` carries the earliest future `publishAt`/`expiresAt`
+  (null when none) so scheduled flips need no mutation. Tombstone keys are
+  read via non-blocking `SCAN` (KEYS fallback, 500 cap).
 - Never fails the caller: missing Redis config, Redis outage, or any exception
   returns `200 { count: 0, news: [], degraded: true }`.
 - `?preview=1` bypasses CDN caching (public data, no auth — the name is a
   cache hint, not a privilege).
+- `GET /api/news-rss` (same rules, RSS 2.0, `s-maxage=300`) powers the `/news`
+  RSS button with per-item `#news-<id>` links and image enclosures.
 
 `toolz-website/api/news-admin.ts` — same-origin JSON API
 (`vercel.json`: `maxDuration` 15). Actions via `?action=`:
@@ -152,13 +166,16 @@ response). Login takes `{ password }` in the
 JSON body only (`?pw=` in the URL is rejected; `?password=` is ignored).
 
 `feed-health` (authed GET) returns `{ indexSize, payloadCount, liveCount,
-orphanIds, items: [{ id, title, status, publishAt, expiresAt,
+feedVersion, nextTransitionAt, orphanIds, items: [{ id, title, status, publishAt, expiresAt,
 liveOnPublicFeed, reason }] }` using the exact feed rules (status + time
 window; version targeting is per-device). `reason` is `live`, `draft (not
 published)`, `archived`, `scheduled at <iso>`, `expired at <iso>`, and index
 members without payloads are reported as `orphanIds`.
 `repair-index` (authed POST) deletes orphan index members and returns
-`{ removed, orphans }`.
+`{ removed, orphans }`. Audit/tombstone key reads use non-blocking `SCAN`
+(KEYS fallback). `list` accepts optional `?limit=&offset=` (defaults to all,
+backward compatible). Session cookies omit `Secure` on localhost/http so dev
+login works; production keeps `HttpOnly; Secure; SameSite=Lax`.
 `create`/`update`/`publish`/`unpublish`/`archive` responses include
 `visibility` (same verdict shape for the single saved item) so the admin can
 confirm "Saved — LIVE" vs "Saved — NOT live: <reason>" at save time.
@@ -187,7 +204,8 @@ nav link). M3 Expressive styling (32 px cards, pill buttons) on Tailwind +
 shadcn, matching the `reset.ts` admin language.
 
 - `src/pages/AdminNews.tsx` — login gate → dashboard (published/draft counts,
-  filter tabs All/Published/Drafts/Archived/Expired, search, refresh), audit
+  filter tabs All/Published/Drafts/Archived/Expired, search, refresh,
+  "Publish all drafts" bulk action with confirm), audit
   section, editor host. Restores a valid session on page refresh (cookie-only
   `list` probe, "Checking session…" state) instead of forcing re-login.
 - `src/hooks/useNewsAdmin.ts` — `credentials: include` fetch wrapper, CSRF kept
@@ -200,15 +218,17 @@ shadcn, matching the `reset.ts` admin language.
 - `src/components/news-admin/NewsEditorDialog.tsx` — tabbed (Content with
   templates, counters, markdown toolbar; Targeting with Everyone reset,
   Latest-version shortcut, who-sees-this + version simulator; Behavior with
-  recurrence presets, plain-language toggles, schedule quick chips and a live
-  verdict line; triple Preview: popup + website article), status segmented
+  recurrence presets, plain-language toggles, schedule quick chips (local-time
+  labels with UTC storage note) and a live
+  verdict line ("~1 min"); triple Preview: popup + website article), status segmented
   control with consequence captions, per-tab zod error counts with auto-jump,
   Cancel / Save draft / Publish now (Update/Unpublish when editing),
   unsaved-changes confirm. "Publish now" forces `published` + immediate.
   Every save auto-verifies against the live feed (`compareSavedVsFeed`) and
   reports "verified live" vs the exact mismatch.
-- `src/components/news-admin/NewsFeedCheck.tsx` — on-demand `feed-health`
-  runner: index/payload/live counts, orphan IDs, per-item verdicts.
+- `src/components/news-admin/NewsFeedCheck.tsx` — auto-runs on mount (no more
+  manual "Run feed check" needed): index/payload/live counts, generation,
+  next-transition badge, orphan IDs, per-item verdicts.
 - `src/components/news-admin/NewsPreviewCard.tsx` — popup mock (priority chip,
   frequency caption, markdown body, CTA row).
 - `src/components/news-admin/NewsAuditLog.tsx` — filter chips (All/Content/
@@ -221,6 +241,9 @@ shadcn, matching the `reset.ts` admin language.
 Public website surface (same feed, `?all=1`, no login):
 
 - `src/hooks/usePublicNews.ts` — client fetch of `/api/news?all=1` with
+  module-level shared cache (home + `/news` fetch once), `ETag`-friendly
+  `no-store` fetch, 60 s `news-version` poll that refetches only on generation
+  or transition-hint change (plus due-check past `nextTransitionAt`),
   loading state, empty-on-failure, plus `formatNewsDate`. Distinguishes feed
   failure (`unavailable`, from `degraded`/HTTP/parse errors) from a genuinely
   empty feed so `/news` can be honest about breakage.
@@ -229,8 +252,11 @@ Public website surface (same feed, `?all=1`, no login):
   times; used by the editor verdict line and list badges (tested in
   `src/test/news-verdict.test.ts`).
 - `src/pages/News.tsx` — `/news` route: M3 hero, priority filter chips
-  (all/critical/feature/fix/promo/info), full cards (image, advanced markdown
-  body, date, CTA), skeleton/empty states, plus a distinct "feed unavailable +
+  (all/critical/feature/fix/promo/info) + RSS button (`/api/news-rss`),
+  per-item `#news-<id>` anchors with copy-link + scroll-to-hash deep-link,
+  full cards (image, advanced markdown
+  body, date, CTA), `toolz://` actions render as "in-app only" hints (no broken
+  new-tab), skeleton/empty states, plus a distinct "feed unavailable +
   Retry" state when `unavailable`, Navbar + Footer + download dialog.
 - `src/components/landing/NewsSection.tsx` — home `/#news` teaser: up to 3
   latest real cards + "All news" entry to `/news`. Renders nothing while the
@@ -244,27 +270,33 @@ Public website surface (same feed, `?all=1`, no login):
 
 - `NewsConstants.kt` — `WEBSITE_BASE_URL` / `WEBSITE_NEWS_URL` (`/news` page link
   used by the popup footer).
-- `NewsDto.kt` — `@Serializable` feed/item DTOs, unknown-field tolerant.
-- `NewsApi.kt` — `GET api/news?appVersion=&platform=`.
+- `NewsDto.kt` — `@Serializable` feed/item DTOs (`nextTransitionAt` additive,
+  defaults keep old servers/clients compatible), unknown-field tolerant.
+- `NewsApi.kt` — `GET api/news?appVersion=&platform=`, `GET api/news-version`.
 - `NewsVersion.kt` — pure semver compare + eligibility (range/only/excluded).
   Covered by `NewsVersionTest` (3 tests).
 - `NewsEntity.kt` — `news_items` Room entity (versions as CSV, epochs as
   millis), `toEntity` sanitizer (length caps, `requiresAction`
   critical-only coercion), `NewsDao` (upsert, `LIMIT/OFFSET` paging,
-  `publishedOrdered`, `markArchived`, prune incl. disappearing auto-delete).
+  `publishedOrdered` + lightweight `publishedIds` for the unread fast-path,
+  `markArchived`, prune incl. disappearing auto-delete).
 - `NewsDatabase.kt` — separate plain Room DB (`toolz_news_db`, v2 with
   `NEWS_MIGRATION_1_2` adding `disappearing`, `exportSchema = false`). Deliberately separate from `AppDatabase` (v61,
   SQLCipher, strict migration chain) so news never risks user data on schema
   drift. News is public content; no encryption needed.
 - `NewsRepository.kt` — `syncIfStale` (6 h stale gate, **single-flight mutex**
   so boot/dashboard/worker/manual triggers share one sync), `syncIfChanged`
-  (cheap generation check → force-sync on change, stale fallback), unpublish
+  (cheap generation check → force-sync on change + transition-due check, stale
+  fallback), tombstone deletes also cancel shade rows, `nextTransitionAt`
+  persist + one-shot `NewsTransition` worker, unpublish
   reconciliation, prune (incl. disappearing auto-delete), `syncAndNotify`
   (sync + immediate notify up to 3 new items, once-per-id), impression/snooze
   state, `popupCandidate`, `notificationCandidates(limit)`.
 - `NewsNotifier.kt` — posts per-item notifications (stable IDs in the
-  8100–8899 band, PendingIntent codes in the free 28100/28200 bands, View +
-  Dismiss actions, BigText style) and `cancel()` used by the dismiss receiver.
+  8100–8899 band, content PendingIntent codes 28100–28899 + dismiss 29100–29899
+  (800-wide, non-overlapping, so 100+ items never alias), View +
+  Dismiss actions, BigText style) and `cancel()` used by the dismiss receiver
+  and tombstone eviction.
 
 `di/NewsModule.kt` provides the Retrofit API (same
 `https://toolz-app.vercel.app/` base and kotlinx converter as the device-specs
@@ -272,6 +304,7 @@ API), the database, and the DAO.
 
 `data/settings/SettingsRepository.kt` additions (all default **ON** unless
 noted): `news_enabled`, `news_notifications_enabled`, `news_last_sync`,
+`news_feed_version`, `news_next_transition`,
 `news_impressions_json`, `news_last_shown_json`, `news_dismissed_ids`,
 `news_snoozed_until_json`, `news_seen_ids`, `news_notified_ids`, with flows
 and capped setters (200/300-entry caps).
@@ -295,17 +328,19 @@ popup, never a crash.
   priority chip, pin marker, natural-ratio Coil cover (capped 420 dp, 20 dp
   corners), full `MarkdownContent` body at 17 sp / 12 dp rhythm, CTA + Later + ✕ + a footer row ("View all news →"
   opens in-app history, "Read on website ↗" opens
-  `NewsConstants.WEBSITE_NEWS_URL` in the browser).
+  `NewsConstants.WEBSITE_NEWS_URL#news-<id>` in the browser).
   `requiresAction` + `critical` renders a blocking `AlertDialog` instead. The (i) button appears only on critical
   items shown while the master toggle is off and explains the bypass.
   Non-dismissible items without a CTA can only be left via "View all" — an
   accepted config constraint documented for admins (section 13).
 - `ToolzNewsScreen.kt` — backup-style rounded (32 dp) `ExpressiveTopAppBar`
   with subtitle + refresh action, `toolzBackground`, fading list edges, full
-  history: `LazyColumn` with keyed cards, 10-by-10 pages, collapsed cards show
+  history: search field + priority filter chips (parity with `/news`) + Android
+  13+ "Notifications off → Enable" card (one-tap `POST_NOTIFICATIONS` request
+  with settings fallback), `LazyColumn` with keyed cards, 10-by-10 pages, collapsed cards show
   plain text (`stripMarkdown`, no raw syntax before "Read more"), expanded
   cards full markdown at 16 sp, natural-ratio images (capped 360 dp, 20 dp
-  corners), real unread dots via `seenIds`, notification deep-link
+  corners), Share action (title + `#news-<id>` link), real unread dots via `seenIds`, notification deep-link
   scroll-to-highlight, loading/empty/error states, refresh button.
 - `NewsViewModel.kt` — immediate popup on dashboard arrival (no delay),
   session guard, foreground `checkNotifications` (sync + immediate notify),
@@ -322,16 +357,20 @@ an About-card "Toolz News" button (`SettingsScreen.kt`).
 
 ## 8. Notifications and workers
 
-`worker/NewsCheckWorker.kt` (Hilt, 12 h periodic, `CONNECTED` + battery-not-low,
+`worker/NewsCheckWorker.kt` (Hilt, 6 h periodic (`UPDATE` so existing installs
+migrate), `CONNECTED` + battery-not-low,
 unique name `NewsCheck`, scheduled in `MainActivity.scheduleNewsCheck()`):
 syncs, then notifies up to 3 newly-eligible `notify` items (each ID exactly
 once via `notified_ids`; `critical` bypasses the notifications toggle).
+A one-shot `NewsTransition` work (same worker class, `REPLACE`) wakes at
+`nextTransitionAt` for scheduled flips.
 `worker/NewsActionReceiver.kt` (manifest-registered, `exported=false`) marks
 dismissed AND cancels the shade row via the same stable ID.
 `util/NotificationHelper.kt` gains `CHANNEL_TOOLZ_NEWS` ("Toolz News",
 `IMPORTANCE_DEFAULT`) and `ID_NEWS_BASE` (8100). Taps deep-link to
-`toolz_news` with `news_id` highlight. No `POST_NOTIFICATIONS` rationale is
-bundled — denial fails silently by design; verify during QA on Android 13+.
+`toolz_news` with `news_id` highlight. Android 13+ `POST_NOTIFICATIONS` is
+requested via the in-app "Notifications off → Enable" card (history screen);
+denial still fails silently by design, with a settings fallback.
 
 ## 9. App wiring
 
@@ -390,9 +429,10 @@ isolated from the encrypted main DB.
 5. Go/no-go on `notify`: off for silent history drops; keep on for launches.
    `critical` + `requiresAction` for outages (bypasses user toggles — use
    sparingly, the app tells users why).
-6. Unpublish/Archive removes the popup on next sync (≤6 h or manual refresh);
+6. Unpublish/Archive removes the popup on next sync (minutes via version check
+   or 6 h backstop, or manual refresh);
    the entry stays in on-device history. Delete removes it everywhere via
-   tombstones (next sync + feed refresh).
+   tombstones (next sync + feed refresh, shade rows dismissed).
 7. Constraints: images must be `https://` allowlisted hosts (or uploaded via
    the imgbb button); every item needs
    either a CTA or `dismissible` on (a non-dismissible item with no action can
@@ -403,7 +443,7 @@ isolated from the encrypted main DB.
 ## 14. File inventory
 
 Website (new): `api/news.ts`, `api/news-admin.ts`, `api/news-image.ts`,
-`api/news-version.ts`, `src/lib/news-schema.ts`,
+`api/news-version.ts`, `api/news-rss.ts`, `src/lib/news-schema.ts`,
 `src/lib/newsVerdict.ts`, `src/lib/stripMarkdown.ts`,
 `src/hooks/useNewsAdmin.ts`, `src/hooks/usePublicNews.ts`,
 `src/components/news-admin/` (6 files), `src/components/landing/NewsSection.tsx`,

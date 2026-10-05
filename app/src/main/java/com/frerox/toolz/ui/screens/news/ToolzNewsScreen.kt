@@ -1,9 +1,15 @@
 package com.frerox.toolz.ui.screens.news
 
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -21,13 +27,18 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Campaign
 import androidx.compose.material.icons.rounded.Newspaper
+import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -70,7 +81,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun ToolzNewsScreen(
     onBack: () -> Unit,
@@ -83,8 +94,33 @@ fun ToolzNewsScreen(
     val loading by viewModel.historyLoading.collectAsState()
     val end by viewModel.historyEnd.collectAsState()
     val seenIds by viewModel.seenIds.collectAsState()
+    var query by remember { mutableStateOf("") }
+    var priority by remember { mutableStateOf("all") }
 
     val listState = rememberLazyListState()
+
+    // Android 13+ notification permission: denial fails silently by design,
+    // so surface a one-tap enable card instead of leaving users confused.
+    var notifGranted by remember {
+        mutableStateOf(
+            if (Build.VERSION.SDK_INT < 33) true else try {
+                androidx.core.content.ContextCompat.checkSelfPermission(
+                    context, android.Manifest.permission.POST_NOTIFICATIONS
+                ) == PackageManager.PERMISSION_GRANTED
+            } catch (_: Exception) { true }
+        )
+    }
+    val notifLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted -> notifGranted = granted }
+
+    val filtered = remember(items, query, priority) {
+        val q = query.trim().lowercase()
+        items.filter { item ->
+            (priority == "all" || item.priority == priority) &&
+                (q.isEmpty() || item.title.lowercase().contains(q) || item.body.lowercase().contains(q))
+        }
+    }
 
     LaunchedEffect(Unit) {
         if (items.isEmpty()) viewModel.loadHistory()
@@ -177,13 +213,89 @@ fun ToolzNewsScreen(
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                items(items, key = { it.id }, contentType = { "news_card" }) { item ->
+                item(key = "news_tools") {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (!notifGranted && Build.VERSION.SDK_INT >= 33) {
+                            Card(
+                                shape = RoundedCornerShape(20.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(14.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Icon(Icons.Rounded.Notifications, contentDescription = null)
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Notifications off", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                                        Text(
+                                            "Enable to get breaking news alerts.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                                        )
+                                    }
+                                    TextButton(onClick = {
+                                        try { notifLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS) }
+                                        catch (_: Exception) {
+                                            try {
+                                                context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                                    putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                                })
+                                            } catch (_: Exception) { }
+                                        }
+                                    }) { Text("Enable") }
+                                }
+                            }
+                        }
+                        OutlinedTextField(
+                            value = query,
+                            onValueChange = { query = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = { Text("Search news…") },
+                            leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                            singleLine = true,
+                            shape = RoundedCornerShape(20.dp)
+                        )
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            listOf("all", "critical", "feature", "fix", "promo", "info").forEach { p ->
+                                FilterChip(
+                                    selected = priority == p,
+                                    onClick = { priority = p; haptic.click() },
+                                    label = { Text(p.replaceFirstChar { it.uppercase() }) }
+                                )
+                            }
+                        }
+                        if (filtered.size != items.size) {
+                            Text(
+                                if (filtered.isEmpty()) "No matches — try another search or filter."
+                                else "${filtered.size} of ${items.size} shown",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+                items(filtered, key = { it.id }, contentType = { "news_card" }) { item ->
                     NewsHistoryCard(
                         item = item,
                         highlighted = item.id == highlightNewsId,
                         seen = item.id in seenIds,
                         onAction = { url ->
                             try { context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) } catch (_: Exception) { }
+                        },
+                        onShare = { shareItem ->
+                            try {
+                                val link = "${com.frerox.toolz.data.news.NewsConstants.WEBSITE_NEWS_URL}#news-${shareItem.id}"
+                                val send = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_SUBJECT, shareItem.title)
+                                    putExtra(Intent.EXTRA_TEXT, "${shareItem.title}\n\n$link")
+                                }
+                                context.startActivity(Intent.createChooser(send, "Share news"))
+                            } catch (_: Exception) { }
                         }
                     )
                 }
@@ -205,7 +317,8 @@ fun NewsHistoryCard(
     item: NewsEntity,
     highlighted: Boolean,
     seen: Boolean,
-    onAction: (String) -> Unit
+    onAction: (String) -> Unit,
+    onShare: (NewsEntity) -> Unit = {}
 ) {
     var expanded by remember(item.id) { mutableStateOf(false) }
     val date = remember(item.publishAt) {
@@ -264,6 +377,17 @@ fun NewsHistoryCard(
             }
             TextButton(onClick = { expanded = !expanded }) {
                 Text(if (expanded) "Show less" else "Read more")
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(onClick = { onShare(item) }) {
+                    Icon(Icons.Rounded.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Share")
+                }
             }
             if (!item.actionUrl.isNullOrBlank()) {
                 Spacer(Modifier.height(4.dp))
