@@ -109,8 +109,9 @@ Canonical shape (v1, `schemaVersion: 1`). Server validation lives in
 | `requiresAction` | bool | Blocking dialog instead of bottom sheet (critical only) |
 | `notify` | bool (default true) | Also post a system notification |
 
-Payload caps: 8 KB per item (server-enforced), ≤50 published items stored,
-≤20 per feed response.
+Payload caps: 8 KB per item (server-enforced), ≤50 published items enforced
+(server rejects the 51st with "Published cap reached"), ≤20 per feed response
+(100 fetched, 20 served).
 
 Markdown support (same syntax everywhere — app popup/history, `/news` page,
 admin live preview, all verified against the renderers):
@@ -140,7 +141,7 @@ admin live preview, all verified against the renderers):
   permanently empty. The website hook additionally fetches with
   `cache: 'no-store'` (tiny payload, freshness wins). `ETag` (`W/"v…"` ) +
   `If-None-Match` → `304` saves mobile data; fail-open per-IP fixed-window
-  throttle (120 req/min, Redis-backed, `429` + `Retry-After`).
+  throttle (120 req/min on feed, `429` + `Retry-After`); `Vary: Accept-Encoding`.
 - Reads `news:index` (ZSET, score = publish time), pipelined `MGET` of up to
   100 items, filters `published` + time window + version eligibility (`all=1`
   skips the version gate for the website surface), sorts pinned-first then
@@ -158,12 +159,17 @@ admin live preview, all verified against the renderers):
 
 `toolz-website/api/news-admin.ts` — same-origin JSON API
 (`vercel.json`: `maxDuration` 15). Actions via `?action=`:
-`login`, `logout`, `list`, `create`, `update`, `publish`, `unpublish`,
-`archive`, `delete`, `audit`, `feed-health`, `repair-index`. Images upload
+`login`, `logout`, `list` (optional `limit`/`offset`), `create`, `update`,
+`publish`, `unpublish`, `archive`, `delete` (7-day trash),
+`restore`, `bulk` (1–50 ops, one round-trip), `export`/`import` (backup),
+`audit`, `feed-health`, `feed-history` (last 50 changes), `simulate`
+(dry-run, no writes), `repair-index`. Images upload
 through the separate `api/news-image.ts` proxy (`maxDuration` 30,
 `IMGBB_API_KEY` stays server-side, 5 MB cap, host-verified `i.ibb.co`
 response). Login takes `{ password }` in the
-JSON body only (`?pw=` in the URL is rejected; `?password=` is ignored).
+JSON body only (`?pw=` in the URL is rejected; `?password=` is ignored);
+failures return generic "Invalid password." (no attempt-count leak); sessions
+slide (active use refreshes the 6h TTL).
 
 `feed-health` (authed GET) returns `{ indexSize, payloadCount, liveCount,
 feedVersion, nextTransitionAt, orphanIds, items: [{ id, title, status, publishAt, expiresAt,
@@ -179,7 +185,8 @@ login works; production keeps `HttpOnly; Secure; SameSite=Lax`.
 `create`/`update`/`publish`/`unpublish`/`archive` responses include
 `visibility` (same verdict shape for the single saved item) so the admin can
 confirm "Saved — LIVE" vs "Saved — NOT live: <reason>" at save time.
-Delete writes a 90-day tombstone; devices hard-delete the cached copy
+Delete writes a 90-day tombstone + 7-day trash copy (`news:trash:<id>`,
+restorable via `restore`); devices hard-delete the cached copy
 (popups, notifications, history) on their next sync.
 
 Redis schema (shares the instance with the specs backend, no key overlap):
@@ -190,6 +197,7 @@ Redis schema (shares the instance with the specs backend, no key overlap):
   at 500 entries
 - `news:tombstone:<id>` — deletion timestamp, 90-day TTL; served as feed
   `removedIds` so devices hard-delete cached copies on next sync
+- `news:trash:<id>` — deleted payload, 7-day TTL; restorable via `restore`
 - `news_admin_session:<tokenId>` — `{ csrf }`, 6 h TTL
 - `newsfails:<ip>` / `newsban:<ip>` — 5-strike lockout, 15-min window/ban
 
@@ -204,17 +212,29 @@ nav link). M3 Expressive styling (32 px cards, pill buttons) on Tailwind +
 shadcn, matching the `reset.ts` admin language.
 
 - `src/pages/AdminNews.tsx` — login gate → dashboard (published/draft counts,
-  filter tabs All/Published/Drafts/Archived/Expired, search, refresh,
-  "Publish all drafts" bulk action with confirm), audit
+  filter tabs All/Published/Drafts/Archived/Critical/Scheduled/Expired,
+  search (`/` focuses), sort (updated/publish/title), counts + selection
+  counter, multi-select bulk bar (publish/unpublish/archive/delete via one
+  `bulk` call), duplicate-title warning, undo-delete toast (7-day `restore`),
+  `n`/`/` shortcuts), audit
   section, editor host. Restores a valid session on page refresh (cookie-only
   `list` probe, "Checking session…" state) instead of forcing re-login.
+- `src/lib/newsAdminTools.ts` — pure helpers (`buildBulkOps`, `filterAdminItems`,
+  `sortAdminItems`, `exportFilename` UTC, `duplicateTitles`). Covered by
+  `src/test/news-admin-tools.test.ts` (5 tests).
 - `src/hooks/useNewsAdmin.ts` — `credentials: include` fetch wrapper, CSRF kept
-  in React state (never localStorage), `login/logout/refresh/mutate`.
+  in React state (never localStorage),
+  `login/logout/refresh/mutate/bulk/restoreItem/feedHistory/simulate/exportBackup/importBackup`.
+- `src/components/news-admin/NewsTestLab.tsx` — dry-run tester: item + version →
+  local verdict + targeting + timeline, server `simulate` confirm, no writes.
+- `src/components/news-admin/NewsStatusDashboard.tsx` — last-50 `feed-history`,
+  JSON export (`exportFilename` UTC) + import with confirm, error/empty states.
 - `src/components/news-admin/NewsLoginCard.tsx` — password form with
   show/hide and lockout messaging.
-- `src/components/news-admin/NewsListTable.tsx` — status/priority pills,
+- `src/components/news-admin/NewsListTable.tsx` — checkbox multi-select,
+  status/priority pills,
   targeting summary (`describeTargeting`), LIVE-on-/news vs reason badges
-  (shared verdict), Clone, Publish/Unpublish/Archive/Delete.
+  (shared verdict) + local-time tooltips, Clone, Publish/Unpublish/Archive/Delete.
 - `src/components/news-admin/NewsEditorDialog.tsx` — tabbed (Content with
   templates, counters, markdown toolbar; Targeting with Everyone reset,
   Latest-version shortcut, who-sees-this + version simulator; Behavior with
@@ -244,6 +264,7 @@ Public website surface (same feed, `?all=1`, no login):
   module-level shared cache (home + `/news` fetch once), `ETag`-friendly
   `no-store` fetch, 60 s `news-version` poll that refetches only on generation
   or transition-hint change (plus due-check past `nextTransitionAt`),
+  `updatedAt` stamp + `refresh()` for Retry (no `location.reload()`),
   loading state, empty-on-failure, plus `formatNewsDate`. Distinguishes feed
   failure (`unavailable`, from `degraded`/HTTP/parse errors) from a genuinely
   empty feed so `/news` can be honest about breakage.
@@ -251,15 +272,19 @@ Public website surface (same feed, `?all=1`, no login):
   the public-feed rules (status + time window) plus `describeWhen` relative
   times; used by the editor verdict line and list badges (tested in
   `src/test/news-verdict.test.ts`).
-- `src/pages/News.tsx` — `/news` route: M3 hero, priority filter chips
-  (all/critical/feature/fix/promo/info) + RSS button (`/api/news-rss`),
-  per-item `#news-<id>` anchors with copy-link + scroll-to-hash deep-link,
-  full cards (image, advanced markdown
+- `src/pages/News.tsx` — `/news` route: M3 hero, search + newest/oldest sort +
+  priority filter chips
+  (all/critical/feature/fix/promo/info) + RSS button (`/api/news-rss`, autodiscovery
+  in `index.html`) + `public/sitemap.xml` + `robots.txt` (admin disallowed),
+  10-at-a-time pagination, per-item `#news-<id>` anchors with copy-link +
+  scroll-to-hash deep-link + active highlight + per-anchor OG/title,
+  full cards (image with fallback/alt, advanced markdown
   body, date, CTA), `toolz://` actions render as "in-app only" hints (no broken
   new-tab), skeleton/empty states, plus a distinct "feed unavailable +
   Retry" state when `unavailable`, Navbar + Footer + download dialog.
 - `src/components/landing/NewsSection.tsx` — home `/#news` teaser: up to 3
-  latest real cards + "All news" entry to `/news`. Renders nothing while the
+  latest per-item deep links (`/news#news-<id>`) + "updated Xm ago" stamp +
+  "All news" entry to `/news`. Renders nothing while the
   feed is empty/unreachable so the home page stays clean. Mounted in
   `src/pages/Index.tsx` between HowItWorks and CTA; linked from
   `src/components/landing/Navbar.tsx` ("News" entry, desktop + mobile).
@@ -290,10 +315,13 @@ Public website surface (same feed, `?all=1`, no login):
   fallback), tombstone deletes also cancel shade rows, `nextTransitionAt`
   persist + one-shot `NewsTransition` worker, unpublish
   reconciliation, prune (incl. disappearing auto-delete), `syncAndNotify`
-  (sync + immediate notify up to 3 new items, once-per-id), impression/snooze
+  (sync + immediate notify up to 3 new items, once-per-id, group summary at 2+),
+  `cancelAllNotifications`, impression/snooze
   state, `popupCandidate`, `notificationCandidates(limit)`.
+  Pure queue rule `shouldReplacePopup` (critical replaces non-critical).
 - `NewsNotifier.kt` — posts per-item notifications (stable IDs in the
-  8100–8899 band, content PendingIntent codes 28100–28899 + dismiss 29100–29899
+  8100–8899 band, group `toolz_news_group` + summary 8099/InboxStyle,
+  content PendingIntent codes 28100–28899 + dismiss 29100–29899
   (800-wide, non-overlapping, so 100+ items never alias), View +
   Dismiss actions, BigText style) and `cancel()` used by the dismiss receiver
   and tombstone eviction.
@@ -326,7 +354,7 @@ popup, never a crash.
 
 - `NewsPopup.kt` — `ModalBottomSheet` (28 px top radius, drag handle) with
   priority chip, pin marker, natural-ratio Coil cover (capped 420 dp, 20 dp
-  corners), full `MarkdownContent` body at 17 sp / 12 dp rhythm, CTA + Later + ✕ + a footer row ("View all news →"
+  corners, hidden on load error), full `MarkdownContent` body at 17 sp / 12 dp rhythm, CTA + Later + ✕ + a footer row ("View all news →"
   opens in-app history, "Read on website ↗" opens
   `NewsConstants.WEBSITE_NEWS_URL#news-<id>` in the browser).
   `requiresAction` + `critical` renders a blocking `AlertDialog` instead. The (i) button appears only on critical
@@ -341,10 +369,12 @@ popup, never a crash.
   plain text (`stripMarkdown`, no raw syntax before "Read more"), expanded
   cards full markdown at 16 sp, natural-ratio images (capped 360 dp, 20 dp
   corners), Share action (title + `#news-<id>` link), real unread dots via `seenIds`, notification deep-link
-  scroll-to-highlight, loading/empty/error states, refresh button.
+  scroll-to-highlight, syncing indicator + sync-error card with Retry, loading/empty/error states, refresh button.
 - `NewsViewModel.kt` — immediate popup on dashboard arrival (no delay),
+  critical-overrides-non-critical queue rule (`shouldReplacePopup`),
   session guard, foreground `checkNotifications` (sync + immediate notify),
-  history paging, badge counts, settings toggles, `syncNow`.
+  history paging + `historyError`/`syncing` states, badge counts, settings toggles,
+  `syncNow`, `dismissAllNotifications`, `refreshNow`.
 - `NewsPreviews.kt` — `@Preview` history cards + 4 popup variants (standard,
   long-markdown, critical-blocking, dark).
 
@@ -386,8 +416,9 @@ denial still fails silently by design, with a settings fallback.
 ## 10. Security model
 
 Separate `NEWS_ADMIN_PASSWORD` (never `SYNC_PASSWORD`); SHA-256 hash-then-
-`timingSafeEqual` (no length oracle); 6 h HMAC session cookie (`HttpOnly`,
-`Secure`, `SameSite=Lax`); per-session CSRF required as header/body on all
+`timingSafeEqual` (no length oracle); 6 h HMAC session cookie with sliding
+refresh on use (`HttpOnly`, `Secure` on https only, `SameSite=Lax`); generic
+"Invalid password." (no attempt-count oracle); per-session CSRF required as header/body on all
 mutating calls (query-string CSRF rejected); IP ban after 5 failures; strict
 security headers; admin API same-origin (public feed alone is CORS `*`);
 input validation server-side with allowlisted https hosts and IP-literal
@@ -396,19 +427,23 @@ rejection; bodies HTML-stripped; audit log with hashed IPs.
 ## 11. Failure modes and stability
 
 Every repository/worker/sync path catches and degrades: Redis outage → empty
-degraded feed; offline → Room cache serves popup + history; sync errors never
+degraded feed; offline → Room cache serves popup + history with sync-error card;
+sync errors never
 propagate to UI or boot; notification errors are swallowed; popup shows max
-once per session; worker returns success (no retry storms). News DB is
-isolated from the encrypted main DB.
+once per session (critical overrides non-critical); worker returns success (no retry storms). News DB is
+isolated from the encrypted main DB. Feed `429` throttle is fail-open and
+treated as sync failure (cached content kept).
 
 ## 12. Tests
 
 - Website: `src/test/news-schema.test.ts` (validation, version compare,
   targeting), `src/test/news-body.test.ts` (`stripMarkdown`),
-  `src/test/news-verdict.test.ts` (visibility verdicts) — `vitest run` green;
+  `src/test/news-verdict.test.ts` (visibility verdicts),
+  `src/test/news-admin-tools.test.ts` (bulk/filter/sort/export/dupes) — `vitest run` green;
   `tsc -p tsconfig.app.json` and api-file `tsc` clean.
 - Android: `app/src/test/.../news/NewsVersionTest` (ordering, short/pre-release
-  equality, eligibility matrix) and `NewsDtoTest` (unknown-field tolerance) —
+  equality, eligibility matrix), `NewsDtoTest` (unknown-field tolerance),
+  `NewsPopupQueueTest` (critical-override rule) —
   `:app:testDebugUnitTest --tests "com.frerox.toolz.news.*"` green, full
   `:app:compileDebugKotlin` green (which also type-checks all UI/nav wiring).
 
@@ -417,9 +452,10 @@ isolated from the encrypted main DB.
 1. Vercel env: `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`,
    `NEWS_ADMIN_PASSWORD`, `IMGBB_API_KEY` (only needed for the editor Upload
    button). Redeploy after backend changes.
-2. Open `/admin/news`, unlock, "+ New announcement". Empty version fields =
+2. Open `/admin/news`, unlock, "+ New announcement" (or `n`). Empty version fields =
    everyone. Use `onlyVersions` for staged rollouts, `excludedVersions` for
-   bad builds. Upload cover art with the Upload button (imgbb, downscaled
+   bad builds. Test first in "Test lab" (item × version, server confirm, no writes).
+   Upload cover art with the Upload button (imgbb, downscaled
    automatically) or paste an `https://` URL.
 3. Cadence: `once` for changelogs; `weekly` + `maxImpressions` for promos.
    There is no foreground delay — popups appear on the dashboard immediately.
@@ -432,33 +468,44 @@ isolated from the encrypted main DB.
 6. Unpublish/Archive removes the popup on next sync (minutes via version check
    or 6 h backstop, or manual refresh);
    the entry stays in on-device history. Delete removes it everywhere via
-   tombstones (next sync + feed refresh, shade rows dismissed).
-7. Constraints: images must be `https://` allowlisted hosts (or uploaded via
+   tombstones (next sync + feed refresh, shade rows dismissed) with a 7-day
+   Undo in the admin. Bulk-select + bulk bar for multi-item ops.
+7. Backups: "Status + backups" → Export downloads versioned JSON; Import
+   validates and respects the 50-published cap (confirm overwrites).
+   Watch "Status + backups" history for the last 50 feed changes.
+8. Constraints: images must be `https://` allowlisted hosts (or uploaded via
    the imgbb button); every item needs
    either a CTA or `dismissible` on (a non-dismissible item with no action can
    only be left via "View all news"); keep bodies short — 2000 chars max.
-8. Locking out? Wait 15 min or clear `newsban:<ip>` / `newsfails:<ip>` in Redis.
+   Max 50 published enforced server-side.
+9. Locking out? Wait 15 min or clear `newsban:<ip>` / `newsfails:<ip>` in Redis.
+   Rotate `NEWS_ADMIN_PASSWORD` + redeploy to rotate sessions.
    Activity is in the audit tab (90 days, hashed IPs).
 
 ## 14. File inventory
 
 Website (new): `api/news.ts`, `api/news-admin.ts`, `api/news-image.ts`,
 `api/news-version.ts`, `api/news-rss.ts`, `src/lib/news-schema.ts`,
-`src/lib/newsVerdict.ts`, `src/lib/stripMarkdown.ts`,
+`src/lib/newsVerdict.ts`, `src/lib/stripMarkdown.ts`, `src/lib/newsAdminTools.ts`,
 `src/hooks/useNewsAdmin.ts`, `src/hooks/usePublicNews.ts`,
-`src/components/news-admin/` (6 files), `src/components/landing/NewsSection.tsx`,
+`src/components/news-admin/` (8 files: +`NewsTestLab`, +`NewsStatusDashboard`), `src/components/landing/NewsSection.tsx`,
 `src/components/news/NewsBody.tsx`,
-`src/pages/AdminNews.tsx`, `src/pages/News.tsx`, `src/test/` (3 news test files),
-`NEWS_ADMIN.md`.
-Website (edited): `vercel.json`, `src/App.tsx`, `src/pages/Index.tsx`,
+`src/pages/AdminNews.tsx`, `src/pages/News.tsx`, `src/test/` (4 news test files),
+`NEWS_ADMIN.md`, `public/sitemap.xml`.
+Website (edited): `vercel.json`, `index.html` (RSS autodiscovery), `public/robots.txt` (sitemap + admin disallow), `src/App.tsx`, `src/pages/Index.tsx`,
 `src/components/landing/Navbar.tsx`.
 
 Android (new): `data/news/` (8 files), `di/NewsModule.kt`,
 `ui/screens/news/` (4 files), `worker/NewsCheckWorker.kt`,
-`worker/NewsActionReceiver.kt`, `app/src/test/.../news/` (2 files).
+`worker/NewsActionReceiver.kt`, `app/src/test/.../news/` (3 files).
 Android (edited): `MainActivity.kt`, `DashboardScreen.kt`,
 `SettingsScreen.kt`, `LoadingViewModel.kt`, `Screen.kt`,
-`SettingsRepository.kt`, `NotificationHelper.kt`, `AndroidManifest.xml`.
+`SettingsRepository.kt`, `NotificationHelper.kt`, `AndroidManifest.xml`,
+`data/news/NewsRepository.kt` (queue rule, summary, cancel-all),
+`ui/screens/news/NewsViewModel.kt` (critical override, error/sync states),
+`ui/screens/news/NewsPopup.kt` (image fallback),
+`ui/screens/news/ToolzNewsScreen.kt` (error/sync states),
+`data/news/NewsNotifier.kt` (group + summary).
 
 ## 15. Draft announcement — legacy Whisper token migration (publish via `/admin/news`, not in-app seed)
 
