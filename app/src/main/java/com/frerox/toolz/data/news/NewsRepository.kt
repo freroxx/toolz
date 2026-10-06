@@ -29,6 +29,19 @@ class NewsRepository @Inject constructor(
         const val SYNC_STALE_MS = 6 * 60 * 60 * 1000L
         const val HISTORY_PAGE_SIZE = 10
         private const val PRUNE_AFTER_MS = 90L * 24 * 60 * 60 * 1000L
+
+        /**
+         * Popup queue rule (pure, unit-tested): 1-per-session for normal items,
+         * but a critical candidate always replaces a shown non-critical one so
+         * outages are never dropped behind a promo.
+         */
+        fun shouldReplacePopup(shown: NewsEntity?, candidate: NewsEntity?): Boolean {
+            if (candidate == null) return false
+            if (shown == null) return true
+            if (shown.id == candidate.id) return false
+            if (candidate.priority == "critical" && shown.priority != "critical") return true
+            return false
+        }
     }
 
     // Single-flight: concurrent triggers (boot, dashboard, worker, manual)
@@ -146,6 +159,7 @@ class NewsRepository @Inject constructor(
      * Sync (single-flight, stale-gated) then immediately notify up to 3
      * newly-eligible items. Each id notifies exactly once; critical bypasses
      * the notifications toggle. Returns the number of posted notifications.
+     * Posts a group summary when 2+ fire together.
      */
     suspend fun syncAndNotify(): Int {
         return try {
@@ -154,17 +168,34 @@ class NewsRepository @Inject constructor(
             val notifOn = settingsRepository.newsNotificationsEnabled.first()
             val notified = settingsRepository.newsNotifiedIds.first()
             var posted = 0
+            val titles = mutableListOf<String>()
             for (candidate in notificationCandidates(limit = 3)) {
                 if (candidate.id in notified) continue
                 if (!notifOn && candidate.priority != "critical") continue
                 NewsNotifier.post(context, candidate)
                 settingsRepository.addNewsNotified(candidate.id)
+                titles.add(candidate.title)
                 posted++
             }
+            try {
+                if (posted >= 2) NewsNotifier.postSummary(context, posted, titles)
+                else NewsNotifier.cancelSummary(context)
+            } catch (_: Exception) { }
             posted
         } catch (_: Exception) {
             0
         }
+    }
+
+    /** Dismiss every cached news notification (settings "clear all" path). */
+    suspend fun cancelAllNotifications() {
+        try {
+            val ids = newsDao.publishedIds()
+            for (id in ids.take(200)) {
+                try { NewsNotifier.cancel(context, id) } catch (_: Exception) { }
+            }
+            try { NewsNotifier.cancelSummary(context) } catch (_: Exception) { }
+        } catch (_: Exception) { /* ignore */ }
     }
 
     /**
