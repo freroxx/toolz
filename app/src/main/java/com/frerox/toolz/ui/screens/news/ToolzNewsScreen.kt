@@ -121,6 +121,8 @@ fun ToolzNewsScreen(
                 (q.isEmpty() || item.title.lowercase().contains(q) || item.body.lowercase().contains(q))
         }
     }
+    val historyError by viewModel.historyError.collectAsState()
+    val syncing by viewModel.syncing.collectAsState()
 
     LaunchedEffect(Unit) {
         if (items.isEmpty()) viewModel.loadHistory()
@@ -215,6 +217,33 @@ fun ToolzNewsScreen(
             ) {
                 item(key = "news_tools") {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (historyError != null) {
+                            Card(
+                                shape = RoundedCornerShape(20.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(14.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(historyError ?: "", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                                    }
+                                    TextButton(onClick = { viewModel.refreshNow() }) { Text("Retry") }
+                                }
+                            }
+                        }
+                        if (syncing) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                Text("Syncing…", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
                         if (!notifGranted && Build.VERSION.SDK_INT >= 33) {
                             Card(
                                 shape = RoundedCornerShape(20.dp),

@@ -62,6 +62,7 @@ fun ToolzNewsPopup(
     val context = LocalContext.current
     val haptic = rememberToolzHapticFeedback()
     var showCriticalInfo by remember { mutableStateOf(false) }
+    var imageBroken by remember(item.id) { mutableStateOf(false) }
     val blocking = item.requiresAction && item.priority == "critical"
 
     val sheetContent: @Composable () -> Unit = {
@@ -110,12 +111,13 @@ fun ToolzNewsPopup(
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Black
             )
-            if (!item.imageUrl.isNullOrBlank()) {
+            if (!item.imageUrl.isNullOrBlank() && !imageBroken) {
                 Spacer(Modifier.height(12.dp))
                 AsyncImage(
                     model = item.imageUrl,
                     contentDescription = item.title,
                     contentScale = ContentScale.FillWidth,
+                    onError = { imageBroken = true },
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(max = 420.dp)

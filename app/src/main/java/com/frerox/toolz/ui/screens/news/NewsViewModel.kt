@@ -44,6 +44,12 @@ class NewsViewModel @Inject constructor(
     private val _historyEnd = MutableStateFlow(false)
     val historyEnd: StateFlow<Boolean> = _historyEnd.asStateFlow()
 
+    private val _historyError = MutableStateFlow<String?>(null)
+    val historyError: StateFlow<String?> = _historyError.asStateFlow()
+
+    private val _syncing = MutableStateFlow(false)
+    val syncing: StateFlow<Boolean> = _syncing.asStateFlow()
+
     val seenIds: StateFlow<Set<String>> = settingsRepository.newsSeenIds
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
@@ -63,16 +69,20 @@ class NewsViewModel @Inject constructor(
         }
     }
 
-    /** Dashboard/foreground entry: show the eligible candidate immediately. */
+    /** Dashboard/foreground entry: show the eligible candidate immediately.
+     * 1-per-session for normal items, but a critical candidate always replaces
+     * a shown non-critical one (never drop outages behind a promo). */
     fun evaluatePopup() {
-        if (sessionPopupShown) return
         popupJob?.cancel()
         popupJob = viewModelScope.launch {
             try {
                 // No foreground delay: news shows as soon as it reaches the
                 // user, dashboard-only (this host lives in DashboardScreen).
                 val candidate = newsRepository.popupCandidate() ?: return@launch
-                if (sessionPopupShown) return@launch
+                val shown = _popup.value
+                if (shown != null && !NewsRepository.shouldReplacePopup(shown, candidate)) return@launch
+                if (shown == null && sessionPopupShown && candidate.priority != "critical") return@launch
+                if (shown != null && shown.id == candidate.id && _popupVisible.value) return@launch
                 _popup.value = candidate
                 _popupVisible.value = true
                 sessionPopupShown = true
@@ -124,8 +134,12 @@ class NewsViewModel @Inject constructor(
     fun loadHistory(force: Boolean = false) {
         viewModelScope.launch {
             try {
+                _historyError.value = null
                 if (force) {
-                    newsRepository.syncIfStale(force = true)
+                    _syncing.value = true
+                    val ok = newsRepository.syncIfStale(force = true)
+                    _syncing.value = false
+                    if (!ok) _historyError.value = "Sync failed — showing cached news."
                     historyPage = 0
                     _historyEnd.value = false
                 }
@@ -138,8 +152,10 @@ class NewsViewModel @Inject constructor(
                 newsRepository.markSeen(seen)
                 refreshUnread()
             } catch (_: Exception) {
+                _historyError.value = "Couldn't load news."
             } finally {
                 _historyLoading.value = false
+                _syncing.value = false
             }
         }
     }
@@ -169,9 +185,18 @@ class NewsViewModel @Inject constructor(
     fun syncNow() {
         viewModelScope.launch {
             try {
+                _syncing.value = true
                 newsRepository.syncIfStale(force = true)
                 refreshUnread()
-            } catch (_: Exception) { }
+            } catch (_: Exception) { } finally {
+                _syncing.value = false
+            }
+        }
+    }
+
+    fun dismissAllNotifications() {
+        viewModelScope.launch {
+            try { newsRepository.cancelAllNotifications() } catch (_: Exception) { }
         }
     }
 
