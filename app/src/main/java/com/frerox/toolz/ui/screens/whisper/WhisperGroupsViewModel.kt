@@ -8,6 +8,7 @@ package com.frerox.toolz.ui.screens.whisper
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.whisper.WhisperGroupEntity
+import com.frerox.toolz.data.whisper.WhisperMutePreferences
 import com.frerox.toolz.data.whisper.WhisperProfile
 import com.frerox.toolz.data.whisper.WhisperRepository
 import com.frerox.toolz.data.whisper.cachedGroupMembers
@@ -18,8 +19,11 @@ import com.frerox.toolz.data.whisper.groupsEnabled
 import com.frerox.toolz.data.whisper.syncGroups
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -31,6 +35,7 @@ import javax.inject.Inject
 @HiltViewModel
 class WhisperGroupsViewModel @Inject constructor(
     private val repository: WhisperRepository,
+    mutePrefs: WhisperMutePreferences,
 ) : ViewModel() {
 
     data class UiState(
@@ -45,6 +50,11 @@ class WhisperGroupsViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(UiState())
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
+
+    /** Muted group ids (the mute store is shared with 1:1 under `group:` keys). */
+    val mutedGroupIds: StateFlow<Set<String>> = mutePrefs.mutedUsers
+        .map { set -> set.filter { it.startsWith("group:") }.map { it.removePrefix("group:") }.toSet() }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
 
     init {
         if (groupsEnabled()) load()
