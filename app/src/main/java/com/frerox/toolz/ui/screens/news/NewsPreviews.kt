@@ -49,7 +49,7 @@ private fun fakeNews(
     receivedAt = System.currentTimeMillis()
 )
 
-@Preview(name = "Popup standard", showBackground = true)
+@Preview(name = "History card standard", showBackground = true)
 @Composable
 fun NewsPopupStandardPreview() {
     ToolzTheme {
@@ -59,7 +59,7 @@ fun NewsPopupStandardPreview() {
     }
 }
 
-@Preview(name = "Popup dark", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Preview(name = "History card dark", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 fun NewsPopupDarkPreview() {
     ToolzTheme {
@@ -161,6 +161,49 @@ fun ToolzNewsPopupDarkPreview() {
         ToolzNewsPopup(
             item = fakeNews(),
             masterNewsEnabled = true,
+            onAction = {},
+            onLater = {},
+            onDismiss = {},
+            onViewAll = {}
+        )
+    }
+}
+
+@Preview(name = "Popup with cover", showBackground = true)
+@Composable
+fun ToolzNewsPopupCoverPreview() {
+    ToolzTheme {
+        ToolzNewsPopup(
+            item = fakeNews(
+                id = "cover1",
+                imageUrl = "https://i.ibb.co/preview-cover.png",
+                priority = "promo",
+                pinned = false
+            ),
+            masterNewsEnabled = true,
+            onAction = {},
+            onLater = {},
+            onDismiss = {},
+            onViewAll = {}
+        )
+    }
+}
+
+@Preview(name = "Popup critical bypass", showBackground = true)
+@Composable
+fun ToolzNewsPopupCriticalBypassPreview() {
+    ToolzTheme {
+        ToolzNewsPopup(
+            item = fakeNews(
+                id = "crit3",
+                title = "Service outage resolved",
+                body = "Downloads are back to normal. Thanks for your patience.",
+                priority = "critical",
+                pinned = false,
+                actionLabel = null,
+                actionUrl = null
+            ),
+            masterNewsEnabled = false,
             onAction = {},
             onLater = {},
             onDismiss = {},

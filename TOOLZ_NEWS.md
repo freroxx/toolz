@@ -352,15 +352,20 @@ popup, never a crash.
 
 `ui/screens/news/`:
 
-- `NewsPopup.kt` — `ModalBottomSheet` (28 px top radius, drag handle) with
-  priority chip, pin marker, natural-ratio Coil cover (capped 420 dp, 20 dp
-  corners, hidden on load error), full `MarkdownContent` body at 17 sp / 12 dp rhythm, CTA + Later + ✕ + a footer row ("View all news →"
-  opens in-app history, "Read on website ↗" opens
-  `NewsConstants.WEBSITE_NEWS_URL#news-<id>` in the browser).
-  `requiresAction` + `critical` renders a blocking `AlertDialog` instead. The (i) button appears only on critical
-  items shown while the master toggle is off and explains the bypass.
-  Non-dismissible items without a CTA can only be left via "View all" — an
-  accepted config constraint documented for admins (section 13).
+- `NewsPopup.kt` — centered expressive card (same language as the PurgeShot /
+  Clipboard popups: dim scrim, 36 dp card, drag handle, max 440 × 600 dp with
+  internal scroll, swipe-down + scrim-tap snooze) with a priority tile header
+  (per-priority icon + tinted container: critical/error, feature/primary,
+  fix/tertiary, promo/secondary, info/neutral) + label/date, cropped Coil
+  cover (190 dp, 24 dp corners, hidden on load error), full `MarkdownContent`
+  body at 15 sp, strict button hierarchy (one filled primary CTA with
+  OpenInNew/deep-link ArrowForward icon, optional tonal Later, quiet footer:
+  All news · Share · Website), inline critical-bypass note instead of a hidden
+  dialog. `requiresAction` + `critical` renders the same card without any
+  dismiss path except a de-emphasized Later text button. Dismiss semantics:
+  ✕ = dismiss forever, Later/swipe/scrim = snooze 24h, CTA = open + close.
+  Action-less items get a filled "Got it" (dismiss, or plain close when
+  non-dismissible), so every config has an exit.
 - `ToolzNewsScreen.kt` — backup-style rounded (32 dp) `ExpressiveTopAppBar`
   with subtitle + refresh action, `toolzBackground`, fading list edges, full
   history: search field + priority filter chips (parity with `/news`) + Android
@@ -503,7 +508,7 @@ Android (edited): `MainActivity.kt`, `DashboardScreen.kt`,
 `SettingsRepository.kt`, `NotificationHelper.kt`, `AndroidManifest.xml`,
 `data/news/NewsRepository.kt` (queue rule, summary, cancel-all),
 `ui/screens/news/NewsViewModel.kt` (critical override, error/sync states),
-`ui/screens/news/NewsPopup.kt` (image fallback),
+`ui/screens/news/NewsPopup.kt` (expressive card redesign),
 `ui/screens/news/ToolzNewsScreen.kt` (error/sync states),
 `data/news/NewsNotifier.kt` (group + summary).
 
