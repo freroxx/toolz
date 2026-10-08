@@ -3853,6 +3853,8 @@
     <string name="st_Whisper_Groups_Mute">Mute</string>
     <string name="st_Whisper_Groups_Unmute">Unmute</string>
     <string name="st_Whisper_Groups_MessageHint">Message</string>
+    <string name="st_Whisper_Groups_SearchHint">Search friends</string>
+    <string name="st_Whisper_Groups_NoFriendsFound">No friends match your search.</string>
     <string name="st_Whisper_Groups_Info">Group info</string>
     <string name="st_Whisper_Groups_BlockConfirm">Block this member? You will stop receiving their messages everywhere, not just here.</string>
     <string name="st_Whisper_Groups_Removed">You are no longer a member of this group.</string>

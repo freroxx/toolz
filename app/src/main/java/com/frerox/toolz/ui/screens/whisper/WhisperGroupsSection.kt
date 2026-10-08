@@ -12,28 +12,34 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.NotificationsOff
 import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -104,7 +110,7 @@ fun WhisperGroupsSection(
             GroupErrorBanner(message = err, onRetry = { viewModel.load() })
         }
         if (!state.isLoading && state.groups.isEmpty() && state.error == null) {
-            GroupEmptyState(onCreate = { showCreate = true })
+            GroupEmptyState()
         }
         state.groups.forEach { group ->
             GroupRowCard(
@@ -210,9 +216,9 @@ private fun GroupErrorBanner(message: String, onRetry: () -> Unit) {
     }
 }
 
-/** Inline empty state with icon + create affordance (tab-level empty stays 1:1). */
+/** Inline empty state (the header pill above is the single create entry). */
 @Composable
-private fun GroupEmptyState(onCreate: () -> Unit) {
+private fun GroupEmptyState() {
     Column(
         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -235,11 +241,6 @@ private fun GroupEmptyState(onCreate: () -> Unit) {
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        ToolzTonalExpressiveButton(onClick = onCreate) {
-            Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(4.dp))
-            Text(stringResource(R.string.st_Whisper_Groups_New), style = MaterialTheme.typography.labelLarge)
-        }
     }
 }
 
@@ -272,41 +273,111 @@ private fun CreateGroupDialog(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     var name by remember { mutableStateOf("") }
+    var query by remember { mutableStateOf("") }
     val picked = remember { mutableStateListOf<String>() }
     var adminsOnly by remember { mutableStateOf(true) }
     val canCreate = name.isNotBlank() && picked.isNotEmpty() && !state.isLoading
+    val visibleFriends = remember(state.friends, query) {
+        val q = query.trim().lowercase()
+        if (q.isBlank()) state.friends
+        else state.friends.filter {
+            it.effectiveName.lowercase().contains(q) || it.username.lowercase().contains(q)
+        }
+    }
 
-    AlertDialog(
+    Dialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.st_Whisper_Groups_CreateTitle), fontWeight = FontWeight.Bold) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { if (it.length <= 64) name = it },
-                    label = { Text(stringResource(R.string.st_Whisper_Groups_NameHint)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Text(stringResource(R.string.st_Whisper_Groups_AddMembers), style = MaterialTheme.typography.labelLarge)
-                LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 220.dp)) {
-                    items(state.friends, key = { it.id }) { friend ->
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            shape = RoundedCornerShape(28.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            modifier = Modifier.fillMaxWidth(0.94f).fillMaxHeight(0.88f),
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                // Header with live avatar preview.
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    GroupAvatar(name = name.ifBlank { "G" }, groupId = name.ifBlank { "preview" }, size = 56.dp)
+                    Spacer(Modifier.width(14.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            stringResource(R.string.st_Whisper_Groups_CreateTitle),
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Black,
+                        )
+                        Text(
+                            if (picked.isEmpty()) stringResource(R.string.st_Whisper_Groups_AddMembers)
+                            else "${picked.size} ${stringResource(R.string.st_Whisper_Groups_Members)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Rounded.Close, contentDescription = null)
+                    }
+                }
+                Column(
+                    modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Spacer(Modifier.size(2.dp))
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { if (it.length <= 64) name = it },
+                        label = { Text(stringResource(R.string.st_Whisper_Groups_NameHint)) },
+                        singleLine = true,
+                        shape = RoundedCornerShape(20.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        label = { Text(stringResource(R.string.st_Whisper_Groups_SearchHint)) },
+                        leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                        singleLine = true,
+                        shape = RoundedCornerShape(20.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        stringResource(R.string.st_Whisper_Groups_WhoCanInvite),
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = adminsOnly,
+                            onClick = { adminsOnly = true },
+                            label = { Text(stringResource(R.string.st_Whisper_Groups_InviteAdmins)) },
+                        )
+                        FilterChip(
+                            selected = !adminsOnly,
+                            onClick = { adminsOnly = false },
+                            label = { Text(stringResource(R.string.st_Whisper_Groups_InviteAll)) },
+                        )
+                    }
+                    if (visibleFriends.isEmpty()) {
+                        Text(
+                            stringResource(R.string.st_Whisper_Groups_NoFriendsFound),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = 12.dp),
+                        )
+                    }
+                    visibleFriends.forEach { friend ->
                         val selected = picked.contains(friend.id)
                         Row(
-                            modifier = Modifier.fillMaxWidth().clickable {
+                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable {
                                 if (selected) picked.remove(friend.id) else picked.add(friend.id)
-                            }.padding(vertical = 4.dp),
+                            }.background(
+                                if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                                else MaterialTheme.colorScheme.surfaceContainerHigh,
+                            ).padding(horizontal = 10.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Checkbox(
-                                checked = selected,
-                                onCheckedChange = {
-                                    if (selected) picked.remove(friend.id) else picked.add(friend.id)
-                                },
-                            )
-                            Spacer(Modifier.width(4.dp))
-                            WhisperAvatar(profile = friend, size = 40.dp)
-                            Spacer(Modifier.width(10.dp))
+                            WhisperAvatar(profile = friend, size = 44.dp)
+                            Spacer(Modifier.width(12.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(friend.effectiveName, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 if (!friend.username.isBlank() && friend.displayName?.isNotBlank() == true) {
@@ -319,41 +390,39 @@ private fun CreateGroupDialog(
                                     )
                                 }
                             }
+                            Checkbox(
+                                checked = selected,
+                                onCheckedChange = {
+                                    if (selected) picked.remove(friend.id) else picked.add(friend.id)
+                                },
+                            )
                         }
                     }
+                    state.error?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    }
+                    Spacer(Modifier.size(4.dp))
                 }
-                Text(stringResource(R.string.st_Whisper_Groups_WhoCanInvite), style = MaterialTheme.typography.labelLarge)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(
-                        selected = adminsOnly,
-                        onClick = { adminsOnly = true },
-                        label = { Text(stringResource(R.string.st_Whisper_Groups_InviteAdmins)) },
-                    )
-                    FilterChip(
-                        selected = !adminsOnly,
-                        onClick = { adminsOnly = false },
-                        label = { Text(stringResource(R.string.st_Whisper_Groups_InviteAll)) },
-                    )
-                }
-                state.error?.let {
-                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                // Bottom action bar.
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TextButton(onClick = onDismiss) { Text(stringResource(R.string.st_Whisper_Cancel)) }
+                    ToolzExpressiveButton(
+                        onClick = { viewModel.create(name, picked.toList(), adminsOnly) },
+                        enabled = canCreate,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(
+                            if (picked.isEmpty()) stringResource(R.string.st_Whisper_Groups_Create)
+                            else "${stringResource(R.string.st_Whisper_Groups_Create)} (${picked.size})",
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
                 }
             }
-        },
-        confirmButton = {
-            ToolzExpressiveButton(
-                onClick = { viewModel.create(name, picked.toList(), adminsOnly) },
-                enabled = canCreate,
-            ) {
-                Text(
-                    if (picked.isEmpty()) stringResource(R.string.st_Whisper_Groups_Create)
-                    else "${stringResource(R.string.st_Whisper_Groups_Create)} (${picked.size})",
-                    fontWeight = FontWeight.Bold,
-                )
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.st_Whisper_Cancel)) }
-        },
-    )
+        }
+    }
 }
