@@ -81,13 +81,22 @@ class WhisperPushService : FirebaseMessagingService() {
         if (message.data["whisper_group_message"].toBoolean()) {
             val groupId = message.data["groupId"].orEmpty()
             val groupName = message.data["groupName"].takeIf { !it.isNullOrBlank() } ?: "Group"
+            val senderName = message.data["senderName"].takeIf { !it.isNullOrBlank() }
             // Messages are NOT governed by the event toggle (members get message
             // pings by default); group mute still applies inside the manager.
             if (groupId.isNotEmpty()) {
+                val text = if (senderName != null) {
+                    applicationContext.getString(
+                        com.frerox.toolz.R.string.st_Whisper_Groups_SenderNewMessage,
+                        senderName,
+                    )
+                } else {
+                    applicationContext.getString(com.frerox.toolz.R.string.st_Whisper_Notif_NewMessage)
+                }
                 notificationManager.showGroupEventNotification(
                     groupId = groupId,
                     title = groupName,
-                    text = applicationContext.getString(com.frerox.toolz.R.string.st_Whisper_Notif_NewMessage),
+                    text = text,
                     dedupeKey = "msg:${message.data["clientId"].orEmpty().ifBlank { message.data["messageId"].orEmpty() }}",
                 )
             }
@@ -101,14 +110,73 @@ class WhisperPushService : FirebaseMessagingService() {
             if (groupId.isNotEmpty() && kind.isNotEmpty()) {
                 // Role + toggle are resolved against the local cache (the server
                 // cannot know our role or our toggle) before anything is shown.
+                // join/leave/decline honor the event toggle; admin-action kinds
+                // (remove/promote/demote/rename/picture/settings) behave like
+                // message pings — mute + open-chat + self only, no toggle.
+                val data = message.data.toMap()
                 serviceScope.launch {
                     runCatching {
                         val me = supabase.auth.currentUserOrNull()?.id.orEmpty()
+                        if (actorId.isNotBlank() && actorId == me) return@launch
                         val group = groupDao.group(groupId)
                         val members = groupDao.members(groupId)
                         val myRole = members.firstOrNull { it.memberId == me }?.role
                         val amOwner = group?.createdBy == me && me.isNotBlank()
                         val amOwnerOrAdmin = amOwner || myRole == "admin"
+                        val groupName = data["groupName"]?.takeIf { it.isNotBlank() } ?: "Group"
+                        val actorName = data["actorName"]?.takeIf { it.isNotBlank() }
+                            ?: applicationContext.getString(com.frerox.toolz.R.string.st_Whisper_SomeoneDefault)
+                        val subjectId = data["subjectId"].orEmpty()
+                        val subjectName = data["subjectName"]?.takeIf { it.isNotBlank() }
+                            ?: applicationContext.getString(com.frerox.toolz.R.string.st_Whisper_SomeoneDefault)
+                        val adminText: String? = when (kind) {
+                            "remove" -> if (subjectId.isNotBlank() && subjectId == me) {
+                                applicationContext.getString(
+                                    com.frerox.toolz.R.string.st_Whisper_Groups_RemovedYou, groupName,
+                                )
+                            } else {
+                                applicationContext.getString(
+                                    com.frerox.toolz.R.string.st_Whisper_Groups_RemovedOther, subjectName, groupName,
+                                )
+                            }
+                            "promote" -> if (subjectId.isNotBlank() && subjectId == me) {
+                                applicationContext.getString(
+                                    com.frerox.toolz.R.string.st_Whisper_Groups_PromotedYou, groupName,
+                                )
+                            } else {
+                                applicationContext.getString(
+                                    com.frerox.toolz.R.string.st_Whisper_Groups_PromotedOther, subjectName, groupName,
+                                )
+                            }
+                            "demote" -> if (subjectId.isNotBlank() && subjectId == me) {
+                                applicationContext.getString(
+                                    com.frerox.toolz.R.string.st_Whisper_Groups_DemotedYou, groupName,
+                                )
+                            } else {
+                                applicationContext.getString(
+                                    com.frerox.toolz.R.string.st_Whisper_Groups_DemotedOther, subjectName, groupName,
+                                )
+                            }
+                            "rename" -> applicationContext.getString(
+                                com.frerox.toolz.R.string.st_Whisper_Groups_Renamed, actorName,
+                            )
+                            "picture" -> applicationContext.getString(
+                                com.frerox.toolz.R.string.st_Whisper_Groups_PictureUpdated, actorName,
+                            )
+                            "settings" -> applicationContext.getString(
+                                com.frerox.toolz.R.string.st_Whisper_Groups_SettingsUpdated, actorName,
+                            )
+                            else -> null
+                        }
+                        if (adminText != null) {
+                            notificationManager.showGroupEventNotification(
+                                groupId = groupId,
+                                title = groupName,
+                                text = adminText,
+                                dedupeKey = "evt:$eventId",
+                            )
+                            return@launch
+                        }
                         val scope = when (kind) {
                             "join" -> com.frerox.toolz.data.whisper.GroupNotifScope.JOIN
                             "leave" -> com.frerox.toolz.data.whisper.GroupNotifScope.LEAVE
@@ -117,9 +185,6 @@ class WhisperPushService : FirebaseMessagingService() {
                         }
                         val toggleOn = groupNotifPrefs.isEnabled(groupId, amOwnerOrAdmin)
                         if (!com.frerox.toolz.data.whisper.shouldNotifyGroupEvent(scope, actorId, me, amOwner, toggleOn)) return@launch
-                        val actorName = message.data["actorName"].takeIf { !it.isNullOrBlank() }
-                            ?: applicationContext.getString(com.frerox.toolz.R.string.st_Whisper_SomeoneDefault)
-                        val groupName = message.data["groupName"].takeIf { !it.isNullOrBlank() } ?: "Group"
                         val text = when (kind) {
                             "join" -> com.frerox.toolz.data.whisper.WhisperGroupNotifTemplates.joinText(actorName, groupName)
                             "leave" -> com.frerox.toolz.data.whisper.WhisperGroupNotifTemplates.leaveText(actorName, groupName)

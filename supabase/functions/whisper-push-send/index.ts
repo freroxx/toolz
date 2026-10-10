@@ -15,7 +15,9 @@
 //      open and realtime already delivers the message.
 //   4. Look up receiver FCM tokens in whisper_fcm_tokens via the service role key.
 //      Group fan-out: invites → the invitee; messages → every member except
-//      the sender; join/leave/decline events → owner + admins (declines owner-only).
+//      the sender (with senderName); join/leave/decline events → owner +
+//      admins (declines owner-only); admin-action events
+//      (remove/promote/demote/rename/picture/settings) → members except actor.
 //   5. Send DATA-ONLY FCM HTTP v1 messages — NO content (privacy), android
 //      priority HIGH. Group payloads carry group/actor NAMES (like 1:1
 //      senderName): accepted and documented in WHISPER.md §11 — FCM sees who
@@ -264,15 +266,33 @@ async function profileName(env: GroupPushEnv, userId: string): Promise<string> {
 }
 
 /**
+ * Subject user id of admin events whose payload is a quoted id
+ * (`"uuid"` for remove/promote/demote/invite/cancel). Null for anything else.
+ */
+function eventSubjectId(payload: unknown): string {
+  if (typeof payload !== "string") return "";
+  const t = payload.trim();
+  if (t.length >= 33 && t.startsWith('"') && t.endsWith('"')) {
+    const inner = t.slice(1, -1);
+    if (/^[0-9a-fA-F-]{10,64}$/.test(inner)) return inner;
+  }
+  return "";
+}
+
+/**
  * Phase-2 groups fan-out. Data-only payloads, no content — same privacy
  * contract as 1:1. Recipients mirror the client defaults (owner/admins for
  * join/leave/decline; the client suppresses anything its toggle excludes):
  * - whisper_group_invites INSERT → the invitee;
- * - whisper_group_messages INSERT → every member except the sender;
- * - whisper_group_events INSERT (join/leave/decline) → owner + admins.
- * Other event types (create/invite/add/remove/rename/promote/picture/cancel)
- * stay in-app only: they spam no channel, and cancel is covered by the
- * invite-row delete the invitee already watches.
+ * - whisper_group_messages INSERT → every member except the sender (now with
+ *   senderName, like 1:1);
+ * - whisper_group_events INSERT (join/leave/decline) → owner + admins;
+ * - whisper_group_events INSERT (remove/promote/demote/rename/picture/
+ *   settings) → every member except the actor (remove also reaches the
+ *   removed subject directly).
+ * Other event types (create/invite/cancel) stay in-app only: they spam no
+ * channel, and cancel is covered by the invite-row delete the invitee
+ * already watches.
  */
 async function handleGroupPush(
   record: any,
@@ -305,6 +325,9 @@ async function handleGroupPush(
       restRows(env, `whisper_groups?id=eq.${encodeURIComponent(groupId)}&select=name&limit=1`),
     ]);
     const groupName = String(groupRows?.[0]?.name || "Group").slice(0, 64);
+    // Sender name rides the push (like 1:1 senderName): FCM sees who wrote
+    // in which named group, never message bodies.
+    const senderName = (await profileName(env, senderId)).slice(0, 64);
     let sent = 0;
     let pruned = 0;
     for (const m of members) {
@@ -314,6 +337,8 @@ async function handleGroupPush(
         whisper_group_message: "true",
         groupId,
         groupName,
+        senderName,
+        senderId,
         clientId: clientId.slice(0, 64),
       }, `gmsg_${groupId}`, env);
       sent += r.sent;
@@ -323,7 +348,11 @@ async function handleGroupPush(
   }
   if (table === "whisper_group_events") {
     const kind = str(record?.type);
-    if (kind !== "join" && kind !== "leave" && kind !== "decline") {
+    const PUSHABLE_EVENT_KINDS = new Set([
+      "join", "leave", "decline",
+      "remove", "promote", "demote", "rename", "picture", "settings",
+    ]);
+    if (!PUSHABLE_EVENT_KINDS.has(kind)) {
       return { sent: 0, pruned: 0, skipped: "event_not_pushable" };
     }
     const groupId = str(record?.group_id);
@@ -337,15 +366,35 @@ async function handleGroupPush(
     const groupName = String(groupRows?.[0]?.name || "Group").slice(0, 64);
     const owner = String(groupRows?.[0]?.created_by || "");
     const actorName = (await profileName(env, actor)).slice(0, 64);
-    // Declines ping the owner only; joins/leaves ping owner + admins.
-    // Members who opted in get these over realtime while the app is open.
+    // Declines ping the owner only; joins/leaves ping owner + admins;
+    // admin-action events (remove/promote/demote/rename/picture/settings)
+    // ping all current members except the actor (mute/open-chat still apply
+    // client-side). Members who opted in get join/leave over realtime while open.
+    const isAdminAction = kind !== "join" && kind !== "leave" && kind !== "decline";
     const targets = members
       .map((m) => ({ id: str(m?.user_id), role: str(m?.role) }))
       .filter((m) => m.id && m.id !== actor)
-      .filter((m) => m.id === owner || m.role === "admin")
+      .filter((m) => isAdminAction || m.id === owner || m.role === "admin")
       .filter((m) => kind !== "decline" || m.id === owner);
+    // A removed member is already gone from the members table by the time
+    // this runs (event publishes before the row delete, but ordering isn't
+    // guaranteed): reach them directly via the event subject.
+    if (kind === "remove") {
+      const subject = eventSubjectId(record?.payload);
+      if (subject && subject !== actor && !targets.some((t) => t.id === subject)) {
+        targets.push({ id: subject, role: "member" });
+      }
+    }
     let sent = 0;
     let pruned = 0;
+    // Subject info for role-change events (remove/promote/demote carry a
+    // quoted user id payload): clients render "you" vs "X" copy from this.
+    let subjectId = "";
+    let subjectName = "";
+    if (kind === "remove" || kind === "promote" || kind === "demote") {
+      subjectId = eventSubjectId(record?.payload);
+      if (subjectId) subjectName = (await profileName(env, subjectId)).slice(0, 64);
+    }
     for (const t of targets) {
       const r = await deliverTo(t.id, {
         whisper_group_event: "true",
@@ -354,6 +403,8 @@ async function handleGroupPush(
         actorId: actor,
         actorName,
         groupName,
+        subjectId,
+        subjectName,
         eventId: eventId.slice(0, 64),
       }, `gevt_${groupId}`, env);
       sent += r.sent;

@@ -402,6 +402,15 @@ class WhisperNotificationManager @Inject constructor(
     }
 
     /**
+     * Retracts a withdrawn invite ping (cancel/decline/join consumed the row).
+     * Same stable id as [showGroupInviteNotification]; silent when absent.
+     */
+    fun cancelGroupInviteNotification(groupId: String, inviterName: String) {
+        if (groupId.isBlank()) return
+        runCatching { notifManager.cancel(groupNotifId("invite:$groupId:$inviterName")) }
+    }
+
+    /**
      * Phase-2 groups: join/leave/decline event ping for owners/admins/members.
      * Honors the per-group toggle (checked by the caller), the group mute, the
      * open-chat suppression, and FCM+realtime dedupe via [dedupeKey] (event id).

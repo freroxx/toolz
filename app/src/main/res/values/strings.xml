@@ -3882,6 +3882,16 @@
     <string name="st_Whisper_Groups_ErrQueued">Will send when you\'re back online.</string>
     <string name="st_Whisper_Groups_ErrAdminOnly">Only admins can send messages in this group.</string>
     <string name="st_Whisper_Groups_ErrLastAdmin">The last admin cannot leave — promote someone first.</string>
+    <string name="st_Whisper_Groups_SenderNewMessage">%1$s: New message</string>
+    <string name="st_Whisper_Groups_RemovedYou">You were removed from %1$s</string>
+    <string name="st_Whisper_Groups_RemovedOther">%1$s was removed from %2$s</string>
+    <string name="st_Whisper_Groups_PromotedYou">You are now an admin in %1$s</string>
+    <string name="st_Whisper_Groups_PromotedOther">%1$s is now an admin in %2$s</string>
+    <string name="st_Whisper_Groups_DemotedYou">You are no longer an admin in %1$s</string>
+    <string name="st_Whisper_Groups_DemotedOther">%1$s is no longer an admin in %2$s</string>
+    <string name="st_Whisper_Groups_Renamed">%1$s updated the group</string>
+    <string name="st_Whisper_Groups_PictureUpdated">%1$s updated the group picture</string>
+    <string name="st_Whisper_Groups_SettingsUpdated">%1$s updated the group settings</string>
     <string name="st_Whisper_Groups_Degraded">Group history couldn\'t be fully verified — showing verified messages only.</string>
     <string name="st_Whisper_Groups_Photo">Photo</string>
     <string name="st_Whisper_Groups_Poll">Poll</string>

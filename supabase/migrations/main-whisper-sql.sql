@@ -2871,3 +2871,126 @@ alter table public.whisper_group_events drop constraint if exists whisper_group_
 alter table public.whisper_group_events add constraint whisper_group_events_type_check
     check (type in ('create', 'remove', 'leave', 'rename', 'promote', 'demote',
                     'settings', 'invite', 'join', 'decline', 'cancel', 'picture'));
+
+-- ═══════════════ 20261011_whisper_groups_adminsend_guard.sql ═
+-- Server enforcement for admin-only send mode. The mode itself lives in the
+-- signed SETTINGS event log (client authority); this mirrors it into
+-- whisper_groups.admin_only_send so the message guard can reject member sends
+-- even from modded clients. Backfilled from each group's latest SETTINGS event.
+alter table public.whisper_groups add column if not exists admin_only_send boolean not null default false;
+
+create or replace function public.whisper_group_mirror_settings()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_send boolean;
+begin
+  if new.type = 'settings' then
+    begin
+      v_send := (new.payload::jsonb ->> 'adminSend')::boolean;
+    exception when others then
+      v_send := null;
+    end;
+    if v_send is not null then
+      update public.whisper_groups set admin_only_send = v_send where id = new.group_id;
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_group_events_mirror_settings on public.whisper_group_events;
+create trigger trg_group_events_mirror_settings
+  after insert on public.whisper_group_events
+  for each row execute function public.whisper_group_mirror_settings();
+
+-- Backfill from latest SETTINGS per group (idempotent; default false stays).
+do $$
+declare
+  r record;
+begin
+  for r in
+    select distinct group_id from public.whisper_group_events where type = 'settings'
+  loop
+    update public.whisper_groups g set admin_only_send = coalesce((
+      select ((e.payload::jsonb ->> 'adminSend')::boolean)
+      from public.whisper_group_events e
+      where e.group_id = r.group_id and e.type = 'settings'
+        and (e.payload::jsonb ? 'adminSend')
+      order by e.seq desc limit 1
+    ), false)
+    where g.id = r.group_id;
+  end loop;
+end $$;
+
+-- Message guard now also rejects non-admin senders in admin-only groups.
+create or replace function public.whisper_group_guard_message()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_epoch bigint;
+  v_members int;
+  v_ok boolean;
+  v_admin_only boolean;
+begin
+  select epoch, admin_only_send into v_epoch, v_admin_only from public.whisper_groups where id = new.group_id;
+  if not found then
+    raise exception 'unknown group' using errcode = '42501';
+  end if;
+  if not exists (
+    select 1 from public.whisper_group_members m
+    where m.group_id = new.group_id and m.user_id = new.sender_id
+  ) then
+    raise exception 'not a member' using errcode = '42501';
+  end if;
+  if v_admin_only then
+    if not exists (
+      select 1 from public.whisper_group_members m
+      where m.group_id = new.group_id and m.user_id = new.sender_id and m.role = 'admin'
+    ) then
+      raise exception 'only admins can send messages in this group' using errcode = '42501';
+    end if;
+  end if;
+  if new.epoch <> v_epoch then
+    raise exception 'stale epoch' using errcode = '42501';
+  end if;
+  select count(*) into v_members
+  from public.whisper_group_members where group_id = new.group_id;
+  select public.whisper_check_group_send_allowed(new.sender_id, v_members) into v_ok;
+  if not v_ok then
+    raise exception 'group send quota exceeded' using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;
+
+-- Receipt hygiene: wiping a message also wipes its seen-state (no orphans,
+-- no lingering presence after a delete-for-everyone).
+create or replace function public.whisper_group_cleanup_receipts()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  delete from public.whisper_group_receipts
+  where group_id = old.group_id and message_id = old.client_id;
+  return old;
+end;
+$$;
+
+drop trigger if exists trg_group_messages_cleanup_receipts on public.whisper_group_messages;
+create trigger trg_group_messages_cleanup_receipts
+  after delete on public.whisper_group_messages
+  for each row execute function public.whisper_group_cleanup_receipts();
+
+-- Webhook policy (no code): whisper-push-send webhooks stay INSERT-only on
+-- whisper_group_invites / whisper_group_messages / whisper_group_events.
+-- NEVER add webhooks on whisper_group_receipts / whisper_group_typing:
+-- presence rows churn constantly and carry no pushable content.

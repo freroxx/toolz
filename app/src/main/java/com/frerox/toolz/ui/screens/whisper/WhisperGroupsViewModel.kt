@@ -102,6 +102,9 @@ class WhisperGroupsViewModel @Inject constructor(
     // Invite ids already pinged this process (realtime resubscribes must not re-ping).
     private val pingedInviteIds = mutableSetOf<String>()
     private var inviteWatchJob: kotlinx.coroutines.Job? = null
+    // Last seen invite keys for retracting withdrawn pings (cancel/join/decline).
+    private var lastInviteKeys: Set<String> = emptySet()
+    private var lastInviteNames: Map<String, String> = emptyMap()
     // Group ids with a join/decline in flight (double-tap guard for card buttons).
     private val _workingInvites = MutableStateFlow<Set<String>>(emptySet())
     val workingInvites: StateFlow<Set<String>> = _workingInvites.asStateFlow()
@@ -230,6 +233,21 @@ class WhisperGroupsViewModel @Inject constructor(
     }
 
     private fun pingNewInvites(invites: List<GroupInviteInfo>) {
+        val freshKeys = invites.map { "${it.groupId}:${it.invitedBy}" to it }.toMap()
+        // Retract pings for invites that vanished (cancel/decline/join consumed).
+        val gone = lastInviteKeys - freshKeys.keys
+        gone.forEach { key ->
+            val sep = key.indexOf(':')
+            if (sep > 0) {
+                val gid = key.substring(0, sep)
+                val name = lastInviteNames[key].orEmpty()
+                // The inviter name disambiguates the stable notif id.
+                if (name.isNotBlank()) notificationManager.cancelGroupInviteNotification(gid, name)
+                pingedInviteIds.remove(key)
+            }
+        }
+        lastInviteKeys = freshKeys.keys.toSet()
+        lastInviteNames = freshKeys.mapValues { it.value.invitedByName }
         invites.forEach { inv ->
             val key = "${inv.groupId}:${inv.invitedBy}"
             if (pingedInviteIds.add(key)) {
@@ -286,10 +304,19 @@ class WhisperGroupsViewModel @Inject constructor(
                             if (ping.senderId == me) return@collect
                             if (!seenEventIds.add("msg:${ping.clientId}")) return@collect
                             val group = lastGroups.firstOrNull { it.id == m.groupId }
+                            val sender = lastFriendNames[ping.senderId]?.takeIf { it.isNotBlank() }
+                            val text = if (sender != null) {
+                                appContext.getString(
+                                    com.frerox.toolz.R.string.st_Whisper_Groups_SenderNewMessage,
+                                    sender,
+                                )
+                            } else {
+                                appContext.getString(com.frerox.toolz.R.string.st_Whisper_Notif_NewMessage)
+                            }
                             notificationManager.showGroupEventNotification(
                                 groupId = m.groupId,
                                 title = group?.name?.ifBlank { "Group" } ?: "Group",
-                                text = appContext.getString(com.frerox.toolz.R.string.st_Whisper_Notif_NewMessage),
+                                text = text,
                                 dedupeKey = "msg:${ping.clientId}",
                             )
                         }
@@ -304,19 +331,68 @@ class WhisperGroupsViewModel @Inject constructor(
         row: com.frerox.toolz.data.whisper.GroupEventRow,
         me: String,
     ) {
+        if (row.actor == me) return
+        val group = lastGroups.firstOrNull { it.id == m.groupId }
+        val groupName = group?.name?.ifBlank { "Group" } ?: "Group"
+        val actorName = lastFriendNames[row.actor] ?: "Someone"
+        // Admin-action events behave like message pings: mute + self only,
+        // no event-toggle gate (the manager still enforces mute/open-chat).
+        when (row.type) {
+            "remove", "promote", "demote", "rename", "picture", "settings" -> {
+                val subjectId = row.payload.trim().trim('"').takeIf {
+                    it.length >= 10 && it.all { c -> c.isLetterOrDigit() || c == '-' }
+                }.orEmpty()
+                val subjectName = lastFriendNames[subjectId] ?: "Someone"
+                val text = when (row.type) {
+                    "remove" -> if (subjectId == me) {
+                        appContext.getString(com.frerox.toolz.R.string.st_Whisper_Groups_RemovedYou, groupName)
+                    } else {
+                        appContext.getString(
+                            com.frerox.toolz.R.string.st_Whisper_Groups_RemovedOther, subjectName, groupName,
+                        )
+                    }
+                    "promote" -> if (subjectId == me) {
+                        appContext.getString(com.frerox.toolz.R.string.st_Whisper_Groups_PromotedYou, groupName)
+                    } else {
+                        appContext.getString(
+                            com.frerox.toolz.R.string.st_Whisper_Groups_PromotedOther, subjectName, groupName,
+                        )
+                    }
+                    "demote" -> if (subjectId == me) {
+                        appContext.getString(com.frerox.toolz.R.string.st_Whisper_Groups_DemotedYou, groupName)
+                    } else {
+                        appContext.getString(
+                            com.frerox.toolz.R.string.st_Whisper_Groups_DemotedOther, subjectName, groupName,
+                        )
+                    }
+                    "rename" -> appContext.getString(com.frerox.toolz.R.string.st_Whisper_Groups_Renamed, actorName)
+                    "picture" -> appContext.getString(
+                        com.frerox.toolz.R.string.st_Whisper_Groups_PictureUpdated, actorName,
+                    )
+                    else -> appContext.getString(
+                        com.frerox.toolz.R.string.st_Whisper_Groups_SettingsUpdated, actorName,
+                    )
+                }
+                notificationManager.showGroupEventNotification(
+                    groupId = m.groupId,
+                    title = groupName,
+                    text = text,
+                    dedupeKey = "evt:${row.id}",
+                )
+                return
+            }
+            else -> {}
+        }
         val scope = when (row.type) {
             "join" -> GroupNotifScope.JOIN
             "leave" -> GroupNotifScope.LEAVE
             "decline" -> GroupNotifScope.DECLINE
             else -> return
         }
-        val group = lastGroups.firstOrNull { it.id == m.groupId }
         val amOwner = group?.createdBy == me
         val amOwnerOrAdmin = amOwner || m.isAdmin(me)
         val toggleOn = notifPrefs.isEnabled(m.groupId, amOwnerOrAdmin)
         if (!shouldNotifyGroupEvent(scope, row.actor, me, amOwner, toggleOn)) return
-        val actorName = lastFriendNames[row.actor] ?: "Someone"
-        val groupName = group?.name?.ifBlank { "Group" } ?: "Group"
         val text = when (scope) {
             GroupNotifScope.JOIN -> WhisperGroupNotifTemplates.joinText(actorName, groupName)
             GroupNotifScope.LEAVE -> WhisperGroupNotifTemplates.leaveText(actorName, groupName)
