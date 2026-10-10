@@ -249,7 +249,7 @@ sealing (`WhisperChatViewModel.compressImageForUpload`). Avatars are cropped to
 
 ## 5. Backend
 
-`supabase/migrations/main-whisper-sql.sql` (2125 lines) is the canonical single
+`supabase/migrations/main-whisper-sql.sql` (3154 lines) is the canonical single
 baseline, squashing 18 migrations (policy in `whisper-sql-info.md`; header banner
 lists all 17, `20260820`…`20261005_whisper_signup_discover_hardening.sql`).
 Tables:
@@ -511,33 +511,40 @@ Ciphertext and IV markers, sender and receiver IDs, timestamps, profile fields
 presence, typing signals, reaction rows, FCM tokens, prekey material and
 signatures, and image URLs with IDs. Usernames reveal who talks to whom;
 message and image bytes stay opaque. Group rows additionally reveal group IDs,
-member lists, epochs, and per-member frame sizes (frames themselves stay
+member lists, epochs, per-member frame sizes, a per-row traffic label
+(`msg_kind`: chat/poll/vote/image), the admin-only-send mirror flag, and
+reaction/request/receipt presence rows (frames and bodies themselves stay
 opaque — one v3 frame per member, each sealed through that member's 1:1
 session). FCM sees sender/message IDs and friend
-pings, plus — accepted explicitly for groups — group NAMES, actor/inviter
-names, group IDs and event kinds on group pushes (invite/message/join/leave/
-decline fan-out). Group push bodies never carry message text; the names mirror
-the 1:1 senderName precedent. ImgBB sees opaque PNGs with expiry. Passwords travel only to GoTrue over
+pings, plus — accepted explicitly for groups — group NAMES, actor/inviter/
+sender/subject names, group IDs and event kinds on group pushes
+(invite/message/join/leave/decline/remove/promote/demote/rename/picture/
+settings fan-out; votes never fan out). Group push bodies never carry message
+text; the names mirror the 1:1 senderName precedent. ImgBB sees opaque PNGs with expiry. Passwords travel only to GoTrue over
 TLS at auth and deletion time; the bypass password goes only to the edge secret
 check.
 
 ## 12. File inventory
 
-Client `data/whisper` (39 files): EdgeFunctionClient 154, EncryptedBlobHost 57, PlayIntegrityAttestor
+Client `data/whisper` (41 files): EdgeFunctionClient 154, EncryptedBlobHost 57, PlayIntegrityAttestor
 189, ProtocolDiagnostics 66, WhisperAubupManager 526, WhisperAuthManager 498,
 WhisperAvatarCodec 61, WhisperAvatarLoader 145, WhisperCrypto 953,
 WhisperDeletedMessagesStore 167, WhisperDeliveryScheduler 42,
 WhisperEncryptedImageHost 233, WhisperEnvelope 133, WhisperErrorMapper 313,
-WhisperGroupEntities 112, WhisperGroupNotifications 165,
+WhisperGroupEntities 112, WhisperGroupNotifications 165, WhisperGroupReadStore 65,
 WhisperHiddenChatsStore 99, WhisperImageCipherTransport 183,
-WhisperImageDiskCache 228, WhisperImagePreprocess 96,
+WhisperImageDiskCache 228, WhisperImagePreprocess 160,
 WhisperKeyRotationStore 77, WhisperKeyTrustStore
 202, WhisperLocalTombstoneEntity 59, WhisperMessageDao 56, WhisperMessageEntity
-127, WhisperModels 555, WhisperMutePreferences 129, WhisperNotificationManager
-465, WhisperOutboxEntity 104, WhisperOutgoingQueue 146, WhisperPinConfig 91,
-WhisperPrekeyManager 345, WhisperProtocolConfig 20, WhisperRepository 3386,
-WhisperRepositoryGroups 1510, WhisperRepositoryProfile 444, WhisperRepositorySocial 467,
+127, WhisperModels 555, WhisperMutePreferences 136, WhisperNotificationManager
+474, WhisperOutboxEntity 104, WhisperOutgoingQueue 146, WhisperPinConfig 91,
+WhisperPrekeyManager 345, WhisperProtocolConfig 20, WhisperRepository 3389,
+WhisperRepositoryGroups 2291, WhisperRepositoryProfile 444, WhisperRepositorySocial 467,
 WhisperSessionFactory 297, WhisperUndoBufferStore 104, WireProtocol 402.
+Group UI (`ui/screens/whisper`, 6 files): WhisperGroupsSection 869,
+WhisperGroupsViewModel 503, WhisperGroupChatScreen 1380,
+WhisperGroupChatViewModel 480, WhisperGroupInfoScreen 1101,
+WhisperGroupInfoViewModel 372. Group tests: `WhisperGroupsTest` 36 tests.
 
 Session subdir (4 files): WhisperRatchet 393, WhisperSessionSecretProtector 36,
 WhisperSessionStore 341, WhisperV3Codec 144.
@@ -556,11 +563,12 @@ Chats-tab section returns early otherwise. Server-side, every group write
 requires `client_version_code >= 18`, and the ship-day floor flip blocks
 <1.1.7 clients from all of Whisper — so the flag stays true after ship.
 1:1 behavior is unchanged (no shared code path was
-rewritten — five functions were widened private→internal, one DAO was added
+rewritten — four properties were widened private→internal (`outgoingQueue`,
+`deliveryScheduler`, `deletedStore`, `imageDiskCache`), one DAO was added
 to the repository constructor, one field to `VerifiedBundle`; the 1:1 outbox
 flush additionally skips `groupId != null` rows, a pure guard).
 
-Transport (`WhisperRepositoryGroups.kt`, ~1500 lines): pairwise fan-out, ≤12
+Transport (`WhisperRepositoryGroups.kt`, ~2300 lines): pairwise fan-out, ≤12
 members. The sender seals one inner frame per member (self included, so the
 sender's own lines open through the same path) through the unmodified 1:1
 `sealWithRatchet`; groupId + epoch ride inside the AEAD plaintext
@@ -581,8 +589,15 @@ bricks the group — `applyEventsTolerant` truncates to the verified prefix and
 flags the membership `degraded` (chat + info banner it; history at/after
 `badSeq` is dropped, never trusted). A bad CREATE still fails the whole log.
 Sync is incremental off the local event cache (watermark = max cached seq;
-a degraded watermark drops the cache and refetches full). Seq races between
-admins retry with re-sign (3 attempts, backoff) instead of surfacing 23505.
+a degraded watermark drops the cache and refetches full). Unknown future event
+types decode to an `UNKNOWN` sentinel that fails closed inside `applyEvents`
+(truncatable) instead of bricking the sync before verification starts. Seq
+races between admins retry with re-sign of seq AND epoch (3 attempts, backoff)
+instead of surfacing 23505. Typing upserts set `updated_at` explicitly (a
+bare PK-conflict upsert would keep the stale stamp). Pagination cursors are
+strictly-older (`lt`, never `lte`). Report pre-checks last-admin BEFORE
+blocking (no stranded block-without-exit). Per-leg seal failures log the
+self-vs-peer split and stay fail-closed (partial fan-out never sends).
 `syncGroups` isolates per-group failures (one bad group never hides the
 healthy ones). Offline sends queue sealed bundles in the Room outbox
 (`groupId` legs, `content_iv = v3-group:<epoch>`; pictures re-run from
@@ -596,27 +611,42 @@ Server (`main-whisper-sql.sql` groups sections): `whisper_groups` /
 `whisper_group_members` / `whisper_group_events` / `whisper_group_messages` /
 `whisper_group_invites` + fan-out quota `whisper_check_group_send_allowed`
 (600 envelopes/day/sender) + guard triggers (12-cap on members AND
-members+invites, epoch chain, member+epoch+quota message guard, invite-gated
+members+invites, epoch chain, member+epoch+admin-send+quota message guard
+(`admin_only_send` mirrors the signed SETTINGS log via trigger + backfill,
+so modded clients cannot bypass it), invite-gated
 member inserts, consume-on-join, all fail-closed 42501) + last-member disband
-DELETE policy (a live group can never be nuked). The direct-`add` event type
+DELETE policy (a live group can never be nuked) + receipt/reaction cleanup on
+message wipe + request-consumed-on-invite. `whisper_group_reactions`
+(one emoji per user per message) and `whisper_group_join_requests`
+(friends ask in, admins approve/deny) are member-RLS presence tables on the
+realtime publication. Message rows carry `msg_kind` (chat/poll/vote/image) so
+votes stay push-silent. The direct-`add` event type
 is retired from the CHECK (legacy rows degrade, never resurrect). Group
 writes require `client_version_code >= 18`.
 
 UI: Chats-tab `WhisperGroupsSection` (rows with picture, last-message
-preview, time, unread badge + persistent invite cards with Join/Decline +
+preview, time, unread badge (decrypt-free count, no 20-cap), @You mention chip
++ persistent invite cards with Join/Decline + withdrawn-invite retraction +
 in-flight guards + create dialog with friend picker, picture picker, and
-invite mode), `WhisperGroupChatScreen` (bubbles with sender names, images,
-quote replies, poll cards, @mention highlighting, send + photo attach, mute,
-refresh, search, degraded banner, live refresh on events/messages/wipes,
-typing line, long-press actions, seen-by info, paging), `WhisperGroupInfoScreen`
-(picture header with admin change, description, rename, multi-pick add/invite
-with search, member search, pending invites with admin cancel, promote,
-demote, make-owner, remove, block-a-member, report (= block + leave), mute
-with durations, per-group notifications toggle, settings card (admin-only
-send, description), share sheet with QR, shared-photos gallery, leave,
-last-member disband — all admin-gated client-side AND server-side). Group
-mutes reuse `WhisperMutePreferences` under `group:<id>` (durations supported
-by the store).
+invite mode + join-with-ID request dialog), `WhisperGroupChatScreen`
+(in-timeline system bubbles from the verified log, unread separator +
+jump-to-latest FAB (opens at first unread), bubbles with sender names,
+reaction chips + emoji picker, expiring images with save-to-gallery viewer,
+quote replies, poll cards with admin close, @mention highlighting, send +
+photo attach with disappearing-photo picker, mute, refresh, full-history
+search (decrypted page-by-page, server rows are opaque), draft persistence,
+degraded banner, live refresh on events/messages/wipes/reactions, typing line,
+long-press actions, seen-by info, paging), `WhisperGroupInfoScreen`
+(picture header with permission-gated change, description, rename (admin-only:
+server RLS), multi-pick add/invite with search, member search, pending
+invites with admin cancel, inbound join-request inbox with approve/deny,
+promote, demote, make-owner, remove, block-a-member, report (= block + leave,
+last-admin pre-checked), mute with durations, per-group notifications toggle,
+settings card (admin-only send, member-edit flag, description), share sheet
+with QR, shared-photos gallery with save, leave, last-member disband — all
+admin-gated client-side AND server-side where the server can see the rule).
+Group mutes reuse `WhisperMutePreferences` under `group:<id>` (durations
+supported by the store).
 
 Invites: creating a group sends persistent invites (never direct adds).
 Invite rows die only by join (trigger-consumed), decline (invitee), or cancel
@@ -625,11 +655,17 @@ to match WhatsApp-style admin teams). No expiry. Invitees see the card on the
 Chats tab (survives restarts) and get pinged (realtime while open, FCM push
 while closed). Owner gets join/leave/decline pings with randomized copy;
 per-group toggle defaults ON for owner/admins (join/leave scope, +declines
-for the owner) and OFF for members. Push fan-out lives in `whisper-push-send`
+for the owner) and OFF for members; admin-action events
+(remove/promote/demote/rename/picture/settings) ping like message pings
+(mute + open-chat + self only, no toggle), with you-vs-other copy. Message
+pushes carry the sender name (like 1:1). Votes never push (tally refreshes
+silently in open chats). Withdrawn invites retract their notification.
+Push fan-out lives in `whisper-push-send`
 (single-file, dashboard deploys; webhooks must be INSERT-only on the three
-group tables — the in-code op gate is defense-in-depth); realtime publication
-now includes all group tables. Push payloads carry group/actor names (see
-§11 — accepted explicitly).
+group tables — the in-code op gate is defense-in-depth; NEVER add webhooks on
+receipts/typing/reactions/requests); realtime publication
+now includes all group tables. Push payloads carry group/actor/sender/subject
+names (see §11 — accepted explicitly).
 
 Group picture: EXIF-strip + 1920 + JPEG82 (shared preprocess, 1:1 untouched),
 fresh AES-256-GCM key per picture, PNG-wrapped for the image host, uploaded
@@ -643,25 +679,38 @@ Report/block: info-screen Block is 1:1-level (does not remove the member from
 the group nor stop their lines); Report = block everywhere + leave the group
 (confirmed, no server moderator queue — documented as the v1 semantic).
 
-Social slice: frames carry `wg1:<json>` structured bodies (text, image ref,
-reply quote, poll, vote, mentions) with legacy bare-text fallback; polls tally
-client-side (latest vote per sender wins, no server change); @mentions render
+Social slice: frames carry `wg1:<json>` structured bodies (text, image ref
+with optional expiry, reply quote, poll, vote, poll-close, mentions) with
+legacy bare-text fallback; polls tally client-side (latest vote per sender
+wins, admin close freezes the tally, no server change); @mentions render
 highlighted with an @-picker at compose time (no special push — the server
-cannot see mentions); replies freeze a quote snapshot (best-effort scroll to
-the quoted client_id); `demote` / `settings` (admin-only send + description)
-are signed events in the same log (settings bump no epoch); ownership moves
-via promote + `created_by` update; receipts (`whisper_group_receipts`) and
-typing (`whisper_group_typing`) are member-RLS presence tables on the realtime
-publication. Admin-only groups reject member sends fail-closed at send time.
+cannot see mentions; unread @You chips ride the list rows); replies freeze a
+quote snapshot (best-effort scroll to the quoted client_id); `demote` /
+`settings` (admin-only send + member-edit flag + description) are signed
+events in the same log (settings bump no epoch); picture edits follow the
+member-edit flag (rename stays admin-only: server RLS); ownership moves via
+promote + `created_by` update; receipts (`whisper_group_receipts`), reactions
+(`whisper_group_reactions`, one emoji per user per message, toggle to remove),
+typing (`whisper_group_typing`), and join requests
+(`whisper_group_join_requests`, friends ask in via ID/QR, admins approve into
+an invite or deny) are member-RLS presence tables on the realtime
+publication. Admin-only groups reject member sends fail-closed client AND
+server side. Chat photos support disappearing timers (1m/1h/1d, same bounds
+as 1:1); expired images render expired and never decrypt.
 
 Dashboard checklist (ship day): (1) three INSERT-only webhooks
-(whisper_group_invites, whisper_group_messages, whisper_group_events) → 
-whisper-push-send; (2) redeploy whisper-push-send; (3) re-run the full
+(whisper_group_invites, whisper_group_messages, whisper_group_events) →
+whisper-push-send, and NO webhooks on whisper_group_receipts /
+whisper_group_typing / whisper_group_reactions / whisper_group_join_requests;
+(2) redeploy whisper-push-send; (3) re-run the full
 main-whisper-sql.sql (idempotent, additive); (4) publish 1.1.7 APKs + signed
 manifest with floor 18; (5) set edge MIN_VERSION_CODE=18.
 
 v1 limits (documented, not bugs): invite mode is fixed at creation;
-invite links/QR encode the group id but joining still needs an admin invite
-(invites ARE the approval queue — no token-link auto-join); voice notes,
-reactions and forwards need new server tables (neither 1:1 nor groups have
-them); receipt ticks stay single-✓ in bubbles with counts in the info sheet.
+QR/ID join creates a REQUEST (admins approve into an invite — no token-link
+auto-join); voice notes, video, docs, and forwards need new pipelines/tables
+(neither 1:1 nor groups have them); message editing is absent; the group
+outbox drains on app open (the worker lane stays 1:1-only — a blind worker
+replay would burn attempts on stale-epoch rows); a queued vote replays with
+the default kind and may push once; unread @You detection covers the last 20
+decrypted rows (counts are exact); search decrypts up to 500 rows per query.
