@@ -2749,6 +2749,17 @@ begin
 end;
 $$;
 
+-- ═══════════════ 20261010_whisper_groups_retire_add.sql ═
+-- The direct-add event is retired: membership starts at JOIN, never at admin
+-- fiat. `add` leaves the CHECK so no new row can carry it; the client rejects
+-- legacy `add` rows fail-closed (verified prefix survives via truncation).
+-- Safe: no production rows behind the flag; dev logs with `add` degrade to
+-- their verified prefix instead of breaking.
+alter table public.whisper_group_events drop constraint if exists whisper_group_events_type_check;
+alter table public.whisper_group_events add constraint whisper_group_events_type_check
+    check (type in ('create', 'remove', 'leave', 'rename', 'promote',
+                    'invite', 'join', 'decline', 'cancel', 'picture'));
+
 -- ═══════════════ 20261010_whisper_groups_disband.sql ═
 -- Disband: the LAST remaining member may delete the group row (everything
 -- cascades: members, events, messages, invites). A live group can never be

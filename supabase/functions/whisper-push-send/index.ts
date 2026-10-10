@@ -1,16 +1,25 @@
-// Supabase Edge Function: whisper-push-send (V3-FIX, task F)
+// Supabase Edge Function: whisper-push-send (V3-FIX, task F; Phase-2 groups)
 //
-// FCM push scaffold invoked by a Supabase Database Webhook on INSERT to
-// public.messages (no cron). Flow:
+// FCM push scaffold invoked by Supabase Database Webhooks (no cron). Flow:
 //   1. Auth: accept EITHER the service-role key as bearer OR a shared webhook
 //      secret header (x-whisper-push-secret) — whichever is configured.
-//   2. Read the inserted message row from the webhook payload.
+//   2. Read the row from the webhook payload. 1:1 path: INSERT to
+//      public.messages / public.friends. Group path (handleGroupPush): any
+//      webhook op on whisper_group_invites / whisper_group_messages /
+//      whisper_group_events, but ONLY type=INSERT is fanned out — a
+//      CANCEL/decline invite DELETE (or a sender message wipe) must never
+//      re-fire the push for the thing just withdrawn.
+//      DASHBOARD CHECKLIST: one webhook per group table, INSERT-only; the
+//      in-code op gate is defense-in-depth, not the primary filter.
 //   3. Skip if the receiver was recently active (< 60 s last_seen_at): their app is
 //      open and realtime already delivers the message.
 //   4. Look up receiver FCM tokens in whisper_fcm_tokens via the service role key.
-//   5. Send a DATA-ONLY FCM HTTP v1 message per token ({whisper_new_message:true,
-//      senderId}) — NO message content (privacy), android priority HIGH,
-//      collapse_key = senderId.
+//      Group fan-out: invites → the invitee; messages → every member except
+//      the sender; join/leave/decline events → owner + admins (declines owner-only).
+//   5. Send DATA-ONLY FCM HTTP v1 messages — NO content (privacy), android
+//      priority HIGH. Group payloads carry group/actor NAMES (like 1:1
+//      senderName): accepted and documented in WHISPER.md §11 — FCM sees who
+//      invited / joined / left which named group, never message bodies.
 //   6. Prune tokens rejected by FCM as invalid/unregistered.
 //
 // Rate-limit friendly: exactly ONE send attempt per token; errors are logged

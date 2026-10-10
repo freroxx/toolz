@@ -31,6 +31,8 @@ class WhisperGroupsTest {
     private val verify: (ByteArray, String, String) -> Boolean =
         { _, sig, _ -> sig == "ok" }
     private val keys: (String) -> String? = { if (it == admin) adminKey else null }
+    /** Accepts every actor's key (JOIN/DECLINE self-signatures in tests). */
+    private val keys2all: (String) -> String? = { "KEY" }
 
     private fun ev(
         seq: Long,
@@ -46,9 +48,16 @@ class WhisperGroupsTest {
 
     private fun create() = ev(1, 0, WhisperGroupEventType.CREATE, admin, """{"name":"Crew"}""")
 
+    /** An INVITE (signed by the inviter) plus a self-signed JOIN builds membership. */
+    private fun inviteJoin(seq: Long, epoch: Long, uid: String, by: String = admin): List<WhisperGroupEvent> =
+        listOf(
+            ev(seq, epoch, WhisperGroupEventType.INVITE, by, "\"$uid\""),
+            ev(seq + 1, epoch + 1, WhisperGroupEventType.JOIN, uid, "\"\""),
+        )
+
     @Test
-    fun `create plus add builds membership`() {
-        val m = applyEvents(gid, listOf(create(), ev(2, 1, WhisperGroupEventType.ADD, admin, "\"u2\"")), verify, keys)
+    fun `create plus invite-join builds membership`() {
+        val m = applyEvents(gid, listOf(create()) + inviteJoin(2, 0, "u2"), verify, keys2all)
         assertTrue(m.isAdmin(admin))
         assertTrue(m.isMember("u2"))
         assertEquals(1L, m.epoch)
@@ -66,8 +75,8 @@ class WhisperGroupsTest {
     }
 
     @Test
-    fun `non-admin add fails closed`() {
-        val log = listOf(create(), ev(2, 1, WhisperGroupEventType.ADD, "u2", "\"u3\""))
+    fun `non-member invite fails closed`() {
+        val log = listOf(create(), ev(2, 0, WhisperGroupEventType.INVITE, "u2", "\"u3\""))
         try {
             applyEvents(gid, log, verify, keys)
             fail("must throw")
@@ -78,19 +87,18 @@ class WhisperGroupsTest {
     }
 
     @Test
-    fun `open invites let members add, strangers still blocked`() {
+    fun `open invites let members invite, strangers still blocked`() {
         val openCreate = create().copy(payloadJson = """{"name":"Crew","invite":"all"}""")
-        val memberAdd = listOf(openCreate, ev(2, 1, WhisperGroupEventType.ADD, admin, "\"u2\""))
-        val m = applyEvents(gid, memberAdd, verify, keys)
+        val memberLog = listOf(openCreate) + inviteJoin(2, 0, "u2")
+        val m = applyEvents(gid, memberLog, verify, keys2all)
         assertTrue(!m.inviteAdminsOnly)
         assertTrue(m.canInvite("u2"))
-        // u2 (member, stub-verified) adds u3.
-        val keys2: (String) -> String? = { "KEY" }
-        val m2 = applyEvents(gid, memberAdd + ev(3, 1, WhisperGroupEventType.ADD, "u2", "\"u3\""), verify, keys2)
+        // u2 (member, stub-verified) invites u3, who joins.
+        val m2 = applyEvents(gid, memberLog + inviteJoin(4, 1, "u3", by = "u2"), verify, keys2all)
         assertTrue(m2.isMember("u3"))
-        // A stranger (never a member) cannot add even with a valid signature.
+        // A stranger (never a member) cannot invite even with a valid signature.
         try {
-            applyEvents(gid, memberAdd + ev(3, 1, WhisperGroupEventType.ADD, "stranger", "\"u4\""), verify, keys2)
+            applyEvents(gid, memberLog + ev(4, 1, WhisperGroupEventType.INVITE, "stranger", "\"u4\""), verify, keys2all)
             fail("must throw")
         } catch (e: IllegalArgumentException) {
             assertTrue((e.message ?: "").contains("signed by inviter"))
@@ -98,15 +106,31 @@ class WhisperGroupsTest {
     }
 
     @Test
-    fun `member add under closed invites fails closed`() {
-        val keys2: (String) -> String? = { "KEY" }
-        val log = listOf(create(), ev(2, 1, WhisperGroupEventType.ADD, admin, "\"u2\""))
+    fun `member invite under closed invites fails closed`() {
+        val log = listOf(create()) + inviteJoin(2, 0, "u2")
         try {
-            applyEvents(gid, log + ev(3, 1, WhisperGroupEventType.ADD, "u2", "\"u3\""), verify, keys2)
+            applyEvents(gid, log + ev(4, 1, WhisperGroupEventType.INVITE, "u2", "\"u3\""), verify, keys2all)
             fail("must throw")
         } catch (e: IllegalArgumentException) {
             assertTrue((e.message ?: "").contains("not admin-signed"))
         }
+    }
+
+    @Test
+    fun `legacy add events are rejected`() {
+        val log = listOf(create(), ev(2, 1, WhisperGroupEventType.ADD, admin, "\"u2\""))
+        try {
+            applyEvents(gid, log, verify, keys)
+            fail("must throw")
+        } catch (e: IllegalStateException) {
+            assertTrue((e.message ?: "").contains("legacy add"))
+        }
+        // The tolerant path truncates at the legacy row instead of bricking.
+        val m = applyEventsTolerant(gid, log, verify, keys)
+        assertTrue(m.degraded)
+        assertEquals(2L, m.badSeq)
+        assertTrue(m.isAdmin(admin))
+        assertTrue(!m.isMember("u2"))
     }
 
     @Test
@@ -130,11 +154,17 @@ class WhisperGroupsTest {
     @Test
     fun `group caps at twelve members`() {
         val log = mutableListOf(create())
-        for (i in 2..12) log += ev(i.toLong(), 1, WhisperGroupEventType.ADD, admin, "\"u$i\"")
-        val m = applyEvents(gid, log, verify, keys)
+        var seq = 2L
+        var epoch = 0L
+        for (i in 2..12) {
+            log += inviteJoin(seq, epoch, "u$i")
+            seq += 2
+            epoch += 1
+        }
+        val m = applyEvents(gid, log, verify, keys2all)
         assertEquals(12, m.members.size)
         try {
-            applyEvents(gid, log + ev(13, 1, WhisperGroupEventType.ADD, admin, "\"u13\""), verify, keys)
+            applyEvents(gid, log + ev(seq, epoch, WhisperGroupEventType.INVITE, admin, "\"u13\""), verify, keys2all)
             fail("must throw")
         } catch (e: IllegalArgumentException) {
             assertTrue((e.message ?: "").contains("full"))
@@ -143,14 +173,16 @@ class WhisperGroupsTest {
 
     @Test
     fun `stale epoch and unordered logs rejected`() {
-        val stale = listOf(create(), ev(2, 1, WhisperGroupEventType.ADD, admin, "\"u2\""), ev(3, 0, WhisperGroupEventType.ADD, admin, "\"u3\""))
+        // INVITE never moves the epoch, so the stale write needs a JOIN first (epoch 0 -> 1).
+        val stale = listOf(create()) + inviteJoin(2, 0, "u2") +
+            ev(4, 0, WhisperGroupEventType.INVITE, admin, "\"u3\"")
         try {
-            applyEvents(gid, stale, verify, keys)
+            applyEvents(gid, stale, verify, keys2all)
             fail("must throw")
         } catch (e: IllegalArgumentException) {
             assertTrue((e.message ?: "").contains("stale epoch"))
         }
-        val unordered = listOf(create(), ev(3, 1, WhisperGroupEventType.ADD, admin, "\"u3\""), ev(2, 1, WhisperGroupEventType.ADD, admin, "\"u2\""))
+        val unordered = listOf(create(), ev(3, 1, WhisperGroupEventType.INVITE, admin, "\"u3\""), ev(2, 1, WhisperGroupEventType.INVITE, admin, "\"u2\""))
         try {
             applyEvents(gid, unordered, verify, keys)
             fail("must throw")
@@ -161,14 +193,11 @@ class WhisperGroupsTest {
 
     @Test
     fun `epoch ranges gate history across remove and re-add`() {
-        val keys2: (String) -> String? = { "KEY" }
-        val log = listOf(
-            create(),
-            ev(2, 1, WhisperGroupEventType.ADD, admin, "\"u2\""),
-            ev(3, 2, WhisperGroupEventType.REMOVE, admin, "\"u2\""),
-            ev(4, 3, WhisperGroupEventType.ADD, admin, "\"u2\""),
-        )
-        val m = applyEvents(gid, log, verify, keys2)
+        val log = listOf(create()) +
+            inviteJoin(2, 0, "u2") +
+            ev(4, 2, WhisperGroupEventType.REMOVE, admin, "\"u2\"") +
+            inviteJoin(5, 2, "u2")
+        val m = applyEvents(gid, log, verify, keys2all)
         assertTrue(m.isMember("u2"))
         // Epoch 1 (first tenure) and 3+ (second tenure) open; epoch 2 (removed) shut.
         assertTrue(m.isMemberAt("u2", 1))
@@ -247,7 +276,7 @@ class WhisperGroupsTest {
     @Test
     fun `picture latest wins and requires admin`() {
         val keys2: (String) -> String? = { "KEY" }
-        fun pic(url: String) = buildGroupPicturePayload(url, "iv1", mapOf(admin to "F"))
+        fun pic(url: String) = buildGroupPicturePayload(url, mapOf(admin to "F"))
         val log = listOf(
             create(),
             ev(2, 0, WhisperGroupEventType.PICTURE, admin, pic("https://a")),

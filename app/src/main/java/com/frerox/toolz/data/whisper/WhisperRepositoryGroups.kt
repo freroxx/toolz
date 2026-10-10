@@ -8,8 +8,9 @@ package com.frerox.toolz.data.whisper
 /**
  * Phase-2 GROUPS DOMAIN of [WhisperRepository], following the
  * WhisperRepositorySocial.kt extraction pattern (extension functions, no
- * call-site changes). v1.1.7 dev, feature-flag OFF — nothing here is
- * reachable from any 1:1 path while [WhisperGroupsConfig.ENABLED] is false.
+ * call-site changes). v1.1.7 dev, feature-flag ON — every entry point still
+ * requires [WhisperGroupsConfig.ENABLED] first, and the server enforces
+ * client_version_code >= 18 on every group write.
  *
  * Transport design (pairwise fan-out, ≤12 members):
  * - The sender seals ONE inner envelope per member through the UNMODIFIED
@@ -132,11 +133,12 @@ data class WhisperGroupEvent(
     val adminSig: String,
 )
 
-/** Current group picture: URL + IV are server-visible metadata; the image key
- * travels per-member sealed (see `picture` events) so bytes stay opaque. */
+/** Current group picture: the URL is server-visible metadata; the image key
+ * travels per-member sealed (see `picture` events) so bytes stay opaque. (The
+ * AES-GCM nonce rides prepended inside the sealed bytes — there is no separate
+ * IV field on the wire anymore.) */
 data class WhisperGroupPicture(
     val url: String,
-    val iv: String,
     val epoch: Long,
 )
 
@@ -264,18 +266,11 @@ fun applyEvents(
         }
         require(members.isNotEmpty()) { "event before create" }
         when (type) {
-            WhisperGroupEventType.ADD -> {
-                require(isMemberSigned(ev, members, verify, signerKeyOf)) { "add not signed by inviter" }
-                require(members[ev.actor] == WhisperGroupRole.ADMIN || !inviteAdminsOnly) {
-                    "add not admin-signed"
-                }
-                val target = targetOf(ev)
-                require(!members.containsKey(target)) { "add of existing member" }
-                require(members.size < WhisperGroupsConfig.MAX_MEMBERS) { "group full" }
-                members[target] = WhisperGroupRole.MEMBER
-                joinEpoch[target] = ev.epoch
-                epoch = ev.epoch
-            }
+            // Retired in the invites slice: adds now go INVITE (signed, no
+            // state change) → JOIN (self-signed). A legacy `add` row fails
+            // closed here — and truncates the log in the tolerant path —
+            // instead of silently resurrecting a privileged direct-add.
+            WhisperGroupEventType.ADD -> error("legacy add events are no longer accepted (use invite+join)")
             WhisperGroupEventType.REMOVE -> {
                 require(isAdminSigned(ev, members, verify, signerKeyOf)) { "remove not admin-signed" }
                 val target = targetOf(ev)
@@ -350,8 +345,8 @@ fun applyEvents(
             }
             WhisperGroupEventType.PICTURE -> {
                 require(isAdminSigned(ev, members, verify, signerKeyOf)) { "picture not admin-signed" }
-                val pic = parseGroupPicture(ev.payloadJson) ?: error("bad picture payload")
-                picture = WhisperGroupPicture(url = pic.first, iv = pic.second, epoch = ev.epoch)
+                val picUrl = parseGroupPicture(ev.payloadJson) ?: error("bad picture payload")
+                picture = WhisperGroupPicture(url = picUrl, epoch = ev.epoch)
             }
             WhisperGroupEventType.CREATE -> error("unreachable")
         }
@@ -432,20 +427,19 @@ private fun memberSignatureValid(
     return verify(groupEventSignBytes(ev.groupId, ev.seq, ev.epoch, ev.type, ev.actor, ev.payloadJson), ev.adminSig, signer)
 }
 
-/** ADD/REMOVE/PROMOTE/INVITE/CANCEL carry the subject user id as the raw payload; RENAME carries the name. */
+/** REMOVE/PROMOTE/INVITE/CANCEL carry the subject user id as the raw payload; RENAME carries the name. */
 private fun targetOf(ev: WhisperGroupEvent): String = ev.payloadJson.trim().trim('"')
 
 /**
- * Group-picture payload: `{"url","iv","frames":{memberId: sealedKeyFrame}}`.
- * URL/IV are server-visible metadata; each frame seals the image key to one
+ * Group-picture payload: `{"url","frames":{memberId: sealedKeyFrame}}`.
+ * The URL is server-visible metadata; each frame seals the image key to one
  * member through their 1:1 session (same primitive as message fan-out).
  */
-fun buildGroupPicturePayload(url: String, iv: String, frames: Map<String, String>): String =
+fun buildGroupPicturePayload(url: String, frames: Map<String, String>): String =
     groupJson.encodeToString(
         kotlinx.serialization.json.JsonObject.serializer(),
         buildJsonObject {
             put("url", url)
-            put("iv", iv)
             put("frames", groupJson.encodeToJsonElement(
                 kotlinx.serialization.builtins.MapSerializer(
                     kotlinx.serialization.serializer<String>(),
@@ -456,19 +450,19 @@ fun buildGroupPicturePayload(url: String, iv: String, frames: Map<String, String
         },
     )
 
-fun parseGroupPicturePayload(raw: String): Triple<String, String, Map<String, String>>? = runCatching {
+fun parseGroupPicturePayload(raw: String): Pair<String, Map<String, String>>? = runCatching {
     val obj = groupJson.parseToJsonElement(raw) as? kotlinx.serialization.json.JsonObject ?: return null
     val url = (obj["url"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull ?: return null
-    val iv = (obj["iv"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull ?: return null
     if (url.isBlank()) return null
+    // A legacy "iv" key (always "") is tolerated and ignored when present.
     val frames = (obj["frames"] as? kotlinx.serialization.json.JsonObject)
         ?.mapNotNull { (k, v) -> (v as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull?.let { k to it } }
         .orEmpty().toMap()
-    Triple(url, iv, frames)
+    url to frames
 }.getOrNull()
 
-private fun parseGroupPicture(raw: String): Pair<String, String>? =
-    parseGroupPicturePayload(raw)?.let { it.first to it.second }
+private fun parseGroupPicture(raw: String): String? =
+    parseGroupPicturePayload(raw)?.first
 
 // ── Envelope helpers ────────────────────────────────────────────────────
 
@@ -609,9 +603,10 @@ data class WhisperGroupChatMessage(
 )
 
 // ── Transport ops (all flag-gated, 1:1 paths untouched) ─────────────────
-// v1 notes: sends are online-only (outbox groupId legs land in the next
-// slice); every open requires a fresh verified sync; event verification is
-// TOFU against current bundle signers (see file header).
+// Offline sends queue sealed bundles in the Room outbox (groupId legs of
+// WhisperOutgoingQueue, drained by flushGroupOutbox on hub/chat loads);
+// every open re-verifies the event log incrementally off the local cache;
+// event verification is TOFU against current bundle signers (see file header).
 
 private fun groupClientVersion(): Int = com.frerox.toolz.BuildConfig.VERSION_CODE
 
@@ -1311,7 +1306,7 @@ private suspend fun WhisperRepository.publishPictureFrames(
     val (seq, epoch) = nextGroupSeqEpoch(groupId)
     publishGroupEvent(
         groupId, seq, epoch, WhisperGroupEventType.PICTURE, me,
-        buildGroupPicturePayload(url, "", frames),
+        buildGroupPicturePayload(url, frames),
     ).getOrThrow()
 }
 
@@ -1325,7 +1320,7 @@ suspend fun WhisperRepository.openGroupPicture(groupId: String): Result<ByteArra
         filter { eq("group_id", groupId); eq("type", "picture") }
     }.decodeList<GroupEventRow>()
     val latest = rows.maxByOrNull { it.seq } ?: return@runCatching null
-    val (url, _, frames) = parseGroupPicturePayload(latest.payload) ?: error("Bad picture data.")
+    val (url, frames) = parseGroupPicturePayload(latest.payload) ?: error("Bad picture data.")
     val frame = frames[me] ?: return@runCatching null
     val inner = openV3Frame(frame, latest.actor, latest.actor, me) ?: error("Could not open the picture key.")
     val keyB64 = openGroupFrameBody(groupId, latest.epoch, inner) ?: error("Could not open the picture key.")
