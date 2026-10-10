@@ -209,6 +209,19 @@ class WhisperGroupInfoViewModel @Inject constructor(
     fun reportMember(userId: String) {
         viewModelScope.launch {
             _uiState.update { it.copy(isWorking = true, error = null) }
+            // Fail-closed BEFORE blocking: a last-admin leave would fail after
+            // the block already landed, stranding a block with no exit.
+            val m = repository.syncGroup(groupId).getOrNull()
+            val me = repository.myId
+            if (m != null && m.isAdmin(me) && m.admins.size <= 1) {
+                _uiState.update {
+                    it.copy(
+                        isWorking = false,
+                        error = appContext.getString(com.frerox.toolz.R.string.st_Whisper_Groups_ErrLastAdmin),
+                    )
+                }
+                return@launch
+            }
             repository.blockUser(userId)
                 .onSuccess {
                     repository.leaveGroup(groupId)

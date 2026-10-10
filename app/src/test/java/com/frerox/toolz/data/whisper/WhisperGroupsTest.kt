@@ -8,6 +8,7 @@ package com.frerox.toolz.data.whisper
 import com.frerox.toolz.ui.screens.whisper.WhisperGroupChatViewModel
 import com.frerox.toolz.ui.screens.whisper.resolveMentionIds
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -591,5 +592,34 @@ class WhisperGroupsTest {
         assertEquals(listOf("id1"), resolveMentionIds("hey @Ann, sup", names))
         assertEquals(emptyList<String>(), resolveMentionIds("no mentions here", names))
         assertEquals(emptyList<String>(), resolveMentionIds("hey @Zed", names))
+    }
+
+    @Test
+    fun `unknown future event type truncates instead of bricking`() {
+        val log = listOf(create()) + inviteJoin(2, 0, "u2") + listOf(
+            WhisperGroupEvent(
+                id = "e-x", groupId = gid, seq = 4, epoch = 1,
+                type = WhisperGroupEventType.UNKNOWN, actor = admin,
+                payloadJson = "{\"future\":1}", adminSig = "ok",
+            ),
+        )
+        try {
+            applyEvents(gid, log, verify, keys2all)
+            fail("must throw")
+        } catch (e: IllegalStateException) {
+            assertTrue((e.message ?: "").contains("unknown event type"))
+        }
+        val m = applyEventsTolerant(gid, log, verify, keys2all)
+        assertTrue(m.degraded)
+        assertEquals(4L, m.badSeq)
+        assertTrue(m.isMember("u2"))
+    }
+
+    @Test
+    fun `last-admin errors map to friendly string`() {
+        assertNotNull(mapGroupError("last admin cannot leave"))
+        assertNotNull(mapGroupError("cannot demote the last admin"))
+        assertNotNull(mapGroupError("cannot remove the last admin"))
+        assertNotNull(mapGroupError("Could not start your secure session — nope"))
     }
 }

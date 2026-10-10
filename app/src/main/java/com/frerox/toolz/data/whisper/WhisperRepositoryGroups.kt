@@ -104,6 +104,13 @@ enum class WhisperGroupEventType(val wire: String) {
     DECLINE("decline"),
     CANCEL("cancel"),
     PICTURE("picture"),
+    /**
+     * Forward-compat sentinel: rows carrying a wire type this build does not
+     * know (shipped after us) decode to UNKNOWN and fail closed inside
+     * [applyEvents] — the tolerant path then truncates to the verified prefix
+     * instead of bricking the whole sync before verification starts.
+     */
+    UNKNOWN("unknown"),
     ;
 
     companion object {
@@ -378,6 +385,9 @@ fun applyEvents(
                 val picUrl = parseGroupPicture(ev.payloadJson) ?: error("bad picture payload")
                 picture = WhisperGroupPicture(url = picUrl, epoch = ev.epoch)
             }
+            // Forward-compat: a type shipped after this build is never trusted,
+            // never skipped — it truncates the log here in the tolerant path.
+            WhisperGroupEventType.UNKNOWN -> error("unknown event type (newer build?)")
             WhisperGroupEventType.CREATE -> error("unreachable")
         }
     }
@@ -763,7 +773,10 @@ private fun GroupEventRow.toModel() = WhisperGroupEvent(
     groupId = groupId,
     seq = seq,
     epoch = epoch,
-    type = WhisperGroupEventType.of(type) ?: error("unknown event type $type"),
+    // Unknown future wire types decode to UNKNOWN (fail-closed + truncatable
+    // inside applyEvents) instead of throwing here and bricking the sync
+    // before the tolerant path ever runs.
+    type = WhisperGroupEventType.of(type) ?: WhisperGroupEventType.UNKNOWN,
     actor = actor,
     payloadJson = payload,
     adminSig = adminSig,
@@ -834,7 +847,9 @@ private fun WhisperGroupEventEntity.toModel() = WhisperGroupEvent(
     groupId = groupId,
     seq = seq,
     epoch = epoch,
-    type = WhisperGroupEventType.of(type) ?: error("unknown event type $type"),
+    // Same forward-compat rule as the network row above (cached rows may
+    // predate this build's known set after a downgrade/restore).
+    type = WhisperGroupEventType.of(type) ?: WhisperGroupEventType.UNKNOWN,
     actor = actor,
     payloadJson = payload,
     adminSig = adminSig,
@@ -994,18 +1009,22 @@ private suspend fun WhisperRepository.publishGroupEvent(
 ): Result<Unit> = runCatching {
     // Two admins acting at once race on nextGroupSeqEpoch: the loser hits the
     // unique(group_id, seq) constraint (23505). Re-read the head, re-sign
-    // (the seq is inside the signed bytes) and retry — 3 attempts, then surface.
+    // (seq AND epoch are inside the signed bytes) and retry — 3 attempts.
+    // Epoch refresh: the event trigger accepts new.epoch >= head, so the
+    // retry uses max(original, fresh head). A rival bump that landed first
+    // otherwise leaves us stale (5 < 6) on an unchanged retry epoch.
     var attemptSeq = seq
+    var attemptEpoch = epoch
     var lastError: Throwable? = null
     repeat(3) { attempt ->
-        val sig = crypto.signProtocol(groupEventSignBytes(groupId, attemptSeq, epoch, type, actor, payload))
+        val sig = crypto.signProtocol(groupEventSignBytes(groupId, attemptSeq, attemptEpoch, type, actor, payload))
             ?: error("Could not sign the group event.")
         val result = runCatching {
             db.from("whisper_group_events").insert(
                 GroupEventInsert(
                     groupId = groupId,
                     seq = attemptSeq,
-                    epoch = epoch,
+                    epoch = attemptEpoch,
                     type = type.wire,
                     actor = actor,
                     payload = payload,
@@ -1020,7 +1039,9 @@ private suspend fun WhisperRepository.publishGroupEvent(
         lastError = err
         if (attempt < 2) {
             kotlinx.coroutines.delay(150L * (attempt + 1))
-            attemptSeq = nextGroupSeqEpoch(groupId).first
+            val fresh = nextGroupSeqEpoch(groupId)
+            attemptSeq = fresh.first
+            if (fresh.second > attemptEpoch) attemptEpoch = fresh.second
         }
     }
     throw lastError ?: error("Could not publish the group event.")
@@ -1059,12 +1080,17 @@ fun mapGroupError(raw: String?): Int? {
             com.frerox.toolz.R.string.st_Whisper_Groups_ErrNotMember
         "could not reach" in msg ->
             com.frerox.toolz.R.string.st_Whisper_Groups_ErrUnreachable
+        "could not start your secure session" in msg ->
+            com.frerox.toolz.R.string.st_Whisper_Groups_ErrUnreachable
         "couldn't sync your groups" in msg ->
             com.frerox.toolz.R.string.st_Whisper_Groups_ErrSync
         "group_send_queued" in msg ->
             com.frerox.toolz.R.string.st_Whisper_Groups_ErrQueued
         "only admins can send" in msg ->
             com.frerox.toolz.R.string.st_Whisper_Groups_ErrAdminOnly
+        "last admin cannot leave" in msg || "cannot demote the last admin" in msg ||
+            "cannot remove the last admin" in msg ->
+            com.frerox.toolz.R.string.st_Whisper_Groups_ErrLastAdmin
         else -> null
     }
 }
@@ -1390,8 +1416,18 @@ private suspend fun WhisperRepository.sealAndPublishContent(
             frames[memberId] = sealed.first
         }
     }
-    require(failed.isEmpty()) {
-        "Could not reach ${failed.size} member(s) — message not sent. Retry when they're reachable."
+    if (failed.isNotEmpty()) {
+        // Per-leg diagnostics (ids stay in logcat, never in UI strings):
+        // a self-leg failure means MY session is broken, anything else is a
+        // peer leg. Fail-closed either way — partial fan-out must never send.
+        android.util.Log.w(
+            "WhisperGroups",
+            "sealAndPublishContent: ${failed.size}/${targets.size} legs failed (self=${me in failed}) for $groupId",
+        )
+        if (me in failed) error("Could not start your secure session — message not sent. Retry in a moment.")
+        require(false) {
+            "Could not reach ${failed.size} member(s) — message not sent. Retry when they're reachable."
+        }
     }
     val clientId = java.util.UUID.randomUUID().toString()
     val content = encodeGroupRow(
@@ -1456,7 +1492,9 @@ suspend fun WhisperRepository.fetchGroupMessages(
     val rows = db.from("whisper_group_messages").select {
         filter {
             eq("group_id", groupId)
-            if (before != null) lte("created_at", before)
+            // Strictly older: lte would return the cursor row itself every
+            // page (dup hidden by distinctBy, but hasMore then never settles).
+            if (before != null) lt("created_at", before)
         }
         // Newest-first at the server so the LIMIT keeps the live head, never a
         // stale arbitrary slice; the client re-sorts ascending below.
@@ -1580,9 +1618,15 @@ suspend fun WhisperRepository.sendGroupTyping(groupId: String): Result<Unit> = r
     if (groupId.isBlank()) return@runCatching
     runCatching {
         // Plain upsert: the (group_id, user_id) PK is the conflict target
-        // (same idiom as the 1:1 typing lane).
+        // (same idiom as the 1:1 typing lane). updated_at is set explicitly:
+        // without it a conflicting upsert keeps the old timestamp and the
+        // typist either vanishes instantly or sticks past the freshness window.
         db.from("whisper_group_typing").upsert(
-            mapOf("group_id" to groupId, "user_id" to me),
+            mapOf(
+                "group_id" to groupId,
+                "user_id" to me,
+                "updated_at" to java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC).toString(),
+            ),
         )
     }
 }
