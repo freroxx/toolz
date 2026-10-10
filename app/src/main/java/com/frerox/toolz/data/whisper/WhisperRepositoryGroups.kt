@@ -176,6 +176,8 @@ data class WhisperGroupMembership(
     val picture: WhisperGroupPicture? = null,
     /** True when only admins may send (signed SETTINGS event, default open). */
     val adminOnlySend: Boolean = false,
+    /** True when members may edit picture + description (admins always can). */
+    val membersCanEdit: Boolean = false,
     /** Group description (signed SETTINGS event, "" = none). */
     val description: String = "",
     /**
@@ -251,6 +253,7 @@ fun applyEvents(
     var inviteAdminsOnly = true
     var picture: WhisperGroupPicture? = null
     var adminOnlySend = false
+    var membersCanEdit = false
     var description = ""
     val members = mutableMapOf<String, WhisperGroupRole>()
     val invited = mutableSetOf<String>()
@@ -334,8 +337,9 @@ fun applyEvents(
             }
             WhisperGroupEventType.SETTINGS -> {
                 require(isAdminSigned(ev, members, verify, signerKeyOf)) { "settings not admin-signed" }
-                val (send, desc) = parseGroupSettings(ev.payloadJson) ?: error("bad settings payload")
+                val (send, desc, edit) = parseGroupSettings(ev.payloadJson) ?: error("bad settings payload")
                 if (send != null) adminOnlySend = send
+                if (edit != null) membersCanEdit = edit
                 if (desc != null) description = desc.take(WhisperGroupsConfig.MAX_GROUP_DESC_CHARS)
                 // No epoch bump: settings change no crypto scope, so in-flight
                 // sends never go stale on a settings change.
@@ -381,7 +385,13 @@ fun applyEvents(
                 invited.remove(target)
             }
             WhisperGroupEventType.PICTURE -> {
-                require(isAdminSigned(ev, members, verify, signerKeyOf)) { "picture not admin-signed" }
+                // Picture follows the edit-permissions flag (rename stays
+                // admin-only: the server groups.name RLS enforces it anyway).
+                if (membersCanEdit) {
+                    require(isMemberSigned(ev, members, verify, signerKeyOf)) { "picture not member-signed" }
+                } else {
+                    require(isAdminSigned(ev, members, verify, signerKeyOf)) { "picture not admin-signed" }
+                }
                 val picUrl = parseGroupPicture(ev.payloadJson) ?: error("bad picture payload")
                 picture = WhisperGroupPicture(url = picUrl, epoch = ev.epoch)
             }
@@ -400,7 +410,8 @@ fun applyEvents(
     return WhisperGroupMembership(
         groupId, epoch, members.toMap(), name, inviteAdminsOnly, ranges,
         invited.toSet(), picture, degraded = false, badSeq = null,
-        adminOnlySend = adminOnlySend, description = description,
+        adminOnlySend = adminOnlySend, membersCanEdit = membersCanEdit,
+        description = description,
     )
 }
 
@@ -509,23 +520,25 @@ private fun parseGroupPicture(raw: String): String? =
     parseGroupPicturePayload(raw)?.first
 
 /**
- * Group-settings payload: `{"adminSend":bool,"desc":string}` (both optional;
- * absent keys leave the current value untouched).
+ * Group-settings payload: `{"adminSend":bool,"editMembers":bool,"desc":string}`
+ * (all optional; absent keys leave the current value untouched).
  */
-fun buildGroupSettingsPayload(adminSend: Boolean?, desc: String?): String =
+fun buildGroupSettingsPayload(adminSend: Boolean?, desc: String?, editMembers: Boolean? = null): String =
     groupJson.encodeToString(
         kotlinx.serialization.json.JsonObject.serializer(),
         buildJsonObject {
             if (adminSend != null) put("adminSend", adminSend)
+            if (editMembers != null) put("editMembers", editMembers)
             if (desc != null) put("desc", desc.take(WhisperGroupsConfig.MAX_GROUP_DESC_CHARS))
         },
     )
 
-fun parseGroupSettings(raw: String): Pair<Boolean?, String?>? = runCatching {
+fun parseGroupSettings(raw: String): Triple<Boolean?, String?, Boolean?>? = runCatching {
     val obj = groupJson.parseToJsonElement(raw) as? kotlinx.serialization.json.JsonObject ?: return null
     val send = (obj["adminSend"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull?.toBooleanStrictOrNull()
     val desc = (obj["desc"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
-    send to desc
+    val edit = (obj["editMembers"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull?.toBooleanStrictOrNull()
+    Triple(send, desc, edit)
 }.getOrNull()
 
 // ── Envelope helpers ────────────────────────────────────────────────────
@@ -574,6 +587,8 @@ data class GroupImageRef(
     val key: String,
     val att: String? = null,
     val mime: String = "image/jpeg",
+    /** Epoch seconds after which clients render expired (null = keeps). */
+    val exp: Long? = null,
 )
 
 /** Reply quote snapshot (names/text frozen at send time — no extra fetch). */
@@ -609,6 +624,8 @@ data class WhisperGroupContent(
     val reply: GroupReplyRef? = null,
     val poll: GroupPoll? = null,
     val vote: GroupVote? = null,
+    /** Admin poll close (poll id); freezes the tally, disables voting. */
+    val pollClose: String? = null,
     val mentions: List<String> = emptyList(),
 )
 
@@ -1286,17 +1303,18 @@ suspend fun WhisperRepository.updateGroupSettings(
     groupId: String,
     adminOnlySend: Boolean? = null,
     description: String? = null,
+    editMembers: Boolean? = null,
 ): Result<Unit> = runCatching {
     requireGroupsEnabled()
     val me = requireMe()
     val m = syncGroup(groupId).getOrThrow()
     require(m.isAdmin(me)) { "Only admins can change settings." }
-    require(adminOnlySend != null || description != null) { "Nothing to change." }
+    require(adminOnlySend != null || description != null || editMembers != null) { "Nothing to change." }
     val cleanDesc = description?.trim()?.take(WhisperGroupsConfig.MAX_GROUP_DESC_CHARS)
     val (seq, epoch) = nextGroupSeqEpoch(groupId)
     publishGroupEvent(
         groupId, seq, epoch, WhisperGroupEventType.SETTINGS, me,
-        buildGroupSettingsPayload(adminOnlySend, cleanDesc),
+        buildGroupSettingsPayload(adminOnlySend, cleanDesc, editMembers),
     ).getOrThrow()
     syncGroup(groupId).getOrThrow()
 }
@@ -1406,12 +1424,17 @@ suspend fun WhisperRepository.sendGroupImage(
     imageBytes: ByteArray,
     mimeType: String,
     caption: String = "",
+    expiresAfterSeconds: Long? = null,
 ): Result<Unit> = runCatching {
     requireGroupsEnabled()
     val me = requireMe()
     require(mimeType in setOf("image/jpeg", "image/png", "image/webp")) {
         "Whisper supports JPEG, PNG, and WebP images."
     }
+    require(
+        expiresAfterSeconds == null ||
+            expiresAfterSeconds in WhisperRepository.MIN_IMAGE_EXPIRY_SECONDS..WhisperRepository.MAX_IMAGE_EXPIRY_SECONDS,
+    ) { "Disappearing images must expire between 1 minute and 180 days." }
     val m = syncGroup(groupId).getOrThrow()
     require(m.isMember(me)) { "You are no longer a member of this group." }
     // Chat photos keep aspect ratio (the picture path square-crops for avatars).
@@ -1426,6 +1449,7 @@ suspend fun WhisperRepository.sendGroupImage(
         key = java.util.Base64.getEncoder().encodeToString(key),
         att = att,
         mime = outMime,
+        exp = expiresAfterSeconds?.let { (System.currentTimeMillis() / 1000) + it },
     )
     sendGroupContent(groupId, WhisperGroupContent(t = caption.trim(), img = ref)).getOrThrow()
 }
@@ -1651,6 +1675,168 @@ suspend fun WhisperRepository.markGroupSeen(groupId: String, clientIds: List<Str
     }
 }
 
+// ── Reactions (one emoji per user per message; upsert replaces) ──────
+
+@Serializable
+internal data class GroupReactionRow(
+    @SerialName("group_id") val groupId: String,
+    @SerialName("message_id") val messageId: String,
+    @SerialName("user_id") val userId: String,
+    val emoji: String,
+)
+
+@Serializable
+internal data class GroupReactionInsert(
+    @SerialName("group_id") val groupId: String,
+    @SerialName("message_id") val messageId: String,
+    @SerialName("user_id") val userId: String,
+    val emoji: String,
+)
+
+/** Allowed reaction emoji (matches the picker; server caps length anyway). */
+val GROUP_REACTION_EMOJI = setOf("\u2764\uFE0F", "\uD83D\uDC4D", "\uD83D\uDE02", "\uD83D\uDE2E", "\uD83D\uDE22", "\uD83D\uDE4F")
+
+/** Toggles my reaction: same emoji removes, anything else replaces. */
+suspend fun WhisperRepository.toggleGroupReaction(
+    groupId: String,
+    messageClientId: String,
+    emoji: String,
+): Result<Unit> = runCatching {
+    requireGroupsEnabled()
+    val me = requireMe()
+    require(groupId.isNotBlank() && messageClientId.isNotBlank()) { "Nothing to react to." }
+    require(emoji in GROUP_REACTION_EMOJI) { "That reaction isn't supported." }
+    val m = syncGroup(groupId).getOrThrow()
+    require(m.isMember(me)) { "You are no longer a member of this group." }
+    val existing = runCatching {
+        db.from("whisper_group_reactions").select {
+            filter { eq("group_id", groupId); eq("message_id", messageClientId); eq("user_id", me) }
+        }.decodeList<GroupReactionRow>()
+    }.getOrDefault(emptyList()).firstOrNull()
+    if (existing?.emoji == emoji) {
+        db.from("whisper_group_reactions").delete {
+            filter { eq("group_id", groupId); eq("message_id", messageClientId); eq("user_id", me) }
+        }
+    } else {
+        db.from("whisper_group_reactions").upsert(
+            GroupReactionInsert(groupId = groupId, messageId = messageClientId, userId = me, emoji = emoji),
+        )
+    }
+}
+
+/** Reactions by message client_id (emoji → user ids), capped like receipts. */
+suspend fun WhisperRepository.fetchGroupReactions(groupId: String): Result<Map<String, Map<String, List<String>>>> =
+    runCatching {
+        requireGroupsEnabled()
+        requireMe()
+        if (groupId.isBlank()) return@runCatching emptyMap()
+        val rows = db.from("whisper_group_reactions").select {
+            filter { eq("group_id", groupId) }
+            order("at", Order.DESCENDING)
+            limit(2000)
+        }.decodeList<GroupReactionRow>()
+        rows.groupBy({ it.messageId }, { it })
+            .mapValues { (_, rs) -> rs.groupBy({ it.emoji }, { it.userId }) }
+    }
+
+/** Live reaction changes for one group (chat refreshes chips on this). */
+fun WhisperRepository.observeGroupReactions(groupId: String): kotlinx.coroutines.flow.Flow<Unit> =
+    kotlinx.coroutines.flow.callbackFlow {
+        requireGroupsEnabled()
+        if (groupId.isBlank()) { close(); return@callbackFlow }
+        val channel = groupChannel("grouppg_react_$groupId")
+        val changes = channel.postgresChangeFlow<io.github.jan.supabase.realtime.PostgresAction>(schema = "public") {
+            table = "whisper_group_reactions"
+            filter("group_id", io.github.jan.supabase.postgrest.query.filter.FilterOperator.EQ, groupId)
+        }
+        val job = launch {
+            changes.collect { trySend(Unit) }
+        }
+        awaitClose {
+            job.cancel()
+            launch { runCatchingCE { realtime.removeChannel(channel) } }
+        }
+    }
+
+// ── Join requests (friends ask in; admins approve via invite) ──────────
+
+@Serializable
+internal data class GroupJoinRequestRow(
+    @SerialName("group_id") val groupId: String,
+    @SerialName("user_id") val userId: String,
+    @SerialName("created_at") val createdAt: String? = null,
+)
+
+data class GroupJoinRequest(
+    val groupId: String,
+    val userId: String,
+    val userName: String,
+    val createdAt: String,
+)
+
+/** Asks to join a group I know the id of (QR / paste). Friends-only enforced client-side. */
+suspend fun WhisperRepository.requestGroupJoin(groupId: String): Result<Unit> = runCatching {
+    requireGroupsEnabled()
+    val me = requireMe()
+    require(groupId.isNotBlank()) { "Group id is required." }
+    db.from("whisper_group_join_requests").upsert(
+        mapOf("group_id" to groupId, "user_id" to me),
+    )
+}
+
+/** Pending requests for admins (names resolved via friends). */
+suspend fun WhisperRepository.pendingGroupJoinRequests(groupId: String): Result<List<GroupJoinRequest>> = runCatching {
+    requireGroupsEnabled()
+    requireMe()
+    if (groupId.isBlank()) return@runCatching emptyList()
+    val rows = db.from("whisper_group_join_requests").select {
+        filter { eq("group_id", groupId) }
+    }.decodeList<GroupJoinRequestRow>()
+    val names = getFriends().getOrNull().orEmpty().associate { it.id to it.effectiveName }
+    rows.map {
+        GroupJoinRequest(
+            groupId = it.groupId,
+            userId = it.userId,
+            userName = names[it.userId] ?: "Someone",
+            createdAt = it.createdAt ?: "",
+        )
+    }
+}
+
+/** Denies (or withdraws) a join request. */
+suspend fun WhisperRepository.denyGroupJoinRequest(groupId: String, userId: String): Result<Unit> = runCatching {
+    requireGroupsEnabled()
+    requireMe()
+    db.from("whisper_group_join_requests").delete {
+        filter { eq("group_id", groupId); eq("user_id", userId) }
+    }
+}
+
+/** Approves = invites (consumes the request via trigger). */
+suspend fun WhisperRepository.approveGroupJoinRequest(groupId: String, userId: String): Result<Unit> = runCatching {
+    requireGroupsEnabled()
+    inviteGroupMember(groupId, userId).getOrThrow()
+}
+
+/** Live request changes for the admin console. */
+fun WhisperRepository.observeGroupJoinRequests(groupId: String): kotlinx.coroutines.flow.Flow<Unit> =
+    kotlinx.coroutines.flow.callbackFlow {
+        requireGroupsEnabled()
+        if (groupId.isBlank()) { close(); return@callbackFlow }
+        val channel = groupChannel("grouppg_reqs_$groupId")
+        val changes = channel.postgresChangeFlow<io.github.jan.supabase.realtime.PostgresAction>(schema = "public") {
+            table = "whisper_group_join_requests"
+            filter("group_id", io.github.jan.supabase.postgrest.query.filter.FilterOperator.EQ, groupId)
+        }
+        val job = launch {
+            changes.collect { trySend(Unit) }
+        }
+        awaitClose {
+            job.cancel()
+            launch { runCatchingCE { realtime.removeChannel(channel) } }
+        }
+    }
+
 /** Seen-by map for a group (message client_id → user ids), newest-first capped. */
 suspend fun WhisperRepository.fetchGroupReceipts(groupId: String): Result<Map<String, List<String>>> = runCatching {
     requireGroupsEnabled()
@@ -1753,6 +1939,7 @@ fun WhisperRepository.observeGroupTyping(groupId: String): kotlinx.coroutines.fl
 suspend fun WhisperRepository.openGroupImage(ref: GroupImageRef, cacheId: String): Result<ByteArray?> = runCatching {
     requireGroupsEnabled()
     requireMe()
+    if (ref.exp != null && ref.exp * 1000 < System.currentTimeMillis()) error("image expired")
     val fp = runCatching {
         val md = java.security.MessageDigest.getInstance("SHA-256")
         md.update(ref.url.toByteArray())
@@ -1784,7 +1971,7 @@ suspend fun WhisperRepository.setGroupPicture(
     requireGroupsEnabled()
     val me = requireMe()
     val m = syncGroup(groupId).getOrThrow()
-    require(m.isAdmin(me)) { "Only admins can change the picture." }
+    require(m.isAdmin(me) || m.membersCanEdit) { "Only admins can change the picture." }
     val (compressed, _) = compressImageForGroupUpload(imageBytes, mimeType)
     require(compressed.isNotEmpty()) { "Could not read that image." }
     val published = runCatching {

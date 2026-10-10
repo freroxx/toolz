@@ -622,4 +622,51 @@ class WhisperGroupsTest {
         assertNotNull(mapGroupError("cannot remove the last admin"))
         assertNotNull(mapGroupError("Could not start your secure session — nope"))
     }
+
+    @Test
+    fun `settings edit flag round-trips and gates picture`() {
+        val payload = buildGroupSettingsPayload(true, "Hi", true)
+        val parsed = parseGroupSettings(payload)!!
+        assertEquals(true, parsed.first)
+        assertEquals("Hi", parsed.second)
+        assertEquals(true, parsed.third)
+        // Absent edit key leaves prior value untouched.
+        val keep = parseGroupSettings(buildGroupSettingsPayload(null, "Yo"))!!
+        assertNull(keep.first)
+        assertNull(keep.third)
+        // Member-signed picture accepted when the flag is open...
+        val openLog = listOf(create()) + inviteJoin(2, 0, "u2") + listOf(
+            ev(4, 1, WhisperGroupEventType.SETTINGS, admin, buildGroupSettingsPayload(null, null, true)),
+        )
+        val open = applyEvents(gid, openLog, verify, keys2all)
+        assertTrue(open.membersCanEdit)
+        val picPayload = buildGroupPicturePayload("https://x/y", mapOf(admin to "F", "u2" to "G"))
+        val withPic = applyEvents(
+            gid, openLog + ev(5, 1, WhisperGroupEventType.PICTURE, "u2", picPayload),
+            verify, keys2all,
+        )
+        assertEquals("https://x/y", withPic.picture?.url)
+        // ...and rejected when closed.
+        try {
+            applyEvents(
+                gid, listOf(create()) + inviteJoin(2, 0, "u2") +
+                    ev(4, 1, WhisperGroupEventType.PICTURE, "u2", picPayload),
+                verify, keys2all,
+            )
+            fail("must throw")
+        } catch (e: IllegalArgumentException) {
+            assertTrue((e.message ?: "").contains("admin-signed"))
+        }
+    }
+
+    @Test
+    fun `poll close and image expiry ride the envelope`() {
+        val close = WhisperGroupContent(t = "poll closed", pollClose = "p1")
+        assertEquals("p1", parseGroupContentBody(buildGroupContentBody(close)).pollClose)
+        val img = GroupImageRef(url = "https://x/y", key = "a2V5", exp = 9_999_999_999L)
+        val back = parseGroupContentBody(buildGroupContentBody(WhisperGroupContent(img = img)))
+        assertEquals(9_999_999_999L, back.img?.exp)
+        // Legacy rows without the new fields still parse (nulls, not crashes).
+        assertNull(parseGroupContentBody("wg1:{\"t\":\"hi\"}").pollClose)
+    }
 }

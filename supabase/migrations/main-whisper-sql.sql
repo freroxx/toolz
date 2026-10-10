@@ -3005,3 +3005,150 @@ create trigger trg_group_messages_cleanup_receipts
 alter table public.whisper_group_messages
     add column if not exists msg_kind text not null default 'chat'
     check (msg_kind in ('chat', 'poll', 'vote', 'image'));
+
+-- ═══════════════ 20261011_whisper_groups_reactions_requests.sql ═
+-- Beyond-parity slice: per-message emoji reactions + inbound join requests.
+-- Reactions are presence-style metadata (message client_id + emoji, no
+-- content); one emoji per user per message (upsert replaces). Join requests
+-- let friends ask in (paste an ID / scan a QR) without an invite first;
+-- admins approve (invite) or deny. Both tables are member-RLS + realtime.
+create table if not exists public.whisper_group_reactions (
+    group_id uuid not null references public.whisper_groups(id) on delete cascade,
+    message_id text not null,
+    user_id uuid not null,
+    emoji text not null check (char_length(emoji) between 1 and 8),
+    at timestamptz not null default now(),
+    primary key (group_id, message_id, user_id)
+);
+
+alter table public.whisper_group_reactions enable row level security;
+
+drop policy if exists "whisper_group_reactions_select_member" on public.whisper_group_reactions;
+create policy "whisper_group_reactions_select_member" on public.whisper_group_reactions
+    for select using (
+        exists (
+            select 1 from public.whisper_group_members m
+            where m.group_id = whisper_group_reactions.group_id and m.user_id = auth.uid()
+        )
+    );
+
+drop policy if exists "whisper_group_reactions_write_own" on public.whisper_group_reactions;
+create policy "whisper_group_reactions_write_own" on public.whisper_group_reactions
+    for all using (
+        user_id = auth.uid()
+        and exists (
+            select 1 from public.whisper_group_members m
+            where m.group_id = whisper_group_reactions.group_id and m.user_id = auth.uid()
+        )
+    )
+    with check (
+        user_id = auth.uid()
+        and exists (
+            select 1 from public.whisper_group_members m
+            where m.group_id = whisper_group_reactions.group_id and m.user_id = auth.uid()
+        )
+    );
+
+create index if not exists whisper_group_reactions_group_idx
+    on public.whisper_group_reactions (group_id, at desc);
+
+create table if not exists public.whisper_group_join_requests (
+    group_id uuid not null references public.whisper_groups(id) on delete cascade,
+    user_id uuid not null,
+    created_at timestamptz not null default now(),
+    primary key (group_id, user_id)
+);
+
+alter table public.whisper_group_join_requests enable row level security;
+
+-- Requester reads own row; admins read all rows of their groups.
+drop policy if exists "whisper_group_join_requests_select" on public.whisper_group_join_requests;
+create policy "whisper_group_join_requests_select" on public.whisper_group_join_requests
+    for select using (
+        user_id = auth.uid()
+        or exists (
+            select 1 from public.whisper_group_members m
+            where m.group_id = whisper_group_join_requests.group_id
+              and m.user_id = auth.uid() and m.role = 'admin'
+        )
+    );
+
+-- Any signed-in user may ask in (admins approve via invite; friendship is
+-- checked client-side before showing the button, like invites).
+drop policy if exists "whisper_group_join_requests_insert_own" on public.whisper_group_join_requests;
+create policy "whisper_group_join_requests_insert_own" on public.whisper_group_join_requests
+    for insert with check (user_id = auth.uid());
+
+-- Requester may withdraw; admins may deny.
+drop policy if exists "whisper_group_join_requests_delete" on public.whisper_group_join_requests;
+create policy "whisper_group_join_requests_delete" on public.whisper_group_join_requests
+    for delete using (
+        user_id = auth.uid()
+        or exists (
+            select 1 from public.whisper_group_members m
+            where m.group_id = whisper_group_join_requests.group_id
+              and m.user_id = auth.uid() and m.role = 'admin'
+        )
+    );
+
+-- Wiping a message wipes its reactions too (no orphaned emoji).
+create or replace function public.whisper_group_cleanup_reactions()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  delete from public.whisper_group_reactions
+  where group_id = old.group_id and message_id = old.client_id;
+  return old;
+end;
+$$;
+
+drop trigger if exists trg_group_messages_cleanup_reactions on public.whisper_group_messages;
+create trigger trg_group_messages_cleanup_reactions
+  after delete on public.whisper_group_messages
+  for each row execute function public.whisper_group_cleanup_reactions();
+
+-- Approving consumes the request (invite insert wipes it, like join consumes
+-- invites). Deny/withdraw is a plain delete via RLS.
+create or replace function public.whisper_group_consume_join_request()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  delete from public.whisper_group_join_requests
+  where group_id = new.group_id and user_id = new.user_id;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_group_invites_consume_request on public.whisper_group_invites;
+create trigger trg_group_invites_consume_request
+  after insert on public.whisper_group_invites
+  for each row execute function public.whisper_group_consume_join_request();
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'whisper_group_reactions'
+  ) then
+    alter publication supabase_realtime add table public.whisper_group_reactions;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'whisper_group_join_requests'
+  ) then
+    alter publication supabase_realtime add table public.whisper_group_join_requests;
+  end if;
+end $$;
+
+alter table public.whisper_group_reactions replica identity full;
+alter table public.whisper_group_join_requests replica identity full;
+
+-- Webhook policy: NO webhooks on reactions / join-requests either. Reactions
+-- would spam a push per tap; requests are covered by a single admin ping via
+-- the invites webhook when approved (deny/withdraw stays silent in-app).
