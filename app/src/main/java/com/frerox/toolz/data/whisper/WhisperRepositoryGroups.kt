@@ -43,6 +43,8 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
@@ -78,6 +80,32 @@ object WhisperGroupsConfig {
 
     /** Fan-out quota: 50 msgs/day x MAX_MEMBERS (mirrors SQL v_limit 600). */
     const val DAILY_ENVELOPE_BUDGET = 600
+
+    /** Network ceiling per group op: loads always settle (error + retry), never hang. */
+    const val OP_TIMEOUT_MS = 30_000L
+
+    /** Friend-name cache TTL (every chat load resolves names; avoid refetch). */
+    const val FRIEND_NAMES_TTL_MS = 60_000L
+}
+
+/**
+ * Bounds any group network op: a hung PostgREST/bundle call surfaces as a
+ * mapped error instead of an infinite spinner (the "does not load" class).
+ */
+private suspend fun <T> groupIo(block: suspend () -> T): T =
+    kotlinx.coroutines.withTimeout(WhisperGroupsConfig.OP_TIMEOUT_MS) { block() }
+
+/** Friend id → display name, cached briefly (all chat loads share it). */
+private var friendNamesCache: Pair<Long, Map<String, String>>? = null
+
+suspend fun WhisperRepository.friendNameMap(): Map<String, String> {
+    val now = System.currentTimeMillis()
+    friendNamesCache?.let { (at, map) ->
+        if (now - at < WhisperGroupsConfig.FRIEND_NAMES_TTL_MS) return map
+    }
+    val fresh = getFriends().getOrNull().orEmpty().associate { it.id to it.effectiveName }
+    friendNamesCache = now to fresh
+    return fresh
 }
 
 /** Requires groups; throws (fail-closed) when the flag is off. */
@@ -817,6 +845,13 @@ suspend fun WhisperRepository.syncGroup(groupId: String): Result<WhisperGroupMem
 suspend fun WhisperRepository.fetchVerifiedMembership(groupId: String): Result<WhisperGroupMembership> = runCatching {
     requireGroupsEnabled()
     requireMe()
+    groupIo { fetchVerifiedMembershipInner(groupId).getOrThrow() }
+}
+
+private suspend fun WhisperRepository.fetchVerifiedMembershipInner(groupId: String): Result<WhisperGroupMembership> =
+    runCatching {
+    requireGroupsEnabled()
+    requireMe()
     val group = db.from("whisper_groups").select { filter { eq("id", groupId) } }
         .decodeSingleOrNull<GroupRow>() ?: error("Group not found.")
     // Incremental sync: the local cache holds the verified prefix, so only
@@ -880,31 +915,39 @@ private fun WhisperGroupEventEntity.toModel() = WhisperGroupEvent(
 suspend fun WhisperRepository.syncGroups(): Result<List<WhisperGroupMembership>> = runCatching {
     requireGroupsEnabled()
     val me = requireMe()
-    val myRows = db.from("whisper_group_members").select { filter { eq("user_id", me) } }
-        .decodeList<GroupMemberRow>()
+    val myRows = groupIo {
+        db.from("whisper_group_members").select { filter { eq("user_id", me) } }
+            .decodeList<GroupMemberRow>()
+    }
     // Per-group isolation: one poisoned or unreachable group must never hide
     // the healthy ones (a total failure still surfaces when nothing synced).
     // Authoritative removals evict the local cache: without this a kicked
     // group lingers in cachedGroups forever (sync fails, cache never clears).
-    val ok = mutableListOf<WhisperGroupMembership>()
-    var failures = 0
-    myRows.forEach { row ->
-        syncGroup(row.groupId)
-            .onSuccess { ok.add(it) }
-            .onFailure {
-                failures++
-                val msg = it.message.orEmpty()
-                if ("no longer a member" in msg || "Group not found" in msg) {
-                    runCatching {
-                        groupDao.deleteGroup(row.groupId)
-                        groupDao.clearMembers(row.groupId)
-                        groupDao.clearEvents(row.groupId)
+    // Groups sync CONCURRENTLY: sequential syncs multiplied one hung group
+    // into a hung list (the "does not load" class); each leg still isolates.
+    val ok = java.util.Collections.synchronizedList(mutableListOf<WhisperGroupMembership>())
+    val failures = java.util.concurrent.atomic.AtomicInteger(0)
+    kotlinx.coroutines.coroutineScope {
+        myRows.map { row ->
+            async {
+                syncGroup(row.groupId)
+                    .onSuccess { ok.add(it) }
+                    .onFailure {
+                        failures.incrementAndGet()
+                        val msg = it.message.orEmpty()
+                        if ("no longer a member" in msg || "Group not found" in msg) {
+                            runCatching {
+                                groupDao.deleteGroup(row.groupId)
+                                groupDao.clearMembers(row.groupId)
+                                groupDao.clearEvents(row.groupId)
+                            }
+                        }
+                        android.util.Log.w("WhisperGroups", "syncGroups: skipping ${row.groupId}: ${it.message}")
                     }
-                }
-                android.util.Log.w("WhisperGroups", "syncGroups: skipping ${row.groupId}: ${it.message}")
             }
+        }.awaitAll()
     }
-    if (ok.isEmpty() && failures > 0) error("Couldn't sync your groups. Check your connection and retry.")
+    if (ok.isEmpty() && failures.get() > 0) error("Couldn't sync your groups. Check your connection and retry.")
     // Kicked/disbanded groups vanish from the server members list but linger
     // in the local cache (nothing else clears them): evict cached groups
     // outside the authoritative server set. Transient per-group failures stay
@@ -1126,7 +1169,7 @@ fun mapGroupError(raw: String?): Int? {
             com.frerox.toolz.R.string.st_Whisper_Groups_ErrUnreachable
         "could not start your secure session" in msg ->
             com.frerox.toolz.R.string.st_Whisper_Groups_ErrUnreachable
-        "couldn't sync your groups" in msg ->
+        "couldn't sync your groups" in msg || "timed out" in msg ->
             com.frerox.toolz.R.string.st_Whisper_Groups_ErrSync
         "group_send_queued" in msg ->
             com.frerox.toolz.R.string.st_Whisper_Groups_ErrQueued
@@ -1239,19 +1282,21 @@ suspend fun WhisperRepository.cancelGroupInvite(groupId: String, userId: String)
 suspend fun WhisperRepository.myGroupInvites(): Result<List<GroupInviteInfo>> = runCatching {
     requireGroupsEnabled()
     val me = requireMe()
-    val rows = db.from("whisper_group_invites").select { filter { eq("user_id", me) } }
-        .decodeList<GroupInviteRow>()
-    val names = getFriends().getOrNull().orEmpty().associate { it.id to it.effectiveName }
-    rows.mapNotNull { row ->
-        val group = db.from("whisper_groups").select { filter { eq("id", row.groupId) } }
-            .decodeSingleOrNull<GroupRow>() ?: return@mapNotNull null
-        GroupInviteInfo(
-            groupId = row.groupId,
-            groupName = group.name.ifBlank { "Group" },
-            invitedBy = row.invitedBy,
-            invitedByName = names[row.invitedBy] ?: "Someone",
-            createdAt = row.createdAt ?: "",
-        )
+    groupIo {
+        val rows = db.from("whisper_group_invites").select { filter { eq("user_id", me) } }
+            .decodeList<GroupInviteRow>()
+        val names = friendNameMap()
+        rows.mapNotNull { row ->
+            val group = db.from("whisper_groups").select { filter { eq("id", row.groupId) } }
+                .decodeSingleOrNull<GroupRow>() ?: return@mapNotNull null
+            GroupInviteInfo(
+                groupId = row.groupId,
+                groupName = group.name.ifBlank { "Group" },
+                invitedBy = row.invitedBy,
+                invitedByName = names[row.invitedBy] ?: "Someone",
+                createdAt = row.createdAt ?: "",
+            )
+        }
     }
 }
 
@@ -1549,6 +1594,17 @@ suspend fun WhisperRepository.fetchGroupMessages(
     before: String? = null,
 ): Result<List<WhisperGroupChatMessage>> = runCatching {
     requireGroupsEnabled()
+    requireMe()
+    groupIo { fetchGroupMessagesInner(groupId, limit, before).getOrThrow() }
+}
+
+/** Bounded inner (see [groupIo]): sync + selects must never hang the timeline. */
+private suspend fun WhisperRepository.fetchGroupMessagesInner(
+    groupId: String,
+    limit: Int,
+    before: String?,
+): Result<List<WhisperGroupChatMessage>> = runCatching {
+    requireGroupsEnabled()
     val me = requireMe()
     val m = syncGroup(groupId).getOrThrow()
     require(m.isMember(me)) { "You are no longer a member of this group." }
@@ -1735,6 +1791,7 @@ suspend fun WhisperRepository.fetchGroupReactions(groupId: String): Result<Map<S
         requireGroupsEnabled()
         requireMe()
         if (groupId.isBlank()) return@runCatching emptyMap()
+        groupIo {
         val rows = db.from("whisper_group_reactions").select {
             filter { eq("group_id", groupId) }
             order("at", Order.DESCENDING)
@@ -1742,6 +1799,7 @@ suspend fun WhisperRepository.fetchGroupReactions(groupId: String): Result<Map<S
         }.decodeList<GroupReactionRow>()
         rows.groupBy({ it.messageId }, { it })
             .mapValues { (_, rs) -> rs.groupBy({ it.emoji }, { it.userId }) }
+        }
     }
 
 /** Live reaction changes for one group (chat refreshes chips on this). */
@@ -1794,10 +1852,11 @@ suspend fun WhisperRepository.pendingGroupJoinRequests(groupId: String): Result<
     requireGroupsEnabled()
     requireMe()
     if (groupId.isBlank()) return@runCatching emptyList()
+    groupIo {
     val rows = db.from("whisper_group_join_requests").select {
         filter { eq("group_id", groupId) }
     }.decodeList<GroupJoinRequestRow>()
-    val names = getFriends().getOrNull().orEmpty().associate { it.id to it.effectiveName }
+    val names = friendNameMap()
     rows.map {
         GroupJoinRequest(
             groupId = it.groupId,
@@ -1805,6 +1864,7 @@ suspend fun WhisperRepository.pendingGroupJoinRequests(groupId: String): Result<
             userName = names[it.userId] ?: "Someone",
             createdAt = it.createdAt ?: "",
         )
+    }
     }
 }
 
@@ -1847,12 +1907,14 @@ suspend fun WhisperRepository.fetchGroupReceipts(groupId: String): Result<Map<St
     requireGroupsEnabled()
     requireMe()
     if (groupId.isBlank()) return@runCatching emptyMap()
+    groupIo {
     val rows = db.from("whisper_group_receipts").select {
         filter { eq("group_id", groupId) }
         order("at", Order.DESCENDING)
         limit(2000)
     }.decodeList<GroupReceiptRow>()
     rows.groupBy({ it.messageId }, { it.userId })
+    }
 }
 
 // ── Typing signals ──────────────────────────────────────────────────────
@@ -2039,6 +2101,13 @@ private suspend fun WhisperRepository.publishPictureFrames(
 /** Opens the current picture for me (null = none set / not for me). */
 suspend fun WhisperRepository.openGroupPicture(groupId: String): Result<ByteArray?> = runCatching {
     requireGroupsEnabled()
+    requireMe()
+    groupIo { openGroupPictureInner(groupId).getOrThrow() }
+}
+
+private suspend fun WhisperRepository.openGroupPictureInner(groupId: String): Result<ByteArray?> =
+    runCatching {
+    requireGroupsEnabled()
     val me = requireMe()
     val m = syncGroup(groupId).getOrThrow()
     require(m.isMember(me)) { "You are no longer a member of this group." }
@@ -2088,6 +2157,7 @@ suspend fun WhisperRepository.flushGroupOutbox(): Int {
     requireGroupsEnabled()
     if (myId.isBlank()) return 0
     return groupFlushMutex.withLock {
+        kotlinx.coroutines.withTimeout(WhisperGroupsConfig.OP_TIMEOUT_MS + 15_000L) {
         var delivered = 0
         outgoingQueue.entries().filter { it.senderId == myId && it.groupId != null }.forEach { queued ->
             if (queued.attempts >= 8) {
@@ -2123,6 +2193,7 @@ suspend fun WhisperRepository.flushGroupOutbox(): Int {
             }
         }
         delivered
+        }
     }
 }
 

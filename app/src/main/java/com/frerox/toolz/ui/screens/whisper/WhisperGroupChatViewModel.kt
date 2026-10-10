@@ -19,8 +19,8 @@ import com.frerox.toolz.data.whisper.deleteGroupMessageForEveryone
 import com.frerox.toolz.data.whisper.deleteGroupMessageForMe
 import com.frerox.toolz.data.whisper.fetchGroupMessages
 import com.frerox.toolz.data.whisper.fetchGroupReceipts
+import com.frerox.toolz.data.whisper.friendNameMap
 import com.frerox.toolz.data.whisper.flushGroupOutbox
-import com.frerox.toolz.data.whisper.getFriends
 import com.frerox.toolz.data.whisper.groupsEnabled
 import com.frerox.toolz.data.whisper.markGroupSeen
 import com.frerox.toolz.data.whisper.observeGroupLog
@@ -180,8 +180,7 @@ class WhisperGroupChatViewModel @Inject constructor(
             membership.onSuccess { m ->
                 val messages = repository.fetchGroupMessages(groupId)
                 messages.onSuccess { list ->
-                    val names = repository.getFriends().getOrNull().orEmpty()
-                        .associate { it.id to it.effectiveName }
+                    val names = repository.friendNameMap()
                     val receipts = repository.fetchGroupReceipts(groupId).getOrNull().orEmpty()
                     val reactionMap = repository.fetchGroupReactions(groupId).getOrNull().orEmpty()
                     val myId = repository.myId

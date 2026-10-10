@@ -214,11 +214,17 @@ fun WhisperGroupChatScreen(
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
                         )
-                        Text(
-                            "${state.membership?.members?.size ?: 0} ${stringResource(R.string.st_Whisper_Groups_Members)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        val memberCount = state.membership?.members?.size
+                        if (memberCount != null) {
+                            Text(
+                                "$memberCount " + stringResource(
+                                    if (memberCount == 1) R.string.st_Whisper_Groups_Member
+                                    else R.string.st_Whisper_Groups_Members,
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 },
                 navigationIcon = {
@@ -250,6 +256,7 @@ fun WhisperGroupChatScreen(
             )
         },
         bottomBar = {
+            if (state.membership != null || state.isLoading) {
             Column {
                 replyTarget?.let { target ->
                     ReplyPreviewBar(
@@ -315,6 +322,7 @@ fun WhisperGroupChatScreen(
                     }
                 }
             }
+            }
         },
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
@@ -353,6 +361,13 @@ fun WhisperGroupChatScreen(
             }
             if (state.isLoading && visible.isEmpty()) {
                 GroupUiCenterLoading(modifier = Modifier.fillMaxSize())
+            } else if (!state.isLoading && state.membership == null) {
+                GroupUiDeadEnd(
+                    message = state.error
+                        ?: stringResource(R.string.st_Whisper_Groups_ErrNoHistory),
+                    onBack = onNavigateBack,
+                    onRetry = { viewModel.load() },
+                )
             } else if (searching && searchQuery.trim().length >= 2) {
                 SearchResultsList(
                     query = searchQuery,

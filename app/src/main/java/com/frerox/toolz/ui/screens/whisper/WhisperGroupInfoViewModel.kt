@@ -25,6 +25,7 @@ import com.frerox.toolz.data.whisper.GroupJoinRequest
 import com.frerox.toolz.data.whisper.approveGroupJoinRequest
 import com.frerox.toolz.data.whisper.denyGroupJoinRequest
 import com.frerox.toolz.data.whisper.fetchGroupMessages
+import com.frerox.toolz.data.whisper.friendNameMap
 import com.frerox.toolz.data.whisper.getFriends
 import com.frerox.toolz.data.whisper.observeGroupJoinRequests
 import com.frerox.toolz.data.whisper.pendingGroupJoinRequests
@@ -131,8 +132,7 @@ class WhisperGroupInfoViewModel @Inject constructor(
             val me = repository.myId
             val membership = repository.syncGroup(groupId)
             membership.onSuccess { m ->
-                val names = repository.getFriends().getOrNull().orEmpty()
-                    .associate { it.id to it.effectiveName }
+                val names = repository.friendNameMap()
                 val muteKey = WhisperGroupChatViewModel.muteKey(groupId)
                 _uiState.update {
                     it.copy(
