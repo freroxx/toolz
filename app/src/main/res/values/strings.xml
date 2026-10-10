@@ -3915,6 +3915,7 @@
     <string name="st_Whisper_Groups_CdMore">More options</string>
     <string name="st_Whisper_Groups_CdLatest">Jump to latest</string>
     <string name="st_Whisper_Groups_Retry">Retry</string>
+    <string name="st_Whisper_Groups_InvalidId">That doesn\u2019t look like a group ID.</string>
     <string name="st_Whisper_Groups_PollClosed">Closed</string>
     <string name="st_Whisper_Groups_ClosePoll">Close poll</string>
     <string name="st_Whisper_Groups_JoinById">Join with ID</string>

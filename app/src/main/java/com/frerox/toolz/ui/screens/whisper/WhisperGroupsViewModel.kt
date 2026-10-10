@@ -59,7 +59,7 @@ import javax.inject.Inject
 @HiltViewModel
 class WhisperGroupsViewModel @Inject constructor(
     private val repository: WhisperRepository,
-    mutePrefs: WhisperMutePreferences,
+    private val mutePrefs: WhisperMutePreferences,
     private val notificationManager: WhisperNotificationManager,
     private val notifPrefs: WhisperGroupNotifPrefs,
     private val readStore: WhisperGroupReadStore,
@@ -492,6 +492,13 @@ class WhisperGroupsViewModel @Inject constructor(
 
     fun clearNotice() {
         _uiState.update { it.copy(notice = null) }
+    }
+
+    /** Swipe-to-mute toggle for one group row (shared mute store). */
+    fun toggleMute(groupId: String) {
+        if (groupId.isBlank()) return
+        val key = WhisperGroupChatViewModel.muteKey(groupId)
+        if (mutePrefs.isMuted(key)) mutePrefs.unmuteUser(key) else mutePrefs.muteUser(key)
     }
 
     fun clearError() {

@@ -31,10 +31,15 @@ import androidx.compose.material.icons.rounded.AddPhotoAlternate
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.NotificationsOff
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -123,35 +128,22 @@ fun WhisperGroupsSection(
                 }
             }
         }
-        state.notice?.let { notice ->
-            Surface(
-                color = MaterialTheme.colorScheme.tertiaryContainer,
-                contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
-                shape = RoundedCornerShape(20.dp),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        notice,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.weight(1f),
-                    )
-                    TextButton(onClick = { viewModel.clearNotice() }) {
-                        Text(stringResource(R.string.st_Whisper_Cancel))
-                    }
-                }
-            }
-        }
+        GroupUiBanner(
+            message = state.notice.orEmpty(),
+            visible = state.notice != null,
+            isError = false,
+            onDismiss = { viewModel.clearNotice() },
+        )
         if (state.isLoading && state.groups.isEmpty()) {
             repeat(2) { ConversationSkeleton() }
         }
-        state.error?.let { err ->
-            GroupErrorBanner(message = err, onRetry = { viewModel.load() })
-        }
+        GroupUiBanner(
+            message = state.error.orEmpty(),
+            visible = state.error != null,
+            isError = true,
+            actionLabel = stringResource(R.string.st_Whisper_Groups_Retry),
+            onAction = { viewModel.load() },
+        )
         if (!state.isLoading && state.groups.isEmpty() && state.invites.isEmpty() && state.error == null) {
             GroupEmptyState()
         }
@@ -164,15 +156,20 @@ fun WhisperGroupsSection(
             )
         }
         state.groups.forEach { group ->
-            GroupRowCard(
-                name = group.name.ifBlank { "Group" },
-                groupId = group.id,
+            SwipeableGroupRow(
                 muted = group.id in mutedIds,
-                memberCount = state.memberCounts[group.id] ?: 0,
-                preview = state.previews[group.id],
-                picture = pictures[group.id],
-                onOpen = { onNavigateToGroup(group.id) },
-            )
+                onToggleMute = { viewModel.toggleMute(group.id) },
+            ) {
+                GroupRowCard(
+                    name = group.name.ifBlank { "Group" },
+                    groupId = group.id,
+                    muted = group.id in mutedIds,
+                    memberCount = state.memberCounts[group.id] ?: 0,
+                    preview = state.previews[group.id],
+                    picture = pictures[group.id],
+                    onOpen = { onNavigateToGroup(group.id) },
+                )
+            }
         }
     }
 
@@ -235,18 +232,66 @@ private fun GroupInviteCard(
                     enabled = !working,
                     modifier = Modifier.weight(1f),
                 ) {
-                    Text(stringResource(R.string.st_Whisper_Groups_Join), fontWeight = FontWeight.Bold)
+                    if (working) {
+                        GroupUiInlineLoading()
+                    } else {
+                        Text(stringResource(R.string.st_Whisper_Groups_Join), fontWeight = FontWeight.Bold)
+                    }
                 }
                 ToolzTonalExpressiveButton(
                     onClick = { haptic.click(); onDecline() },
                     enabled = !working,
                     modifier = Modifier.weight(1f),
                 ) {
-                    Text(stringResource(R.string.st_Whisper_Groups_Decline), fontWeight = FontWeight.Bold)
+                    if (working) {
+                        GroupUiInlineLoading()
+                    } else {
+                        Text(stringResource(R.string.st_Whisper_Groups_Decline), fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
     }
+}
+
+/** Swipe-to-mute row: end-to-start swipe toggles the group mute. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SwipeableGroupRow(
+    muted: Boolean,
+    onToggleMute: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    val haptic = rememberToolzHapticFeedback()
+    val dismissState = rememberSwipeToDismissBoxState()
+    LaunchedEffect(dismissState.currentValue) {
+        if (dismissState.currentValue != SwipeToDismissBoxValue.Settled) {
+            haptic.click()
+            onToggleMute()
+            dismissState.reset()
+        }
+    }
+    SwipeToDismissBox(
+        state = dismissState,
+        enableDismissFromStartToEnd = false,
+        backgroundContent = {
+            Box(
+                modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp))
+                    .background(MaterialTheme.colorScheme.tertiaryContainer),
+                contentAlignment = Alignment.CenterEnd,
+            ) {
+                Icon(
+                    if (muted) Icons.Rounded.NotificationsActive else Icons.Rounded.NotificationsOff,
+                    contentDescription = stringResource(
+                        if (muted) R.string.st_Whisper_Groups_CdUnmute else R.string.st_Whisper_Groups_CdMute,
+                    ),
+                    tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                    modifier = Modifier.padding(end = 20.dp).size(22.dp),
+                )
+            }
+        },
+        content = { content() },
+    )
 }
 
 @Composable
@@ -275,7 +320,7 @@ private fun GroupRowCard(
             if (bitmap != null) {
                 Image(
                     bitmap = bitmap.asImageBitmap(),
-                    contentDescription = null,
+                    contentDescription = stringResource(R.string.st_Whisper_Groups_CdPicture),
                     modifier = Modifier.size(52.dp).clip(CircleShape),
                     contentScale = ContentScale.Crop,
                 )
@@ -299,7 +344,7 @@ private fun GroupRowCard(
                         Spacer(Modifier.width(5.dp))
                         Icon(
                             Icons.Rounded.NotificationsOff,
-                            contentDescription = null,
+                            contentDescription = stringResource(R.string.st_Whisper_Groups_CdMute),
                             tint = MaterialTheme.colorScheme.outline,
                             modifier = Modifier.size(13.dp),
                         )
@@ -376,19 +421,23 @@ private fun GroupRowCard(
     }
 }
 
-/** Row timestamp: HH:mm today, Yesterday, else dd MMM. */
+/** Row timestamp: localized time today, Yesterday, else a medium date. */
 @Composable
 internal fun formatGroupListTime(iso: String): String {
     val yesterday = stringResource(R.string.st_Whisper_Groups_Yesterday)
+    val context = LocalContext.current
     return runCatching {
         val odt = java.time.OffsetDateTime.parse(iso)
         val today = java.time.LocalDate.now()
         val date = odt.toLocalDate()
         when {
-            date.isEqual(today) -> "%02d:%02d".format(odt.hour, odt.minute)
+            date.isEqual(today) -> java.text.DateFormat.getTimeInstance(
+                java.text.DateFormat.SHORT, context.resources.configuration.locales.get(0),
+            ).format(java.util.Date.from(odt.toInstant()))
             date.isEqual(today.minusDays(1)) -> yesterday
-            date.year == today.year -> "${date.dayOfMonth} ${date.month.name.lowercase().replaceFirstChar { it.uppercase() }.take(3)}"
-            else -> "${date.dayOfMonth} ${date.month.name.lowercase().replaceFirstChar { it.uppercase() }.take(3)} ${date.year}"
+            else -> java.text.DateFormat.getDateInstance(
+                java.text.DateFormat.MEDIUM, context.resources.configuration.locales.get(0),
+            ).format(java.util.Date.from(odt.toInstant()))
         }
     }.getOrDefault("")
 }
@@ -487,6 +536,7 @@ private fun CreateGroupDialog(
     var adminsOnly by remember { mutableStateOf(true) }
     var pictureBytes by remember { mutableStateOf<ByteArray?>(null) }
     var pictureMime by remember { mutableStateOf("image/jpeg") }
+    var pictureError by remember { mutableStateOf<String?>(null) }
     val canCreate = name.isNotBlank() && picked.isNotEmpty() && !state.isLoading
     val visibleFriends = remember(state.friends, query) {
         val q = query.trim().lowercase()
@@ -495,12 +545,20 @@ private fun CreateGroupDialog(
             it.effectiveName.lowercase().contains(q) || it.username.lowercase().contains(q)
         }
     }
+    val pictureTooBig = stringResource(R.string.st_Whisper_Error_ImageTooLarge)
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
+        pictureError = null
         runCatching {
             context.contentResolver.getType(uri)?.let { pictureMime = it }
-            context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-        }.getOrNull()?.let { pictureBytes = it }
+            context.contentResolver.openInputStream(uri)?.use {
+                com.frerox.toolz.data.whisper.readBoundedGroupImageBytes(it)
+            }
+        }.onSuccess { bytes ->
+            if (bytes != null) pictureBytes = bytes
+        }.onFailure {
+            pictureError = pictureTooBig
+        }
     }
     val previewBitmap = remember(pictureBytes) {
         pictureBytes?.let {
@@ -567,11 +625,20 @@ private fun CreateGroupDialog(
                         )
                     }
                     IconButton(onClick = onDismiss) {
-                        Icon(Icons.Rounded.Close, contentDescription = null)
+                        Icon(Icons.Rounded.Close, contentDescription = GroupCd.close())
                     }
                 }
+                pictureError?.let { err ->
+                    Text(
+                        err,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                    )
+                }
                 Column(
-                    modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp),
+                    modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())
+                        .padding(horizontal = 20.dp).groupFadingEdge(),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Spacer(Modifier.size(2.dp))
@@ -594,7 +661,7 @@ private fun CreateGroupDialog(
                         value = query,
                         onValueChange = { query = it },
                         label = { Text(stringResource(R.string.st_Whisper_Groups_SearchHint)) },
-                        leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                        leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = GroupCd.search()) },
                         singleLine = true,
                         shape = RoundedCornerShape(20.dp),
                         modifier = Modifier.fillMaxWidth(),
@@ -656,9 +723,12 @@ private fun CreateGroupDialog(
                             )
                         }
                     }
-                    state.error?.let {
-                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                    }
+                    GroupUiBanner(
+                        message = state.error.orEmpty(),
+                        visible = state.error != null,
+                        isError = true,
+                        onDismiss = { viewModel.clearError() },
+                    )
                     Spacer(Modifier.size(4.dp))
                 }
                 // Bottom action bar.
@@ -673,6 +743,7 @@ private fun CreateGroupDialog(
                         enabled = canCreate,
                         modifier = Modifier.weight(1f),
                     ) {
+                        if (state.isLoading) GroupUiInlineLoading() else
                         Text(
                             if (picked.isEmpty()) stringResource(R.string.st_Whisper_Groups_Create)
                             else "${stringResource(R.string.st_Whisper_Groups_Create)} (${picked.size})",
@@ -834,30 +905,46 @@ internal suspend fun saveGroupImageToGallery(context: android.content.Context, b
         }
     }
 
+/** Returns true for a bare UUID or a `WHISPER-GROUP:<uuid>` QR payload. */
+internal fun isGroupJoinIdValid(raw: String): Boolean {
+    val id = raw.trim().removePrefix("WHISPER-GROUP:")
+    return id.isNotBlank() && runCatching { java.util.UUID.fromString(id) }.isSuccess
+}
+
 /** Join-by-ID: paste a group id (or scanned QR payload) to request access. */
 @Composable
 private fun JoinByIdDialog(onDismiss: () -> Unit, onRequest: (String) -> Unit) {
     var id by remember { mutableStateOf("") }
+    val trimmed = id.trim().removePrefix("WHISPER-GROUP:")
+    val showError = id.isNotBlank() && runCatching { java.util.UUID.fromString(trimmed) }.isFailure
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.st_Whisper_Groups_JoinById), fontWeight = FontWeight.Bold) },
         text = {
-            OutlinedTextField(
-                value = id,
-                onValueChange = { id = it },
-                label = { Text(stringResource(R.string.st_Whisper_Groups_JoinByIdHint)) },
-                singleLine = true,
-                shape = RoundedCornerShape(20.dp),
-                modifier = Modifier.fillMaxWidth(),
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                OutlinedTextField(
+                    value = id,
+                    onValueChange = { id = it },
+                    label = { Text(stringResource(R.string.st_Whisper_Groups_JoinByIdHint)) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(20.dp),
+                    isError = showError,
+                    supportingText = if (showError) {
+                        {
+                            Text(
+                                stringResource(R.string.st_Whisper_Groups_InvalidId),
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    } else null,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         },
         confirmButton = {
             ToolzExpressiveButton(
-                onClick = {
-                    // QR payloads encode "WHISPER-GROUP:<uuid>" — accept both forms.
-                    onRequest(id.trim().removePrefix("WHISPER-GROUP:"))
-                },
-                enabled = id.trim().removePrefix("WHISPER-GROUP:").isNotBlank(),
+                onClick = { onRequest(trimmed) },
+                enabled = isGroupJoinIdValid(id),
             ) {
                 Text(stringResource(R.string.st_Whisper_Groups_JoinById), fontWeight = FontWeight.Bold)
             }
