@@ -2748,3 +2748,23 @@ begin
   return new;
 end;
 $$;
+
+-- ═══════════════ 20261010_whisper_groups_disband.sql ═
+-- Disband: the LAST remaining member may delete the group row (everything
+-- cascades: members, events, messages, invites). A live group can never be
+-- nuked — the policy requires zero OTHER members, so no admin can delete a
+-- group out from under anyone. Without this, a creator whose invites all
+-- declined would be stranded: the last admin cannot leave, and nothing could
+-- delete the row. The client gates the button to members.size <= 1.
+drop policy if exists "whisper_groups_delete_last_member" on public.whisper_groups;
+create policy "whisper_groups_delete_last_member" on public.whisper_groups
+    for delete using (
+        exists (
+            select 1 from public.whisper_group_members m
+            where m.group_id = whisper_groups.id and m.user_id = auth.uid()
+        )
+        and not exists (
+            select 1 from public.whisper_group_members m
+            where m.group_id = whisper_groups.id and m.user_id <> auth.uid()
+        )
+    );

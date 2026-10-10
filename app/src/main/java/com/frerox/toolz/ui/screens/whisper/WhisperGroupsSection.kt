@@ -85,11 +85,13 @@ fun WhisperGroupsSection(
     if (!groupsEnabled()) return
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val mutedIds by viewModel.mutedGroupIds.collectAsStateWithLifecycle()
+    val workingInvites by viewModel.workingInvites.collectAsStateWithLifecycle()
     var showCreate by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.createdGroupId) {
         state.createdGroupId?.let {
             viewModel.consumeCreated()
+            showCreate = false
             onNavigateToGroup(it)
         }
     }
@@ -122,6 +124,7 @@ fun WhisperGroupsSection(
         state.invites.forEach { invite ->
             GroupInviteCard(
                 invite = invite,
+                working = invite.groupId in workingInvites,
                 onJoin = { viewModel.join(invite.groupId, onNavigateToGroup) },
                 onDecline = { viewModel.decline(invite.groupId) },
             )
@@ -149,6 +152,7 @@ fun WhisperGroupsSection(
 @Composable
 private fun GroupInviteCard(
     invite: com.frerox.toolz.data.whisper.GroupInviteInfo,
+    working: Boolean,
     onJoin: () -> Unit,
     onDecline: () -> Unit,
 ) {
@@ -183,10 +187,18 @@ private fun GroupInviteCard(
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ToolzExpressiveButton(onClick = { haptic.click(); onJoin() }, modifier = Modifier.weight(1f)) {
+                ToolzExpressiveButton(
+                    onClick = { haptic.click(); onJoin() },
+                    enabled = !working,
+                    modifier = Modifier.weight(1f),
+                ) {
                     Text(stringResource(R.string.st_Whisper_Groups_Join), fontWeight = FontWeight.Bold)
                 }
-                ToolzTonalExpressiveButton(onClick = { haptic.click(); onDecline() }, modifier = Modifier.weight(1f)) {
+                ToolzTonalExpressiveButton(
+                    onClick = { haptic.click(); onDecline() },
+                    enabled = !working,
+                    modifier = Modifier.weight(1f),
+                ) {
                     Text(stringResource(R.string.st_Whisper_Groups_Decline), fontWeight = FontWeight.Bold)
                 }
             }

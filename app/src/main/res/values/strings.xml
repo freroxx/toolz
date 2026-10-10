@@ -3870,4 +3870,6 @@
     <string name="st_Whisper_Groups_NotifToggleOff">Off for you (tap to enable)</string>
     <string name="st_Whisper_Groups_NotifScopeOwner">Join, leave + declined invites</string>
     <string name="st_Whisper_Groups_NotifScopeMember">Join + leave only</string>
+    <string name="st_Whisper_Groups_Disband">Disband group</string>
+    <string name="st_Whisper_Groups_DisbandConfirm">Delete this group for everyone? The chat history, members and invites disappear permanently. This cannot be undone.</string>
 </resources>

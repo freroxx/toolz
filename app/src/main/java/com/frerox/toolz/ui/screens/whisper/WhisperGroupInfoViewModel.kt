@@ -17,6 +17,7 @@ import com.frerox.toolz.data.whisper.inviteGroupMember
 import com.frerox.toolz.data.whisper.blockUser
 import com.frerox.toolz.data.whisper.cachedGroups
 import com.frerox.toolz.data.whisper.cancelGroupInvite
+import com.frerox.toolz.data.whisper.disbandGroup
 import com.frerox.toolz.data.whisper.getFriends
 import com.frerox.toolz.data.whisper.groupsEnabled
 import com.frerox.toolz.data.whisper.leaveGroup
@@ -61,6 +62,8 @@ class WhisperGroupInfoViewModel @Inject constructor(
         val pending: List<MemberEntry> = emptyList(),
         val myId: String = "",
         val amOwner: Boolean = false,
+        /** True when I'm the only member left: disband replaces leave. */
+        val canDisband: Boolean = false,
         val isMuted: Boolean = false,
         /** Effective group-notifications toggle (role default until overridden). */
         val notifOn: Boolean = true,
@@ -74,6 +77,7 @@ class WhisperGroupInfoViewModel @Inject constructor(
         override fun equals(other: Any?): Boolean = other is UiState &&
             membership == other.membership && members == other.members &&
             pending == other.pending && myId == other.myId && amOwner == other.amOwner &&
+            canDisband == other.canDisband &&
             isMuted == other.isMuted && notifOn == other.notifOn &&
             isLoading == other.isLoading && isWorking == other.isWorking &&
             left == other.left && error == other.error
@@ -118,17 +122,19 @@ class WhisperGroupInfoViewModel @Inject constructor(
                         },
                         myId = me,
                         amOwner = repository.cachedGroups().firstOrNull { it.id == groupId }?.createdBy == me,
+                        canDisband = m.members.size <= 1 && m.isMember(me),
                         notifOn = notifPrefs.isEnabled(
                             groupId,
                             (repository.cachedGroups().firstOrNull { it.id == groupId }?.createdBy == me) ||
                                 m.isAdmin(me),
                         ),
                         isLoading = false,
+                        isWorking = false,
                     )
                 }
                 loadPicture()
             }.onFailure { e ->
-                _uiState.update { it.copy(isLoading = false, error = e.message) }
+                _uiState.update { it.copy(isLoading = false, isWorking = false, error = e.message) }
             }
         }
     }
@@ -143,6 +149,31 @@ class WhisperGroupInfoViewModel @Inject constructor(
     }
 
     fun addMember(userId: String) = work({ repository.inviteGroupMember(groupId, userId) })
+
+    /** Invites several friends in one go (single reload + single summary error). */
+    fun addMembers(userIds: List<String>) {
+        val ids = userIds.filter { it.isNotBlank() }.distinct()
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isWorking = true, error = null) }
+            var failed = 0
+            ids.forEach { uid ->
+                if (repository.inviteGroupMember(groupId, uid).isFailure) failed++
+            }
+            if (failed > 0) {
+                _uiState.update {
+                    it.copy(
+                        isWorking = false,
+                        error = if (failed == ids.size) "Couldn't invite anyone. Check your connection and retry."
+                        else "Couldn't invite $failed of ${ids.size} friend(s).",
+                    )
+                }
+                load()
+            } else {
+                load()
+            }
+        }
+    }
     fun removeMember(userId: String) = work({ repository.removeGroupMember(groupId, userId) })
     fun promoteMember(userId: String) = work({ repository.promoteGroupMember(groupId, userId) })
     fun rename(name: String) = work({ repository.renameGroup(groupId, name) })
@@ -176,6 +207,16 @@ class WhisperGroupInfoViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isWorking = true, error = null) }
             repository.leaveGroup(groupId)
+                .onSuccess { _uiState.update { it.copy(isWorking = false, left = true) } }
+                .onFailure { e -> _uiState.update { it.copy(isWorking = false, error = e.message) } }
+        }
+    }
+
+    /** Deletes the whole group (last-member-only, server-enforced). */
+    fun disband() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isWorking = true, error = null) }
+            repository.disbandGroup(groupId)
                 .onSuccess { _uiState.update { it.copy(isWorking = false, left = true) } }
                 .onFailure { e -> _uiState.update { it.copy(isWorking = false, error = e.message) } }
         }

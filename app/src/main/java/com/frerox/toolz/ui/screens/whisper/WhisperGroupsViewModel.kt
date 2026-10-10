@@ -77,6 +77,9 @@ class WhisperGroupsViewModel @Inject constructor(
     // Invite ids already pinged this process (realtime resubscribes must not re-ping).
     private val pingedInviteIds = mutableSetOf<String>()
     private var inviteWatchJob: kotlinx.coroutines.Job? = null
+    // Group ids with a join/decline in flight (double-tap guard for card buttons).
+    private val _workingInvites = MutableStateFlow<Set<String>>(emptySet())
+    val workingInvites: StateFlow<Set<String>> = _workingInvites.asStateFlow()
     // Event ids already seen (join/leave/decline pings fire once per event).
     private val seenEventIds = mutableSetOf<String>()
     private var logWatchJobs: List<kotlinx.coroutines.Job> = emptyList()
@@ -157,6 +160,8 @@ class WhisperGroupsViewModel @Inject constructor(
     }
 
     fun join(groupId: String, onJoined: (String) -> Unit = {}) {
+        if (groupId in _workingInvites.value) return
+        _workingInvites.update { it + groupId }
         viewModelScope.launch {
             _uiState.update { it.copy(error = null) }
             repository.joinGroup(groupId)
@@ -165,15 +170,19 @@ class WhisperGroupsViewModel @Inject constructor(
                     onJoined(groupId)
                 }
                 .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+            _workingInvites.update { it - groupId }
         }
     }
 
     fun decline(groupId: String) {
+        if (groupId in _workingInvites.value) return
+        _workingInvites.update { it + groupId }
         viewModelScope.launch {
             _uiState.update { it.copy(error = null) }
             repository.declineGroupInvite(groupId)
                 .onSuccess { load() }
                 .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+            _workingInvites.update { it - groupId }
         }
     }
 

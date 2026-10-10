@@ -50,13 +50,16 @@ serve(async (request) => {
   const saJson = Deno.env.get("FCM_SERVICE_ACCOUNT_JSON");
   if (!saJson) return json({ error: "Push is not configured" }, 503);
 
-  // 2. Parse the Database Webhook payload (INSERT on public.messages or public.friends).
+  // 2. Parse the Database Webhook payload (INSERT on public.messages or public.friends,
+  // or any operation on the Phase-2 group tables — group ops are gated below).
   let record: any;
   let table: string = "";
+  let op: string = "";
   try {
     const payload = await request.json();
     record = payload?.record ?? payload?.new ?? null;
     table = payload?.table ?? "";
+    op = typeof payload?.type === "string" ? payload.type : "";
   } catch {
     return json({ error: "Invalid request" }, 400);
   }
@@ -95,7 +98,10 @@ serve(async (request) => {
   };
 
   // ── Phase-2 groups: invite / message / join-leave-decline fan-out ──
+  // INSERT-only: a CANCEL/decline invite DELETE (or a sender message wipe)
+  // must never re-fire the push for the thing just withdrawn.
   if (isGroupTable(table) && record && typeof record === "object") {
+    if (op && op !== "INSERT") return json({ skipped: "not_insert_group_event" }, 200);
     return json(await handleGroupPush(record, table, { supabaseUrl, serviceRoleKey, serviceHeaders, saJson }), 200);
   }
 

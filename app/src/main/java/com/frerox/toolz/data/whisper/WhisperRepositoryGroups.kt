@@ -49,6 +49,7 @@ import io.github.jan.supabase.realtime.channel
 import io.github.jan.supabase.realtime.decodeRecord
 import io.github.jan.supabase.realtime.postgresChangeFlow
 import io.github.jan.supabase.realtime.realtime
+import io.github.jan.supabase.postgrest.query.Order
 
 /** Compile-time gate: true in v1.1.7 dev builds (1.1.7 is unshipped — only dev
  * devices carry it). Server-side, every group write still requires
@@ -635,7 +636,20 @@ suspend fun WhisperRepository.syncGroups(): Result<List<WhisperGroupMembership>>
     val me = requireMe()
     val myRows = db.from("whisper_group_members").select { filter { eq("user_id", me) } }
         .decodeList<GroupMemberRow>()
-    myRows.map { syncGroup(it.groupId).getOrThrow() }
+    // Per-group isolation: one poisoned or unreachable group must never hide
+    // the healthy ones (a total failure still surfaces when nothing synced).
+    val ok = mutableListOf<WhisperGroupMembership>()
+    var failures = 0
+    myRows.forEach { row ->
+        syncGroup(row.groupId)
+            .onSuccess { ok.add(it) }
+            .onFailure {
+                failures++
+                android.util.Log.w("WhisperGroups", "syncGroups: skipping ${row.groupId}: ${it.message}")
+            }
+    }
+    if (ok.isEmpty() && failures > 0) error("Couldn't sync your groups. Check your connection and retry.")
+    ok
 }
 
 private suspend fun WhisperRepository.persistGroupCache(
@@ -708,7 +722,13 @@ suspend fun WhisperRepository.createGroup(
     require(strangers.isEmpty()) { "Only friends can be added to a group." }
     val groupId = java.util.UUID.randomUUID().toString()
     db.from("whisper_groups").insert(GroupRowInsert(id = groupId, name = cleanName, epoch = 0, createdBy = me))
-    db.from("whisper_group_members").insert(GroupMemberRow(groupId = groupId, userId = me, role = "admin"))
+    try {
+        db.from("whisper_group_members").insert(GroupMemberRow(groupId = groupId, userId = me, role = "admin"))
+    } catch (e: Throwable) {
+        // Bootstrap failed: remove the bare group row so no orphan survives.
+        runCatching { db.from("whisper_groups").delete { filter { eq("id", groupId) } } }
+        throw e
+    }
     val payload = groupJson.encodeToString(
         kotlinx.serialization.json.JsonObject.serializer(),
         kotlinx.serialization.json.buildJsonObject {
@@ -716,21 +736,40 @@ suspend fun WhisperRepository.createGroup(
             put("invite", if (inviteAdminsOnly) "admins" else "all")
         },
     )
-    publishGroupEvent(
-        groupId = groupId,
-        seq = 1,
-        epoch = 0,
-        type = WhisperGroupEventType.CREATE,
-        actor = me,
-        payload = payload,
-    ).getOrThrow()
+    try {
+        publishGroupEvent(
+            groupId = groupId,
+            seq = 1,
+            epoch = 0,
+            type = WhisperGroupEventType.CREATE,
+            actor = me,
+            payload = payload,
+        ).getOrThrow()
+    } catch (e: Throwable) {
+        // No history: tear the whole stub down (row + admin row).
+        runCatching { db.from("whisper_group_members").delete { filter { eq("group_id", groupId); eq("user_id", me) } } }
+        runCatching { db.from("whisper_groups").delete { filter { eq("id", groupId) } } }
+        throw e
+    }
     var seq = 2L
-    others.forEach { uid ->
-        db.from("whisper_group_invites").insert(
-            GroupInviteInsert(groupId = groupId, userId = uid, invitedBy = me, clientVersionCode = groupClientVersion()),
-        )
-        publishGroupEvent(groupId, seq, 0, WhisperGroupEventType.INVITE, me, "\"$uid\"").getOrThrow()
-        seq += 1
+    val attempted = mutableListOf<String>()
+    try {
+        others.forEach { uid ->
+            attempted.add(uid)
+            db.from("whisper_group_invites").insert(
+                GroupInviteInsert(groupId = groupId, userId = uid, invitedBy = me, clientVersionCode = groupClientVersion()),
+            )
+            publishGroupEvent(groupId, seq, 0, WhisperGroupEventType.INVITE, me, "\"$uid\"").getOrThrow()
+            seq += 1
+        }
+    } catch (e: Throwable) {
+        // Partial fan-out: withdraw every invite row this loop touched
+        // (completed AND in-flight — rows land before their events) so nobody
+        // holds a phantom invite card the log never recorded.
+        attempted.forEach { uid ->
+            runCatching { db.from("whisper_group_invites").delete { filter { eq("group_id", groupId); eq("user_id", uid) } } }
+        }
+        throw e
     }
     syncGroup(groupId).getOrThrow()
     groupId
@@ -788,19 +827,34 @@ suspend fun WhisperRepository.inviteGroupMember(groupId: String, userId: String)
     syncGroup(groupId).getOrThrow()
 }
 
-/** Accepts my invite: member row (consumes the invite via trigger) + JOIN event. */
+/** Accepts my invite: JOIN event first, then the member row (event-first like
+ * every other op — a failed event leaves zero state behind, so a retry never
+ * wedges on a member row the log doesn't know). */
 suspend fun WhisperRepository.joinGroup(groupId: String): Result<Unit> = runCatching {
     requireGroupsEnabled()
     val me = requireMe()
     val m = fetchVerifiedMembership(groupId).getOrThrow()
-    require(!m.isMember(me)) { "Already a member." }
+    if (m.isMember(me)) {
+        // Heal path: the log already carries my JOIN (a previous attempt
+        // published the event but the member row never landed). Restore the
+        // row idempotently — a PK conflict just means it is already there.
+        runCatching {
+            db.from("whisper_group_members").insert(
+                GroupMemberRow(groupId = groupId, userId = me, role = "member"),
+            )
+        }
+        syncGroup(groupId).getOrThrow()
+        return@runCatching
+    }
     require(me in m.pendingInvites) { "No invite for this group." }
     require(m.members.size < WhisperGroupsConfig.MAX_MEMBERS) { "Group is full." }
+    val (seq, epoch) = nextGroupSeqEpoch(groupId)
+    // Event first: the invite row is still live, so the require-invite
+    // trigger on the member insert below is satisfied either way.
+    publishGroupEvent(groupId, seq, epoch + 1, WhisperGroupEventType.JOIN, me, "\"\"").getOrThrow()
     db.from("whisper_group_members").insert(
         GroupMemberRow(groupId = groupId, userId = me, role = "member"),
     )
-    val (seq, epoch) = nextGroupSeqEpoch(groupId)
-    publishGroupEvent(groupId, seq, epoch + 1, WhisperGroupEventType.JOIN, me, "\"\"").getOrThrow()
     syncGroup(groupId).getOrThrow()
 }
 
@@ -906,6 +960,24 @@ suspend fun WhisperRepository.leaveGroup(groupId: String): Result<Unit> = runCat
     groupDao.clearEvents(groupId)
 }
 
+/**
+ * Deletes the whole group. Only the LAST remaining member may do this (the
+ * server policy enforces zero other members) — the escape hatch for a creator
+ * whose invites all declined: the last admin cannot leave, so without disband
+ * the empty group would be stranded forever. Everything cascades server-side.
+ */
+suspend fun WhisperRepository.disbandGroup(groupId: String): Result<Unit> = runCatching {
+    requireGroupsEnabled()
+    val me = requireMe()
+    val m = syncGroup(groupId).getOrThrow()
+    require(m.isMember(me)) { "You are not a member." }
+    require(m.members.size <= 1) { "Only the last remaining member can disband the group." }
+    db.from("whisper_groups").delete { filter { eq("id", groupId) } }
+    groupDao.deleteGroup(groupId)
+    groupDao.clearMembers(groupId)
+    groupDao.clearEvents(groupId)
+}
+
 /** Sends one message to every current member (fail-closed: all legs or nothing). */
 suspend fun WhisperRepository.sendGroupMessage(groupId: String, plaintext: String): Result<Unit> = runCatching {
     requireGroupsEnabled()
@@ -962,10 +1034,13 @@ suspend fun WhisperRepository.fetchGroupMessages(
     require(m.isMember(me)) { "You are no longer a member of this group." }
     val rows = db.from("whisper_group_messages").select {
         filter { eq("group_id", groupId) }
+        // Newest-first at the server so the LIMIT keeps the live head, never a
+        // stale arbitrary slice; the client re-sorts ascending below.
+        order("created_at", Order.DESCENDING)
         limit(limit.toLong())
     }.decodeList<GroupMessageRow>()
     val names = getFriends().getOrNull().orEmpty().associate { it.id to it.effectiveName }
-    rows.sortedBy { it.createdAt ?: "" }.mapNotNull { row ->
+    rows.sortedWith(compareBy({ it.createdAt ?: "" }, { it.id })).mapNotNull { row ->
         if (!m.isMemberAt(row.senderId, row.epoch) || !m.isMemberAt(me, row.epoch)) return@mapNotNull null
         val body = decodeGroupRow(row.content) ?: return@mapNotNull null
         if (body.g != groupId || body.e != row.epoch) return@mapNotNull null

@@ -31,9 +31,11 @@ import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AddPhotoAlternate
 import androidx.compose.material.icons.rounded.Block
+import androidx.compose.material.icons.rounded.DeleteForever
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.PersonRemove
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.VolumeOff
 import androidx.compose.material.icons.rounded.VolumeUp
@@ -56,6 +58,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -92,6 +95,7 @@ fun WhisperGroupInfoScreen(
     var showAdd by remember { mutableStateOf(false) }
     var showRename by remember { mutableStateOf(false) }
     var showLeave by remember { mutableStateOf(false) }
+    var showDisband by remember { mutableStateOf(false) }
     var pendingBlock by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(state.left) {
@@ -215,6 +219,19 @@ fun WhisperGroupInfoScreen(
                     Spacer(Modifier.width(6.dp))
                     Text(stringResource(R.string.st_Whisper_Groups_Leave), fontWeight = FontWeight.Bold)
                 }
+                // Last member standing: leave is blocked server-side, so disband
+                // (delete the group) replaces it instead of a dead button.
+                if (state.canDisband) {
+                    Spacer(Modifier.size(8.dp))
+                    ToolzExpressiveButton(
+                        onClick = { showDisband = true },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Rounded.DeleteForever, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(stringResource(R.string.st_Whisper_Groups_Disband), fontWeight = FontWeight.Bold)
+                    }
+                }
                 Spacer(Modifier.size(24.dp))
             }
             state.error?.let { err ->
@@ -226,7 +243,11 @@ fun WhisperGroupInfoScreen(
     }
 
     if (showAdd) {
-        AddMemberDialog(viewModel = viewModel, knownIds = state.members.map { it.userId }.toSet(), onDismiss = { showAdd = false })
+        AddMemberDialog(
+            viewModel = viewModel,
+            excludedIds = state.members.map { it.userId }.toSet() + state.pending.map { it.userId }.toSet(),
+            onDismiss = { showAdd = false },
+        )
     }
     if (showRename) {
         RenameDialog(
@@ -247,6 +268,21 @@ fun WhisperGroupInfoScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showLeave = false }) { Text(stringResource(R.string.st_Whisper_Cancel)) }
+            },
+        )
+    }
+    if (showDisband) {
+        AlertDialog(
+            onDismissRequest = { showDisband = false },
+            title = { Text(stringResource(R.string.st_Whisper_Groups_Disband), fontWeight = FontWeight.Bold) },
+            text = { Text(stringResource(R.string.st_Whisper_Groups_DisbandConfirm)) },
+            confirmButton = {
+                ToolzExpressiveButton(onClick = { showDisband = false; viewModel.disband() }) {
+                    Text(stringResource(R.string.st_Whisper_Groups_Disband), fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDisband = false }) { Text(stringResource(R.string.st_Whisper_Cancel)) }
             },
         )
     }
@@ -352,38 +388,69 @@ private fun MemberRow(
 @Composable
 private fun AddMemberDialog(
     viewModel: WhisperGroupInfoViewModel,
-    knownIds: Set<String>,
+    excludedIds: Set<String>,
     onDismiss: () -> Unit,
 ) {
     var friends by remember { mutableStateOf<List<com.frerox.toolz.data.whisper.WhisperProfile>>(emptyList()) }
-    var picked by remember { mutableStateOf<String?>(null) }
+    val picked = remember { mutableStateListOf<String>() }
+    var query by remember { mutableStateOf("") }
     LaunchedEffect(Unit) {
-        viewModel.loadFriends { friends = it.filter { it.id !in knownIds } }
+        viewModel.loadFriends { friends = it.filter { it.id !in excludedIds } }
+    }
+    val visible = remember(friends, query) {
+        val q = query.trim().lowercase()
+        if (q.isBlank()) friends
+        else friends.filter {
+            it.effectiveName.lowercase().contains(q) || it.username.lowercase().contains(q)
+        }
     }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.st_Whisper_Groups_AddMembers), fontWeight = FontWeight.Bold) },
         text = {
-            LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 280.dp)) {
-                items(friends, key = { it.id }) { friend ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth().clickable {
-                            picked = if (picked == friend.id) null else friend.id
-                        }.padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Checkbox(checked = picked == friend.id, onCheckedChange = {
-                            picked = if (picked == friend.id) null else friend.id
-                        })
-                        Spacer(Modifier.width(8.dp))
-                        Text(friend.effectiveName, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Column(modifier = Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    label = { Text(stringResource(R.string.st_Whisper_Groups_SearchHint)) },
+                    leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(20.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.size(8.dp))
+                LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 280.dp)) {
+                    items(visible, key = { it.id }) { friend ->
+                        val selected = friend.id in picked
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clickable {
+                                if (selected) picked.remove(friend.id) else picked.add(friend.id)
+                            }.padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Checkbox(
+                                checked = selected,
+                                onCheckedChange = {
+                                    if (selected) picked.remove(friend.id) else picked.add(friend.id)
+                                },
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(friend.effectiveName, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
                     }
                 }
             }
         },
         confirmButton = {
-            ToolzExpressiveButton(onClick = { picked?.let { viewModel.addMember(it) }; onDismiss() }) {
-                Text(stringResource(R.string.st_Whisper_Groups_AddMembers), fontWeight = FontWeight.Bold)
+            ToolzExpressiveButton(
+                onClick = { viewModel.addMembers(picked.toList()); onDismiss() },
+                enabled = picked.isNotEmpty(),
+            ) {
+                Text(
+                    if (picked.isEmpty()) stringResource(R.string.st_Whisper_Groups_AddMembers)
+                    else "${stringResource(R.string.st_Whisper_Groups_AddMembers)} (${picked.size})",
+                    fontWeight = FontWeight.Bold,
+                )
             }
         },
         dismissButton = {
