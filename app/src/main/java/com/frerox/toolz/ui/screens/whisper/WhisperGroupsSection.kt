@@ -442,36 +442,6 @@ internal fun formatGroupListTime(iso: String): String {
     }.getOrDefault("")
 }
 
-/** Compact error + retry banner, mirroring the tab's initial-load banner. */
-@Composable
-private fun GroupErrorBanner(message: String, onRetry: () -> Unit) {
-    Surface(
-        color = MaterialTheme.colorScheme.errorContainer,
-        contentColor = MaterialTheme.colorScheme.onErrorContainer,
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text(
-                message,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.weight(1f),
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            ToolzTonalExpressiveButton(onClick = onRetry) {
-                Icon(Icons.Rounded.Refresh, null, Modifier.size(14.dp))
-                Spacer(Modifier.width(4.dp))
-                Text(stringResource(R.string.st_Whisper_Retry), style = MaterialTheme.typography.labelSmall)
-            }
-        }
-    }
-}
 
 /** Inline empty state (the header pill above is the single create entry). */
 @Composable
@@ -590,7 +560,7 @@ private fun CreateGroupDialog(
                         if (previewBitmap != null) {
                             Image(
                                 bitmap = previewBitmap.asImageBitmap(),
-                                contentDescription = null,
+                                contentDescription = GroupCd.picture(),
                                 modifier = Modifier.size(64.dp).clip(CircleShape),
                                 contentScale = ContentScale.Crop,
                             )
@@ -604,7 +574,7 @@ private fun CreateGroupDialog(
                         ) {
                             Icon(
                                 Icons.Rounded.AddPhotoAlternate,
-                                contentDescription = null,
+                                contentDescription = GroupCd.picture(),
                                 tint = MaterialTheme.colorScheme.surface,
                                 modifier = Modifier.size(20.dp).padding(2.dp),
                             )
@@ -773,7 +743,7 @@ private fun PickedChipsRow(
                 selected = true,
                 onClick = { onRemove(id) },
                 label = { Text(byId[id]?.effectiveName ?: "…", maxLines = 1) },
-                trailingIcon = { Icon(Icons.Rounded.Close, contentDescription = null, modifier = Modifier.size(14.dp)) },
+                trailingIcon = { Icon(Icons.Rounded.Close, contentDescription = stringResource(R.string.st_Whisper_Groups_Remove), modifier = Modifier.size(14.dp)) },
             )
         }
     }
@@ -807,7 +777,7 @@ fun GroupDegradedBanner() {
  * path (MediaStore, no extra permission on Q+).
  */
 @Composable
-fun GroupImageViewer(bytes: ByteArray, onDismiss: () -> Unit) {
+fun GroupImageViewer(bytes: ByteArray, onDismiss: () -> Unit, onMessage: (String) -> Unit = {}) {
     val bitmap = remember(bytes) {
         runCatching { android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }.getOrNull()
     }
@@ -824,7 +794,7 @@ fun GroupImageViewer(bytes: ByteArray, onDismiss: () -> Unit) {
             if (bitmap != null) {
                 Image(
                     bitmap = bitmap.asImageBitmap(),
-                    contentDescription = null,
+                    contentDescription = stringResource(R.string.st_Whisper_Groups_Photo),
                     modifier = Modifier.fillMaxWidth().padding(16.dp),
                     contentScale = ContentScale.Fit,
                 )
@@ -837,20 +807,18 @@ fun GroupImageViewer(bytes: ByteArray, onDismiss: () -> Unit) {
                 IconButton(onClick = {
                     saveScope.launch {
                         val ok = saveGroupImageToGallery(context, bytes)
-                        android.widget.Toast.makeText(
-                            context,
+                        onMessage(
                             context.getString(
                                 if (ok) R.string.st_Whisper_Groups_SavedToGallery
                                 else R.string.st_Whisper_Groups_SaveFailed,
                             ),
-                            android.widget.Toast.LENGTH_SHORT,
-                        ).show()
+                        )
                     }
                 }) {
-                    Icon(Icons.Rounded.Download, contentDescription = null, tint = MaterialTheme.colorScheme.surface)
+                    Icon(Icons.Rounded.Download, contentDescription = GroupCd.save(), tint = MaterialTheme.colorScheme.surface)
                 }
                 IconButton(onClick = onDismiss) {
-                    Icon(Icons.Rounded.Close, contentDescription = null, tint = MaterialTheme.colorScheme.surface)
+                    Icon(Icons.Rounded.Close, contentDescription = GroupCd.close(), tint = MaterialTheme.colorScheme.surface)
                 }
             }
         }

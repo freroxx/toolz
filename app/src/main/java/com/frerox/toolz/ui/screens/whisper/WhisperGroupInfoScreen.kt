@@ -49,7 +49,9 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -68,6 +70,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -132,14 +136,17 @@ fun WhisperGroupInfoScreen(
         else state.pending.filter { it.name.lowercase().contains(mq) }
     }
 
+    val snackbar = remember { SnackbarHostState() }
+    val snackScope = rememberCoroutineScope()
     Scaffold(
         modifier = Modifier.fillMaxSize().toolzBackground(),
+        snackbarHost = { GroupSnackbarHost(state = snackbar) },
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.st_Whisper_Groups_Info), fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = null)
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = GroupCd.back())
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
@@ -147,13 +154,11 @@ fun WhisperGroupInfoScreen(
         },
     ) { padding ->
         if (state.isLoading && membership == null) {
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
+            GroupUiCenterLoading(modifier = Modifier.fillMaxSize().padding(padding))
             return@Scaffold
         }
         LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp),
+            modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp).groupFadingEdge(),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {
@@ -165,6 +170,7 @@ fun WhisperGroupInfoScreen(
                         groupId = viewModel.groupId,
                         canChange = iAmAdmin || membership?.membersCanEdit == true,
                         onPick = { bytes, mime -> viewModel.setPicture(bytes, mime) },
+                        onError = { msg -> snackScope.launch { snackbar.showGroupNotice(msg) } },
                     )
                     Spacer(Modifier.size(8.dp))
                     Text(
@@ -191,7 +197,7 @@ fun WhisperGroupInfoScreen(
                     }
                     if (iAmAdmin) {
                         TextButton(onClick = { showRename = true }) {
-                            Icon(Icons.Rounded.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Rounded.Edit, contentDescription = stringResource(R.string.st_Whisper_Groups_Rename), modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
                             Text(stringResource(R.string.st_Whisper_Groups_Rename))
                         }
@@ -239,8 +245,10 @@ fun WhisperGroupInfoScreen(
                 }
             }
             if (iAmAdmin && state.requests.isNotEmpty()) {
-                item {
-                    SectionHeader(stringResource(R.string.st_Whisper_Groups_Requests))
+                stickyHeader {
+                    Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
+                        SectionHeader(stringResource(R.string.st_Whisper_Groups_Requests))
+                    }
                 }
                 items(state.requests, key = { "req_${it.userId}" }) { req ->
                     RequestRow(
@@ -253,7 +261,7 @@ fun WhisperGroupInfoScreen(
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ToolzTonalExpressiveButton(onClick = { showShare = true }, modifier = Modifier.weight(1f)) {
-                        Icon(Icons.Rounded.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Rounded.Share, contentDescription = stringResource(R.string.st_Whisper_Groups_Share), modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
                         Text(stringResource(R.string.st_Whisper_Groups_Share), fontWeight = FontWeight.Bold)
                     }
@@ -261,21 +269,23 @@ fun WhisperGroupInfoScreen(
                         onClick = { viewModel.loadGallery(); showGallery = true },
                         modifier = Modifier.weight(1f),
                     ) {
-                        Icon(Icons.Rounded.PhotoLibrary, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Rounded.PhotoLibrary, contentDescription = stringResource(R.string.st_Whisper_Groups_Gallery), modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
                         Text(stringResource(R.string.st_Whisper_Groups_Gallery), fontWeight = FontWeight.Bold)
                     }
                 }
             }
-            item {
-                SectionHeader(stringResource(R.string.st_Whisper_Groups_Members))
+            stickyHeader {
+                Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
+                    SectionHeader(stringResource(R.string.st_Whisper_Groups_Members))
+                }
             }
             item {
                 OutlinedTextField(
                     value = memberQuery,
                     onValueChange = { memberQuery = it },
                     label = { Text(stringResource(R.string.st_Whisper_Groups_MemberSearchHint)) },
-                    leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                    leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = GroupCd.search()) },
                     singleLine = true,
                     shape = RoundedCornerShape(20.dp),
                     modifier = Modifier.fillMaxWidth(),
@@ -284,7 +294,7 @@ fun WhisperGroupInfoScreen(
             if (canInvite) {
                 item {
                     ToolzExpressiveButton(onClick = { showAdd = true }, modifier = Modifier.fillMaxWidth()) {
-                        Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Rounded.Add, contentDescription = stringResource(R.string.st_Whisper_Groups_AddMembers), modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
                         Text(stringResource(R.string.st_Whisper_Groups_AddMembers), fontWeight = FontWeight.Bold)
                     }
@@ -309,10 +319,12 @@ fun WhisperGroupInfoScreen(
                 )
             }
             if (visiblePending.isNotEmpty() && iAmAdmin) {
-                item {
-                    SectionHeader(
-                        "${stringResource(R.string.st_Whisper_Groups_InvitedLabel)} (${state.pending.size})",
-                    )
+                stickyHeader {
+                    Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
+                        SectionHeader(
+                            "${stringResource(R.string.st_Whisper_Groups_InvitedLabel)} (${state.pending.size})",
+                        )
+                    }
                 }
                 items(visiblePending, key = { "pending_${it.userId}" }) { entry ->
                     PendingInviteRow(
@@ -323,33 +335,43 @@ fun WhisperGroupInfoScreen(
             }
             item {
                 Spacer(Modifier.size(4.dp))
-                ToolzExpressiveButton(
-                    onClick = { showLeave = true },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Icon(Icons.AutoMirrored.Rounded.Logout, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text(stringResource(R.string.st_Whisper_Groups_Leave), fontWeight = FontWeight.Bold)
-                }
-                // Last member standing: leave is blocked server-side, so disband
-                // (delete the group) replaces it instead of a dead button.
-                if (state.canDisband) {
-                    Spacer(Modifier.size(8.dp))
+                DangerZoneCard {
                     ToolzExpressiveButton(
-                        onClick = { showDisband = true },
+                        onClick = { showLeave = true },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Icon(Icons.Rounded.DeleteForever, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Icon(Icons.AutoMirrored.Rounded.Logout, contentDescription = stringResource(R.string.st_Whisper_Groups_Leave), modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text(stringResource(R.string.st_Whisper_Groups_Disband), fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.st_Whisper_Groups_Leave), fontWeight = FontWeight.Bold)
+                    }
+                    // Last member standing: leave is blocked server-side, so disband
+                    // (delete the group) replaces it instead of a dead button.
+                    if (state.canDisband) {
+                        Spacer(Modifier.size(8.dp))
+                        ToolzExpressiveButton(
+                            onClick = { showDisband = true },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.error,
+                                contentColor = MaterialTheme.colorScheme.onError,
+                            ),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Icon(Icons.Rounded.DeleteForever, contentDescription = stringResource(R.string.st_Whisper_Groups_Disband), modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(stringResource(R.string.st_Whisper_Groups_Disband), fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
                 Spacer(Modifier.size(24.dp))
             }
-            state.error?.let { err ->
-                item {
-                    Text(err, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                }
+            item {
+                GroupUiBanner(
+                    message = state.error.orEmpty(),
+                    visible = state.error != null,
+                    isError = true,
+                    actionLabel = stringResource(R.string.st_Whisper_Groups_Retry),
+                    onAction = { viewModel.load() },
+                )
             }
         }
     }
@@ -425,6 +447,7 @@ fun WhisperGroupInfoScreen(
             groupId = viewModel.groupId,
             groupName = membership?.name?.ifBlank { "Group" } ?: "Group",
             onDismiss = { showShare = false },
+            onMessage = { msg -> snackScope.launch { snackbar.showGroupNotice(msg) } },
         )
     }
     if (showGallery) {
@@ -433,6 +456,7 @@ fun WhisperGroupInfoScreen(
             bytesById = state.galleryBytes,
             onRequestBytes = { viewModel.loadGalleryImage(it) },
             onDismiss = { showGallery = false },
+            onMessage = { msg -> snackScope.launch { snackbar.showGroupNotice(msg) } },
         )
     }
     if (showMuteDurations) {
@@ -483,7 +507,7 @@ private fun MuteRow(muted: Boolean, mutedUntilMs: Long, onToggle: () -> Unit) {
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(if (muted) Icons.Rounded.VolumeOff else Icons.Rounded.VolumeUp, contentDescription = null)
+            Icon(if (muted) Icons.Rounded.VolumeOff else Icons.Rounded.VolumeUp, contentDescription = if (muted) GroupCd.unmute() else GroupCd.mute())
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
@@ -555,7 +579,7 @@ private fun MemberRow(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (iAmAdmin && role != "admin") {
                             TextButton(onClick = onPromote) {
-                                Icon(Icons.Rounded.Star, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Rounded.Star, contentDescription = stringResource(R.string.st_Whisper_Groups_MakeAdmin), modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(4.dp))
                                 Text(stringResource(R.string.st_Whisper_Groups_MakeAdmin))
                             }
@@ -574,18 +598,18 @@ private fun MemberRow(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (iAmAdmin) {
                             TextButton(onClick = onRemove) {
-                                Icon(Icons.Rounded.PersonRemove, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Rounded.PersonRemove, contentDescription = stringResource(R.string.st_Whisper_Groups_Remove), modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(4.dp))
                                 Text(stringResource(R.string.st_Whisper_Groups_Remove))
                             }
                         }
                         TextButton(onClick = onBlock) {
-                            Icon(Icons.Rounded.Block, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Rounded.Block, contentDescription = stringResource(R.string.st_Whisper_Groups_Block), modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
                             Text(stringResource(R.string.st_Whisper_Groups_Block))
                         }
                         TextButton(onClick = onReport) {
-                            Icon(Icons.Rounded.Flag, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Rounded.Flag, contentDescription = stringResource(R.string.st_Whisper_Groups_Report), modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
                             Text(
                                 stringResource(R.string.st_Whisper_Groups_Report),
@@ -627,7 +651,7 @@ private fun AddMemberDialog(
                     value = query,
                     onValueChange = { query = it },
                     label = { Text(stringResource(R.string.st_Whisper_Groups_SearchHint)) },
-                    leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                    leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = GroupCd.search()) },
                     singleLine = true,
                     shape = RoundedCornerShape(20.dp),
                     modifier = Modifier.fillMaxWidth(),
@@ -707,15 +731,19 @@ private fun GroupPictureHeader(
     groupId: String,
     canChange: Boolean,
     onPick: (ByteArray, String) -> Unit,
+    onError: (String) -> Unit = {},
 ) {
     val context = LocalContext.current
+    val tooBig = stringResource(R.string.st_Whisper_Error_ImageTooLarge)
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         runCatching {
             val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
-            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-            if (bytes != null) onPick(bytes, mime)
-        }
+            val bytes = context.contentResolver.openInputStream(uri)?.use {
+                com.frerox.toolz.data.whisper.readBoundedGroupImageBytes(it)
+            } ?: error("empty")
+            onPick(bytes, mime)
+        }.onFailure { onError(tooBig) }
     }
     val bitmap = remember(pictureBytes) {
         pictureBytes?.let {
@@ -732,7 +760,7 @@ private fun GroupPictureHeader(
         if (bitmap != null) {
             Image(
                 bitmap = bitmap.asImageBitmap(),
-                contentDescription = null,
+                contentDescription = GroupCd.picture(),
                 modifier = Modifier.size(96.dp).clip(CircleShape),
                 contentScale = ContentScale.Crop,
             )
@@ -747,7 +775,7 @@ private fun GroupPictureHeader(
             ) {
                 Icon(
                     Icons.Rounded.AddPhotoAlternate,
-                    contentDescription = null,
+                    contentDescription = GroupCd.picture(),
                     tint = MaterialTheme.colorScheme.surface,
                     modifier = Modifier.size(24.dp).padding(3.dp),
                 )
@@ -769,7 +797,7 @@ private fun NotifRow(on: Boolean, isOwnerOrAdmin: Boolean, onToggle: () -> Unit)
         ) {
             Icon(
                 Icons.Rounded.NotificationsActive,
-                contentDescription = null,
+                contentDescription = if (on) GroupCd.unmute() else GroupCd.mute(),
                 tint = if (on) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
             )
             Spacer(Modifier.width(12.dp))
@@ -958,7 +986,12 @@ private fun DescEditDialog(current: String, onDismiss: () -> Unit, onConfirm: (S
 
 /** Share sheet: QR of the group id + copy helpers (join still needs an invite). */
 @Composable
-private fun ShareGroupDialog(groupId: String, groupName: String, onDismiss: () -> Unit) {
+private fun ShareGroupDialog(
+    groupId: String,
+    groupName: String,
+    onDismiss: () -> Unit,
+    onMessage: (String) -> Unit = {},
+) {
     val context = LocalContext.current
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     val qr = remember(groupId) {
@@ -979,7 +1012,7 @@ private fun ShareGroupDialog(groupId: String, groupName: String, onDismiss: () -
                 if (qrBitmap != null) {
                     Image(
                         bitmap = qrBitmap,
-                        contentDescription = null,
+                        contentDescription = stringResource(R.string.st_Whisper_Groups_Share),
                         modifier = Modifier.size(200.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surface),
                     )
                 }
@@ -992,7 +1025,7 @@ private fun ShareGroupDialog(groupId: String, groupName: String, onDismiss: () -
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ToolzTonalExpressiveButton(onClick = {
                         clipboard.setText(AnnotatedString(groupId))
-                        android.widget.Toast.makeText(context, context.getString(R.string.st_Whisper_Groups_Copied), android.widget.Toast.LENGTH_SHORT).show()
+                        onMessage(context.getString(R.string.st_Whisper_Groups_Copied))
                     }) {
                         Text(stringResource(R.string.st_Whisper_Groups_CopyId))
                     }
@@ -1013,6 +1046,7 @@ private fun GroupGalleryDialog(
     bytesById: Map<String, ByteArray>,
     onRequestBytes: (WhisperGroupInfoViewModel.GalleryItem) -> Unit,
     onDismiss: () -> Unit,
+    onMessage: (String) -> Unit = {},
 ) {
     var viewer by remember { mutableStateOf<ByteArray?>(null) }
     AlertDialog(
@@ -1028,7 +1062,7 @@ private fun GroupGalleryDialog(
             } else {
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(3),
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp),
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp).groupFadingEdge(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
@@ -1055,7 +1089,7 @@ private fun GroupGalleryDialog(
                                     contentScale = ContentScale.Crop,
                                 )
                             } else {
-                                CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                                GroupUiInlineLoading()
                             }
                         }
                     }
@@ -1068,7 +1102,7 @@ private fun GroupGalleryDialog(
         },
     )
     viewer?.let { bytes ->
-        GroupImageViewer(bytes = bytes, onDismiss = { viewer = null })
+        GroupImageViewer(bytes = bytes, onDismiss = { viewer = null }, onMessage = onMessage)
     }
 }
 
@@ -1096,6 +1130,24 @@ private fun RequestRow(name: String, onApprove: () -> Unit, onDeny: () -> Unit) 
             ToolzExpressiveButton(onClick = onApprove) {
                 Text(stringResource(R.string.st_Whisper_Groups_Approve), fontWeight = FontWeight.Bold)
             }
+        }
+    }
+}
+
+/** Visually separated destructive actions (leave / disband live here only). */
+@Composable
+private fun DangerZoneCard(content: @Composable () -> Unit) {
+    Card(
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f),
+        ),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            content()
         }
     }
 }
