@@ -178,8 +178,12 @@ fun WhisperGroupInfoScreen(
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Black,
                     )
+                    val nMembers = state.members.size
                     Text(
-                        "${state.members.size} ${stringResource(R.string.st_Whisper_Groups_Members)} · " +
+                        "$nMembers " + stringResource(
+                            if (nMembers == 1) R.string.st_Whisper_Groups_Member
+                            else R.string.st_Whisper_Groups_Members,
+                        ) + " · " +
                             if (membership?.inviteAdminsOnly == true) stringResource(R.string.st_Whisper_Groups_InviteAdmins)
                             else stringResource(R.string.st_Whisper_Groups_InviteAll),
                         style = MaterialTheme.typography.bodySmall,
@@ -828,7 +832,7 @@ private fun PendingInviteRow(name: String, onCancel: () -> Unit) {
     Card(
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         ),
     ) {
         Row(

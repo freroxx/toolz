@@ -233,3 +233,44 @@ object GroupCd {
     @Composable fun deny(): String = stringResource(R.string.st_Whisper_Groups_Deny)
     @Composable fun latest(): String = stringResource(R.string.st_Whisper_Groups_CdLatest)
 }
+
+/** Full dead-end panel (chat opened but membership never resolved). */
+@Composable
+fun GroupUiDeadEnd(
+    message: String,
+    onBack: () -> Unit,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp, vertical = 32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(
+            Icons.Rounded.ErrorOutline,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(40.dp),
+        )
+        Text(
+            message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            com.frerox.toolz.ui.components.ToolzTonalExpressiveButton(onClick = onBack) {
+                Text(stringResource(R.string.st_Whisper_Groups_CdBack))
+            }
+            com.frerox.toolz.ui.components.ToolzExpressiveButton(onClick = onRetry) {
+                Text(
+                    stringResource(R.string.st_Whisper_Groups_Retry),
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
+    }
+}

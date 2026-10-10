@@ -41,6 +41,8 @@ import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -200,7 +202,6 @@ private fun GroupInviteCard(
     ExpressiveCard(
         onClick = {},
         modifier = Modifier.fillMaxWidth(),
-        containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
@@ -554,29 +555,35 @@ private fun CreateGroupDialog(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Box(
-                        modifier = Modifier.size(64.dp).clip(CircleShape).clickable { picker.launch("image/*") },
+                        modifier = Modifier.size(72.dp),
                         contentAlignment = Alignment.Center,
                     ) {
                         if (previewBitmap != null) {
                             Image(
                                 bitmap = previewBitmap.asImageBitmap(),
                                 contentDescription = GroupCd.picture(),
-                                modifier = Modifier.size(64.dp).clip(CircleShape),
+                                modifier = Modifier.size(64.dp).clip(CircleShape)
+                                    .clickable { picker.launch("image/*") },
                                 contentScale = ContentScale.Crop,
                             )
                         } else {
-                            GroupAvatar(name = name.ifBlank { "G" }, groupId = name.ifBlank { "preview" }, size = 64.dp)
+                            Box(modifier = Modifier.clickable { picker.launch("image/*") }) {
+                                GroupAvatar(name = name.ifBlank { "G" }, groupId = name.ifBlank { "preview" }, size = 64.dp)
+                            }
                         }
-                        Box(
-                            modifier = Modifier.size(64.dp).clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.25f)),
-                            contentAlignment = Alignment.BottomEnd,
+                        FilledIconButton(
+                            onClick = { picker.launch("image/*") },
+                            modifier = Modifier.align(Alignment.BottomEnd).size(26.dp),
+                            shape = CircleShape,
+                            colors = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                            ),
                         ) {
                             Icon(
                                 Icons.Rounded.AddPhotoAlternate,
                                 contentDescription = GroupCd.picture(),
-                                tint = MaterialTheme.colorScheme.surface,
-                                modifier = Modifier.size(20.dp).padding(2.dp),
+                                modifier = Modifier.size(15.dp),
                             )
                         }
                     }
@@ -652,7 +659,14 @@ private fun CreateGroupDialog(
                             label = { Text(stringResource(R.string.st_Whisper_Groups_InviteAll)) },
                         )
                     }
-                    if (visibleFriends.isEmpty()) {
+                    if (state.friends.isEmpty() && !state.isLoading) {
+                        GroupUiBanner(
+                            message = stringResource(R.string.st_Whisper_Groups_NoFriendsForGroup),
+                            visible = true,
+                            isError = false,
+                            onDismiss = null,
+                        )
+                    } else if (visibleFriends.isEmpty()) {
                         Text(
                             stringResource(R.string.st_Whisper_Groups_NoFriendsFound),
                             style = MaterialTheme.typography.bodyMedium,
