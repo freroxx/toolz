@@ -30,6 +30,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.AddPhotoAlternate
 import androidx.compose.material.icons.rounded.BarChart
@@ -40,12 +41,10 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.VolumeOff
 import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -59,6 +58,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -85,7 +85,9 @@ import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.WhisperGroupChatMessage
 import com.frerox.toolz.data.whisper.groupsEnabled
 import com.frerox.toolz.data.whisper.readBoundedGroupImageBytes
+import com.frerox.toolz.ui.components.ExpressiveLinearProgressIndicator
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
+import com.frerox.toolz.ui.components.ToolzLargeExtendedFloatingActionButton
 import com.frerox.toolz.ui.theme.toolzBackground
 
 /**
@@ -108,6 +110,7 @@ fun WhisperGroupChatScreen(
     val scrollScope = rememberCoroutineScope()
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
+    val snackbar = remember { SnackbarHostState() }
 
     var searching by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
@@ -150,14 +153,18 @@ fun WhisperGroupChatScreen(
             if (anchor >= 0) listState.scrollToItem(anchor)
         }
     }
-    LaunchedEffect(visible.lastOrNull()?.id) {
-        if (scrolledInitial && visible.isNotEmpty()) {
+    val feedPreview = remember(visible, state.systemEvents, state.firstUnreadId, state.unreadCount) {
+        buildFeed(visible, state.systemEvents, state.firstUnreadId, state.unreadCount)
+    }
+    LaunchedEffect(feedPreview.size, visible.lastOrNull()?.id) {
+        if (scrolledInitial && feedPreview.isNotEmpty()) {
             val lastIdx = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index
             val total = listState.layoutInfo.totalItemsCount
             // Only auto-pin when already near the bottom (reading history
-            // must not yank on every arrival).
+            // must not yank on every arrival). Index is feed-based: message
+            // indices shift under dividers and system lines.
             if (lastIdx == null || total == 0 || lastIdx >= total - 3) {
-                listState.animateScrollToItem(visible.size - 1)
+                listState.animateScrollToItem(feedPreview.size - 1)
             }
         }
     }
@@ -171,7 +178,7 @@ fun WhisperGroupChatScreen(
             if (bytes != null) pendingImage = bytes to mime
         }.onFailure { e ->
             // Bounded-read overflow surfaces here (no VM round-trip needed).
-            android.widget.Toast.makeText(context, e.message ?: "", android.widget.Toast.LENGTH_SHORT).show()
+            scrollScope.launch { snackbar.showGroupNotice(e.message.orEmpty()) }
         }
     }
 
@@ -196,6 +203,7 @@ fun WhisperGroupChatScreen(
 
     Scaffold(
         modifier = Modifier.fillMaxSize().toolzBackground(),
+        snackbarHost = { GroupSnackbarHost(state = snackbar) },
         topBar = {
             TopAppBar(
                 title = {
@@ -215,27 +223,27 @@ fun WhisperGroupChatScreen(
                 },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = null)
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = GroupCd.back())
                     }
                 },
                 actions = {
                     IconButton(onClick = { searching = !searching; if (!searching) searchQuery = "" }) {
-                        Icon(Icons.Rounded.Search, contentDescription = null)
+                        Icon(Icons.Rounded.Search, contentDescription = GroupCd.search())
                     }
                     IconButton(onClick = { showPollCreate = true }) {
-                        Icon(Icons.Rounded.BarChart, contentDescription = null)
+                        Icon(Icons.Rounded.BarChart, contentDescription = GroupCd.createPoll())
                     }
                     IconButton(onClick = { viewModel.toggleMute() }) {
                         Icon(
                             if (state.isMuted) Icons.Rounded.VolumeOff else Icons.Rounded.VolumeUp,
-                            contentDescription = null,
+                            contentDescription = if (state.isMuted) GroupCd.unmute() else GroupCd.mute(),
                         )
                     }
                     IconButton(onClick = { viewModel.load() }) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = null)
+                        Icon(Icons.Rounded.Refresh, contentDescription = GroupCd.refresh())
                     }
                     IconButton(onClick = { onNavigateToInfo(viewModel.groupId) }) {
-                        Icon(Icons.Rounded.Info, contentDescription = null)
+                        Icon(Icons.Rounded.Info, contentDescription = GroupCd.info())
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
@@ -259,7 +267,7 @@ fun WhisperGroupChatScreen(
                         draft = if (at >= 0) draft.substring(0, at) + "@$name " else "$draft@$name "
                     },
                 )
-                if (state.typingNames.isNotEmpty()) {
+                GroupAnimatedReveal(visible = state.typingNames.isNotEmpty()) {
                     Text(
                         typingLine(state.typingNames),
                         style = MaterialTheme.typography.bodySmall,
@@ -275,7 +283,7 @@ fun WhisperGroupChatScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     IconButton(onClick = { picker.launch("image/*") }) {
-                        Icon(Icons.Rounded.AddPhotoAlternate, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Icon(Icons.Rounded.AddPhotoAlternate, contentDescription = GroupCd.attach(), tint = MaterialTheme.colorScheme.primary)
                     }
                     OutlinedTextField(
                         value = draft,
@@ -303,7 +311,7 @@ fun WhisperGroupChatScreen(
                             }
                         },
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = GroupCd.send(), tint = MaterialTheme.colorScheme.primary)
                     }
                 }
             }
@@ -315,11 +323,11 @@ fun WhisperGroupChatScreen(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
                     label = { Text(stringResource(R.string.st_Whisper_Groups_SearchMessagesHint)) },
-                    leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                    leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = GroupCd.search()) },
                     trailingIcon = {
                         if (searchQuery.isNotBlank()) {
                             IconButton(onClick = { searchQuery = "" }) {
-                                Icon(Icons.Rounded.Close, contentDescription = null)
+                                Icon(Icons.Rounded.Close, contentDescription = GroupCd.clear())
                             }
                         }
                     },
@@ -328,30 +336,27 @@ fun WhisperGroupChatScreen(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
                 )
             }
-            state.error?.let { err ->
-                Text(
-                    err,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                )
-            }
+            GroupUiBanner(
+                message = state.error.orEmpty(),
+                visible = state.error != null,
+                isError = true,
+                actionLabel = stringResource(R.string.st_Whisper_Groups_Retry),
+                onAction = { viewModel.load() },
+            )
             if (state.degraded) {
                 Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
                     GroupDegradedBanner()
                 }
             }
             if (state.isUploadingImage) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
+                ExpressiveLinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
             }
             if (state.isLoading && visible.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
-                }
+                GroupUiCenterLoading(modifier = Modifier.fillMaxSize())
             } else if (searching && searchQuery.trim().length >= 2) {
                 SearchResultsList(
                     query = searchQuery,
+                    highlight = searchQuery,
                     loading = searchingNow,
                     results = searchResults,
                     onPick = { msg ->
@@ -361,17 +366,13 @@ fun WhisperGroupChatScreen(
                         val idx = buildFeed(visible, state.systemEvents, state.firstUnreadId, state.unreadCount)
                             .indexOfFirst { it is FeedItem.Msg && it.msg.id == msg.id }
                         if (idx >= 0) scrollScope.launch { listState.animateScrollToItem(idx) }
-                        else android.widget.Toast.makeText(
-                            context,
-                            context.getString(R.string.st_Whisper_Groups_LoadOlder),
-                            android.widget.Toast.LENGTH_SHORT,
-                        ).show()
+                        else scrollScope.launch {
+                            snackbar.showGroupNotice(context.getString(R.string.st_Whisper_Groups_LoadOlder))
+                        }
                     },
                 )
             } else {
-                val feed = remember(visible, state.systemEvents, state.firstUnreadId, state.unreadCount) {
-                    buildFeed(visible, state.systemEvents, state.firstUnreadId, state.unreadCount)
-                }
+                val feed = feedPreview
                 val atBottom = remember {
                     androidx.compose.runtime.derivedStateOf {
                         val info = listState.layoutInfo
@@ -382,14 +383,14 @@ fun WhisperGroupChatScreen(
                 androidx.compose.foundation.layout.Box(modifier = Modifier.fillMaxSize()) {
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
+                    modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp).groupFadingEdge(),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     if (state.hasMore) {
                         item {
                             Box(Modifier.fillMaxWidth().padding(vertical = 4.dp), contentAlignment = Alignment.Center) {
                                 if (state.loadingMore) {
-                                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                                    GroupUiInlineLoading()
                                 } else {
                                     TextButton(onClick = { viewModel.loadMore() }) {
                                         Text(stringResource(R.string.st_Whisper_Groups_LoadOlder))
@@ -448,20 +449,29 @@ fun WhisperGroupChatScreen(
                     }
                     // Jump-to-latest: appears with pending unread once the user
                     // scrolls up (WhatsApp-style). Tapping pins to the bottom.
-                    if (state.unreadCount > 0 && !atBottom.value) {
-                        androidx.compose.material3.ExtendedFloatingActionButton(
+                    GroupAnimatedReveal(
+                        visible = state.unreadCount > 0 && !atBottom.value,
+                        modifier = Modifier.align(androidx.compose.ui.Alignment.BottomEnd)
+                            .padding(end = 4.dp, bottom = 12.dp),
+                    ) {
+                        ToolzLargeExtendedFloatingActionButton(
                             onClick = {
                                 scrollScope.launch {
                                     listState.animateScrollToItem(feed.size - 1)
                                 }
                             },
-                            modifier = Modifier.align(androidx.compose.ui.Alignment.BottomEnd)
-                                .padding(end = 4.dp, bottom = 12.dp),
-                        ) {
-                            Text(
-                                stringResource(R.string.st_Whisper_Groups_NewMessages, state.unreadCount),
-                            )
-                        }
+                            icon = {
+                                Icon(
+                                    Icons.Rounded.ArrowDownward,
+                                    contentDescription = GroupCd.latest(),
+                                )
+                            },
+                            text = {
+                                Text(
+                                    stringResource(R.string.st_Whisper_Groups_NewMessages, state.unreadCount),
+                                )
+                            },
+                        )
                     }
                 }
             }
@@ -487,7 +497,7 @@ fun WhisperGroupChatScreen(
             onReply = { replyTarget = msg; menuMsg = null },
             onCopy = {
                 clipboard.setText(AnnotatedString(msg.body))
-                android.widget.Toast.makeText(context, context.getString(R.string.st_Whisper_Groups_Copied), android.widget.Toast.LENGTH_SHORT).show()
+                scrollScope.launch { snackbar.showGroupNotice(context.getString(R.string.st_Whisper_Groups_Copied)) }
                 menuMsg = null
             },
             onDeleteForMe = { viewModel.deleteForMe(msg); menuMsg = null },
@@ -523,7 +533,11 @@ fun WhisperGroupChatScreen(
     }
 
     viewerBytes?.let { bytes ->
-        GroupImageViewer(bytes = bytes, onDismiss = { viewerBytes = null })
+        GroupImageViewer(
+            bytes = bytes,
+            onDismiss = { viewerBytes = null },
+            onMessage = { msg -> scrollScope.launch { snackbar.showGroupNotice(msg) } },
+        )
     }
 
     if (showPollCreate) {
@@ -543,6 +557,35 @@ fun WhisperGroupChatScreen(
         )
     }
 
+}
+
+/** Body text with every query match tinted + bolded (search results). */
+@Composable
+private fun SearchHighlightText(body: String, query: String) {
+    val q = query.trim()
+    val accent = MaterialTheme.colorScheme.primary
+    val annotated = remember(body, q, accent) {
+        val builder = androidx.compose.ui.text.AnnotatedString.Builder(body)
+        if (q.length >= 2) {
+            var from = 0
+            while (true) {
+                val idx = body.lowercase().indexOf(q.lowercase(), from)
+                if (idx < 0) break
+                builder.addStyle(
+                    androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Bold, color = accent),
+                    idx, idx + q.length,
+                )
+                from = idx + q.length
+            }
+        }
+        builder.toAnnotatedString()
+    }
+    Text(
+        annotated,
+        style = MaterialTheme.typography.bodyMedium,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+    )
 }
 
 @Composable
@@ -672,6 +715,7 @@ private fun UnreadDivider(count: Int) {
 @Composable
 private fun SearchResultsList(
     query: String,
+    highlight: String,
     loading: Boolean,
     results: List<WhisperGroupChatMessage>?,
     onPick: (WhisperGroupChatMessage) -> Unit,
@@ -679,7 +723,7 @@ private fun SearchResultsList(
     Column(modifier = Modifier.fillMaxSize()) {
         if (loading && results == null) {
             Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(modifier = Modifier.size(28.dp))
+                GroupUiInlineLoading()
             }
         }
         val list = results.orEmpty()
@@ -710,11 +754,9 @@ private fun SearchResultsList(
                         color = MaterialTheme.colorScheme.primary,
                         maxLines = 1,
                     )
-                    Text(
-                        msg.body,
-                        style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
+                    SearchHighlightText(
+                        body = msg.body,
+                        query = highlight,
                     )
                     Text(
                         formatGroupTime(msg.createdAt),
@@ -837,7 +879,7 @@ private fun GroupBubble(
                     if (bitmap != null) {
                         Image(
                             bitmap = bitmap.asImageBitmap(),
-                            contentDescription = null,
+                            contentDescription = stringResource(R.string.st_Whisper_Groups_Photo),
                             modifier = Modifier.heightIn(max = 260.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp))
                                 .clickable { imageBytes?.let(onImageClick) },
                             contentScale = ContentScale.Crop,
@@ -847,7 +889,7 @@ private fun GroupBubble(
                             modifier = Modifier.heightIn(min = 120.dp).fillMaxWidth(),
                             contentAlignment = Alignment.Center,
                         ) {
-                            CircularProgressIndicator(modifier = Modifier.size(28.dp))
+                            GroupUiInlineLoading()
                         }
                     }
                 }
@@ -893,7 +935,7 @@ private fun GroupBubble(
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = if (mine) FontWeight.Bold else FontWeight.Normal,
                                     modifier = Modifier.clickable { onReact(emoji) }
-                                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                                        .padding(horizontal = 10.dp, vertical = 6.dp),
                                 )
                             }
                         }
@@ -963,7 +1005,7 @@ private fun MessageActionDialog(
                                     else MaterialTheme.colorScheme.surfaceContainerHighest,
                                 )
                                 .clickable { onReact(emoji); onDismiss() }
-                                .padding(6.dp),
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
                         )
                     }
                 }
@@ -1132,7 +1174,7 @@ private fun ReplyPreviewBar(sender: String, text: String, onCancel: () -> Unit) 
             )
         }
         IconButton(onClick = onCancel, modifier = Modifier.size(28.dp)) {
-            Icon(Icons.Rounded.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+            Icon(Icons.Rounded.Close, contentDescription = GroupCd.clear(), modifier = Modifier.size(16.dp))
         }
     }
 }
