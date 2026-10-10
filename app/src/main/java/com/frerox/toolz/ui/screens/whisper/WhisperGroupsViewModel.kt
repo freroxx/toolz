@@ -21,6 +21,7 @@ import com.frerox.toolz.data.whisper.WhisperProfile
 import com.frerox.toolz.data.whisper.WhisperRepository
 import com.frerox.toolz.data.whisper.cachedGroupMembers
 import com.frerox.toolz.data.whisper.cachedGroups
+import com.frerox.toolz.data.whisper.countGroupUnread
 import com.frerox.toolz.data.whisper.createGroup
 import com.frerox.toolz.data.whisper.declineGroupInvite
 import com.frerox.toolz.data.whisper.fetchGroupMessages
@@ -37,6 +38,9 @@ import com.frerox.toolz.data.whisper.setGroupPicture
 import com.frerox.toolz.data.whisper.shouldNotifyGroupEvent
 import com.frerox.toolz.data.whisper.syncGroups
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -170,41 +174,54 @@ class WhisperGroupsViewModel @Inject constructor(
 
     /**
      * Latest-message previews + unread counts + picture thumbs, resolved after
-     * the main sync (each needs frame decrypts). Failures stay silent — a row
-     * without a preview still opens the chat.
+     * the main sync. Per-group work runs concurrently (each needs its own
+     * verified sync + frame decrypts); a slow group never head-blocks the
+     * rest. Failures stay silent — a row without a preview still opens.
+     * Unread counts come from a decrypt-free server count (no 20-cap).
      */
     private fun refreshPreviews(groups: List<WhisperGroupEntity>) {
         viewModelScope.launch {
             val me = repository.myId
-            val previews = mutableMapOf<String, GroupPreview>()
+            val results = coroutineScope {
+                groups.map { g ->
+                    async {
+                        runCatching {
+                            val recent = repository.fetchGroupMessages(g.id, 20).getOrThrow()
+                            val mark = readStore.readAt(g.id)
+                            val last = recent.lastOrNull()
+                            val unread = repository.countGroupUnread(g.id, mark, me)
+                            val preview = GroupPreview(
+                                text = last?.let { previewText(it) }.orEmpty(),
+                                time = last?.createdAt.orEmpty(),
+                                senderName = last?.senderName.orEmpty(),
+                                unread = if (last == null) 0 else unread,
+                                hasImage = last?.image != null,
+                                hasPoll = last?.poll != null,
+                            )
+                            // Picture thumb (content-guarded at merge time).
+                            val bytes = repository.openGroupPicture(g.id).getOrNull()
+                            Triple(g.id, preview, bytes)
+                        }.getOrNull()
+                    }
+                }.awaitAll().filterNotNull()
+            }
+            val previews = results.associate { it.first to it.second }
+            _uiState.update { it.copy(previews = previews) }
             val pics = _pictures.value.toMutableMap()
             var picsChanged = false
-            groups.forEach { g ->
-                runCatching {
-                    val recent = repository.fetchGroupMessages(g.id, 20).getOrThrow()
-                    val mark = readStore.readAt(g.id)
-                    val last = recent.lastOrNull()
-                    previews[g.id] = GroupPreview(
-                        text = last?.let { previewText(it) }.orEmpty(),
-                        time = last?.createdAt.orEmpty(),
-                        senderName = last?.senderName.orEmpty(),
-                        unread = if (last == null) 0 else recent.count { it.createdAt > mark && it.senderId != me },
-                        hasImage = last?.image != null,
-                        hasPoll = last?.poll != null,
-                    )
-                    // Picture thumb (content-guarded: no-op when unchanged).
-                    val bytes = repository.openGroupPicture(g.id).getOrNull()
-                    if (bytes != null) {
-                        if (pics[g.id]?.contentEquals(bytes) != true) {
-                            pics[g.id] = bytes
-                            picsChanged = true
-                        }
-                    } else if (pics.remove(g.id) != null) {
+            results.forEach { (id, _, bytes) ->
+                if (bytes != null) {
+                    if (pics[id]?.contentEquals(bytes) != true) {
+                        pics[id] = bytes
                         picsChanged = true
                     }
+                } else if (pics.remove(id) != null) {
+                    picsChanged = true
                 }
             }
-            _uiState.update { it.copy(previews = previews) }
+            // Drop thumbs for groups that left the list (evicted/kicked).
+            val stalePics = pics.keys - groups.map { it.id }.toSet()
+            stalePics.forEach { pics.remove(it).let { picsChanged = true } }
             if (picsChanged) _pictures.value = pics
             Unit
         }
@@ -302,6 +319,9 @@ class WhisperGroupsViewModel @Inject constructor(
                     runCatching {
                         repository.observeGroupMessagesLive(m.groupId).collect { ping ->
                             if (ping.senderId == me) return@collect
+                            // Votes are tally data: open chats refresh silently
+                            // via load(), but they never ping (push layer agrees).
+                            if (ping.kind == "vote") return@collect
                             if (!seenEventIds.add("msg:${ping.clientId}")) return@collect
                             val group = lastGroups.firstOrNull { it.id == m.groupId }
                             val sender = lastFriendNames[ping.senderId]?.takeIf { it.isNotBlank() }

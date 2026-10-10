@@ -2994,3 +2994,14 @@ create trigger trg_group_messages_cleanup_receipts
 -- whisper_group_invites / whisper_group_messages / whisper_group_events.
 -- NEVER add webhooks on whisper_group_receipts / whisper_group_typing:
 -- presence rows churn constantly and carry no pushable content.
+
+-- ═══════════════ 20261011_whisper_groups_msgkind.sql ═
+-- Vote/poll traffic control. Votes are tally data, not chat lines: fanning a
+-- push per vote spams every member and burns the send quota. A `msg_kind`
+-- flag lets the push layer stay silent for votes while realtime still
+-- delivers them to open chats (tally refreshes, no ping). Metadata cost is
+-- one small label per row (chat/poll/vote/image) — documented in WHISPER.md
+-- §11 alongside the other group-row metadata. Content stays opaque.
+alter table public.whisper_group_messages
+    add column if not exists msg_kind text not null default 'chat'
+    check (msg_kind in ('chat', 'poll', 'vote', 'image'));

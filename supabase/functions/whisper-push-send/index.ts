@@ -320,6 +320,9 @@ async function handleGroupPush(
     const senderId = str(record?.sender_id);
     const clientId = str(record?.client_id);
     if (!groupId || !senderId || !clientId) return { sent: 0, pruned: 0, skipped: "not_a_pushable_event" };
+    // Votes are tally data, not chat lines: realtime delivers them to open
+    // chats silently, but they never fan out a push (quota + noise).
+    if (str(record?.msg_kind) === "vote") return { sent: 0, pruned: 0, skipped: "vote_no_push" };
     const [members, groupRows] = await Promise.all([
       restRows(env, `whisper_group_members?group_id=eq.${encodeURIComponent(groupId)}&select=user_id`),
       restRows(env, `whisper_groups?id=eq.${encodeURIComponent(groupId)}&select=name&limit=1`),

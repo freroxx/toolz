@@ -708,6 +708,8 @@ internal data class GroupMessageRow(
     @SerialName("content_iv") val contentIv: String,
     val epoch: Long,
     @SerialName("created_at") val createdAt: String? = null,
+    /** Traffic class (chat/poll/vote/image): push + tally routing, never content. */
+    @SerialName("msg_kind") val msgKind: String = "chat",
 )
 
 @Serializable
@@ -719,6 +721,7 @@ internal data class GroupMessageInsert(
     @SerialName("content_iv") val contentIv: String,
     val epoch: Long,
     @SerialName("client_version_code") val clientVersionCode: Int,
+    @SerialName("msg_kind") val msgKind: String = "chat",
 )
 
 /** One decrypted group chat line for the UI. */
@@ -862,6 +865,8 @@ suspend fun WhisperRepository.syncGroups(): Result<List<WhisperGroupMembership>>
         .decodeList<GroupMemberRow>()
     // Per-group isolation: one poisoned or unreachable group must never hide
     // the healthy ones (a total failure still surfaces when nothing synced).
+    // Authoritative removals evict the local cache: without this a kicked
+    // group lingers in cachedGroups forever (sync fails, cache never clears).
     val ok = mutableListOf<WhisperGroupMembership>()
     var failures = 0
     myRows.forEach { row ->
@@ -869,10 +874,30 @@ suspend fun WhisperRepository.syncGroups(): Result<List<WhisperGroupMembership>>
             .onSuccess { ok.add(it) }
             .onFailure {
                 failures++
+                val msg = it.message.orEmpty()
+                if ("no longer a member" in msg || "Group not found" in msg) {
+                    runCatching {
+                        groupDao.deleteGroup(row.groupId)
+                        groupDao.clearMembers(row.groupId)
+                        groupDao.clearEvents(row.groupId)
+                    }
+                }
                 android.util.Log.w("WhisperGroups", "syncGroups: skipping ${row.groupId}: ${it.message}")
             }
     }
     if (ok.isEmpty() && failures > 0) error("Couldn't sync your groups. Check your connection and retry.")
+    // Kicked/disbanded groups vanish from the server members list but linger
+    // in the local cache (nothing else clears them): evict cached groups
+    // outside the authoritative server set. Transient per-group failures stay
+    // cached — only non-membership evicts.
+    val myIds = myRows.map { it.groupId }.toSet()
+    runCatching {
+        groupDao.allGroups().filter { it.id !in myIds }.forEach { stale ->
+            groupDao.deleteGroup(stale.id)
+            groupDao.clearMembers(stale.id)
+            groupDao.clearEvents(stale.id)
+        }
+    }
     ok
 }
 
@@ -1360,7 +1385,15 @@ suspend fun WhisperRepository.sendGroupContent(groupId: String, content: Whisper
     val m = syncGroup(groupId).getOrThrow()
     require(m.isMember(me)) { "You are no longer a member of this group." }
     require(!m.adminOnlySend || m.isAdmin(me)) { "Only admins can send messages in this group." }
-    sealAndPublishContent(groupId, m, me, buildGroupContentBody(content)).getOrThrow()
+    // Traffic class for push routing (server sees the label, never content):
+    // votes stay push-silent, everything else fans out normally.
+    val kind = when {
+        content.vote != null -> "vote"
+        content.poll != null -> "poll"
+        content.img != null -> "image"
+        else -> "chat"
+    }
+    sealAndPublishContent(groupId, m, me, buildGroupContentBody(content), kind).getOrThrow()
 }
 
 /**
@@ -1403,6 +1436,7 @@ private suspend fun WhisperRepository.sealAndPublishContent(
     m: WhisperGroupMembership,
     me: String,
     frameBody: String,
+    msgKind: String = "chat",
 ): Result<Unit> = runCatching {
     val targets = m.members.keys.sorted()
     val frames = mutableMapOf<String, String>()
@@ -1450,6 +1484,7 @@ private suspend fun WhisperRepository.sealAndPublishContent(
                 contentIv = groupMessageIv(m.epoch),
                 epoch = m.epoch,
                 clientVersionCode = groupClientVersion(),
+                msgKind = msgKind,
             ),
         )
     }
@@ -1812,7 +1847,11 @@ suspend fun WhisperRepository.openGroupPicture(groupId: String): Result<ByteArra
 // replays them. Message rows are ciphertext-only replays (frames sealed at
 // enqueue time; dup client_id = already delivered). Picture rows re-run the
 // full pipeline from the persisted original bytes. Drained on hub + chat
-// loads (app-open driven); the worker lane stays 1:1-only by design.
+// loads (app-open driven); the worker lane stays 1:1-only by design —
+// extending WhisperDeliveryWorker to group legs is deferred (drain needs the
+// verified log + ratchet sessions; a blind worker replay would burn attempts
+// on stale-epoch rows). Queued votes replay as plain rows (kind defaults to
+// chat server-side); the single extra push on a queued vote is accepted.
 
 private val groupFlushMutex = kotlinx.coroutines.sync.Mutex()
 
@@ -1957,6 +1996,8 @@ data class WhisperGroupMessagePing(
     val groupId: String,
     val senderId: String,
     val clientId: String,
+    /** Traffic class: vote pings stay notification-silent (tally only). */
+    val kind: String = "chat",
 )
 
 /** Fires with every new message row of one group (foreground message pings). */
@@ -1976,7 +2017,7 @@ fun WhisperRepository.observeGroupMessagesLive(groupId: String): kotlinx.corouti
                         runCatching { action.decodeRecord<GroupMessageRow>() }.getOrNull()
                     else -> null
                 }
-                if (row != null) trySend(WhisperGroupMessagePing(groupId, row.senderId, row.clientId))
+                if (row != null) trySend(WhisperGroupMessagePing(groupId, row.senderId, row.clientId, row.msgKind))
             }
         }
         awaitClose {
@@ -1984,6 +2025,25 @@ fun WhisperRepository.observeGroupMessagesLive(groupId: String): kotlinx.corouti
             launch { runCatchingCE { realtime.removeChannel(channel) } }
         }
     }
+
+/**
+ * Unread count without decrypting: rows newer than [mark] not sent by [me].
+ * Capped at 101 (UI renders "99+"). Previews only decrypt the last 20, so
+ * without this >20 unread would silently cap at 20.
+ */
+suspend fun WhisperRepository.countGroupUnread(groupId: String, mark: String, me: String): Int {
+    if (groupId.isBlank() || me.isBlank()) return 0
+    return runCatching {
+        db.from("whisper_group_messages").select {
+            filter {
+                eq("group_id", groupId)
+                if (mark.isNotBlank()) gt("created_at", mark)
+            }
+            order("created_at", Order.DESCENDING)
+            limit(101)
+        }.decodeList<GroupMessageRow>().count { it.senderId != me && (mark.isBlank() || (it.createdAt ?: "") > mark) }
+    }.getOrDefault(0)
+}
 
 /**
  * Fires with the row id of every DELETED message row of one group
