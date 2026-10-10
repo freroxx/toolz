@@ -17,8 +17,13 @@ import com.frerox.toolz.data.whisper.inviteGroupMember
 import com.frerox.toolz.data.whisper.blockUser
 import com.frerox.toolz.data.whisper.cachedGroups
 import com.frerox.toolz.data.whisper.cancelGroupInvite
+import com.frerox.toolz.data.whisper.demoteGroupMember
 import com.frerox.toolz.data.whisper.disbandGroup
+import com.frerox.toolz.data.whisper.transferGroupOwnership
+import com.frerox.toolz.data.whisper.updateGroupSettings
+import com.frerox.toolz.data.whisper.fetchGroupMessages
 import com.frerox.toolz.data.whisper.getFriends
+import com.frerox.toolz.data.whisper.openGroupImage
 import com.frerox.toolz.data.whisper.groupsEnabled
 import com.frerox.toolz.data.whisper.leaveGroup
 import com.frerox.toolz.data.whisper.openGroupPicture
@@ -71,6 +76,9 @@ class WhisperGroupInfoViewModel @Inject constructor(
         /** Effective group-notifications toggle (role default until overridden). */
         val notifOn: Boolean = true,
         val pictureBytes: ByteArray? = null,
+        /** Shared-photo refs for the gallery (bytes load lazily per thumb). */
+        val gallery: List<GalleryItem> = emptyList(),
+        val galleryBytes: Map<String, ByteArray> = emptyMap(),
         val isLoading: Boolean = true,
         val isWorking: Boolean = false,
         val left: Boolean = false,
@@ -190,6 +198,26 @@ class WhisperGroupInfoViewModel @Inject constructor(
     fun rename(name: String) = work({ repository.renameGroup(groupId, name) })
     fun blockMember(userId: String) = work({ repository.blockUser(userId) })
     fun cancelInvite(userId: String) = work({ repository.cancelGroupInvite(groupId, userId) })
+    fun demoteMember(userId: String) = work({ repository.demoteGroupMember(groupId, userId) })
+    fun transferOwnership(userId: String) = work({ repository.transferGroupOwnership(groupId, userId) })
+
+    /** Admin-only send toggle and/or description (either may be null = unchanged). */
+    fun saveSettings(adminOnlySend: Boolean? = null, description: String? = null) =
+        work({ repository.updateGroupSettings(groupId, adminOnlySend, description) })
+
+    /** Report = block the member 1:1-wide, then leave the group. */
+    fun reportMember(userId: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isWorking = true, error = null) }
+            repository.blockUser(userId)
+                .onSuccess {
+                    repository.leaveGroup(groupId)
+                        .onSuccess { _uiState.update { it.copy(isWorking = false, left = true) } }
+                        .onFailure { e -> _uiState.update { it.copy(isWorking = false, error = err(e)) } }
+                }
+                .onFailure { e -> _uiState.update { it.copy(isWorking = false, error = err(e)) } }
+        }
+    }
 
     fun setPicture(bytes: ByteArray, mime: String) {
         viewModelScope.launch {
@@ -245,6 +273,31 @@ class WhisperGroupInfoViewModel @Inject constructor(
         val until = if (durationMs == Long.MAX_VALUE) Long.MAX_VALUE else System.currentTimeMillis() + durationMs
         mutePrefs.muteUser(key, until)
         _uiState.update { it.copy(isMuted = true, mutedUntilMs = until) }
+    }
+
+    data class GalleryItem(
+        val rowId: String,
+        val ref: com.frerox.toolz.data.whisper.GroupImageRef,
+        val caption: String,
+    )
+
+    /** Loads shared-photo refs (newest 100 rows); bytes stay lazy per thumb. */
+    fun loadGallery() {
+        viewModelScope.launch {
+            val items = repository.fetchGroupMessages(groupId, 100).getOrNull().orEmpty()
+                .filter { it.image != null }
+                .map { GalleryItem(rowId = it.id, ref = it.image!!, caption = it.body) }
+            _uiState.update { it.copy(gallery = items) }
+        }
+    }
+
+    fun loadGalleryImage(item: GalleryItem) {
+        if (_uiState.value.galleryBytes[item.rowId] != null) return
+        viewModelScope.launch {
+            repository.openGroupImage(item.ref, "gmsg:${item.rowId}").getOrNull()?.let { bytes ->
+                _uiState.update { it.copy(galleryBytes = it.galleryBytes + (item.rowId to bytes)) }
+            }
+        }
     }
 
     fun loadFriends(onResult: (List<WhisperProfile>) -> Unit) {

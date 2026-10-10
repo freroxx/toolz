@@ -3880,6 +3880,7 @@
     <string name="st_Whisper_Groups_ErrUnreachable">A member can\'t be reached right now — retry when they\'re online.</string>
     <string name="st_Whisper_Groups_ErrSync">Couldn\'t sync. Check your connection and retry.</string>
     <string name="st_Whisper_Groups_ErrQueued">Will send when you\'re back online.</string>
+    <string name="st_Whisper_Groups_ErrAdminOnly">Only admins can send messages in this group.</string>
     <string name="st_Whisper_Groups_Degraded">Group history couldn\'t be fully verified — showing verified messages only.</string>
     <string name="st_Whisper_Groups_Photo">Photo</string>
     <string name="st_Whisper_Groups_Poll">Poll</string>
@@ -3906,4 +3907,28 @@
     <string name="st_Whisper_Groups_MemberSearchHint">Search members</string>
     <string name="st_Whisper_Groups_Today">Today</string>
     <string name="st_Whisper_Groups_Yesterday">Yesterday</string>
+    <string name="st_Whisper_Groups_Demote">Demote to member</string>
+    <string name="st_Whisper_Groups_MakeOwner">Make owner</string>
+    <string name="st_Whisper_Groups_MakeOwnerConfirm">Hand ownership of this group to %1$s? You stay an admin, but only they can transfer ownership afterwards.</string>
+    <string name="st_Whisper_Groups_Report">Report</string>
+    <string name="st_Whisper_Groups_ReportConfirm">Report %1$s? They are blocked everywhere and you leave this group.</string>
+    <string name="st_Whisper_Groups_Settings">Group settings</string>
+    <string name="st_Whisper_Groups_AdminOnlySend">Only admins can send</string>
+    <string name="st_Whisper_Groups_AdminOnlySendDesc">Members can read but not send messages</string>
+    <string name="st_Whisper_Groups_Description">Description</string>
+    <string name="st_Whisper_Groups_DescriptionHint">What is this group about?</string>
+    <string name="st_Whisper_Groups_EditDescription">Edit description</string>
+    <string name="st_Whisper_Groups_Share">Share group</string>
+    <string name="st_Whisper_Groups_ShareText">Join me on Whisper — ask an admin of \"%1$s\" for an invite, then open the invite card in Chats.</string>
+    <string name="st_Whisper_Groups_CopyId">Copy group ID</string>
+    <string name="st_Whisper_Groups_Gallery">Shared photos</string>
+    <string name="st_Whisper_Groups_GalleryEmpty">No shared photos yet</string>
+    <string name="st_Whisper_Groups_Reply">Reply</string>
+    <string name="st_Whisper_Groups_CreatePoll">Create poll</string>
+    <string name="st_Whisper_Groups_PollQuestionHint">Ask a question</string>
+    <string name="st_Whisper_Groups_PollOptionHint">Option %1$d</string>
+    <string name="st_Whisper_Groups_PollAddOption">Add option</string>
+    <string name="st_Whisper_Groups_PollSend">Send poll</string>
+    <string name="st_Whisper_Groups_SearchMessagesHint">Search messages</string>
+    <string name="st_Whisper_Groups_MentionHint">Mention…</string>
 </resources>

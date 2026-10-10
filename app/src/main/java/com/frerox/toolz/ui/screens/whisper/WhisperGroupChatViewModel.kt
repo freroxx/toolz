@@ -28,6 +28,11 @@ import com.frerox.toolz.data.whisper.observeGroupMessageDeletes
 import com.frerox.toolz.data.whisper.observeGroupMessagesLive
 import com.frerox.toolz.data.whisper.observeGroupTyping
 import com.frerox.toolz.data.whisper.openGroupImage
+import com.frerox.toolz.data.whisper.GroupPoll
+import com.frerox.toolz.data.whisper.GroupReplyRef
+import com.frerox.toolz.data.whisper.GroupVote
+import com.frerox.toolz.data.whisper.WhisperGroupContent
+import com.frerox.toolz.data.whisper.sendGroupContent
 import com.frerox.toolz.data.whisper.sendGroupImage
 import com.frerox.toolz.data.whisper.sendGroupMessage
 import com.frerox.toolz.data.whisper.sendGroupTyping
@@ -58,6 +63,9 @@ class WhisperGroupChatViewModel @Inject constructor(
 
     val groupId: String = savedStateHandle.get<String>("groupId").orEmpty()
 
+    /** My user id for mention matching ("mentioned you" highlighting). */
+    val myUserId: String get() = repository.myId
+
     data class UiState(
         val membership: WhisperGroupMembership? = null,
         val messages: List<WhisperGroupChatMessage> = emptyList(),
@@ -75,7 +83,15 @@ class WhisperGroupChatViewModel @Inject constructor(
         /** Seen-by user ids by message client_id (my messages only matter). */
         val receipts: Map<String, List<String>> = emptyMap(),
         val memberNames: Map<String, String> = emptyMap(),
+        /** Poll tallies by poll id (latest vote per sender wins). */
+        val pollTallies: Map<String, PollTally> = emptyMap(),
         val error: String? = null,
+    )
+
+    /** Vote tally for one poll card. */
+    data class PollTally(
+        val myVote: Int? = null,
+        val counts: Map<Int, Int> = emptyMap(),
     )
 
     private val _uiState = MutableStateFlow(UiState(isMuted = mutePrefs.isMuted(muteKey(groupId))))
@@ -147,6 +163,7 @@ class WhisperGroupChatViewModel @Inject constructor(
                             degraded = m.degraded,
                             receipts = receipts,
                             memberNames = names,
+                            pollTallies = tallyPolls(list, repository.myId),
                         )
                     }
                     // Seen receipts + read watermark (fire-and-forget).
@@ -174,10 +191,12 @@ class WhisperGroupChatViewModel @Inject constructor(
                 .onSuccess { older ->
                     _uiState.update {
                         val merged = (older + it.messages).distinctBy { msg -> msg.id }
+                            .sortedWith(compareBy({ msg -> msg.createdAt }, { msg -> msg.id }))
                         it.copy(
-                            messages = merged.sortedWith(compareBy({ msg -> msg.createdAt }, { msg -> msg.id })),
+                            messages = merged,
                             loadingMore = false,
                             hasMore = older.size >= PAGE_SIZE,
+                            pollTallies = tallyPolls(merged, repository.myId),
                         )
                     }
                 }
@@ -187,15 +206,54 @@ class WhisperGroupChatViewModel @Inject constructor(
         }
     }
 
-    fun send(text: String) {
+    fun send(
+        text: String,
+        reply: GroupReplyRef? = null,
+        mentionIds: List<String> = emptyList(),
+    ) {
+        val clean = text.trim()
+        if (clean.isBlank()) return
+        if (clean.length > WhisperRepository.MAX_MESSAGE_CHARS) {
+            _uiState.update { it.copy(error = "Message is too long.") }
+            return
+        }
         viewModelScope.launch { repository.clearGroupTyping(groupId) }
         viewModelScope.launch {
             _uiState.update { it.copy(isSending = true, error = null) }
-            repository.sendGroupMessage(groupId, text)
+            repository.sendGroupContent(groupId, WhisperGroupContent(t = clean, reply = reply, mentions = mentionIds))
                 .onSuccess { load() }
                 .onFailure { e ->
                     _uiState.update { it.copy(isSending = false, error = err(e)) }
                 }
+        }
+    }
+
+    /** Sends a poll card (question + 2..6 options). */
+    fun sendPoll(question: String, options: List<String>) {
+        val q = question.trim()
+        val opts = options.map { it.trim() }.filter { it.isNotBlank() }.take(6)
+        if (q.isBlank() || opts.size < 2) {
+            _uiState.update { it.copy(error = "A poll needs a question and at least 2 options.") }
+            return
+        }
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSending = true, error = null) }
+            val poll = GroupPoll(id = java.util.UUID.randomUUID().toString(), q = q, opts = opts)
+            repository.sendGroupContent(groupId, WhisperGroupContent(t = "\ud83d\udcca $q", poll = poll))
+                .onSuccess { load() }
+                .onFailure { e ->
+                    _uiState.update { it.copy(isSending = false, error = err(e)) }
+                }
+        }
+    }
+
+    /** Votes (or re-votes — latest per sender wins the tally). */
+    fun vote(pollId: String, opt: Int) {
+        if (pollId.isBlank()) return
+        viewModelScope.launch {
+            repository.sendGroupContent(groupId, WhisperGroupContent(vote = GroupVote(pollId, opt)))
+                .onSuccess { load() }
+                .onFailure { e -> _uiState.update { it.copy(error = err(e)) } }
         }
     }
 
@@ -262,5 +320,20 @@ class WhisperGroupChatViewModel @Inject constructor(
         /** Group mutes reuse the 1:1 mute store under a reserved namespace. */
         fun muteKey(groupId: String) = "group:$groupId"
         const val PAGE_SIZE = 50
+
+        /** Latest vote per sender per poll wins; my latest vote is tracked. */
+        fun tallyPolls(messages: List<WhisperGroupChatMessage>, me: String): Map<String, PollTally> {
+            val latest = mutableMapOf<String, MutableMap<String, Int>>()
+            messages.forEach { msg ->
+                val v = msg.vote ?: return@forEach
+                if (v.opt < 0) return@forEach
+                latest.getOrPut(v.poll) { mutableMapOf() }[msg.senderId] = v.opt
+            }
+            return latest.mapValues { (_, bySender) ->
+                val counts = mutableMapOf<Int, Int>()
+                bySender.values.forEach { opt -> counts[opt] = (counts[opt] ?: 0) + 1 }
+                PollTally(myVote = bySender[me], counts = counts)
+            }
+        }
     }
 }

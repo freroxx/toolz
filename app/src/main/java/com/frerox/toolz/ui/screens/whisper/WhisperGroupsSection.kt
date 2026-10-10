@@ -673,3 +673,38 @@ fun GroupDegradedBanner() {
         )
     }
 }
+
+/**
+ * Shared fullscreen group-image viewer (chat bubbles + info gallery).
+ * Non-private so both screens reuse it.
+ */
+@Composable
+fun GroupImageViewer(bytes: ByteArray, onDismiss: () -> Unit) {
+    val bitmap = remember(bytes) {
+        runCatching { android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }.getOrNull()
+    }
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Box(
+            modifier = Modifier.fillMaxSize().clickable { onDismiss() },
+            contentAlignment = Alignment.Center,
+        ) {
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap.asImageBitmap(),
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    contentScale = ContentScale.Fit,
+                )
+            }
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier.align(Alignment.TopEnd).padding(16.dp),
+            ) {
+                Icon(Icons.Rounded.Close, contentDescription = null, tint = MaterialTheme.colorScheme.surface)
+            }
+        }
+    }
+}

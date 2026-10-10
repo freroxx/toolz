@@ -478,4 +478,86 @@ class WhisperGroupsTest {
         assertEquals("gmsg:abc", groupTombstoneKey("abc"))
         assertTrue(!groupTombstoneKey("abc").contains("1:1"))
     }
+
+    @Test
+    fun `demote lifecycle`() {
+        val log = listOf(create()) + inviteJoin(2, 0, "u2") + listOf(
+            ev(4, 1, WhisperGroupEventType.PROMOTE, admin, "\"u2\""),
+        )
+        val promoted = applyEvents(gid, log, verify, keys2all)
+        assertTrue(promoted.isAdmin("u2"))
+        val demoted = applyEvents(gid, log + ev(5, 2, WhisperGroupEventType.DEMOTE, admin, "\"u2\""), verify, keys2all)
+        assertTrue(!demoted.isAdmin("u2"))
+        assertTrue(demoted.isMember("u2"))
+        assertEquals(2L, demoted.epoch)
+        // Demoting the last admin fails closed (solo-admin log).
+        try {
+            applyEvents(gid, listOf(create(), ev(2, 0, WhisperGroupEventType.DEMOTE, admin, "\"user-admin\"")), verify, keys2all)
+            fail("must throw")
+        } catch (e: IllegalArgumentException) {
+            assertTrue((e.message ?: "").contains("last admin"))
+        }
+        // Demoting a non-admin fails closed.
+        try {
+            applyEvents(
+                gid,
+                listOf(create()) + inviteJoin(2, 0, "u2") +
+                    ev(4, 1, WhisperGroupEventType.DEMOTE, admin, "\"u2\""),
+                verify, keys2all,
+            )
+            fail("must throw")
+        } catch (e: IllegalArgumentException) {
+            assertTrue((e.message ?: "").contains("non-admin"))
+        }
+        // A plain member's demote fails closed (u2 was never promoted here).
+        val memberLog = listOf(create()) + inviteJoin(2, 0, "u2")
+        try {
+            applyEvents(gid, memberLog + ev(4, 1, WhisperGroupEventType.DEMOTE, "u2", "\"user-admin\""), verify, keys2all)
+            fail("must throw")
+        } catch (e: IllegalArgumentException) {
+            assertTrue((e.message ?: "").contains("admin-signed"))
+        }
+    }
+
+    @Test
+    fun `settings toggle and description`() {
+        val base = listOf(create()) + inviteJoin(2, 0, "u2")
+        val m0 = applyEvents(gid, base, verify, keys2all)
+        assertTrue(!m0.adminOnlySend)
+        assertEquals("", m0.description)
+        // Admin-only mode on (no epoch bump).
+        val m1 = applyEvents(
+            gid, base + ev(4, 1, WhisperGroupEventType.SETTINGS, admin, buildGroupSettingsPayload(true, null)),
+            verify, keys2all,
+        )
+        assertTrue(m1.adminOnlySend)
+        assertEquals(1L, m1.epoch)
+        // Description set + truncated.
+        val long = "x".repeat(200)
+        val m2 = applyEvents(
+            gid, base + ev(4, 1, WhisperGroupEventType.SETTINGS, admin, buildGroupSettingsPayload(null, long)),
+            verify, keys2all,
+        )
+        assertEquals(140, m2.description.length)
+        assertTrue(!m2.adminOnlySend)
+        // Absent keys leave values untouched.
+        val m3 = applyEvents(
+            gid, base + ev(4, 1, WhisperGroupEventType.SETTINGS, admin, buildGroupSettingsPayload(null, "Hi")),
+            verify, keys2all,
+        )
+        assertEquals("Hi", m3.description)
+        // Member-signed settings rejected; garbage payload rejected.
+        try {
+            applyEvents(gid, base + ev(4, 1, WhisperGroupEventType.SETTINGS, "u2", buildGroupSettingsPayload(true, null)), verify, keys2all)
+            fail("must throw")
+        } catch (e: IllegalArgumentException) {
+            assertTrue((e.message ?: "").contains("admin-signed"))
+        }
+        try {
+            applyEvents(gid, base + ev(4, 1, WhisperGroupEventType.SETTINGS, admin, "nope"), verify, keys2all)
+            fail("must throw")
+        } catch (e: IllegalStateException) {
+            assertTrue((e.message ?: "").contains("settings payload"))
+        }
+    }
 }

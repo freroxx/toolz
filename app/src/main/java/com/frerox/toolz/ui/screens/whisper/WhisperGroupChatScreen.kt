@@ -32,9 +32,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.AddPhotoAlternate
+import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.VolumeOff
 import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material3.AlertDialog
@@ -57,6 +59,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -76,6 +79,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.launch
 import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.WhisperGroupChatMessage
 import com.frerox.toolz.data.whisper.groupsEnabled
@@ -100,12 +104,21 @@ fun WhisperGroupChatScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     var draft by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
+    val scrollScope = rememberCoroutineScope()
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
 
-    // Vote rows are tally data (rendered in poll cards by the social slice);
-    // they carry no readable body, so they stay out of the line list.
-    val visible = remember(state.messages) { state.messages.filter { it.vote == null } }
+    var searching by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+    var replyTarget by remember { mutableStateOf<WhisperGroupChatMessage?>(null) }
+    var showPollCreate by remember { mutableStateOf(false) }
+    // Vote rows are tally data (rendered in poll cards below); they carry no
+    // readable body, so they stay out of the line list.
+    val visible = remember(state.messages, searchQuery) {
+        val base = state.messages.filter { it.vote == null }
+        val q = searchQuery.trim().lowercase()
+        if (q.isBlank()) base else base.filter { it.body.lowercase().contains(q) }
+    }
 
     // Auto-scroll only when the NEWEST line changes (paging prepends must not
     // yank the viewport to the bottom).
@@ -129,6 +142,20 @@ fun WhisperGroupChatScreen(
     var infoMsg by remember { mutableStateOf<WhisperGroupChatMessage?>(null) }
     var confirmWipe by remember { mutableStateOf<WhisperGroupChatMessage?>(null) }
     var viewerBytes by remember { mutableStateOf<ByteArray?>(null) }
+
+    fun sendWithContext() {
+        val target = replyTarget
+        val ref = target?.let {
+            com.frerox.toolz.data.whisper.GroupReplyRef(
+                id = it.clientId,
+                sender = it.senderName,
+                text = it.body.ifBlank { "Photo" }.take(140),
+            )
+        }
+        viewModel.send(draft, reply = ref, mentionIds = resolveMentionIds(draft, state.memberNames))
+        draft = ""
+        replyTarget = null
+    }
 
     Scaffold(
         modifier = Modifier.fillMaxSize().toolzBackground(),
@@ -155,6 +182,12 @@ fun WhisperGroupChatScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { searching = !searching; if (!searching) searchQuery = "" }) {
+                        Icon(Icons.Rounded.Search, contentDescription = null)
+                    }
+                    IconButton(onClick = { showPollCreate = true }) {
+                        Icon(Icons.Rounded.BarChart, contentDescription = null)
+                    }
                     IconButton(onClick = { viewModel.toggleMute() }) {
                         Icon(
                             if (state.isMuted) Icons.Rounded.VolumeOff else Icons.Rounded.VolumeUp,
@@ -173,6 +206,22 @@ fun WhisperGroupChatScreen(
         },
         bottomBar = {
             Column {
+                replyTarget?.let { target ->
+                    ReplyPreviewBar(
+                        sender = target.senderName,
+                        text = target.body.ifBlank { stringResource(R.string.st_Whisper_Groups_Photo) },
+                        onCancel = { replyTarget = null },
+                    )
+                }
+                MentionSuggestions(
+                    draft = draft,
+                    memberNames = state.memberNames,
+                    myId = viewModel.myUserId,
+                    onPick = { name ->
+                        val at = draft.lastIndexOf("@")
+                        draft = if (at >= 0) draft.substring(0, at) + "@$name " else "$draft@$name "
+                    },
+                )
                 if (state.typingNames.isNotEmpty()) {
                     Text(
                         typingLine(state.typingNames),
@@ -203,8 +252,7 @@ fun WhisperGroupChatScreen(
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                         keyboardActions = KeyboardActions(onSend = {
                             if (draft.isNotBlank()) {
-                                viewModel.send(draft)
-                                draft = ""
+                                sendWithContext()
                             }
                         }),
                         modifier = Modifier.weight(1f),
@@ -214,8 +262,7 @@ fun WhisperGroupChatScreen(
                     IconButton(
                         onClick = {
                             if (draft.isNotBlank()) {
-                                viewModel.send(draft)
-                                draft = ""
+                                sendWithContext()
                             }
                         },
                     ) {
@@ -226,6 +273,24 @@ fun WhisperGroupChatScreen(
         },
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+            if (searching) {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    label = { Text(stringResource(R.string.st_Whisper_Groups_SearchMessagesHint)) },
+                    leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                    trailingIcon = {
+                        if (searchQuery.isNotBlank()) {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(Icons.Rounded.Close, contentDescription = null)
+                            }
+                        }
+                    },
+                    singleLine = true,
+                    shape = RoundedCornerShape(20.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                )
+            }
             state.error?.let { err ->
                 Text(
                     err,
@@ -248,6 +313,7 @@ fun WhisperGroupChatScreen(
                     CircularProgressIndicator()
                 }
             } else {
+                val feed = remember(visible) { buildFeed(visible) }
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
@@ -266,24 +332,38 @@ fun WhisperGroupChatScreen(
                             }
                         }
                     }
-                    var lastDay: String? = null
-                    visible.forEach { msg ->
-                        val day = groupDayKey(msg.createdAt)
-                        if (day != lastDay) {
-                            lastDay = day
-                            item(key = "day_$day") {
-                                DayDivider(label = groupDayLabel(day))
-                            }
+                    items(feed.size, key = { idx ->
+                        when (val it = feed[idx]) {
+                            is FeedItem.Day -> "day_${it.label}"
+                            is FeedItem.Msg -> it.msg.id
                         }
-                        item(key = msg.id) {
-                            GroupBubble(
-                                msg = msg,
-                                imageBytes = state.images[msg.id],
-                                seenCount = state.receipts[msg.clientId]?.size ?: 0,
-                                onRequestImage = { viewModel.loadImage(msg) },
-                                onImageClick = { bytes -> viewerBytes = bytes },
-                                onLongPress = { menuMsg = msg },
-                            )
+                    }) { idx ->
+                        when (val item = feed[idx]) {
+                            is FeedItem.Day -> DayDivider(label = groupDayLabel(item.label))
+                            is FeedItem.Msg -> {
+                                val msg = item.msg
+                                GroupBubble(
+                                    msg = msg,
+                                    imageBytes = state.images[msg.id],
+                                    seenCount = state.receipts[msg.clientId]?.size ?: 0,
+                                    pollTally = msg.poll?.let { state.pollTallies[it.id] },
+                                    memberNames = state.memberNames,
+                                    myId = viewModel.myUserId,
+                                    onRequestImage = { viewModel.loadImage(msg) },
+                                    onImageClick = { bytes -> viewerBytes = bytes },
+                                    onLongPress = { menuMsg = msg },
+                                    onReply = { replyTarget = msg },
+                                    onQuoteClick = { qid ->
+                                        val target = feed.indexOfFirst {
+                                            it is FeedItem.Msg && it.msg.clientId == qid
+                                        }
+                                        if (target >= 0) scrollScope.launch { listState.animateScrollToItem(target) }
+                                    },
+                                    onVote = { opt ->
+                                        msg.poll?.let { viewModel.vote(it.id, opt) }
+                                    },
+                                )
+                            }
                         }
                     }
                 }
@@ -304,6 +384,7 @@ fun WhisperGroupChatScreen(
         MessageActionDialog(
             msg = msg,
             onDismiss = { menuMsg = null },
+            onReply = { replyTarget = msg; menuMsg = null },
             onCopy = {
                 clipboard.setText(AnnotatedString(msg.body))
                 android.widget.Toast.makeText(context, context.getString(R.string.st_Whisper_Groups_Copied), android.widget.Toast.LENGTH_SHORT).show()
@@ -342,34 +423,16 @@ fun WhisperGroupChatScreen(
     }
 
     viewerBytes?.let { bytes ->
-        val bitmap = remember(bytes) {
-            runCatching { android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }.getOrNull()
-        }
-        Dialog(
-            onDismissRequest = { viewerBytes = null },
-            properties = DialogProperties(usePlatformDefaultWidth = false),
-        ) {
-            Box(
-                modifier = Modifier.fillMaxSize().clickable { viewerBytes = null },
-                contentAlignment = Alignment.Center,
-            ) {
-                if (bitmap != null) {
-                    Image(
-                        bitmap = bitmap.asImageBitmap(),
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxWidth().padding(16.dp),
-                        contentScale = ContentScale.Fit,
-                    )
-                }
-                IconButton(
-                    onClick = { viewerBytes = null },
-                    modifier = Modifier.align(Alignment.TopEnd).padding(16.dp),
-                ) {
-                    Icon(Icons.Rounded.Close, contentDescription = null, tint = MaterialTheme.colorScheme.surface)
-                }
-            }
-        }
+        GroupImageViewer(bytes = bytes, onDismiss = { viewerBytes = null })
     }
+
+    if (showPollCreate) {
+        CreatePollDialog(
+            onDismiss = { showPollCreate = false },
+            onSend = { q, opts -> showPollCreate = false; viewModel.sendPoll(q, opts) },
+        )
+    }
+
 }
 
 @Composable
@@ -378,6 +441,26 @@ private fun typingLine(names: List<String>): String = when (names.size) {
     1 -> stringResource(R.string.st_Whisper_Groups_TypingOne, names[0])
     2 -> stringResource(R.string.st_Whisper_Groups_TypingTwo, names[0], names[1])
     else -> stringResource(R.string.st_Whisper_Groups_TypingMany)
+}
+
+/** Flat feed: exact indices (dividers included) so quote-tap can scroll precisely. */
+private sealed interface FeedItem {
+    data class Day(val label: String) : FeedItem
+    data class Msg(val msg: WhisperGroupChatMessage) : FeedItem
+}
+
+private fun buildFeed(visible: List<WhisperGroupChatMessage>): List<FeedItem> {
+    val out = mutableListOf<FeedItem>()
+    var lastDay: String? = null
+    visible.forEach { msg ->
+        val day = groupDayKey(msg.createdAt)
+        if (day != lastDay) {
+            lastDay = day
+            out.add(FeedItem.Day(day))
+        }
+        out.add(FeedItem.Msg(msg))
+    }
+    return out
 }
 
 /** Day bucket key (yyyy-MM-dd) for dividers; unparseable rows share the "" bucket. */
@@ -430,9 +513,15 @@ private fun GroupBubble(
     msg: WhisperGroupChatMessage,
     imageBytes: ByteArray?,
     seenCount: Int,
+    pollTally: WhisperGroupChatViewModel.PollTally?,
+    memberNames: Map<String, String>,
+    myId: String,
     onRequestImage: () -> Unit,
     onImageClick: (ByteArray) -> Unit,
     onLongPress: () -> Unit,
+    onReply: () -> Unit,
+    onQuoteClick: (String) -> Unit,
+    onVote: (Int) -> Unit,
 ) {
     val bitmap = remember(imageBytes) {
         imageBytes?.let { runCatching { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size) }.getOrNull() }
@@ -467,6 +556,12 @@ private fun GroupBubble(
             ).padding(horizontal = 14.dp, vertical = 10.dp),
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (msg.reply != null) {
+                    QuoteBlock(quote = msg.reply, onClick = { onQuoteClick(msg.reply.id) })
+                }
+                if (msg.poll != null) {
+                    PollCard(poll = msg.poll, tally = pollTally, enabled = true, onVote = onVote)
+                }
                 if (msg.image != null) {
                     if (bitmap != null) {
                         Image(
@@ -486,12 +581,29 @@ private fun GroupBubble(
                     }
                 }
                 if (msg.body.isNotBlank()) {
-                    Text(
-                        msg.body,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (msg.mine) MaterialTheme.colorScheme.onPrimaryContainer
-                        else MaterialTheme.colorScheme.onSurface,
-                    )
+                    val mentionedMe = remember(msg.mentions, myId) { myId.isNotBlank() && myId in msg.mentions }
+                    if (mentionedMe) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f),
+                        ) {
+                            MentionText(
+                                body = msg.body,
+                                memberNames = memberNames,
+                                mine = msg.mine,
+                                baseColor = if (msg.mine) MaterialTheme.colorScheme.onPrimaryContainer
+                                else MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                    } else {
+                        MentionText(
+                            body = msg.body,
+                            memberNames = memberNames,
+                            mine = msg.mine,
+                            baseColor = if (msg.mine) MaterialTheme.colorScheme.onPrimaryContainer
+                            else MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
                 }
                 Row(
                     modifier = Modifier.align(Alignment.End),
@@ -522,6 +634,7 @@ private fun MessageActionDialog(
     msg: WhisperGroupChatMessage,
     onDismiss: () -> Unit,
     onCopy: () -> Unit,
+    onReply: () -> Unit,
     onDeleteForMe: () -> Unit,
     onDeleteForEveryone: () -> Unit,
     onInfo: () -> Unit,
@@ -538,6 +651,9 @@ private fun MessageActionDialog(
         },
         text = {
             Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = onReply, modifier = Modifier.fillMaxWidth()) {
+                    Text(stringResource(R.string.st_Whisper_Groups_Reply), modifier = Modifier.fillMaxWidth())
+                }
                 if (msg.body.isNotBlank()) {
                     TextButton(onClick = onCopy, modifier = Modifier.fillMaxWidth()) {
                         Text(stringResource(R.string.st_Whisper_Groups_Copy), modifier = Modifier.fillMaxWidth())
@@ -600,3 +716,277 @@ private fun formatGroupTime(iso: String): String = runCatching {
     val instant = java.time.OffsetDateTime.parse(iso)
     "%02d:%02d".format(instant.hour, instant.minute)
 }.getOrDefault("")
+
+/** Resolves @Name tokens in a draft to member ids (longest-name-first). */
+internal fun resolveMentionIds(draft: String, memberNames: Map<String, String>): List<String> {
+    if ("@" !in draft) return emptyList()
+    return memberNames.entries
+        .sortedByDescending { it.value.length }
+        .filter { (id, name) -> name.isNotBlank() && "@$name" in draft }
+        .map { it.key }
+        .distinct()
+}
+
+/** Trailing @word being typed (null when the caret isn't in a mention). */
+private fun mentionQuery(draft: String): String? {
+    val tail = draft.substringAfterLast("\n")
+    val at = tail.lastIndexOf("@")
+    if (at < 0) return null
+    val word = tail.substring(at + 1)
+    if (word.any { it.isWhitespace() } || word.length > 32) return null
+    return word
+}
+
+@Composable
+private fun MentionSuggestions(
+    draft: String,
+    memberNames: Map<String, String>,
+    myId: String,
+    onPick: (String) -> Unit,
+) {
+    val q = remember(draft) { mentionQuery(draft) } ?: return
+    val hits = remember(memberNames, q) {
+        memberNames.filter { (id, name) ->
+            id != myId && name.isNotBlank() && (q.isBlank() || name.lowercase().startsWith(q.lowercase()))
+        }.values.take(4)
+    }
+    if (hits.isEmpty()) return
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        hits.forEach { name ->
+            Text(
+                "@$name",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f))
+                    .clickable { onPick(name) }
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ReplyPreviewBar(sender: String, text: String, onCancel: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier.width(3.dp).heightIn(min = 28.dp)
+                .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp)),
+        )
+        Spacer(Modifier.width(8.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                stringResource(R.string.st_Whisper_Groups_Reply) + " · $sender",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        IconButton(onClick = onCancel, modifier = Modifier.size(28.dp)) {
+            Icon(Icons.Rounded.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+        }
+    }
+}
+
+@Composable
+private fun QuoteBlock(quote: com.frerox.toolz.data.whisper.GroupReplyRef, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier.width(3.dp).heightIn(min = 28.dp)
+                .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp)),
+        )
+        Spacer(Modifier.width(8.dp))
+        Column {
+            Text(
+                quote.sender,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                quote.text,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/** Body text with @Name tokens tinted (only tokens matching members). */
+@Composable
+private fun MentionText(
+    body: String,
+    memberNames: Map<String, String>,
+    mine: Boolean,
+    baseColor: androidx.compose.ui.graphics.Color,
+) {
+    val annotated = remember(body, memberNames) {
+        val builder = androidx.compose.ui.text.AnnotatedString.Builder(body)
+        if ("@" in body) {
+            memberNames.values.filter { it.isNotBlank() }
+                .sortedByDescending { it.length }
+                .forEach { name ->
+                    var from = 0
+                    while (true) {
+                        val idx = body.indexOf("@$name", from)
+                        if (idx < 0) break
+                        builder.addStyle(
+                            androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Bold),
+                            idx, idx + name.length + 1,
+                        )
+                        from = idx + name.length + 1
+                    }
+                }
+        }
+        builder.toAnnotatedString()
+    }
+    Text(
+        annotated,
+        style = MaterialTheme.typography.bodyMedium,
+        color = baseColor,
+    )
+}
+
+@Composable
+private fun PollCard(
+    poll: com.frerox.toolz.data.whisper.GroupPoll,
+    tally: WhisperGroupChatViewModel.PollTally?,
+    enabled: Boolean,
+    onVote: (Int) -> Unit,
+) {
+    val total = tally?.counts?.values?.sum() ?: 0
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            poll.q,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Bold,
+        )
+        poll.opts.forEachIndexed { idx, opt ->
+            val votes = tally?.counts?.get(idx) ?: 0
+            val frac = if (total == 0) 0f else votes.toFloat() / total
+            val selected = tally?.myVote == idx
+            Box(
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                    .background(
+                        if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
+                        else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.7f),
+                    )
+                    .clickable(enabled = enabled) { onVote(idx) }
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            ) {
+                Box(
+                    modifier = Modifier.matchParentSize()
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.22f * frac + 0.04f)),
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        opt,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        if (total == 0) "" else "$votes",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+        }
+        if (total > 0) {
+            Text(
+                "$total vote${if (total == 1) "" else "s"}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CreatePollDialog(onDismiss: () -> Unit, onSend: (String, List<String>) -> Unit) {
+    var question by remember { mutableStateOf("") }
+    val options = remember { androidx.compose.runtime.mutableStateListOf("", "") }
+    val canSend = question.isNotBlank() && options.count { it.isNotBlank() } >= 2
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.st_Whisper_Groups_CreatePoll), fontWeight = FontWeight.Bold) },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedTextField(
+                    value = question,
+                    onValueChange = { if (it.length <= 140) question = it },
+                    label = { Text(stringResource(R.string.st_Whisper_Groups_PollQuestionHint)) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(20.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                options.forEachIndexed { idx, opt ->
+                    OutlinedTextField(
+                        value = opt,
+                        onValueChange = { if (it.length <= 60) options[idx] = it },
+                        label = { Text(stringResource(R.string.st_Whisper_Groups_PollOptionHint, idx + 1)) },
+                        singleLine = true,
+                        shape = RoundedCornerShape(20.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                if (options.size < 6) {
+                    TextButton(onClick = { options.add("") }) {
+                        Text(stringResource(R.string.st_Whisper_Groups_PollAddOption))
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            ToolzExpressiveButton(
+                onClick = { onSend(question.trim(), options.map { it.trim() }.filter { it.isNotBlank() }) },
+                enabled = canSend,
+            ) {
+                Text(stringResource(R.string.st_Whisper_Groups_PollSend), fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.st_Whisper_Cancel)) }
+        },
+    )
+}

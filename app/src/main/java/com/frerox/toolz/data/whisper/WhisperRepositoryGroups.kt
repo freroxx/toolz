@@ -70,6 +70,9 @@ object WhisperGroupsConfig {
     /** Max group display-name length (client + UI enforce, server stores). */
     const val MAX_GROUP_NAME_CHARS = 64
 
+    /** Max group description length (signed SETTINGS event). */
+    const val MAX_GROUP_DESC_CHARS = 140
+
     /** Envelope version written into every inner frame and row map. */
     const val ENVELOPE_VERSION = 1
 
@@ -94,6 +97,8 @@ enum class WhisperGroupEventType(val wire: String) {
     LEAVE("leave"),
     RENAME("rename"),
     PROMOTE("promote"),
+    DEMOTE("demote"),
+    SETTINGS("settings"),
     INVITE("invite"),
     JOIN("join"),
     DECLINE("decline"),
@@ -162,6 +167,10 @@ data class WhisperGroupMembership(
     val pendingInvites: Set<String> = emptySet(),
     /** Latest verified picture event, null until the first one. */
     val picture: WhisperGroupPicture? = null,
+    /** True when only admins may send (signed SETTINGS event, default open). */
+    val adminOnlySend: Boolean = false,
+    /** Group description (signed SETTINGS event, "" = none). */
+    val description: String = "",
     /**
      * True when the log contains an event that failed verification: the
      * membership above covers the verified PREFIX only (every event before
@@ -234,6 +243,8 @@ fun applyEvents(
     var name = ""
     var inviteAdminsOnly = true
     var picture: WhisperGroupPicture? = null
+    var adminOnlySend = false
+    var description = ""
     val members = mutableMapOf<String, WhisperGroupRole>()
     val invited = mutableSetOf<String>()
     val joinEpoch = mutableMapOf<String, Long>()
@@ -304,6 +315,24 @@ fun applyEvents(
                 members[target] = WhisperGroupRole.ADMIN
                 epoch = ev.epoch
             }
+            WhisperGroupEventType.DEMOTE -> {
+                require(isAdminSigned(ev, members, verify, signerKeyOf)) { "demote not admin-signed" }
+                val target = targetOf(ev)
+                require(members[target] == WhisperGroupRole.ADMIN) { "demote of non-admin" }
+                require(members.count { it.value == WhisperGroupRole.ADMIN } > 1) {
+                    "cannot demote last admin"
+                }
+                members[target] = WhisperGroupRole.MEMBER
+                epoch = ev.epoch
+            }
+            WhisperGroupEventType.SETTINGS -> {
+                require(isAdminSigned(ev, members, verify, signerKeyOf)) { "settings not admin-signed" }
+                val (send, desc) = parseGroupSettings(ev.payloadJson) ?: error("bad settings payload")
+                if (send != null) adminOnlySend = send
+                if (desc != null) description = desc.take(WhisperGroupsConfig.MAX_GROUP_DESC_CHARS)
+                // No epoch bump: settings change no crypto scope, so in-flight
+                // sends never go stale on a settings change.
+            }
             WhisperGroupEventType.INVITE -> {
                 require(isMemberSigned(ev, members, verify, signerKeyOf)) { "invite not signed by inviter" }
                 require(members[ev.actor] == WhisperGroupRole.ADMIN || !inviteAdminsOnly) {
@@ -358,7 +387,11 @@ fun applyEvents(
         val open = joinEpoch[user]?.let { listOf(it..Long.MAX_VALUE) }.orEmpty()
         closed + open
     }
-    return WhisperGroupMembership(groupId, epoch, members.toMap(), name, inviteAdminsOnly, ranges, invited.toSet(), picture)
+    return WhisperGroupMembership(
+        groupId, epoch, members.toMap(), name, inviteAdminsOnly, ranges,
+        invited.toSet(), picture, degraded = false, badSeq = null,
+        adminOnlySend = adminOnlySend, description = description,
+    )
 }
 
 /**
@@ -428,7 +461,7 @@ private fun memberSignatureValid(
     return verify(groupEventSignBytes(ev.groupId, ev.seq, ev.epoch, ev.type, ev.actor, ev.payloadJson), ev.adminSig, signer)
 }
 
-/** REMOVE/PROMOTE/INVITE/CANCEL carry the subject user id as the raw payload; RENAME carries the name. */
+/** REMOVE/PROMOTE/DEMOTE/INVITE/CANCEL carry the subject user id as the raw payload; RENAME carries the name. */
 private fun targetOf(ev: WhisperGroupEvent): String = ev.payloadJson.trim().trim('"')
 
 /**
@@ -464,6 +497,26 @@ fun parseGroupPicturePayload(raw: String): Pair<String, Map<String, String>>? = 
 
 private fun parseGroupPicture(raw: String): String? =
     parseGroupPicturePayload(raw)?.first
+
+/**
+ * Group-settings payload: `{"adminSend":bool,"desc":string}` (both optional;
+ * absent keys leave the current value untouched).
+ */
+fun buildGroupSettingsPayload(adminSend: Boolean?, desc: String?): String =
+    groupJson.encodeToString(
+        kotlinx.serialization.json.JsonObject.serializer(),
+        buildJsonObject {
+            if (adminSend != null) put("adminSend", adminSend)
+            if (desc != null) put("desc", desc.take(WhisperGroupsConfig.MAX_GROUP_DESC_CHARS))
+        },
+    )
+
+fun parseGroupSettings(raw: String): Pair<Boolean?, String?>? = runCatching {
+    val obj = groupJson.parseToJsonElement(raw) as? kotlinx.serialization.json.JsonObject ?: return null
+    val send = (obj["adminSend"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull?.toBooleanStrictOrNull()
+    val desc = (obj["desc"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
+    send to desc
+}.getOrNull()
 
 // ── Envelope helpers ────────────────────────────────────────────────────
 
@@ -1010,6 +1063,8 @@ fun mapGroupError(raw: String?): Int? {
             com.frerox.toolz.R.string.st_Whisper_Groups_ErrSync
         "group_send_queued" in msg ->
             com.frerox.toolz.R.string.st_Whisper_Groups_ErrQueued
+        "only admins can send" in msg ->
+            com.frerox.toolz.R.string.st_Whisper_Groups_ErrAdminOnly
         else -> null
     }
 }
@@ -1157,6 +1212,63 @@ suspend fun WhisperRepository.promoteGroupMember(groupId: String, userId: String
     syncGroup(groupId).getOrThrow()
 }
 
+suspend fun WhisperRepository.demoteGroupMember(groupId: String, userId: String): Result<Unit> = runCatching {
+    requireGroupsEnabled()
+    val me = requireMe()
+    val m = syncGroup(groupId).getOrThrow()
+    require(m.isAdmin(me)) { "Only admins can demote members." }
+    require(m.members[userId] == WhisperGroupRole.ADMIN) { "Not an admin." }
+    require(m.admins.size > 1) { "Cannot demote the last admin." }
+    val (seq, epoch) = nextGroupSeqEpoch(groupId)
+    publishGroupEvent(groupId, seq, epoch + 1, WhisperGroupEventType.DEMOTE, me, "\"$userId\"").getOrThrow()
+    db.from("whisper_group_members").update({ set("role", "member") }) {
+        filter { eq("group_id", groupId); eq("user_id", userId) }
+    }
+    syncGroup(groupId).getOrThrow()
+}
+
+/**
+ * Updates group settings (admin-only send mode and/or description).
+ * Event-only: no epoch bump, so in-flight sends never go stale.
+ */
+suspend fun WhisperRepository.updateGroupSettings(
+    groupId: String,
+    adminOnlySend: Boolean? = null,
+    description: String? = null,
+): Result<Unit> = runCatching {
+    requireGroupsEnabled()
+    val me = requireMe()
+    val m = syncGroup(groupId).getOrThrow()
+    require(m.isAdmin(me)) { "Only admins can change settings." }
+    require(adminOnlySend != null || description != null) { "Nothing to change." }
+    val cleanDesc = description?.trim()?.take(WhisperGroupsConfig.MAX_GROUP_DESC_CHARS)
+    val (seq, epoch) = nextGroupSeqEpoch(groupId)
+    publishGroupEvent(
+        groupId, seq, epoch, WhisperGroupEventType.SETTINGS, me,
+        buildGroupSettingsPayload(adminOnlySend, cleanDesc),
+    ).getOrThrow()
+    syncGroup(groupId).getOrThrow()
+}
+
+/**
+ * Hands ownership to another admin (owner-only). Promotes the target first
+ * when needed, then moves `created_by` (covered by the admin UPDATE policy).
+ */
+suspend fun WhisperRepository.transferGroupOwnership(groupId: String, userId: String): Result<Unit> = runCatching {
+    requireGroupsEnabled()
+    val me = requireMe()
+    val m = syncGroup(groupId).getOrThrow()
+    val group = db.from("whisper_groups").select { filter { eq("id", groupId) } }
+        .decodeSingleOrNull<GroupRow>() ?: error("Group not found.")
+    require(group.createdBy == me) { "Only the owner can transfer ownership." }
+    require(m.isMember(userId) && userId != me) { "Choose another member." }
+    if (m.members[userId] != WhisperGroupRole.ADMIN) {
+        promoteGroupMember(groupId, userId).getOrThrow()
+    }
+    db.from("whisper_groups").update({ set("created_by", userId) }) { filter { eq("id", groupId) } }
+    syncGroup(groupId).getOrThrow()
+}
+
 suspend fun WhisperRepository.renameGroup(groupId: String, name: String): Result<Unit> = runCatching {
     requireGroupsEnabled()
     val me = requireMe()
@@ -1221,6 +1333,7 @@ suspend fun WhisperRepository.sendGroupContent(groupId: String, content: Whisper
     val me = requireMe()
     val m = syncGroup(groupId).getOrThrow()
     require(m.isMember(me)) { "You are no longer a member of this group." }
+    require(!m.adminOnlySend || m.isAdmin(me)) { "Only admins can send messages in this group." }
     sealAndPublishContent(groupId, m, me, buildGroupContentBody(content)).getOrThrow()
 }
 

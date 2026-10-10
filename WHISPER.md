@@ -602,15 +602,21 @@ DELETE policy (a live group can never be nuked). The direct-`add` event type
 is retired from the CHECK (legacy rows degrade, never resurrect). Group
 writes require `client_version_code >= 18`.
 
-UI: Chats-tab `WhisperGroupsSection` (list + persistent invite cards with
-Join/Decline + in-flight guards + create dialog with friend picker, picture
-picker, and invite mode), `WhisperGroupChatScreen` (bubbles with sender names,
-send, mute, refresh, degraded banner, live event refresh), `WhisperGroupInfoScreen`
-(picture header with admin change, rename, multi-pick add/invite with search,
-pending invites with admin cancel, promote, remove, block-a-member, mute,
-per-group notifications toggle, leave, last-member disband — all admin-gated
-client-side AND server-side). Group mutes reuse `WhisperMutePreferences`
-under `group:<id>` (durations supported by the store).
+UI: Chats-tab `WhisperGroupsSection` (rows with picture, last-message
+preview, time, unread badge + persistent invite cards with Join/Decline +
+in-flight guards + create dialog with friend picker, picture picker, and
+invite mode), `WhisperGroupChatScreen` (bubbles with sender names, images,
+quote replies, poll cards, @mention highlighting, send + photo attach, mute,
+refresh, search, degraded banner, live refresh on events/messages/wipes,
+typing line, long-press actions, seen-by info, paging), `WhisperGroupInfoScreen`
+(picture header with admin change, description, rename, multi-pick add/invite
+with search, member search, pending invites with admin cancel, promote,
+demote, make-owner, remove, block-a-member, report (= block + leave), mute
+with durations, per-group notifications toggle, settings card (admin-only
+send, description), share sheet with QR, shared-photos gallery, leave,
+last-member disband — all admin-gated client-side AND server-side). Group
+mutes reuse `WhisperMutePreferences` under `group:<id>` (durations supported
+by the store).
 
 Invites: creating a group sends persistent invites (never direct adds).
 Invite rows die only by join (trigger-consumed), decline (invitee), or cancel
@@ -634,8 +640,19 @@ not bump the epoch; removed members keep bytes they already fetched (can't
 un-send) but never get new keys.
 
 Report/block: info-screen Block is 1:1-level (does not remove the member from
-the group nor stop their lines); the combined report flow (block + leave +
-reason) lands with the social slice.
+the group nor stop their lines); Report = block everywhere + leave the group
+(confirmed, no server moderator queue — documented as the v1 semantic).
+
+Social slice: frames carry `wg1:<json>` structured bodies (text, image ref,
+reply quote, poll, vote, mentions) with legacy bare-text fallback; polls tally
+client-side (latest vote per sender wins, no server change); @mentions render
+highlighted with an @-picker at compose time (no special push — the server
+cannot see mentions); replies freeze a quote snapshot (best-effort scroll to
+the quoted client_id); `demote` / `settings` (admin-only send + description)
+are signed events in the same log (settings bump no epoch); ownership moves
+via promote + `created_by` update; receipts (`whisper_group_receipts`) and
+typing (`whisper_group_typing`) are member-RLS presence tables on the realtime
+publication. Admin-only groups reject member sends fail-closed at send time.
 
 Dashboard checklist (ship day): (1) three INSERT-only webhooks
 (whisper_group_invites, whisper_group_messages, whisper_group_events) → 
@@ -643,7 +660,8 @@ whisper-push-send; (2) redeploy whisper-push-send; (3) re-run the full
 main-whisper-sql.sql (idempotent, additive); (4) publish 1.1.7 APKs + signed
 manifest with floor 18; (5) set edge MIN_VERSION_CODE=18.
 
-v1 limits (documented, not bugs): realtime message rows do not yet refresh an
-open chat (events do; messages refresh on load — full live chat lands with the
-parity slice); invite mode is fixed at creation; in-chat image messages come
-with the parity slice (group picture is done).
+v1 limits (documented, not bugs): invite mode is fixed at creation;
+invite links/QR encode the group id but joining still needs an admin invite
+(invites ARE the approval queue — no token-link auto-join); voice notes,
+reactions and forwards need new server tables (neither 1:1 nor groups have
+them); receipt ticks stay single-✓ in bubbles with counts in the info sheet.

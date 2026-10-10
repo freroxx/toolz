@@ -2859,3 +2859,15 @@ end $$;
 
 alter table public.whisper_group_receipts replica identity full;
 alter table public.whisper_group_typing replica identity full;
+
+-- ═══════════════ 20261010_whisper_groups_social.sql ═
+-- Social slice: `demote` (admin→member) and `settings` (admin-only send mode
+-- + group description) events. Both are admin-signed, verified client-side
+-- like every other event. Settings deliberately do NOT bump the epoch (they
+-- change no crypto scope), so in-flight sends never go stale on a settings
+-- change. Ownership transfer needs no schema: promote + UPDATE
+-- whisper_groups.created_by (the admin UPDATE policy already covers it).
+alter table public.whisper_group_events drop constraint if exists whisper_group_events_type_check;
+alter table public.whisper_group_events add constraint whisper_group_events_type_check
+    check (type in ('create', 'remove', 'leave', 'rename', 'promote', 'demote',
+                    'settings', 'invite', 'join', 'decline', 'cancel', 'picture'));

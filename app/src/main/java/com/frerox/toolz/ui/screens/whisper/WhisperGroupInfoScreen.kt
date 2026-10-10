@@ -22,6 +22,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -34,8 +37,11 @@ import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.DeleteForever
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.NotificationsActive
+import androidx.compose.material.icons.rounded.Flag
 import androidx.compose.material.icons.rounded.PersonRemove
+import androidx.compose.material.icons.rounded.PhotoLibrary
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.VolumeOff
 import androidx.compose.material.icons.rounded.VolumeUp
@@ -45,6 +51,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -69,7 +76,9 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -77,6 +86,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.groupsEnabled
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
+import com.frerox.toolz.ui.components.ToolzTonalExpressiveButton
 import com.frerox.toolz.ui.theme.toolzBackground
 
 /**
@@ -99,6 +109,11 @@ fun WhisperGroupInfoScreen(
     var showMuteDurations by remember { mutableStateOf(false) }
     var memberQuery by remember { mutableStateOf("") }
     var pendingBlock by remember { mutableStateOf<String?>(null) }
+    var transferTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var reportTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var showDescEdit by remember { mutableStateOf(false) }
+    var showShare by remember { mutableStateOf(false) }
+    var showGallery by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.left) {
         if (state.left) onNavigateBack()
@@ -164,6 +179,16 @@ fun WhisperGroupInfoScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    if (!membership?.description.isNullOrBlank()) {
+                        Spacer(Modifier.size(4.dp))
+                        Text(
+                            membership?.description.orEmpty(),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(horizontal = 24.dp),
+                        )
+                    }
                     if (iAmAdmin) {
                         TextButton(onClick = { showRename = true }) {
                             Icon(Icons.Rounded.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -193,6 +218,33 @@ fun WhisperGroupInfoScreen(
                     onToggle = { viewModel.toggleNotif() },
                 )
             }
+            if (iAmAdmin) {
+                item {
+                    SettingsCard(
+                        adminOnlySend = membership?.adminOnlySend == true,
+                        description = membership?.description.orEmpty(),
+                        onToggleSend = { viewModel.saveSettings(adminOnlySend = membership?.adminOnlySend != true) },
+                        onEditDesc = { showDescEdit = true },
+                    )
+                }
+            }
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ToolzTonalExpressiveButton(onClick = { showShare = true }, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Rounded.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(stringResource(R.string.st_Whisper_Groups_Share), fontWeight = FontWeight.Bold)
+                    }
+                    ToolzTonalExpressiveButton(
+                        onClick = { viewModel.loadGallery(); showGallery = true },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(Icons.Rounded.PhotoLibrary, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(stringResource(R.string.st_Whisper_Groups_Gallery), fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
             item {
                 SectionHeader(stringResource(R.string.st_Whisper_Groups_Members))
             }
@@ -216,6 +268,7 @@ fun WhisperGroupInfoScreen(
                     }
                 }
             }
+            val adminCount = membership?.members?.count { it.value.wire == "admin" } ?: 0
             items(visibleMembers, key = { it.userId }) { member ->
                 MemberRow(
                     name = member.name,
@@ -223,9 +276,14 @@ fun WhisperGroupInfoScreen(
                     role = member.role,
                     isMe = member.isMe,
                     iAmAdmin = iAmAdmin,
+                    canDemote = iAmAdmin && member.role == "admin" && adminCount > 1,
+                    canTransfer = state.amOwner,
                     onPromote = { viewModel.promoteMember(member.userId) },
+                    onDemote = { viewModel.demoteMember(member.userId) },
+                    onMakeOwner = { transferTarget = member.userId to member.name },
                     onRemove = { viewModel.removeMember(member.userId) },
                     onBlock = { pendingBlock = member.userId },
+                    onReport = { reportTarget = member.userId to member.name },
                 )
             }
             if (visiblePending.isNotEmpty() && iAmAdmin) {
@@ -301,6 +359,58 @@ fun WhisperGroupInfoScreen(
             dismissButton = {
                 TextButton(onClick = { showLeave = false }) { Text(stringResource(R.string.st_Whisper_Cancel)) }
             },
+        )
+    }
+    transferTarget?.let { (uid, name) ->
+        AlertDialog(
+            onDismissRequest = { transferTarget = null },
+            title = { Text(stringResource(R.string.st_Whisper_Groups_MakeOwner), fontWeight = FontWeight.Bold) },
+            text = { Text(stringResource(R.string.st_Whisper_Groups_MakeOwnerConfirm, name)) },
+            confirmButton = {
+                ToolzExpressiveButton(onClick = { viewModel.transferOwnership(uid); transferTarget = null }) {
+                    Text(stringResource(R.string.st_Whisper_Groups_MakeOwner), fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { transferTarget = null }) { Text(stringResource(R.string.st_Whisper_Cancel)) }
+            },
+        )
+    }
+    reportTarget?.let { (uid, name) ->
+        AlertDialog(
+            onDismissRequest = { reportTarget = null },
+            title = { Text(stringResource(R.string.st_Whisper_Groups_Report), fontWeight = FontWeight.Bold) },
+            text = { Text(stringResource(R.string.st_Whisper_Groups_ReportConfirm, name)) },
+            confirmButton = {
+                ToolzExpressiveButton(onClick = { viewModel.reportMember(uid); reportTarget = null }) {
+                    Text(stringResource(R.string.st_Whisper_Groups_Report), fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { reportTarget = null }) { Text(stringResource(R.string.st_Whisper_Cancel)) }
+            },
+        )
+    }
+    if (showDescEdit) {
+        DescEditDialog(
+            current = membership?.description.orEmpty(),
+            onDismiss = { showDescEdit = false },
+            onConfirm = { viewModel.saveSettings(description = it); showDescEdit = false },
+        )
+    }
+    if (showShare) {
+        ShareGroupDialog(
+            groupId = viewModel.groupId,
+            groupName = membership?.name?.ifBlank { "Group" } ?: "Group",
+            onDismiss = { showShare = false },
+        )
+    }
+    if (showGallery) {
+        GroupGalleryDialog(
+            photos = state.gallery,
+            bytesById = state.galleryBytes,
+            onRequestBytes = { viewModel.loadGalleryImage(it) },
+            onDismiss = { showGallery = false },
         )
     }
     if (showMuteDurations) {
@@ -387,9 +497,14 @@ private fun MemberRow(
     role: String,
     isMe: Boolean,
     iAmAdmin: Boolean,
+    canDemote: Boolean,
+    canTransfer: Boolean,
     onPromote: () -> Unit,
+    onDemote: () -> Unit,
+    onMakeOwner: () -> Unit,
     onRemove: () -> Unit,
     onBlock: () -> Unit,
+    onReport: () -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
     Card(
@@ -414,25 +529,47 @@ private fun MemberRow(
             }
             if (expanded && !isMe) {
                 Spacer(Modifier.size(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (iAmAdmin && role != "admin") {
-                        TextButton(onClick = onPromote) {
-                            Icon(Icons.Rounded.Star, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text(stringResource(R.string.st_Whisper_Groups_MakeAdmin))
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (iAmAdmin && role != "admin") {
+                            TextButton(onClick = onPromote) {
+                                Icon(Icons.Rounded.Star, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text(stringResource(R.string.st_Whisper_Groups_MakeAdmin))
+                            }
+                        }
+                        if (canDemote) {
+                            TextButton(onClick = onDemote) {
+                                Text(stringResource(R.string.st_Whisper_Groups_Demote))
+                            }
+                        }
+                        if (canTransfer) {
+                            TextButton(onClick = onMakeOwner) {
+                                Text(stringResource(R.string.st_Whisper_Groups_MakeOwner))
+                            }
                         }
                     }
-                    if (iAmAdmin) {
-                        TextButton(onClick = onRemove) {
-                            Icon(Icons.Rounded.PersonRemove, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text(stringResource(R.string.st_Whisper_Groups_Remove))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (iAmAdmin) {
+                            TextButton(onClick = onRemove) {
+                                Icon(Icons.Rounded.PersonRemove, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text(stringResource(R.string.st_Whisper_Groups_Remove))
+                            }
                         }
-                    }
-                    TextButton(onClick = onBlock) {
-                        Icon(Icons.Rounded.Block, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text(stringResource(R.string.st_Whisper_Groups_Block))
+                        TextButton(onClick = onBlock) {
+                            Icon(Icons.Rounded.Block, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text(stringResource(R.string.st_Whisper_Groups_Block))
+                        }
+                        TextButton(onClick = onReport) {
+                            Icon(Icons.Rounded.Flag, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                stringResource(R.string.st_Whisper_Groups_Report),
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
                     }
                 }
             }
@@ -690,4 +827,207 @@ private fun MuteDurationDialog(onDismiss: () -> Unit, onPick: (Long) -> Unit) {
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.st_Whisper_Cancel)) }
         },
     )
+}
+
+/** Admin console: send-mode toggle + description (signed SETTINGS event). */
+@Composable
+private fun SettingsCard(
+    adminOnlySend: Boolean,
+    description: String,
+    onToggleSend: () -> Unit,
+    onEditDesc: () -> Unit,
+) {
+    Card(
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+            Text(
+                stringResource(R.string.st_Whisper_Groups_Settings),
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        stringResource(R.string.st_Whisper_Groups_AdminOnlySend),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        stringResource(R.string.st_Whisper_Groups_AdminOnlySendDesc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = adminOnlySend, onCheckedChange = { onToggleSend() })
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        stringResource(R.string.st_Whisper_Groups_Description),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        description.ifBlank { stringResource(R.string.st_Whisper_Groups_DescriptionHint) },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                TextButton(onClick = onEditDesc) {
+                    Text(stringResource(R.string.st_Whisper_Groups_EditDescription))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DescEditDialog(current: String, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+    var desc by remember(current) { mutableStateOf(current) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.st_Whisper_Groups_Description), fontWeight = FontWeight.Bold) },
+        text = {
+            OutlinedTextField(
+                value = desc,
+                onValueChange = { if (it.length <= 140) desc = it },
+                label = { Text(stringResource(R.string.st_Whisper_Groups_DescriptionHint)) },
+                minLines = 2,
+                maxLines = 4,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        confirmButton = {
+            ToolzExpressiveButton(onClick = { onConfirm(desc.trim()) }) {
+                Text(stringResource(R.string.st_Whisper_Groups_EditDescription), fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.st_Whisper_Cancel)) }
+        },
+    )
+}
+
+/** Share sheet: QR of the group id + copy helpers (join still needs an invite). */
+@Composable
+private fun ShareGroupDialog(groupId: String, groupName: String, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    val qr = remember(groupId) {
+        runCatching {
+            com.frerox.toolz.util.CryptoManager.generateQrCode("WHISPER-GROUP:$groupId", 512)
+        }.getOrNull()
+    }
+    val qrBitmap = remember(qr) { qr?.asImageBitmap() }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.st_Whisper_Groups_Share), fontWeight = FontWeight.Bold) },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (qrBitmap != null) {
+                    Image(
+                        bitmap = qrBitmap,
+                        contentDescription = null,
+                        modifier = Modifier.size(200.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surface),
+                    )
+                }
+                Text(
+                    stringResource(R.string.st_Whisper_Groups_ShareText, groupName),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ToolzTonalExpressiveButton(onClick = {
+                        clipboard.setText(AnnotatedString(groupId))
+                        android.widget.Toast.makeText(context, context.getString(R.string.st_Whisper_Groups_Copied), android.widget.Toast.LENGTH_SHORT).show()
+                    }) {
+                        Text(stringResource(R.string.st_Whisper_Groups_CopyId))
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.st_Whisper_Cancel)) }
+        },
+    )
+}
+
+/** Shared-photos grid; thumbs decrypt lazily, tap opens the fullscreen viewer. */
+@Composable
+private fun GroupGalleryDialog(
+    photos: List<WhisperGroupInfoViewModel.GalleryItem>,
+    bytesById: Map<String, ByteArray>,
+    onRequestBytes: (WhisperGroupInfoViewModel.GalleryItem) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var viewer by remember { mutableStateOf<ByteArray?>(null) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.st_Whisper_Groups_Gallery), fontWeight = FontWeight.Bold) },
+        text = {
+            if (photos.isEmpty()) {
+                Text(
+                    stringResource(R.string.st_Whisper_Groups_GalleryEmpty),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(3),
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    items(photos.size, key = { photos[it].rowId }) { idx ->
+                        val item = photos[idx]
+                        LaunchedEffect(item.rowId) { onRequestBytes(item) }
+                        val bytes = bytesById[item.rowId]
+                        val bitmap = remember(bytes) {
+                            bytes?.let {
+                                runCatching { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size) }.getOrNull()
+                            }
+                        }
+                        Box(
+                            modifier = Modifier.size(96.dp).clip(RoundedCornerShape(12.dp))
+                                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                                .clickable(enabled = bytes != null) { viewer = bytes },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (bitmap != null) {
+                                Image(
+                                    bitmap = bitmap.asImageBitmap(),
+                                    contentDescription = item.caption.ifBlank { null },
+                                    modifier = Modifier.size(96.dp),
+                                    contentScale = ContentScale.Crop,
+                                )
+                            } else {
+                                CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.st_Whisper_Cancel)) }
+        },
+    )
+    viewer?.let { bytes ->
+        GroupImageViewer(bytes = bytes, onDismiss = { viewer = null })
+    }
 }
