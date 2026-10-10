@@ -11,9 +11,11 @@ import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.whisper.WhisperGroupChatMessage
 import com.frerox.toolz.data.whisper.WhisperGroupMembership
 import com.frerox.toolz.data.whisper.WhisperMutePreferences
+import com.frerox.toolz.data.whisper.WhisperNotificationManager
 import com.frerox.toolz.data.whisper.WhisperRepository
 import com.frerox.toolz.data.whisper.fetchGroupMessages
 import com.frerox.toolz.data.whisper.groupsEnabled
+import com.frerox.toolz.data.whisper.observeGroupLog
 import com.frerox.toolz.data.whisper.sendGroupMessage
 import com.frerox.toolz.data.whisper.syncGroup
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -32,6 +34,7 @@ import javax.inject.Inject
 class WhisperGroupChatViewModel @Inject constructor(
     private val repository: WhisperRepository,
     private val mutePrefs: WhisperMutePreferences,
+    private val notificationManager: WhisperNotificationManager,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -49,8 +52,33 @@ class WhisperGroupChatViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(UiState(isMuted = mutePrefs.isMuted(muteKey(groupId))))
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
 
+    private var logWatchJob: kotlinx.coroutines.Job? = null
+
     init {
-        if (groupsEnabled() && groupId.isNotBlank()) load()
+        if (groupsEnabled() && groupId.isNotBlank()) {
+            // Open-chat suppression id (mirrors 1:1 currentChatId).
+            notificationManager.currentChatId = "group:$groupId"
+            load()
+            watchLog()
+        }
+    }
+
+    /** Live refresh on new rows (messages + membership events); pings stay with the section watcher. */
+    private fun watchLog() {
+        logWatchJob?.cancel()
+        logWatchJob = viewModelScope.launch {
+            runCatching {
+                repository.observeGroupLog(groupId).collect { load() }
+            }
+        }
+    }
+
+    override fun onCleared() {
+        logWatchJob?.cancel()
+        if (notificationManager.currentChatId == "group:$groupId") {
+            notificationManager.currentChatId = null
+        }
+        super.onCleared()
     }
 
     fun load() {

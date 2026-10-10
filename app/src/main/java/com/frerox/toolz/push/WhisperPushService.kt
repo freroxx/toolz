@@ -40,6 +40,8 @@ class WhisperPushService : FirebaseMessagingService() {
     @Inject lateinit var notificationManager: WhisperNotificationManager
     @Inject lateinit var supabase: SupabaseClient
     @Inject lateinit var tokenStore: WhisperPushTokenStore
+    @Inject lateinit var groupNotifPrefs: com.frerox.toolz.data.whisper.WhisperGroupNotifPrefs
+    @Inject lateinit var groupDao: com.frerox.toolz.data.whisper.WhisperGroupDao
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -61,6 +63,76 @@ class WhisperPushService : FirebaseMessagingService() {
                     fromId = senderId,
                     fromName = senderName
                 )
+            }
+            return
+        }
+
+        // Phase-2 groups: invite / message / event wake pings (data-only, no content).
+        if (message.data["whisper_group_invite"].toBoolean()) {
+            val groupId = message.data["groupId"].orEmpty()
+            val groupName = message.data["groupName"].takeIf { !it.isNullOrBlank() } ?: "Group"
+            val inviterName = message.data["inviterName"].takeIf { !it.isNullOrBlank() }
+                ?: applicationContext.getString(com.frerox.toolz.R.string.st_Whisper_SomeoneDefault)
+            if (groupId.isNotEmpty()) {
+                notificationManager.showGroupInviteNotification(groupId, groupName, inviterName)
+            }
+            return
+        }
+        if (message.data["whisper_group_message"].toBoolean()) {
+            val groupId = message.data["groupId"].orEmpty()
+            val groupName = message.data["groupName"].takeIf { !it.isNullOrBlank() } ?: "Group"
+            // Messages are NOT governed by the event toggle (members get message
+            // pings by default); group mute still applies inside the manager.
+            if (groupId.isNotEmpty()) {
+                notificationManager.showGroupEventNotification(
+                    groupId = groupId,
+                    title = groupName,
+                    text = applicationContext.getString(com.frerox.toolz.R.string.st_Whisper_Notif_NewMessage),
+                    dedupeKey = "msg:${message.data["clientId"].orEmpty().ifBlank { message.data["messageId"].orEmpty() }}",
+                )
+            }
+            return
+        }
+        if (message.data["whisper_group_event"].toBoolean()) {
+            val groupId = message.data["groupId"].orEmpty()
+            val kind = message.data["kind"].orEmpty()
+            val actorId = message.data["actorId"].orEmpty()
+            val eventId = message.data["eventId"].orEmpty()
+            if (groupId.isNotEmpty() && kind.isNotEmpty()) {
+                // Role + toggle are resolved against the local cache (the server
+                // cannot know our role or our toggle) before anything is shown.
+                serviceScope.launch {
+                    runCatching {
+                        val me = supabase.auth.currentUserOrNull()?.id.orEmpty()
+                        val group = groupDao.group(groupId)
+                        val members = groupDao.members(groupId)
+                        val myRole = members.firstOrNull { it.memberId == me }?.role
+                        val amOwner = group?.createdBy == me && me.isNotBlank()
+                        val amOwnerOrAdmin = amOwner || myRole == "admin"
+                        val scope = when (kind) {
+                            "join" -> com.frerox.toolz.data.whisper.GroupNotifScope.JOIN
+                            "leave" -> com.frerox.toolz.data.whisper.GroupNotifScope.LEAVE
+                            "decline" -> com.frerox.toolz.data.whisper.GroupNotifScope.DECLINE
+                            else -> return@launch
+                        }
+                        val toggleOn = groupNotifPrefs.isEnabled(groupId, amOwnerOrAdmin)
+                        if (!com.frerox.toolz.data.whisper.shouldNotifyGroupEvent(scope, actorId, me, amOwner, toggleOn)) return@launch
+                        val actorName = message.data["actorName"].takeIf { !it.isNullOrBlank() }
+                            ?: applicationContext.getString(com.frerox.toolz.R.string.st_Whisper_SomeoneDefault)
+                        val groupName = message.data["groupName"].takeIf { !it.isNullOrBlank() } ?: "Group"
+                        val text = when (kind) {
+                            "join" -> com.frerox.toolz.data.whisper.WhisperGroupNotifTemplates.joinText(actorName, groupName)
+                            "leave" -> com.frerox.toolz.data.whisper.WhisperGroupNotifTemplates.leaveText(actorName, groupName)
+                            else -> com.frerox.toolz.data.whisper.WhisperGroupNotifTemplates.declineText(actorName, groupName)
+                        }
+                        notificationManager.showGroupEventNotification(
+                            groupId = groupId,
+                            title = groupName,
+                            text = text,
+                            dedupeKey = "evt:$eventId",
+                        )
+                    }
+                }
             }
             return
         }

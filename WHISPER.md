@@ -575,14 +575,33 @@ fan-out quota `whisper_check_group_send_allowed` (600 envelopes/day/sender) +
 guard triggers (12-cap, epoch chain, member+epoch+quota message guard, all
 fail-closed 42501). Group writes require `client_version_code >= 18`.
 
-UI: Chats-tab `WhisperGroupsSection` (list + create dialog with friend
-multi-select and invite-mode choice), `WhisperGroupChatScreen` (bubbles with
-sender names, send, mute, refresh), `WhisperGroupInfoScreen` (rename, add,
-promote, remove, block-a-member, mute, leave — all admin-gated client-side
-AND server-side). Group mutes reuse `WhisperMutePreferences` under
-`group:<id>`.
+UI: Chats-tab `WhisperGroupsSection` (list + persistent invite cards with
+Join/Decline + create dialog with friend picker, picture picker, and invite
+mode), `WhisperGroupChatScreen` (bubbles with sender names, send, mute,
+refresh, live event refresh), `WhisperGroupInfoScreen` (picture header with
+admin change, rename, add/invite, pending invites with owner cancel, promote,
+remove, block-a-member, mute, per-group notifications toggle, leave — all
+admin-gated client-side AND server-side). Group mutes reuse
+`WhisperMutePreferences` under `group:<id>`.
+
+Invites: creating a group sends persistent invites (never direct adds).
+Invite rows die only by join (trigger-consumed), decline (invitee), or cancel
+(owner/admin) — no expiry. Invitees see the card on the Chats tab (survives
+restarts) and get pinged (realtime while open, FCM push while closed). Owner
+gets join/leave/decline pings with randomized copy; per-group toggle defaults
+ON for owner/admins (join/leave scope, +declines for the owner) and OFF for
+members. Push fan-out lives in `whisper-push-send` (single-file, dashboard
+deploys; needs DB webhooks on the three group tables); realtime publication
+now includes all group tables.
+
+Group picture: EXIF-strip + 1920 + JPEG82 (shared preprocess, 1:1 untouched),
+fresh AES-256-GCM key per picture, PNG-wrapped for the image host, uploaded
+via `EncryptedBlobHost`, key sealed per member into a signed `picture` event.
+URL is server-visible metadata; bytes + key stay opaque. Picture changes do
+not bump the epoch; removed members keep bytes they already fetched (can't
+un-send) but never get new keys.
 
 v1 limits (documented, not bugs): sends are online-only (outbox `groupId`
-legs land next); no realtime subscription (open + manual refresh);
-invite mode is fixed at creation; report = block + leave; images in groups
-come after 1:1 image parity review.
+legs land next); realtime watchers live while the Whisper hub is open, push
+covers closed-app; invite mode is fixed at creation; report = block + leave;
+in-chat image messages come after 1:1 parity review (group picture is done).

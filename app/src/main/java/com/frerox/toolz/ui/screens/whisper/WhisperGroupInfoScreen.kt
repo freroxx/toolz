@@ -5,6 +5,10 @@
 
 package com.frerox.toolz.ui.screens.whisper
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,13 +23,16 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.AddPhotoAlternate
 import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.PersonRemove
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.VolumeOff
@@ -54,6 +61,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -118,7 +129,13 @@ fun WhisperGroupInfoScreen(
             item {
                 Spacer(Modifier.size(4.dp))
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                    GroupAvatar(name = membership?.name?.ifBlank { "Group" } ?: "Group", groupId = viewModel.groupId, size = 84.dp)
+                    GroupPictureHeader(
+                        pictureBytes = state.pictureBytes,
+                        name = membership?.name?.ifBlank { "Group" } ?: "Group",
+                        groupId = viewModel.groupId,
+                        canChange = iAmAdmin,
+                        onPick = { bytes, mime -> viewModel.setPicture(bytes, mime) },
+                    )
                     Spacer(Modifier.size(8.dp))
                     Text(
                         membership?.name?.ifBlank { "Group" } ?: "Group",
@@ -145,6 +162,13 @@ fun WhisperGroupInfoScreen(
                 MuteRow(muted = state.isMuted, onToggle = { viewModel.toggleMute() })
             }
             item {
+                NotifRow(
+                    on = state.notifOn,
+                    isOwnerOrAdmin = iAmAdmin || state.amOwner,
+                    onToggle = { viewModel.toggleNotif() },
+                )
+            }
+            item {
                 SectionHeader(stringResource(R.string.st_Whisper_Groups_Members))
             }
             if (canInvite) {
@@ -167,6 +191,19 @@ fun WhisperGroupInfoScreen(
                     onRemove = { viewModel.removeMember(member.userId) },
                     onBlock = { pendingBlock = member.userId },
                 )
+            }
+            if (state.pending.isNotEmpty() && iAmAdmin) {
+                item {
+                    SectionHeader(
+                        "${stringResource(R.string.st_Whisper_Groups_InvitedLabel)} (${state.pending.size})",
+                    )
+                }
+                items(state.pending, key = { "pending_${it.userId}" }) { entry ->
+                    PendingInviteRow(
+                        name = entry.name,
+                        onCancel = { viewModel.cancelInvite(entry.userId) },
+                    )
+                }
             }
             item {
                 Spacer(Modifier.size(4.dp))
@@ -379,4 +416,127 @@ private fun RenameDialog(current: String, onDismiss: () -> Unit, onConfirm: (Str
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.st_Whisper_Cancel)) }
         },
     )
+}
+
+/** Group picture header: decrypted picture when present, initial avatar otherwise. */
+@Composable
+private fun GroupPictureHeader(
+    pictureBytes: ByteArray?,
+    name: String,
+    groupId: String,
+    canChange: Boolean,
+    onPick: (ByteArray, String) -> Unit,
+) {
+    val context = LocalContext.current
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        runCatching {
+            val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
+            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            if (bytes != null) onPick(bytes, mime)
+        }
+    }
+    val bitmap = remember(pictureBytes) {
+        pictureBytes?.let {
+            runCatching { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size) }.getOrNull()
+        }
+    }
+    Box(
+        modifier = Modifier.size(96.dp).clip(CircleShape).clickable(
+            enabled = canChange,
+            onClick = { picker.launch("image/*") },
+        ),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = null,
+                modifier = Modifier.size(96.dp).clip(CircleShape),
+                contentScale = ContentScale.Crop,
+            )
+        } else {
+            GroupAvatar(name = name, groupId = groupId, size = 96.dp)
+        }
+        if (canChange) {
+            Box(
+                modifier = Modifier.size(96.dp).clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.25f)),
+                contentAlignment = Alignment.BottomEnd,
+            ) {
+                Icon(
+                    Icons.Rounded.AddPhotoAlternate,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.surface,
+                    modifier = Modifier.size(24.dp).padding(3.dp),
+                )
+            }
+        }
+    }
+}
+
+/** Per-group event toggle: role default until the user overrides it. */
+@Composable
+private fun NotifRow(on: Boolean, isOwnerOrAdmin: Boolean, onToggle: () -> Unit) {
+    Card(
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Rounded.NotificationsActive,
+                contentDescription = null,
+                tint = if (on) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    stringResource(R.string.st_Whisper_Groups_NotifToggle),
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Text(
+                    if (on) {
+                        if (isOwnerOrAdmin) stringResource(R.string.st_Whisper_Groups_NotifScopeOwner)
+                        else stringResource(R.string.st_Whisper_Groups_NotifScopeMember)
+                    } else {
+                        stringResource(R.string.st_Whisper_Groups_NotifToggleOff)
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(checked = on, onCheckedChange = { onToggle() })
+        }
+    }
+}
+
+/** Outstanding invite with owner-only cancel. */
+@Composable
+private fun PendingInviteRow(name: String, onCancel: () -> Unit) {
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
+        ),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    stringResource(R.string.st_Whisper_Groups_InvitedLabel),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            TextButton(onClick = onCancel) {
+                Text(stringResource(R.string.st_Whisper_Groups_CancelInvite))
+            }
+        }
+    }
 }

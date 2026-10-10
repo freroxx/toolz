@@ -74,6 +74,13 @@ class WhisperNotificationManager @Inject constructor(
          */
         private const val FRIEND_REQUEST_NOTIF_ID_BASE = 2_000_000
         private const val FRIEND_REQUEST_NOTIF_ID_SPAN = 100_000
+
+        /**
+         * Phase-2 groups: dedicated ID band for group invite + event notifications.
+         * Range: 3_000_000 .. 3_099_999 — disjoint from every band above.
+         */
+        private const val GROUP_NOTIF_ID_BASE = 3_000_000
+        private const val GROUP_NOTIF_ID_SPAN = 100_000
     }
 
     private val notifManager = NotificationManagerCompat.from(context)
@@ -351,6 +358,95 @@ class WhisperNotificationManager @Inject constructor(
     /** Stable id for a friend-request notification inside [FRIEND_REQUEST_NOTIF_ID_BASE, +SPAN). */
     private fun friendRequestNotifId(fromId: String): Int =
         FRIEND_REQUEST_NOTIF_ID_BASE + ((fromId.hashCode() and 0x7FFFFFFF) % FRIEND_REQUEST_NOTIF_ID_SPAN)
+
+    /** Stable id for a group notification inside [GROUP_NOTIF_ID_BASE, +SPAN). */
+    private fun groupNotifId(key: String): Int =
+        GROUP_NOTIF_ID_BASE + ((key.hashCode() and 0x7FFFFFFF) % GROUP_NOTIF_ID_SPAN)
+
+    /**
+     * Phase-2 groups: persistent-invite ping. No mute check (the invitee is not
+     * a member yet and cannot have muted the group); master toggle still applies.
+     * Tapping opens the Whisper hub where the invite card lives.
+     */
+    fun showGroupInviteNotification(groupId: String, groupName: String, inviterName: String) {
+        if (!whisperNotificationsEnabled) return
+        if (groupId.isBlank()) return
+        val notifId = groupNotifId("invite:$groupId:$inviterName")
+        val intent = Intent(context, MainActivity::class.java).apply {
+            action = "com.frerox.toolz.OPEN_WHISPER_GROUP_INVITES"
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            REQUEST_CODE_BASE + (notifId % 900),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_whisper_notif).setColor(com.frerox.toolz.util.NotificationHelper.ACCENT_COLOR).setLargeIcon(com.frerox.toolz.util.NotificationHelper.toolzLargeIcon(context))
+            .setContentTitle(context.getString(R.string.st_Whisper_Groups_InviteNotifTitle, inviterName))
+            .setContentText(context.getString(R.string.st_Whisper_Groups_InviteNotifText, groupName))
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setGroup(GROUP_KEY)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .build()
+        try {
+            notifManager.notify(notifId, notification)
+        } catch (e: SecurityException) {
+            Log.e(TAG, "Notification permission not granted: ${e.message}")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error posting notification", e)
+        }
+    }
+
+    /**
+     * Phase-2 groups: join/leave/decline event ping for owners/admins/members.
+     * Honors the per-group toggle (checked by the caller), the group mute, the
+     * open-chat suppression, and FCM+realtime dedupe via [dedupeKey] (event id).
+     * Tapping opens the group chat.
+     */
+    fun showGroupEventNotification(
+        groupId: String,
+        title: String,
+        text: String,
+        dedupeKey: String,
+    ) {
+        if (!whisperNotificationsEnabled) return
+        if (groupId.isBlank() || !shouldNotifyForMessage(dedupeKey)) return
+        if (mutePrefs.isMuted("group:$groupId")) return
+        if (isInForeground && currentChatId == "group:$groupId") return
+        val notifId = groupNotifId("event:$groupId:$dedupeKey")
+        val deepLinkIntent = Intent(context, MainActivity::class.java).apply {
+            action = "com.frerox.toolz.OPEN_WHISPER_GROUP"
+            putExtra("groupId", groupId)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            REQUEST_CODE_BASE + (notifId % 900),
+            deepLinkIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_whisper_notif).setColor(com.frerox.toolz.util.NotificationHelper.ACCENT_COLOR).setLargeIcon(com.frerox.toolz.util.NotificationHelper.toolzLargeIcon(context))
+            .setContentTitle(title)
+            .setContentText(text)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setGroup(GROUP_KEY)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .build()
+        try {
+            notifManager.notify(notifId, notification)
+        } catch (e: SecurityException) {
+            Log.e(TAG, "Notification permission not granted: ${e.message}")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error posting notification", e)
+        }
+    }
 
     private fun senderNotifId(senderId: String): Int = synchronized(senderNotifIds) {
         senderNotifIds[senderId]?.let { return it }

@@ -5,6 +5,9 @@
 
 package com.frerox.toolz.ui.screens.whisper
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -24,6 +27,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.AddPhotoAlternate
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.NotificationsOff
@@ -38,6 +42,9 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.runtime.Composable
@@ -109,8 +116,15 @@ fun WhisperGroupsSection(
         state.error?.let { err ->
             GroupErrorBanner(message = err, onRetry = { viewModel.load() })
         }
-        if (!state.isLoading && state.groups.isEmpty() && state.error == null) {
+        if (!state.isLoading && state.groups.isEmpty() && state.invites.isEmpty() && state.error == null) {
             GroupEmptyState()
+        }
+        state.invites.forEach { invite ->
+            GroupInviteCard(
+                invite = invite,
+                onJoin = { viewModel.join(invite.groupId, onNavigateToGroup) },
+                onDecline = { viewModel.decline(invite.groupId) },
+            )
         }
         state.groups.forEach { group ->
             GroupRowCard(
@@ -128,6 +142,55 @@ fun WhisperGroupsSection(
             viewModel = viewModel,
             onDismiss = { showCreate = false },
         )
+    }
+}
+
+/** Persistent invite card: survives restarts, dies only by join/decline/cancel. */
+@Composable
+private fun GroupInviteCard(
+    invite: com.frerox.toolz.data.whisper.GroupInviteInfo,
+    onJoin: () -> Unit,
+    onDecline: () -> Unit,
+) {
+    val haptic = rememberToolzHapticFeedback()
+    ExpressiveCard(
+        onClick = {},
+        modifier = Modifier.fillMaxWidth(),
+        containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                GroupAvatar(name = invite.groupName, groupId = invite.groupId, size = 44.dp)
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        invite.groupName,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        "${invite.invitedByName} · ${stringResource(R.string.st_Whisper_Groups_InvitedLabel)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ToolzExpressiveButton(onClick = { haptic.click(); onJoin() }, modifier = Modifier.weight(1f)) {
+                    Text(stringResource(R.string.st_Whisper_Groups_Join), fontWeight = FontWeight.Bold)
+                }
+                ToolzTonalExpressiveButton(onClick = { haptic.click(); onDecline() }, modifier = Modifier.weight(1f)) {
+                    Text(stringResource(R.string.st_Whisper_Groups_Decline), fontWeight = FontWeight.Bold)
+                }
+            }
+        }
     }
 }
 
@@ -272,16 +335,33 @@ private fun CreateGroupDialog(
     onDismiss: () -> Unit,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     var name by remember { mutableStateOf("") }
     var query by remember { mutableStateOf("") }
     val picked = remember { mutableStateListOf<String>() }
     var adminsOnly by remember { mutableStateOf(true) }
+    var pictureBytes by remember { mutableStateOf<ByteArray?>(null) }
+    var pictureMime by remember { mutableStateOf("image/jpeg") }
     val canCreate = name.isNotBlank() && picked.isNotEmpty() && !state.isLoading
     val visibleFriends = remember(state.friends, query) {
         val q = query.trim().lowercase()
         if (q.isBlank()) state.friends
         else state.friends.filter {
             it.effectiveName.lowercase().contains(q) || it.username.lowercase().contains(q)
+        }
+    }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        runCatching {
+            context.contentResolver.getType(uri)?.let { pictureMime = it }
+            context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+        }.getOrNull()?.let { pictureBytes = it }
+    }
+    val previewBitmap = remember(pictureBytes) {
+        pictureBytes?.let {
+            runCatching {
+                android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size)
+            }.getOrNull()
         }
     }
 
@@ -295,12 +375,38 @@ private fun CreateGroupDialog(
             modifier = Modifier.fillMaxWidth(0.94f).fillMaxHeight(0.88f),
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
-                // Header with live avatar preview.
+                // Header with picture picker + live preview.
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 16.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    GroupAvatar(name = name.ifBlank { "G" }, groupId = name.ifBlank { "preview" }, size = 56.dp)
+                    Box(
+                        modifier = Modifier.size(64.dp).clip(CircleShape).clickable { picker.launch("image/*") },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (previewBitmap != null) {
+                            Image(
+                                bitmap = previewBitmap.asImageBitmap(),
+                                contentDescription = null,
+                                modifier = Modifier.size(64.dp).clip(CircleShape),
+                                contentScale = ContentScale.Crop,
+                            )
+                        } else {
+                            GroupAvatar(name = name.ifBlank { "G" }, groupId = name.ifBlank { "preview" }, size = 64.dp)
+                        }
+                        Box(
+                            modifier = Modifier.size(64.dp).clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.25f)),
+                            contentAlignment = Alignment.BottomEnd,
+                        ) {
+                            Icon(
+                                Icons.Rounded.AddPhotoAlternate,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.surface,
+                                modifier = Modifier.size(20.dp).padding(2.dp),
+                            )
+                        }
+                    }
                     Spacer(Modifier.width(14.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
@@ -332,6 +438,13 @@ private fun CreateGroupDialog(
                         shape = RoundedCornerShape(20.dp),
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    if (picked.isNotEmpty()) {
+                        PickedChipsRow(
+                            picked = picked.toList(),
+                            friends = state.friends,
+                            onRemove = { picked.remove(it) },
+                        )
+                    }
                     OutlinedTextField(
                         value = query,
                         onValueChange = { query = it },
@@ -411,7 +524,7 @@ private fun CreateGroupDialog(
                 ) {
                     TextButton(onClick = onDismiss) { Text(stringResource(R.string.st_Whisper_Cancel)) }
                     ToolzExpressiveButton(
-                        onClick = { viewModel.create(name, picked.toList(), adminsOnly) },
+                        onClick = { viewModel.create(name, picked.toList(), adminsOnly, pictureBytes, pictureMime) },
                         enabled = canCreate,
                         modifier = Modifier.weight(1f),
                     ) {
@@ -423,6 +536,29 @@ private fun CreateGroupDialog(
                     }
                 }
             }
+        }
+    }
+}
+
+/** Removable chips for the picked members (tap × to drop without scrolling). */
+@Composable
+private fun PickedChipsRow(
+    picked: List<String>,
+    friends: List<com.frerox.toolz.data.whisper.WhisperProfile>,
+    onRemove: (String) -> Unit,
+) {
+    val byId = remember(friends) { friends.associateBy { it.id } }
+    androidx.compose.foundation.layout.FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        picked.forEach { id ->
+            FilterChip(
+                selected = true,
+                onClick = { onRemove(id) },
+                label = { Text(byId[id]?.effectiveName ?: "…", maxLines = 1) },
+                trailingIcon = { Icon(Icons.Rounded.Close, contentDescription = null, modifier = Modifier.size(14.dp)) },
+            )
         }
     }
 }

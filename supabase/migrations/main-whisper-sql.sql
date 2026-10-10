@@ -2480,3 +2480,271 @@ comment on function public.whisper_check_group_send_allowed(uuid, int) is
 alter table public.whisper_group_events alter column payload type text using payload::text;
 alter table public.whisper_group_events alter column payload set default '{}';
 alter table public.whisper_group_events alter column payload set not null;
+
+-- ═══════════════ 20261010_whisper_groups_invites.sql ═
+-- Phase-2 invites: creating a group no longer adds members directly — the
+-- creator picks friends, each gets a persistent INVITE, and membership starts
+-- at join. An invite row dies ONLY by join (trigger-consumed), decline
+-- (invitee), or cancel (owner/admin). No expiry, no other delete path.
+-- Group picture rides a signed `picture` admin event carrying per-member
+-- sealed key frames (bytes opaque on ImgBB; URL visible like other group
+-- metadata; key sealed per member like message frames).
+
+-- ── 1. Invites table ──────────────────────────────────────────────
+create table if not exists public.whisper_group_invites (
+    group_id uuid not null references public.whisper_groups(id) on delete cascade,
+    user_id uuid not null,
+    invited_by uuid not null,
+    client_version_code int not null check (client_version_code >= 18),
+    created_at timestamptz not null default now(),
+    primary key (group_id, user_id)
+);
+
+alter table public.whisper_group_invites enable row level security;
+
+-- Invitee reads + deletes (join/decline) only their own rows.
+drop policy if exists "whisper_group_invites_select_own" on public.whisper_group_invites;
+create policy "whisper_group_invites_select_own" on public.whisper_group_invites
+    for select using (user_id = auth.uid());
+
+drop policy if exists "whisper_group_invites_delete_own" on public.whisper_group_invites;
+create policy "whisper_group_invites_delete_own" on public.whisper_group_invites
+    for delete using (user_id = auth.uid());
+
+-- Invite (member with invite rights) and cancel (admin) write paths.
+drop policy if exists "whisper_group_invites_insert_inviter" on public.whisper_group_invites;
+create policy "whisper_group_invites_insert_inviter" on public.whisper_group_invites
+    for insert with check (
+        invited_by = auth.uid()
+        and exists (
+            select 1 from public.whisper_group_members m
+            where m.group_id = whisper_group_invites.group_id and m.user_id = auth.uid()
+        )
+    );
+
+drop policy if exists "whisper_group_invites_delete_admin" on public.whisper_group_invites;
+create policy "whisper_group_invites_delete_admin" on public.whisper_group_invites
+    for delete using (
+        exists (
+            select 1 from public.whisper_group_members m
+            where m.group_id = whisper_group_invites.group_id
+              and m.user_id = auth.uid() and m.role = 'admin'
+        )
+    );
+
+create index if not exists whisper_group_invites_user_idx
+    on public.whisper_group_invites (user_id);
+
+-- ── 2. New event types: invite/join/decline/cancel/picture ────────
+-- Events stay append-only; the CHECK grows (additive — old rows unaffected).
+alter table public.whisper_group_events drop constraint if exists whisper_group_events_type_check;
+alter table public.whisper_group_events add constraint whisper_group_events_type_check
+    check (type in ('create', 'add', 'remove', 'leave', 'rename', 'promote',
+                    'invite', 'join', 'decline', 'cancel', 'picture'));
+
+-- ── 3. Join consumes the invite (the ONLY silent invite death) ────
+create or replace function public.whisper_group_consume_invite()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  delete from public.whisper_group_invites
+  where group_id = new.group_id and user_id = new.user_id;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_group_members_consume_invite on public.whisper_group_members;
+create trigger trg_group_members_consume_invite
+  after insert on public.whisper_group_members
+  for each row execute function public.whisper_group_consume_invite();
+
+-- ── 4. Member JOINs require a live invite (admins exempt for recovery) ──
+-- With invites, direct member-row inserts are invite redemptions — except an
+-- admin restoring state. Mods bypassing the invite table still face the
+-- signature-checked event log (JOIN needs a prior INVITE event) and the
+-- ship-day floor.
+create or replace function public.whisper_group_require_invite()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if exists (
+    select 1 from public.whisper_group_members m
+    where m.group_id = new.group_id and m.user_id = auth.uid() and m.role = 'admin'
+  ) then
+    return new;
+  end if;
+  if not exists (
+    select 1 from public.whisper_group_invites i
+    where i.group_id = new.group_id and i.user_id = new.user_id
+  ) then
+    raise exception 'no invite' using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_group_members_require_invite on public.whisper_group_members;
+create trigger trg_group_members_require_invite
+  before insert on public.whisper_group_members
+  for each row execute function public.whisper_group_require_invite();
+
+-- ── 5. Cap counts members + pending invites (12 max, either way) ──
+create or replace function public.whisper_group_enforce_member_cap()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_count int;
+begin
+  select count(*) into v_count
+  from public.whisper_group_members where group_id = new.group_id;
+  if v_count >= 12 then
+    raise exception 'group full (12 max)' using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;
+
+create or replace function public.whisper_group_enforce_invite_cap()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_total int;
+begin
+  select
+    (select count(*) from public.whisper_group_members where group_id = new.group_id) +
+    (select count(*) from public.whisper_group_invites where group_id = new.group_id)
+    into v_total;
+  if v_total >= 12 then
+    raise exception 'group full (12 max)' using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_group_invites_cap on public.whisper_group_invites;
+create trigger trg_group_invites_cap
+  before insert on public.whisper_group_invites
+  for each row execute function public.whisper_group_enforce_invite_cap();
+
+-- ── 6. Realtime: group tables join the publication (idempotent) ───
+-- Without these, NO realtime fires on group tables — verified missing 20261010.
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'whisper_groups'
+  ) then
+    alter publication supabase_realtime add table public.whisper_groups;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'whisper_group_members'
+  ) then
+    alter publication supabase_realtime add table public.whisper_group_members;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'whisper_group_events'
+  ) then
+    alter publication supabase_realtime add table public.whisper_group_events;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'whisper_group_messages'
+  ) then
+    alter publication supabase_realtime add table public.whisper_group_messages;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'whisper_group_invites'
+  ) then
+    alter publication supabase_realtime add table public.whisper_group_invites;
+  end if;
+end $$;
+
+-- Invite DELETE must carry the row (cancel/decline fan-out without re-select).
+alter table public.whisper_group_invites replica identity full;
+alter table public.whisper_group_members replica identity full;
+alter table public.whisper_group_events replica identity full;
+alter table public.whisper_group_messages replica identity full;
+
+comment on table public.whisper_group_invites is
+  '20261010 Phase-2 invites: persistent until join (trigger-consumed), decline (invitee), or cancel (admin). No expiry, no other delete path.';
+
+-- ═══════════════ 20261010_whisper_groups_invites_fix.sql ═
+-- Three gaps found while wiring transport (all on dev-only group tables):
+-- (a) the group creator bootstraps the first admin row with no invite and no
+--     admin row yet — the require-invite trigger would reject it;
+-- (b) invitees must READ the group row (name for the invite card) before they
+--     are members;
+-- (c) invitees must WRITE join/decline events before they are members.
+drop policy if exists "whisper_groups_select_member" on public.whisper_groups;
+create policy "whisper_groups_select_member" on public.whisper_groups
+    for select using (
+        exists (
+            select 1 from public.whisper_group_members m
+            where m.group_id = whisper_groups.id and m.user_id = auth.uid()
+        )
+        or exists (
+            select 1 from public.whisper_group_invites i
+            where i.group_id = whisper_groups.id and i.user_id = auth.uid()
+        )
+    );
+
+drop policy if exists "whisper_group_events_insert_member" on public.whisper_group_events;
+create policy "whisper_group_events_insert_member" on public.whisper_group_events
+    for insert with check (
+        actor = auth.uid()
+        and (
+            exists (
+                select 1 from public.whisper_group_members m
+                where m.group_id = whisper_group_events.group_id and m.user_id = auth.uid()
+            )
+            or exists (
+                select 1 from public.whisper_group_invites i
+                where i.group_id = whisper_group_events.group_id and i.user_id = auth.uid()
+            )
+        )
+    );
+
+create or replace function public.whisper_group_require_invite()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_creator uuid;
+begin
+  -- (a) the creator bootstraps the first admin row.
+  select created_by into v_creator from public.whisper_groups where id = new.group_id;
+  if found and v_creator = auth.uid() and new.user_id = auth.uid() then
+    return new;
+  end if;
+  if exists (
+    select 1 from public.whisper_group_members m
+    where m.group_id = new.group_id and m.user_id = auth.uid() and m.role = 'admin'
+  ) then
+    return new;
+  end if;
+  if not exists (
+    select 1 from public.whisper_group_invites i
+    where i.group_id = new.group_id and i.user_id = new.user_id
+  ) then
+    raise exception 'no invite' using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;

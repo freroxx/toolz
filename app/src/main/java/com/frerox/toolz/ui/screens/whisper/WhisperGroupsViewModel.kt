@@ -7,15 +7,29 @@ package com.frerox.toolz.ui.screens.whisper
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.frerox.toolz.data.whisper.GroupInviteInfo
+import com.frerox.toolz.data.whisper.GroupNotifScope
 import com.frerox.toolz.data.whisper.WhisperGroupEntity
+import com.frerox.toolz.data.whisper.WhisperGroupMembership
+import com.frerox.toolz.data.whisper.WhisperGroupNotifPrefs
+import com.frerox.toolz.data.whisper.WhisperGroupNotifTemplates
 import com.frerox.toolz.data.whisper.WhisperMutePreferences
+import com.frerox.toolz.data.whisper.WhisperNotificationManager
 import com.frerox.toolz.data.whisper.WhisperProfile
 import com.frerox.toolz.data.whisper.WhisperRepository
 import com.frerox.toolz.data.whisper.cachedGroupMembers
 import com.frerox.toolz.data.whisper.cachedGroups
 import com.frerox.toolz.data.whisper.createGroup
+import com.frerox.toolz.data.whisper.declineGroupInvite
 import com.frerox.toolz.data.whisper.getFriends
 import com.frerox.toolz.data.whisper.groupsEnabled
+import com.frerox.toolz.data.whisper.joinGroup
+import com.frerox.toolz.data.whisper.myGroupInvites
+import com.frerox.toolz.data.whisper.observeGroupLog
+import com.frerox.toolz.data.whisper.observeGroupMessagesLive
+import com.frerox.toolz.data.whisper.observeMyGroupInvites
+import com.frerox.toolz.data.whisper.setGroupPicture
+import com.frerox.toolz.data.whisper.shouldNotifyGroupEvent
 import com.frerox.toolz.data.whisper.syncGroups
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,11 +50,15 @@ import javax.inject.Inject
 class WhisperGroupsViewModel @Inject constructor(
     private val repository: WhisperRepository,
     mutePrefs: WhisperMutePreferences,
+    private val notificationManager: WhisperNotificationManager,
+    private val notifPrefs: WhisperGroupNotifPrefs,
+    @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) : ViewModel() {
 
     data class UiState(
         val groups: List<WhisperGroupEntity> = emptyList(),
         val memberCounts: Map<String, Int> = emptyMap(),
+        val invites: List<GroupInviteInfo> = emptyList(),
         val friends: List<WhisperProfile> = emptyList(),
         val isLoading: Boolean = false,
         val error: String? = null,
@@ -56,8 +74,21 @@ class WhisperGroupsViewModel @Inject constructor(
         .map { set -> set.filter { it.startsWith("group:") }.map { it.removePrefix("group:") }.toSet() }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
 
+    // Invite ids already pinged this process (realtime resubscribes must not re-ping).
+    private val pingedInviteIds = mutableSetOf<String>()
+    private var inviteWatchJob: kotlinx.coroutines.Job? = null
+    // Event ids already seen (join/leave/decline pings fire once per event).
+    private val seenEventIds = mutableSetOf<String>()
+    private var logWatchJobs: List<kotlinx.coroutines.Job> = emptyList()
+    private var lastMemberships: List<WhisperGroupMembership> = emptyList()
+    private var lastFriendNames: Map<String, String> = emptyMap()
+    private var lastGroups: List<WhisperGroupEntity> = emptyList()
+
     init {
-        if (groupsEnabled()) load()
+        if (groupsEnabled()) {
+            load()
+            watchInvites()
+        }
     }
 
     fun load() {
@@ -66,16 +97,25 @@ class WhisperGroupsViewModel @Inject constructor(
             // Cached rows render instantly; the verified sync replaces them.
             _uiState.update { it.copy(groups = repository.cachedGroups()) }
             val friends = repository.getFriends().getOrNull().orEmpty()
+            val invites = repository.myGroupInvites().getOrNull().orEmpty()
+            pingNewInvites(invites)
             val synced = repository.syncGroups()
-            synced.onSuccess {
+            synced.onSuccess { memberships ->
                 val fresh = repository.cachedGroups().sortedByDescending { g -> g.updatedAtMs }
                 val counts = fresh.associate { g ->
                     g.id to repository.cachedGroupMembers(g.id).size
                 }
+                val freshInvites = repository.myGroupInvites().getOrNull().orEmpty()
+                pingNewInvites(freshInvites)
+                lastMemberships = memberships
+                lastFriendNames = friends.associate { it.id to it.effectiveName }
+                lastGroups = fresh
+                watchGroupLogs()
                 _uiState.update {
                     it.copy(
                         groups = fresh,
                         memberCounts = counts,
+                        invites = freshInvites,
                         friends = friends,
                         isLoading = false,
                     )
@@ -83,6 +123,7 @@ class WhisperGroupsViewModel @Inject constructor(
             }.onFailure { e ->
                 _uiState.update {
                     it.copy(
+                        invites = invites,
                         friends = friends,
                         isLoading = false,
                         error = if (it.groups.isEmpty()) e.message else null,
@@ -92,17 +133,144 @@ class WhisperGroupsViewModel @Inject constructor(
         }
     }
 
-    fun create(name: String, memberIds: List<String>, inviteAdminsOnly: Boolean) {
+    /** Realtime invite lane: refetch + ping only genuinely new invites. */
+    private fun watchInvites() {
+        inviteWatchJob?.cancel()
+        inviteWatchJob = viewModelScope.launch {
+            runCatching {
+                repository.observeMyGroupInvites().collect {
+                    val fresh = repository.myGroupInvites().getOrNull().orEmpty()
+                    pingNewInvites(fresh)
+                    _uiState.update { it.copy(invites = fresh) }
+                }
+            }
+        }
+    }
+
+    private fun pingNewInvites(invites: List<GroupInviteInfo>) {
+        invites.forEach { inv ->
+            val key = "${inv.groupId}:${inv.invitedBy}"
+            if (pingedInviteIds.add(key)) {
+                notificationManager.showGroupInviteNotification(inv.groupId, inv.groupName, inv.invitedByName)
+            }
+        }
+    }
+
+    fun join(groupId: String, onJoined: (String) -> Unit = {}) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(error = null) }
+            repository.joinGroup(groupId)
+                .onSuccess {
+                    load()
+                    onJoined(groupId)
+                }
+                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+        }
+    }
+
+    fun decline(groupId: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(error = null) }
+            repository.declineGroupInvite(groupId)
+                .onSuccess { load() }
+                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+        }
+    }
+
+    /** One log watcher per group: join/leave/decline pings for opted-in roles. */
+    private fun watchGroupLogs() {
+        logWatchJobs.forEach { it.cancel() }
+        val me = repository.myId
+        if (me.isBlank()) return
+        logWatchJobs = lastMemberships.flatMap { m ->
+            listOf(
+                viewModelScope.launch {
+                    runCatching {
+                        repository.observeGroupLog(m.groupId).collect { row ->
+                            if (!seenEventIds.add("evt:${row.id}")) return@collect
+                            onGroupEventRow(m, row, me)
+                        }
+                    }
+                },
+                viewModelScope.launch {
+                    runCatching {
+                        repository.observeGroupMessagesLive(m.groupId).collect { ping ->
+                            if (ping.senderId == me) return@collect
+                            if (!seenEventIds.add("msg:${ping.clientId}")) return@collect
+                            val group = lastGroups.firstOrNull { it.id == m.groupId }
+                            notificationManager.showGroupEventNotification(
+                                groupId = m.groupId,
+                                title = group?.name?.ifBlank { "Group" } ?: "Group",
+                                text = appContext.getString(com.frerox.toolz.R.string.st_Whisper_Notif_NewMessage),
+                                dedupeKey = "msg:${ping.clientId}",
+                            )
+                        }
+                    }
+                },
+            )
+        }
+    }
+
+    private fun onGroupEventRow(
+        m: WhisperGroupMembership,
+        row: com.frerox.toolz.data.whisper.GroupEventRow,
+        me: String,
+    ) {
+        val scope = when (row.type) {
+            "join" -> GroupNotifScope.JOIN
+            "leave" -> GroupNotifScope.LEAVE
+            "decline" -> GroupNotifScope.DECLINE
+            else -> return
+        }
+        val group = lastGroups.firstOrNull { it.id == m.groupId }
+        val amOwner = group?.createdBy == me
+        val amOwnerOrAdmin = amOwner || m.isAdmin(me)
+        val toggleOn = notifPrefs.isEnabled(m.groupId, amOwnerOrAdmin)
+        if (!shouldNotifyGroupEvent(scope, row.actor, me, amOwner, toggleOn)) return
+        val actorName = lastFriendNames[row.actor] ?: "Someone"
+        val groupName = group?.name?.ifBlank { "Group" } ?: "Group"
+        val text = when (scope) {
+            GroupNotifScope.JOIN -> WhisperGroupNotifTemplates.joinText(actorName, groupName)
+            GroupNotifScope.LEAVE -> WhisperGroupNotifTemplates.leaveText(actorName, groupName)
+            GroupNotifScope.DECLINE -> WhisperGroupNotifTemplates.declineText(actorName, groupName)
+        }
+        notificationManager.showGroupEventNotification(
+            groupId = m.groupId,
+            title = groupName,
+            text = text,
+            dedupeKey = "evt:${row.id}",
+        )
+    }
+
+    override fun onCleared() {
+        inviteWatchJob?.cancel()
+        logWatchJobs.forEach { it.cancel() }
+        super.onCleared()
+    }
+
+    fun create(
+        name: String,
+        memberIds: List<String>,
+        inviteAdminsOnly: Boolean,
+        pictureBytes: ByteArray? = null,
+        pictureMime: String = "image/jpeg",
+    ) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
-            repository.createGroup(name, memberIds, inviteAdminsOnly)
-                .onSuccess { groupId ->
-                    load()
-                    _uiState.update { it.copy(createdGroupId = groupId) }
+            val created = repository.createGroup(name, memberIds, inviteAdminsOnly)
+            created.onSuccess { groupId ->
+                // Picture is best-effort after the group exists (needs the id);
+                // a picture failure must not lose the created group.
+                if (pictureBytes != null) {
+                    repository.setGroupPicture(groupId, pictureBytes, pictureMime)
+                        .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
                 }
-                .onFailure { e ->
-                    _uiState.update { it.copy(isLoading = false, error = e.message) }
-                }
+                load()
+                _uiState.update { it.copy(createdGroupId = groupId) }
+            }
+            created.onFailure { e ->
+                _uiState.update { it.copy(isLoading = false, error = e.message) }
+            }
         }
     }
 

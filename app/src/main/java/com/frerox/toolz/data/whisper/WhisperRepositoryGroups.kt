@@ -25,7 +25,11 @@ package com.frerox.toolz.data.whisper
  *   ([applyEvents]), never from the server members table. Admin ops are
  *   signed with the admin's protocol signing key
  *   (WhisperCrypto.signProtocol / verifyProtocol); the signature covers
- *   "WG-EVENT|groupId|seq|epoch|type|actor|payloadJson".
+ *   "WG-EVENT|groupId|seq|epoch|type|actor|payloadJson". Adds go through
+ *   persistent invites: INVITE (signed, no state change) → JOIN (self-signed,
+ *   requires a prior INVITE event for the actor) → member; DECLINE/CANCEL
+ *   only clear pending. A `picture` admin event carries the group picture
+ *   (URL server-visible, image key sealed per member).
  * - Removed members stop receiving frames (they are simply not in the
  *   fan-out set); post-add members see nothing prior (no history frames
  *   are ever re-sealed to them); a stale-epoch row is rejected both by
@@ -38,6 +42,13 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
+import io.github.jan.supabase.realtime.channel
+import io.github.jan.supabase.realtime.decodeRecord
+import io.github.jan.supabase.realtime.postgresChangeFlow
+import io.github.jan.supabase.realtime.realtime
 
 /** Compile-time gate: true in v1.1.7 dev builds (1.1.7 is unshipped — only dev
  * devices carry it). Server-side, every group write still requires
@@ -80,6 +91,11 @@ enum class WhisperGroupEventType(val wire: String) {
     LEAVE("leave"),
     RENAME("rename"),
     PROMOTE("promote"),
+    INVITE("invite"),
+    JOIN("join"),
+    DECLINE("decline"),
+    CANCEL("cancel"),
+    PICTURE("picture"),
     ;
 
     companion object {
@@ -115,6 +131,14 @@ data class WhisperGroupEvent(
     val adminSig: String,
 )
 
+/** Current group picture: URL + IV are server-visible metadata; the image key
+ * travels per-member sealed (see `picture` events) so bytes stay opaque. */
+data class WhisperGroupPicture(
+    val url: String,
+    val iv: String,
+    val epoch: Long,
+)
+
 /** Membership rebuilt purely from a verified event log. */
 data class WhisperGroupMembership(
     val groupId: String,
@@ -130,6 +154,10 @@ data class WhisperGroupMembership(
      * to stays shut even though they can fetch the rows again.
      */
     val ranges: Map<String, List<LongRange>> = emptyMap(),
+    /** Outstanding invites (invited, not yet joined/declined/canceled). */
+    val pendingInvites: Set<String> = emptySet(),
+    /** Latest verified picture event, null until the first one. */
+    val picture: WhisperGroupPicture? = null,
 ) {
     val admins: Set<String> get() = members.filterValues { it == WhisperGroupRole.ADMIN }.keys
     fun isMember(userId: String): Boolean = members.containsKey(userId)
@@ -192,7 +220,9 @@ fun applyEvents(
     var epoch = 0L
     var name = ""
     var inviteAdminsOnly = true
+    var picture: WhisperGroupPicture? = null
     val members = mutableMapOf<String, WhisperGroupRole>()
+    val invited = mutableSetOf<String>()
     val joinEpoch = mutableMapOf<String, Long>()
     val closedRanges = mutableMapOf<String, MutableList<LongRange>>()
     fun closeSegment(userId: String, atEpoch: Long) {
@@ -268,6 +298,51 @@ fun applyEvents(
                 members[target] = WhisperGroupRole.ADMIN
                 epoch = ev.epoch
             }
+            WhisperGroupEventType.INVITE -> {
+                require(isMemberSigned(ev, members, verify, signerKeyOf)) { "invite not signed by inviter" }
+                require(members[ev.actor] == WhisperGroupRole.ADMIN || !inviteAdminsOnly) {
+                    "invite not admin-signed"
+                }
+                val target = targetOf(ev)
+                require(!members.containsKey(target)) { "invite of existing member" }
+                require(!invited.contains(target)) { "already invited" }
+                require(members.size + invited.size < WhisperGroupsConfig.MAX_MEMBERS) { "group full" }
+                invited.add(target)
+            }
+            WhisperGroupEventType.JOIN -> {
+                require(!members.containsKey(ev.actor)) { "join by existing member" }
+                require(invited.contains(ev.actor)) { "join without invite" }
+                val signer = signerKeyOf(ev.actor)
+                require(signer != null && verify(
+                    groupEventSignBytes(ev.groupId, ev.seq, ev.epoch, ev.type, ev.actor, ev.payloadJson),
+                    ev.adminSig, signer,
+                )) { "join not self-signed" }
+                require(members.size < WhisperGroupsConfig.MAX_MEMBERS) { "group full" }
+                members[ev.actor] = WhisperGroupRole.MEMBER
+                joinEpoch[ev.actor] = ev.epoch
+                invited.remove(ev.actor)
+                epoch = ev.epoch
+            }
+            WhisperGroupEventType.DECLINE -> {
+                require(invited.contains(ev.actor)) { "decline without invite" }
+                val signer = signerKeyOf(ev.actor)
+                require(signer != null && verify(
+                    groupEventSignBytes(ev.groupId, ev.seq, ev.epoch, ev.type, ev.actor, ev.payloadJson),
+                    ev.adminSig, signer,
+                )) { "decline not self-signed" }
+                invited.remove(ev.actor)
+            }
+            WhisperGroupEventType.CANCEL -> {
+                require(isAdminSigned(ev, members, verify, signerKeyOf)) { "cancel not admin-signed" }
+                val target = targetOf(ev)
+                require(invited.contains(target)) { "cancel without invite" }
+                invited.remove(target)
+            }
+            WhisperGroupEventType.PICTURE -> {
+                require(isAdminSigned(ev, members, verify, signerKeyOf)) { "picture not admin-signed" }
+                val pic = parseGroupPicture(ev.payloadJson) ?: error("bad picture payload")
+                picture = WhisperGroupPicture(url = pic.first, iv = pic.second, epoch = ev.epoch)
+            }
             WhisperGroupEventType.CREATE -> error("unreachable")
         }
     }
@@ -277,7 +352,7 @@ fun applyEvents(
         val open = joinEpoch[user]?.let { listOf(it..Long.MAX_VALUE) }.orEmpty()
         closed + open
     }
-    return WhisperGroupMembership(groupId, epoch, members.toMap(), name, inviteAdminsOnly, ranges)
+    return WhisperGroupMembership(groupId, epoch, members.toMap(), name, inviteAdminsOnly, ranges, invited.toSet(), picture)
 }
 
 private fun isAdminSigned(
@@ -310,8 +385,43 @@ private fun memberSignatureValid(
     return verify(groupEventSignBytes(ev.groupId, ev.seq, ev.epoch, ev.type, ev.actor, ev.payloadJson), ev.adminSig, signer)
 }
 
-/** ADD/REMOVE/PROMOTE carry the subject user id as the raw payload; RENAME carries the name. */
+/** ADD/REMOVE/PROMOTE/INVITE/CANCEL carry the subject user id as the raw payload; RENAME carries the name. */
 private fun targetOf(ev: WhisperGroupEvent): String = ev.payloadJson.trim().trim('"')
+
+/**
+ * Group-picture payload: `{"url","iv","frames":{memberId: sealedKeyFrame}}`.
+ * URL/IV are server-visible metadata; each frame seals the image key to one
+ * member through their 1:1 session (same primitive as message fan-out).
+ */
+fun buildGroupPicturePayload(url: String, iv: String, frames: Map<String, String>): String =
+    groupJson.encodeToString(
+        kotlinx.serialization.json.JsonObject.serializer(),
+        buildJsonObject {
+            put("url", url)
+            put("iv", iv)
+            put("frames", groupJson.encodeToJsonElement(
+                kotlinx.serialization.builtins.MapSerializer(
+                    kotlinx.serialization.serializer<String>(),
+                    kotlinx.serialization.serializer<String>(),
+                ),
+                frames,
+            ))
+        },
+    )
+
+fun parseGroupPicturePayload(raw: String): Triple<String, String, Map<String, String>>? = runCatching {
+    val obj = groupJson.parseToJsonElement(raw) as? kotlinx.serialization.json.JsonObject ?: return null
+    val url = (obj["url"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull ?: return null
+    val iv = (obj["iv"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull ?: return null
+    if (url.isBlank()) return null
+    val frames = (obj["frames"] as? kotlinx.serialization.json.JsonObject)
+        ?.mapNotNull { (k, v) -> (v as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull?.let { k to it } }
+        .orEmpty().toMap()
+    Triple(url, iv, frames)
+}.getOrNull()
+
+private fun parseGroupPicture(raw: String): Pair<String, String>? =
+    parseGroupPicturePayload(raw)?.let { it.first to it.second }
 
 // ── Envelope helpers ────────────────────────────────────────────────────
 
@@ -365,6 +475,31 @@ internal data class GroupMemberRow(
     @SerialName("user_id") val userId: String,
     val role: String,
     @SerialName("invited_by") val invitedBy: String? = null,
+)
+
+@Serializable
+internal data class GroupInviteRow(
+    @SerialName("group_id") val groupId: String,
+    @SerialName("user_id") val userId: String,
+    @SerialName("invited_by") val invitedBy: String,
+    @SerialName("created_at") val createdAt: String? = null,
+)
+
+@Serializable
+internal data class GroupInviteInsert(
+    @SerialName("group_id") val groupId: String,
+    @SerialName("user_id") val userId: String,
+    @SerialName("invited_by") val invitedBy: String,
+    @SerialName("client_version_code") val clientVersionCode: Int,
+)
+
+/** One outstanding invite for the invite-card UI. */
+data class GroupInviteInfo(
+    val groupId: String,
+    val groupName: String,
+    val invitedBy: String,
+    val invitedByName: String,
+    val createdAt: String,
 )
 
 @Serializable
@@ -466,6 +601,15 @@ private fun GroupEventRow.toModel() = WhisperGroupEvent(
 suspend fun WhisperRepository.syncGroup(groupId: String): Result<WhisperGroupMembership> = runCatching {
     requireGroupsEnabled()
     val me = requireMe()
+    val membership = fetchVerifiedMembership(groupId).getOrThrow()
+    if (!membership.isMember(me)) error("You are no longer a member of this group.")
+    membership
+}
+
+/** Verified log without the membership requirement (join path for invitees). */
+suspend fun WhisperRepository.fetchVerifiedMembership(groupId: String): Result<WhisperGroupMembership> = runCatching {
+    requireGroupsEnabled()
+    requireMe()
     val group = db.from("whisper_groups").select { filter { eq("id", groupId) } }
         .decodeSingleOrNull<GroupRow>() ?: error("Group not found.")
     val rows = db.from("whisper_group_events").select { filter { eq("group_id", groupId) } }
@@ -482,7 +626,6 @@ suspend fun WhisperRepository.syncGroup(groupId: String): Result<WhisperGroupMem
         verify = { payload, sig, signer -> groupVerify(payload, sig, signer) },
         signerKeyOf = { uid -> keys[uid] },
     )
-    if (!membership.isMember(me)) error("You are no longer a member of this group.")
     persistGroupCache(group, membership, events)
     membership
 }
@@ -544,7 +687,7 @@ suspend fun WhisperRepository.cachedGroups(): List<WhisperGroupEntity> = groupDa
 suspend fun WhisperRepository.cachedGroupMembers(groupId: String): List<WhisperGroupMemberEntity> =
     groupDao.members(groupId)
 
-/** Creates a group: row + admin/member rows + signed CREATE event (event-first). */
+/** Creates a group: row + own admin row + persistent INVITEs (join starts membership). */
 suspend fun WhisperRepository.createGroup(
     name: String,
     memberIds: List<String>,
@@ -566,9 +709,6 @@ suspend fun WhisperRepository.createGroup(
     val groupId = java.util.UUID.randomUUID().toString()
     db.from("whisper_groups").insert(GroupRowInsert(id = groupId, name = cleanName, epoch = 0, createdBy = me))
     db.from("whisper_group_members").insert(GroupMemberRow(groupId = groupId, userId = me, role = "admin"))
-    others.forEach { uid ->
-        db.from("whisper_group_members").insert(GroupMemberRow(groupId = groupId, userId = uid, role = "member", invitedBy = me))
-    }
     val payload = groupJson.encodeToString(
         kotlinx.serialization.json.JsonObject.serializer(),
         kotlinx.serialization.json.buildJsonObject {
@@ -584,6 +724,14 @@ suspend fun WhisperRepository.createGroup(
         actor = me,
         payload = payload,
     ).getOrThrow()
+    var seq = 2L
+    others.forEach { uid ->
+        db.from("whisper_group_invites").insert(
+            GroupInviteInsert(groupId = groupId, userId = uid, invitedBy = me, clientVersionCode = groupClientVersion()),
+        )
+        publishGroupEvent(groupId, seq, 0, WhisperGroupEventType.INVITE, me, "\"$uid\"").getOrThrow()
+        seq += 1
+    }
     syncGroup(groupId).getOrThrow()
     groupId
 }
@@ -621,23 +769,85 @@ private suspend fun WhisperRepository.nextGroupSeqEpoch(groupId: String): Pair<L
     return (maxSeq + 1) to (group?.epoch ?: 0L)
 }
 
-suspend fun WhisperRepository.addGroupMember(groupId: String, userId: String): Result<Unit> = runCatching {
+suspend fun WhisperRepository.inviteGroupMember(groupId: String, userId: String): Result<Unit> = runCatching {
     requireGroupsEnabled()
     val me = requireMe()
     require(userId.isNotBlank() && userId != me) { "Choose another user to add." }
     val m = syncGroup(groupId).getOrThrow()
     require(m.canInvite(me)) { "Only admins can invite to this group." }
     require(!m.isMember(userId)) { "Already a member." }
-    require(m.members.size < WhisperGroupsConfig.MAX_MEMBERS) { "Group is full." }
+    require(userId !in m.pendingInvites) { "Already invited." }
+    require(m.members.size + m.pendingInvites.size < WhisperGroupsConfig.MAX_MEMBERS) { "Group is full." }
     val status = getFriendshipStatus(userId).getOrNull()?.first
     require(status == FriendStatus.ACCEPTED) { "Only friends can be added to a group." }
     val (seq, epoch) = nextGroupSeqEpoch(groupId)
-    // Event-first (events are authoritative); the member row follows.
-    publishGroupEvent(groupId, seq, epoch + 1, WhisperGroupEventType.ADD, me, "\"$userId\"").getOrThrow()
-    db.from("whisper_group_members").insert(
-        GroupMemberRow(groupId = groupId, userId = userId, role = "member", invitedBy = me),
+    db.from("whisper_group_invites").insert(
+        GroupInviteInsert(groupId = groupId, userId = userId, invitedBy = me, clientVersionCode = groupClientVersion()),
     )
+    publishGroupEvent(groupId, seq, epoch, WhisperGroupEventType.INVITE, me, "\"$userId\"").getOrThrow()
     syncGroup(groupId).getOrThrow()
+}
+
+/** Accepts my invite: member row (consumes the invite via trigger) + JOIN event. */
+suspend fun WhisperRepository.joinGroup(groupId: String): Result<Unit> = runCatching {
+    requireGroupsEnabled()
+    val me = requireMe()
+    val m = fetchVerifiedMembership(groupId).getOrThrow()
+    require(!m.isMember(me)) { "Already a member." }
+    require(me in m.pendingInvites) { "No invite for this group." }
+    require(m.members.size < WhisperGroupsConfig.MAX_MEMBERS) { "Group is full." }
+    db.from("whisper_group_members").insert(
+        GroupMemberRow(groupId = groupId, userId = me, role = "member"),
+    )
+    val (seq, epoch) = nextGroupSeqEpoch(groupId)
+    publishGroupEvent(groupId, seq, epoch + 1, WhisperGroupEventType.JOIN, me, "\"\"").getOrThrow()
+    syncGroup(groupId).getOrThrow()
+}
+
+/** Refuses my invite: DECLINE event for the owner's eyes + invite row delete. */
+suspend fun WhisperRepository.declineGroupInvite(groupId: String): Result<Unit> = runCatching {
+    requireGroupsEnabled()
+    val me = requireMe()
+    val invite = db.from("whisper_group_invites").select {
+        filter { eq("group_id", groupId); eq("user_id", me) }
+    }.decodeSingleOrNull<GroupInviteRow>() ?: error("No invite for this group.")
+    check(invite.userId == me) { "No invite for this group." }
+    val (seq, epoch) = nextGroupSeqEpoch(groupId)
+    publishGroupEvent(groupId, seq, epoch, WhisperGroupEventType.DECLINE, me, "\"\"").getOrThrow()
+    db.from("whisper_group_invites").delete { filter { eq("group_id", groupId); eq("user_id", me) } }
+}
+
+/** Owner/admin cancels someone's invite: row delete + CANCEL event for the log. */
+suspend fun WhisperRepository.cancelGroupInvite(groupId: String, userId: String): Result<Unit> = runCatching {
+    requireGroupsEnabled()
+    val me = requireMe()
+    val m = syncGroup(groupId).getOrThrow()
+    require(m.isAdmin(me)) { "Only admins can cancel invites." }
+    require(userId in m.pendingInvites) { "No invite to cancel." }
+    db.from("whisper_group_invites").delete { filter { eq("group_id", groupId); eq("user_id", userId) } }
+    val (seq, epoch) = nextGroupSeqEpoch(groupId)
+    publishGroupEvent(groupId, seq, epoch, WhisperGroupEventType.CANCEL, me, "\"$userId\"").getOrThrow()
+    syncGroup(groupId).getOrThrow()
+}
+
+/** My outstanding invites with group names (invite-card source, persistent). */
+suspend fun WhisperRepository.myGroupInvites(): Result<List<GroupInviteInfo>> = runCatching {
+    requireGroupsEnabled()
+    val me = requireMe()
+    val rows = db.from("whisper_group_invites").select { filter { eq("user_id", me) } }
+        .decodeList<GroupInviteRow>()
+    val names = getFriends().getOrNull().orEmpty().associate { it.id to it.effectiveName }
+    rows.mapNotNull { row ->
+        val group = db.from("whisper_groups").select { filter { eq("id", row.groupId) } }
+            .decodeSingleOrNull<GroupRow>() ?: return@mapNotNull null
+        GroupInviteInfo(
+            groupId = row.groupId,
+            groupName = group.name.ifBlank { "Group" },
+            invitedBy = row.invitedBy,
+            invitedByName = names[row.invitedBy] ?: "Someone",
+            createdAt = row.createdAt ?: "",
+        )
+    }
 }
 
 suspend fun WhisperRepository.removeGroupMember(groupId: String, userId: String): Result<Unit> = runCatching {
@@ -774,3 +984,156 @@ suspend fun WhisperRepository.fetchGroupMessages(
         )
     }
 }
+
+// ── Group picture (encrypted, same stack as chat images) ────────────────
+// Pipeline: EXIF-strip + 1920 + JPEG82 (shared preprocess) → fresh AES-256-GCM
+// key → PNG-wrap (image-only host) → EncryptedBlobHost upload → key sealed per
+// member into a signed PICTURE event. URL is server-visible metadata (like the
+// member list); bytes + key stay opaque. Picture changes do NOT bump the epoch.
+
+/** Admin sets/replaces the picture. Fail-closed: all key frames or nothing. */
+suspend fun WhisperRepository.setGroupPicture(
+    groupId: String,
+    imageBytes: ByteArray,
+    mimeType: String,
+): Result<Unit> = runCatching {
+    requireGroupsEnabled()
+    val me = requireMe()
+    val m = syncGroup(groupId).getOrThrow()
+    require(m.isAdmin(me)) { "Only admins can change the picture." }
+    val (compressed, _) = compressImageForGroupUpload(imageBytes, mimeType)
+    require(compressed.isNotEmpty()) { "Could not read that image." }
+    val (sealed, key) = newGroupPictureSeal(compressed)
+    val png = WhisperImageCipherTransport.encode(sealed)
+    val (url, _) = encryptedImageHost.upload(png, "group-$groupId", null).getOrThrow()
+    require(url.isNotBlank()) { "Picture upload failed." }
+    val keyB64 = java.util.Base64.getEncoder().encodeToString(key)
+    val frames = mutableMapOf<String, String>()
+    val failed = mutableListOf<String>()
+    for (memberId in m.members.keys.sorted()) {
+        val frame = buildGroupFrameBody(groupId, m.epoch, System.currentTimeMillis(), keyB64)
+        val out = sealWithRatchet(me, memberId, frame)
+        if (out == null) failed.add(memberId) else frames[memberId] = out.first
+    }
+    require(failed.isEmpty()) {
+        "Could not reach ${failed.size} member(s) — picture not changed. Retry when they're reachable."
+    }
+    val (seq, epoch) = nextGroupSeqEpoch(groupId)
+    publishGroupEvent(
+        groupId, seq, epoch, WhisperGroupEventType.PICTURE, me,
+        buildGroupPicturePayload(url, "", frames),
+    ).getOrThrow()
+    syncGroup(groupId).getOrThrow()
+}
+
+/** Opens the current picture for me (null = none set / not for me). */
+suspend fun WhisperRepository.openGroupPicture(groupId: String): Result<ByteArray?> = runCatching {
+    requireGroupsEnabled()
+    val me = requireMe()
+    val m = syncGroup(groupId).getOrThrow()
+    require(m.isMember(me)) { "You are no longer a member of this group." }
+    val rows = db.from("whisper_group_events").select {
+        filter { eq("group_id", groupId); eq("type", "picture") }
+    }.decodeList<GroupEventRow>()
+    val latest = rows.maxByOrNull { it.seq } ?: return@runCatching null
+    val (url, _, frames) = parseGroupPicturePayload(latest.payload) ?: error("Bad picture data.")
+    val frame = frames[me] ?: return@runCatching null
+    val inner = openV3Frame(frame, latest.actor, latest.actor, me) ?: error("Could not open the picture key.")
+    val keyB64 = openGroupFrameBody(groupId, latest.epoch, inner) ?: error("Could not open the picture key.")
+    val key = runCatching { java.util.Base64.getDecoder().decode(keyB64) }.getOrNull()
+        ?: error("Bad picture key.")
+    val png = encryptedImageHost.download(url).getOrThrow()
+    val sealed = WhisperImageCipherTransport.decode(png) ?: error("Bad picture data.")
+    openGroupPictureBytes(sealed, key) ?: error("Could not decrypt the picture.")
+}
+
+// ── Realtime (Postgres Changes, same teardown discipline as 1:1) ───────
+
+private suspend fun WhisperRepository.groupChannel(name: String): io.github.jan.supabase.realtime.RealtimeChannel {
+    channelMutex.withLock {
+        broadcastChannelCache[name]?.let { runCatchingCE { realtime.removeChannel(it) } }
+        broadcastChannelCache.remove(name)
+    }
+    return supabase.channel(name)
+}
+
+/** Fires on every invite-row insert/delete visible to me (my invites only, via RLS). */
+fun WhisperRepository.observeMyGroupInvites(): kotlinx.coroutines.flow.Flow<Unit> =
+    kotlinx.coroutines.flow.callbackFlow {
+        requireGroupsEnabled()
+        val me = myId
+        if (me.isBlank()) { close(); return@callbackFlow }
+        val channel = groupChannel("grouppg_invites_$me")
+        val changes = channel.postgresChangeFlow<io.github.jan.supabase.realtime.PostgresAction>(schema = "public") {
+            table = "whisper_group_invites"
+            filter("user_id", io.github.jan.supabase.postgrest.query.filter.FilterOperator.EQ, me)
+        }
+        val job = launch {
+            changes.collect {
+                trySend(Unit)
+            }
+        }
+        awaitClose {
+            job.cancel()
+            launch { runCatchingCE { realtime.removeChannel(channel) } }
+        }
+    }
+
+/** Fires with every new event row of one group (join/leave/decline/picture…). */
+internal fun WhisperRepository.observeGroupLog(groupId: String): kotlinx.coroutines.flow.Flow<GroupEventRow> =
+    kotlinx.coroutines.flow.callbackFlow {
+        requireGroupsEnabled()
+        if (groupId.isBlank()) { close(); return@callbackFlow }
+        val channel = groupChannel("grouppg_log_$groupId")
+        val changes = channel.postgresChangeFlow<io.github.jan.supabase.realtime.PostgresAction>(schema = "public") {
+            table = "whisper_group_events"
+            filter("group_id", io.github.jan.supabase.postgrest.query.filter.FilterOperator.EQ, groupId)
+        }
+        val job = launch {
+            changes.collect { action ->
+                val row = when (action) {
+                    is io.github.jan.supabase.realtime.PostgresAction.Insert ->
+                        runCatching { action.decodeRecord<GroupEventRow>() }.getOrNull()
+                    else -> null
+                }
+                if (row != null) trySend(row)
+            }
+        }
+        awaitClose {
+            job.cancel()
+            launch { runCatchingCE { realtime.removeChannel(channel) } }
+        }
+    }
+
+/** Public ping for a new group message row (no ciphertext leaves the row). */
+data class WhisperGroupMessagePing(
+    val groupId: String,
+    val senderId: String,
+    val clientId: String,
+)
+
+/** Fires with every new message row of one group (foreground message pings). */
+fun WhisperRepository.observeGroupMessagesLive(groupId: String): kotlinx.coroutines.flow.Flow<WhisperGroupMessagePing> =
+    kotlinx.coroutines.flow.callbackFlow {
+        requireGroupsEnabled()
+        if (groupId.isBlank()) { close(); return@callbackFlow }
+        val channel = groupChannel("grouppg_msg_$groupId")
+        val changes = channel.postgresChangeFlow<io.github.jan.supabase.realtime.PostgresAction>(schema = "public") {
+            table = "whisper_group_messages"
+            filter("group_id", io.github.jan.supabase.postgrest.query.filter.FilterOperator.EQ, groupId)
+        }
+        val job = launch {
+            changes.collect { action ->
+                val row = when (action) {
+                    is io.github.jan.supabase.realtime.PostgresAction.Insert ->
+                        runCatching { action.decodeRecord<GroupMessageRow>() }.getOrNull()
+                    else -> null
+                }
+                if (row != null) trySend(WhisperGroupMessagePing(groupId, row.senderId, row.clientId))
+            }
+        }
+        awaitClose {
+            job.cancel()
+            launch { runCatchingCE { realtime.removeChannel(channel) } }
+        }
+    }

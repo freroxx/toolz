@@ -849,6 +849,21 @@ fun ToolzNavHost(
             return@LaunchedEffect
         }
 
+        // 2c. Handle Whisper Group Deep Links (Phase-2 groups).
+        if (latestIntent.action == "com.frerox.toolz.OPEN_WHISPER_GROUP_INVITES") {
+            navController.navigate(Screen.Whisper.route)
+            return@LaunchedEffect
+        }
+        if (latestIntent.action == "com.frerox.toolz.OPEN_WHISPER_GROUP") {
+            val groupId = latestIntent.getStringExtra("groupId")?.trim()
+            if (!groupId.isNullOrBlank() && groupId.length in 5..128 && groupId.matches(Regex("[a-zA-Z0-9_-]+"))) {
+                navController.navigate(Screen.WhisperGroupChat.createRoute(groupId))
+                return@LaunchedEffect
+            } else {
+                android.util.Log.w("MainActivity", "Invalid OPEN_WHISPER_GROUP groupId: $groupId")
+            }
+        }
+
         // 3. Handle PDF if NOT handled by a specific alias already
         // (If resolvedRoute is PdfReader, we'll handle it here to call openPdf)
         if (resolvedRoute == Screen.PdfReader.route || 

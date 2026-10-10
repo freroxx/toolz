@@ -183,6 +183,101 @@ class WhisperGroupsTest {
     }
 
     @Test
+    fun `invite join decline cancel lifecycle`() {
+        val keys2: (String) -> String? = { "KEY" }
+        val invited = listOf(
+            create(),
+            ev(2, 0, WhisperGroupEventType.INVITE, admin, "\"u2\""),
+        )
+        val m0 = applyEvents(gid, invited, verify, keys2)
+        assertTrue(m0.pendingInvites.contains("u2"))
+        assertTrue(!m0.isMember("u2"))
+        // Join without... join with invite: member, pending cleared, epoch bumps.
+        val joined = invited + ev(3, 1, WhisperGroupEventType.JOIN, "u2", "\"\"")
+        val m1 = applyEvents(gid, joined, verify, keys2)
+        assertTrue(m1.isMember("u2"))
+        assertTrue(m1.pendingInvites.isEmpty())
+        assertEquals(1L, m1.epoch)
+        // Fresh invite then decline: pending cleared, never a member.
+        val declined = joined + listOf(
+            ev(4, 1, WhisperGroupEventType.INVITE, admin, "\"u3\""),
+            ev(5, 1, WhisperGroupEventType.DECLINE, "u3", "\"\""),
+        )
+        val m2 = applyEvents(gid, declined, verify, keys2)
+        assertTrue(!m2.isMember("u3"))
+        assertTrue(m2.pendingInvites.isEmpty())
+        // Fresh invite then admin cancel: same end state.
+        val canceled = declined + listOf(
+            ev(6, 1, WhisperGroupEventType.INVITE, admin, "\"u4\""),
+            ev(7, 1, WhisperGroupEventType.CANCEL, admin, "\"u4\""),
+        )
+        val m3 = applyEvents(gid, canceled, verify, keys2)
+        assertTrue(!m3.isMember("u4"))
+        assertTrue(m3.pendingInvites.isEmpty())
+    }
+
+    @Test
+    fun `join without invite fails closed`() {
+        val keys2: (String) -> String? = { "KEY" }
+        try {
+            applyEvents(gid, listOf(create(), ev(2, 1, WhisperGroupEventType.JOIN, "u2", "\"\"")), verify, keys2)
+            fail("must throw")
+        } catch (e: IllegalArgumentException) {
+            assertTrue((e.message ?: "").contains("without invite"))
+        }
+    }
+
+    @Test
+    fun `cancel by non-admin fails closed`() {
+        val keys2: (String) -> String? = { "KEY" }
+        val log = listOf(
+            create(),
+            ev(2, 0, WhisperGroupEventType.INVITE, admin, "\"u2\""),
+            ev(3, 1, WhisperGroupEventType.JOIN, "u2", "\"\""),
+            ev(4, 1, WhisperGroupEventType.INVITE, admin, "\"u3\""),
+        )
+        try {
+            applyEvents(gid, log + ev(5, 1, WhisperGroupEventType.CANCEL, "u2", "\"u3\""), verify, keys2)
+            fail("must throw")
+        } catch (e: IllegalArgumentException) {
+            assertTrue((e.message ?: "").contains("admin-signed"))
+        }
+    }
+
+    @Test
+    fun `picture latest wins and requires admin`() {
+        val keys2: (String) -> String? = { "KEY" }
+        fun pic(url: String) = buildGroupPicturePayload(url, "iv1", mapOf(admin to "F"))
+        val log = listOf(
+            create(),
+            ev(2, 0, WhisperGroupEventType.PICTURE, admin, pic("https://a")),
+            ev(3, 0, WhisperGroupEventType.PICTURE, admin, pic("https://b")),
+        )
+        val m = applyEvents(gid, log, verify, keys2)
+        assertEquals("https://b", m.picture?.url)
+        // Member-signed picture rejected.
+        val log2 = listOf(
+            create(),
+            ev(2, 0, WhisperGroupEventType.INVITE, admin, "\"u2\""),
+            ev(3, 1, WhisperGroupEventType.JOIN, "u2", "\"\""),
+        )
+        try {
+            applyEvents(gid, log2 + ev(4, 1, WhisperGroupEventType.PICTURE, "u2", pic("https://evil")), verify, keys2)
+            fail("must throw")
+        } catch (e: IllegalArgumentException) {
+            assertTrue((e.message ?: "").contains("admin-signed"))
+        }
+        // Garbage payload rejected (error() throws IllegalStateException, not
+        // IllegalArgumentException like require() — hence the wider catch).
+        try {
+            applyEvents(gid, listOf(create(), ev(2, 0, WhisperGroupEventType.PICTURE, admin, "nope")), verify, keys2)
+            fail("must throw")
+        } catch (e: IllegalStateException) {
+            assertTrue((e.message ?: "").contains("picture payload"))
+        }
+    }
+
+    @Test
     fun `event from another group rejected`() {
         val other = create().copy(groupId = "group-2")
         try {
@@ -228,5 +323,38 @@ class WhisperGroupsTest {
     @Test
     fun `flag on in dev builds`() {
         assertTrue(groupsEnabled())
+    }
+
+    @Test
+    fun `recipient matrix`() {
+        // Owner with toggle on: everything except own actions.
+        assertTrue(shouldNotifyGroupEvent(GroupNotifScope.JOIN, "u2", "owner", amOwner = true, toggleOn = true))
+        assertTrue(shouldNotifyGroupEvent(GroupNotifScope.LEAVE, "u2", "owner", amOwner = true, toggleOn = true))
+        assertTrue(shouldNotifyGroupEvent(GroupNotifScope.DECLINE, "u2", "owner", amOwner = true, toggleOn = true))
+        assertTrue(!shouldNotifyGroupEvent(GroupNotifScope.JOIN, "owner", "owner", amOwner = true, toggleOn = true))
+        // Toggle off silences everything.
+        assertTrue(!shouldNotifyGroupEvent(GroupNotifScope.JOIN, "u2", "owner", amOwner = true, toggleOn = false))
+        assertTrue(!shouldNotifyGroupEvent(GroupNotifScope.DECLINE, "u2", "owner", amOwner = true, toggleOn = false))
+        // Non-owner (opted-in member/admin): join/leave yes, decline no.
+        assertTrue(shouldNotifyGroupEvent(GroupNotifScope.JOIN, "u3", "u2", amOwner = false, toggleOn = true))
+        assertTrue(shouldNotifyGroupEvent(GroupNotifScope.LEAVE, "u3", "u2", amOwner = false, toggleOn = true))
+        assertTrue(!shouldNotifyGroupEvent(GroupNotifScope.DECLINE, "u3", "u2", amOwner = false, toggleOn = true))
+    }
+
+    @Test
+    fun `templates render without placeholders`() {
+        val rnd = kotlin.random.Random(7)
+        repeat(40) {
+            val j = WhisperGroupNotifTemplates.joinText("Aïcha-ß", "Crew €", rnd)
+            val l = WhisperGroupNotifTemplates.leaveText("Aïcha-ß", "Crew €", rnd)
+            val d = WhisperGroupNotifTemplates.declineText("Aïcha-ß", "Crew €", rnd)
+            assertTrue(!j.contains("%1\$s") && !l.contains("%1\$s") && !d.contains("%1\$s"))
+            // Every template names the user; the group slot is optional by design
+            // (the notification title already carries the group name).
+            assertTrue(j.contains("Aïcha-ß") && l.contains("Aïcha-ß") && d.contains("Aïcha-ß"))
+        }
+        assertTrue(WhisperGroupNotifTemplates.joinPoolSize() >= 8)
+        assertTrue(WhisperGroupNotifTemplates.leavePoolSize() >= 8)
+        assertTrue(WhisperGroupNotifTemplates.declinePoolSize() >= 5)
     }
 }

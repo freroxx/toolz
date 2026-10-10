@@ -3858,4 +3858,16 @@
     <string name="st_Whisper_Groups_Info">Group info</string>
     <string name="st_Whisper_Groups_BlockConfirm">Block this member? You will stop receiving their messages everywhere, not just here.</string>
     <string name="st_Whisper_Groups_Removed">You are no longer a member of this group.</string>
+    <string name="st_Whisper_Groups_InviteNotifTitle">%1$s invited you to a group</string>
+    <string name="st_Whisper_Groups_InviteNotifText">Join %1$s?</string>
+    <string name="st_Whisper_Groups_InvitesTitle">Group invites</string>
+    <string name="st_Whisper_Groups_Join">Join</string>
+    <string name="st_Whisper_Groups_Decline">Decline</string>
+    <string name="st_Whisper_Groups_CancelInvite">Cancel invite</string>
+    <string name="st_Whisper_Groups_InvitedLabel">Invited</string>
+    <string name="st_Whisper_Groups_ChangePicture">Change picture</string>
+    <string name="st_Whisper_Groups_NotifToggle">Group notifications</string>
+    <string name="st_Whisper_Groups_NotifToggleOff">Off for you (tap to enable)</string>
+    <string name="st_Whisper_Groups_NotifScopeOwner">Join, leave + declined invites</string>
+    <string name="st_Whisper_Groups_NotifScopeMember">Join + leave only</string>
 </resources>
