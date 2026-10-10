@@ -21,8 +21,13 @@ import com.frerox.toolz.data.whisper.demoteGroupMember
 import com.frerox.toolz.data.whisper.disbandGroup
 import com.frerox.toolz.data.whisper.transferGroupOwnership
 import com.frerox.toolz.data.whisper.updateGroupSettings
+import com.frerox.toolz.data.whisper.GroupJoinRequest
+import com.frerox.toolz.data.whisper.approveGroupJoinRequest
+import com.frerox.toolz.data.whisper.denyGroupJoinRequest
 import com.frerox.toolz.data.whisper.fetchGroupMessages
 import com.frerox.toolz.data.whisper.getFriends
+import com.frerox.toolz.data.whisper.observeGroupJoinRequests
+import com.frerox.toolz.data.whisper.pendingGroupJoinRequests
 import com.frerox.toolz.data.whisper.openGroupImage
 import com.frerox.toolz.data.whisper.groupsEnabled
 import com.frerox.toolz.data.whisper.leaveGroup
@@ -76,6 +81,8 @@ class WhisperGroupInfoViewModel @Inject constructor(
         /** Effective group-notifications toggle (role default until overridden). */
         val notifOn: Boolean = true,
         val pictureBytes: ByteArray? = null,
+        /** Inbound join requests (admins review; empty for members). */
+        val requests: List<GroupJoinRequest> = emptyList(),
         /** Shared-photo refs for the gallery (bytes load lazily per thumb). */
         val gallery: List<GalleryItem> = emptyList(),
         val galleryBytes: Map<String, ByteArray> = emptyMap(),
@@ -102,8 +109,20 @@ class WhisperGroupInfoViewModel @Inject constructor(
     )
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
 
+    private var requestWatch: kotlinx.coroutines.Job? = null
+
     init {
-        if (groupsEnabled() && groupId.isNotBlank()) load()
+        if (groupsEnabled() && groupId.isNotBlank()) {
+            load()
+            requestWatch = viewModelScope.launch {
+                runCatching { repository.observeGroupJoinRequests(groupId).collect { loadRequests() } }
+            }
+        }
+    }
+
+    override fun onCleared() {
+        requestWatch?.cancel()
+        super.onCleared()
     }
 
     fun load() {
@@ -149,6 +168,7 @@ class WhisperGroupInfoViewModel @Inject constructor(
                     )
                 }
                 loadPicture()
+                loadRequests()
             }.onFailure { e ->
                 _uiState.update { it.copy(isLoading = false, isWorking = false, error = err(e)) }
             }
@@ -201,9 +221,36 @@ class WhisperGroupInfoViewModel @Inject constructor(
     fun demoteMember(userId: String) = work({ repository.demoteGroupMember(groupId, userId) })
     fun transferOwnership(userId: String) = work({ repository.transferGroupOwnership(groupId, userId) })
 
-    /** Admin-only send toggle and/or description (either may be null = unchanged). */
-    fun saveSettings(adminOnlySend: Boolean? = null, description: String? = null) =
-        work({ repository.updateGroupSettings(groupId, adminOnlySend, description) })
+    /** Admin-only send toggle, member-edit flag and/or description (null = unchanged). */
+    fun saveSettings(
+        adminOnlySend: Boolean? = null,
+        description: String? = null,
+        editMembers: Boolean? = null,
+    ) = work({ repository.updateGroupSettings(groupId, adminOnlySend, description, editMembers) })
+
+    private fun loadRequests() {
+        viewModelScope.launch {
+            val reqs = repository.pendingGroupJoinRequests(groupId).getOrNull().orEmpty()
+            _uiState.update { it.copy(requests = reqs) }
+        }
+    }
+
+    fun approveRequest(userId: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isWorking = true, error = null) }
+            repository.approveGroupJoinRequest(groupId, userId)
+                .onSuccess { load() }
+                .onFailure { e -> _uiState.update { it.copy(isWorking = false, error = err(e)) } }
+        }
+    }
+
+    fun denyRequest(userId: String) {
+        viewModelScope.launch {
+            repository.denyGroupJoinRequest(groupId, userId)
+                .onSuccess { loadRequests() }
+                .onFailure { e -> _uiState.update { it.copy(error = err(e)) } }
+        }
+    }
 
     /** Report = block the member 1:1-wide, then leave the group. */
     fun reportMember(userId: String) {

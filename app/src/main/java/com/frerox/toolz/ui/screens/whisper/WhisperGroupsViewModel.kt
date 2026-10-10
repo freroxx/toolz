@@ -34,6 +34,7 @@ import com.frerox.toolz.data.whisper.observeGroupLog
 import com.frerox.toolz.data.whisper.observeGroupMessagesLive
 import com.frerox.toolz.data.whisper.observeMyGroupInvites
 import com.frerox.toolz.data.whisper.openGroupPicture
+import com.frerox.toolz.data.whisper.requestGroupJoin
 import com.frerox.toolz.data.whisper.setGroupPicture
 import com.frerox.toolz.data.whisper.shouldNotifyGroupEvent
 import com.frerox.toolz.data.whisper.syncGroups
@@ -85,6 +86,8 @@ class WhisperGroupsViewModel @Inject constructor(
         val friends: List<WhisperProfile> = emptyList(),
         val isLoading: Boolean = false,
         val error: String? = null,
+        /** Transient success notice (join request sent). */
+        val notice: String? = null,
         /** Set on successful create so the UI can navigate once. */
         val createdGroupId: String? = null,
     )
@@ -463,8 +466,32 @@ class WhisperGroupsViewModel @Inject constructor(
         }
     }
 
+    /** Asks to join a known group id (QR / paste); admins approve as invite. */
+    fun requestJoin(rawId: String) {
+        val id = rawId.trim()
+        if (id.isBlank()) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(error = null, notice = null) }
+            repository.requestGroupJoin(id)
+                .onSuccess {
+                    _uiState.update {
+                        it.copy(
+                            notice = appContext.getString(
+                                com.frerox.toolz.R.string.st_Whisper_Groups_RequestSent,
+                            ),
+                        )
+                    }
+                }
+                .onFailure { e -> _uiState.update { it.copy(error = err(e)) } }
+        }
+    }
+
     fun consumeCreated() {
         _uiState.update { it.copy(createdGroupId = null) }
+    }
+
+    fun clearNotice() {
+        _uiState.update { it.copy(notice = null) }
     }
 
     fun clearError() {

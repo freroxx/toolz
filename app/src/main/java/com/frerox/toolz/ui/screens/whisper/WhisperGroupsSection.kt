@@ -39,6 +39,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -91,6 +92,7 @@ fun WhisperGroupsSection(
     val workingInvites by viewModel.workingInvites.collectAsStateWithLifecycle()
     val pictures by viewModel.pictures.collectAsStateWithLifecycle()
     var showCreate by remember { mutableStateOf(false) }
+    var showJoinId by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.createdGroupId) {
         state.createdGroupId?.let {
@@ -110,10 +112,38 @@ fun WhisperGroupsSection(
                 if (state.groups.isEmpty()) stringResource(R.string.st_Whisper_Groups_Title)
                 else "${stringResource(R.string.st_Whisper_Groups_Title)} (${state.groups.size})",
             )
-            ToolzTonalExpressiveButton(onClick = { showCreate = true }) {
-                Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(4.dp))
-                Text(stringResource(R.string.st_Whisper_Groups_New), style = MaterialTheme.typography.labelLarge)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = { showJoinId = true }) {
+                    Text(stringResource(R.string.st_Whisper_Groups_JoinById))
+                }
+                ToolzTonalExpressiveButton(onClick = { showCreate = true }) {
+                    Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(stringResource(R.string.st_Whisper_Groups_New), style = MaterialTheme.typography.labelLarge)
+                }
+            }
+        }
+        state.notice?.let { notice ->
+            Surface(
+                color = MaterialTheme.colorScheme.tertiaryContainer,
+                contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        notice,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = { viewModel.clearNotice() }) {
+                        Text(stringResource(R.string.st_Whisper_Cancel))
+                    }
+                }
             }
         }
         if (state.isLoading && state.groups.isEmpty()) {
@@ -150,6 +180,13 @@ fun WhisperGroupsSection(
         CreateGroupDialog(
             viewModel = viewModel,
             onDismiss = { showCreate = false },
+        )
+    }
+
+    if (showJoinId) {
+        JoinByIdDialog(
+            onDismiss = { showJoinId = false },
+            onRequest = { id -> showJoinId = false; viewModel.requestJoin(id) },
         )
     }
 }
@@ -796,3 +833,37 @@ internal suspend fun saveGroupImageToGallery(context: android.content.Context, b
             false
         }
     }
+
+/** Join-by-ID: paste a group id (or scanned QR payload) to request access. */
+@Composable
+private fun JoinByIdDialog(onDismiss: () -> Unit, onRequest: (String) -> Unit) {
+    var id by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.st_Whisper_Groups_JoinById), fontWeight = FontWeight.Bold) },
+        text = {
+            OutlinedTextField(
+                value = id,
+                onValueChange = { id = it },
+                label = { Text(stringResource(R.string.st_Whisper_Groups_JoinByIdHint)) },
+                singleLine = true,
+                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        confirmButton = {
+            ToolzExpressiveButton(
+                onClick = {
+                    // QR payloads encode "WHISPER-GROUP:<uuid>" — accept both forms.
+                    onRequest(id.trim().removePrefix("WHISPER-GROUP:"))
+                },
+                enabled = id.trim().removePrefix("WHISPER-GROUP:").isNotBlank(),
+            ) {
+                Text(stringResource(R.string.st_Whisper_Groups_JoinById), fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.st_Whisper_Cancel)) }
+        },
+    )
+}

@@ -115,7 +115,7 @@ fun WhisperGroupChatScreen(
     var showPollCreate by remember { mutableStateOf(false) }
     // Vote rows are tally data (rendered in poll cards below); they carry no
     // readable body, so they stay out of the line list.
-    val visible = remember(state.messages) { state.messages.filter { it.vote == null } }
+    val visible = remember(state.messages) { state.messages.filter { it.vote == null && it.pollClose == null } }
 
     // Full-history search results (decrypted page-by-page in the VM; the
     // timeline filter only ever saw the loaded page).
@@ -162,12 +162,13 @@ fun WhisperGroupChatScreen(
         }
     }
 
+    var pendingImage by remember { mutableStateOf<Pair<ByteArray, String>?>(null) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         runCatching {
             val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
             val bytes = context.contentResolver.openInputStream(uri)?.use { readBoundedGroupImageBytes(it) }
-            if (bytes != null) viewModel.sendImage(bytes, mime)
+            if (bytes != null) pendingImage = bytes to mime
         }.onFailure { e ->
             // Bounded-read overflow surfaces here (no VM round-trip needed).
             android.widget.Toast.makeText(context, e.message ?: "", android.widget.Toast.LENGTH_SHORT).show()
@@ -414,10 +415,15 @@ fun WhisperGroupChatScreen(
                                 GroupBubble(
                                     msg = msg,
                                     imageBytes = state.images[msg.id],
+                                    imageExpired = msg.id in state.expiredImages,
                                     seenCount = state.receipts[msg.clientId]?.size ?: 0,
                                     pollTally = msg.poll?.let { state.pollTallies[it.id] },
-                                    memberNames = state.memberNames,
+                                    pollClosed = msg.poll?.let { it.id in state.closedPolls } == true,
+                                    pollCanClose = (state.membership?.isAdmin(viewModel.myUserId) == true) &&
+                                        msg.poll?.let { it.id !in state.closedPolls } == true,
+                                    reactions = state.reactions[msg.clientId].orEmpty(),
                                     myId = viewModel.myUserId,
+                                    memberNames = state.memberNames,
                                     onRequestImage = { viewModel.loadImage(msg) },
                                     onImageClick = { bytes -> viewerBytes = bytes },
                                     onLongPress = { menuMsg = msg },
@@ -431,6 +437,10 @@ fun WhisperGroupChatScreen(
                                     onVote = { opt ->
                                         msg.poll?.let { viewModel.vote(it.id, opt) }
                                     },
+                                    onClosePoll = {
+                                        msg.poll?.let { viewModel.closePoll(it.id) }
+                                    },
+                                    onReact = { emoji -> viewModel.toggleReaction(msg, emoji) },
                                 )
                             }
                         }
@@ -470,7 +480,10 @@ fun WhisperGroupChatScreen(
     menuMsg?.let { msg ->
         MessageActionDialog(
             msg = msg,
+            reactions = state.reactions[msg.clientId].orEmpty(),
+            myId = viewModel.myUserId,
             onDismiss = { menuMsg = null },
+            onReact = { emoji -> viewModel.toggleReaction(msg, emoji) },
             onReply = { replyTarget = msg; menuMsg = null },
             onCopy = {
                 clipboard.setText(AnnotatedString(msg.body))
@@ -517,6 +530,16 @@ fun WhisperGroupChatScreen(
         CreatePollDialog(
             onDismiss = { showPollCreate = false },
             onSend = { q, opts -> showPollCreate = false; viewModel.sendPoll(q, opts) },
+        )
+    }
+
+    pendingImage?.let { (bytes, mime) ->
+        ImageExpiryDialog(
+            onDismiss = { pendingImage = null },
+            onSend = { expiry ->
+                pendingImage = null
+                viewModel.sendImage(bytes, mime, expiry)
+            },
         )
     }
 
@@ -734,8 +757,12 @@ private fun DayDivider(label: String) {
 private fun GroupBubble(
     msg: WhisperGroupChatMessage,
     imageBytes: ByteArray?,
+    imageExpired: Boolean,
     seenCount: Int,
     pollTally: WhisperGroupChatViewModel.PollTally?,
+    pollClosed: Boolean,
+    pollCanClose: Boolean,
+    reactions: Map<String, List<String>>,
     memberNames: Map<String, String>,
     myId: String,
     onRequestImage: () -> Unit,
@@ -744,6 +771,8 @@ private fun GroupBubble(
     onReply: () -> Unit,
     onQuoteClick: (String) -> Unit,
     onVote: (Int) -> Unit,
+    onClosePoll: () -> Unit,
+    onReact: (String) -> Unit,
 ) {
     val bitmap = remember(imageBytes) {
         imageBytes?.let { runCatching { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size) }.getOrNull() }
@@ -782,9 +811,29 @@ private fun GroupBubble(
                     QuoteBlock(quote = msg.reply, onClick = { onQuoteClick(msg.reply.id) })
                 }
                 if (msg.poll != null) {
-                    PollCard(poll = msg.poll, tally = pollTally, enabled = true, onVote = onVote)
+                    PollCard(
+                        poll = msg.poll,
+                        tally = pollTally,
+                        closed = pollClosed,
+                        canClose = pollCanClose,
+                        enabled = !pollClosed,
+                        onVote = onVote,
+                        onClose = onClosePoll,
+                    )
                 }
-                if (msg.image != null) {
+                if (imageExpired) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f),
+                    ) {
+                        Text(
+                            stringResource(R.string.st_Whisper_ImageExpired),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        )
+                    }
+                } else if (msg.image != null) {
                     if (bitmap != null) {
                         Image(
                             bitmap = bitmap.asImageBitmap(),
@@ -827,6 +876,29 @@ private fun GroupBubble(
                         )
                     }
                 }
+                if (reactions.isNotEmpty()) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        reactions.entries.sortedBy { it.key }.take(6).forEach { (emoji, users) ->
+                            val mine = users.contains(myId)
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (mine) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
+                                else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.7f),
+                            ) {
+                                Text(
+                                    "$emoji ${users.size}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = if (mine) FontWeight.Bold else FontWeight.Normal,
+                                    modifier = Modifier.clickable { onReact(emoji) }
+                                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                                )
+                            }
+                        }
+                    }
+                }
                 Row(
                     modifier = Modifier.align(Alignment.End),
                     verticalAlignment = Alignment.CenterVertically,
@@ -854,8 +926,11 @@ private fun GroupBubble(
 @Composable
 private fun MessageActionDialog(
     msg: WhisperGroupChatMessage,
+    reactions: Map<String, List<String>>,
+    myId: String,
     onDismiss: () -> Unit,
     onCopy: () -> Unit,
+    onReact: (String) -> Unit,
     onReply: () -> Unit,
     onDeleteForMe: () -> Unit,
     onDeleteForEveryone: () -> Unit,
@@ -873,6 +948,25 @@ private fun MessageActionDialog(
         },
         text = {
             Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                ) {
+                    com.frerox.toolz.data.whisper.GROUP_REACTION_EMOJI.forEach { emoji ->
+                        val mine = reactions[emoji]?.contains(myId) == true
+                        Text(
+                            emoji,
+                            style = MaterialTheme.typography.titleLarge,
+                            modifier = Modifier.clip(RoundedCornerShape(10.dp))
+                                .background(
+                                    if (mine) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
+                                    else MaterialTheme.colorScheme.surfaceContainerHighest,
+                                )
+                                .clickable { onReact(emoji); onDismiss() }
+                                .padding(6.dp),
+                        )
+                    }
+                }
                 TextButton(onClick = onReply, modifier = Modifier.fillMaxWidth()) {
                     Text(stringResource(R.string.st_Whisper_Groups_Reply), modifier = Modifier.fillMaxWidth())
                 }
@@ -1115,19 +1209,45 @@ private fun MentionText(
 private fun PollCard(
     poll: com.frerox.toolz.data.whisper.GroupPoll,
     tally: WhisperGroupChatViewModel.PollTally?,
+    closed: Boolean,
+    canClose: Boolean,
     enabled: Boolean,
     onVote: (Int) -> Unit,
+    onClose: () -> Unit,
 ) {
     val total = tally?.counts?.values?.sum() ?: 0
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text(
-            poll.q,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Bold,
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                poll.q,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f),
+            )
+            if (closed) {
+                Spacer(Modifier.width(8.dp))
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                ) {
+                    Text(
+                        stringResource(R.string.st_Whisper_Groups_PollClosed),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                    )
+                }
+            } else if (canClose) {
+                Spacer(Modifier.width(8.dp))
+                TextButton(onClick = onClose) {
+                    Text(stringResource(R.string.st_Whisper_Groups_ClosePoll))
+                }
+            }
+        }
         poll.opts.forEachIndexed { idx, opt ->
             val votes = tally?.counts?.get(idx) ?: 0
             val frac = if (total == 0) 0f else votes.toFloat() / total
@@ -1219,6 +1339,40 @@ private fun CreatePollDialog(onDismiss: () -> Unit, onSend: (String, List<String
                 Text(stringResource(R.string.st_Whisper_Groups_PollSend), fontWeight = FontWeight.Bold)
             }
         },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.st_Whisper_Cancel)) }
+        },
+    )
+}
+
+/** Disappearing-photo picker for group sends (mirrors the 1:1 sheet). */
+@Composable
+private fun ImageExpiryDialog(onDismiss: () -> Unit, onSend: (Long?) -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.st_Whisper_ImageExpiry_Title), fontWeight = FontWeight.Bold) },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    stringResource(R.string.st_Whisper_ImageExpiryDesc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                TextButton(onClick = { onSend(null) }, modifier = Modifier.fillMaxWidth()) {
+                    Text(stringResource(R.string.st_Whisper_Expiry_Never), modifier = Modifier.fillMaxWidth())
+                }
+                TextButton(onClick = { onSend(60L) }, modifier = Modifier.fillMaxWidth()) {
+                    Text(stringResource(R.string.st_Whisper_Expiry_1m), modifier = Modifier.fillMaxWidth())
+                }
+                TextButton(onClick = { onSend(3600L) }, modifier = Modifier.fillMaxWidth()) {
+                    Text(stringResource(R.string.st_Whisper_Expiry_1h), modifier = Modifier.fillMaxWidth())
+                }
+                TextButton(onClick = { onSend(86400L) }, modifier = Modifier.fillMaxWidth()) {
+                    Text(stringResource(R.string.st_Whisper_Expiry_1d), modifier = Modifier.fillMaxWidth())
+                }
+            }
+        },
+        confirmButton = {},
         dismissButton = {
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.st_Whisper_Cancel)) }
         },

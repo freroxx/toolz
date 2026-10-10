@@ -757,6 +757,8 @@ data class WhisperGroupChatMessage(
     val reply: GroupReplyRef? = null,
     val poll: GroupPoll? = null,
     val vote: GroupVote? = null,
+    /** Admin poll-close marker (poll id); freezes the tally when present. */
+    val pollClose: String? = null,
     val mentions: List<String> = emptyList(),
     /** Seen-by user ids for my messages (receipts lane; empty until loaded). */
     val seenBy: List<String> = emptyList(),
@@ -1586,6 +1588,7 @@ suspend fun WhisperRepository.fetchGroupMessages(
                 reply = content.reply,
                 poll = content.poll,
                 vote = content.vote,
+                pollClose = content.pollClose,
                 mentions = content.mentions,
             )
         }

@@ -163,7 +163,7 @@ fun WhisperGroupInfoScreen(
                         pictureBytes = state.pictureBytes,
                         name = membership?.name?.ifBlank { "Group" } ?: "Group",
                         groupId = viewModel.groupId,
-                        canChange = iAmAdmin,
+                        canChange = iAmAdmin || membership?.membersCanEdit == true,
                         onPick = { bytes, mime -> viewModel.setPicture(bytes, mime) },
                     )
                     Spacer(Modifier.size(8.dp))
@@ -222,9 +222,31 @@ fun WhisperGroupInfoScreen(
                 item {
                     SettingsCard(
                         adminOnlySend = membership?.adminOnlySend == true,
+                        membersCanEdit = membership?.membersCanEdit == true,
                         description = membership?.description.orEmpty(),
                         onToggleSend = { viewModel.saveSettings(adminOnlySend = membership?.adminOnlySend != true) },
+                        onToggleEdit = { viewModel.saveSettings(editMembers = membership?.membersCanEdit != true) },
                         onEditDesc = { showDescEdit = true },
+                    )
+                }
+            }
+            // Description editing follows the same flag as the picture.
+            if (!iAmAdmin && membership?.membersCanEdit == true) {
+                item {
+                    TextButton(onClick = { showDescEdit = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.st_Whisper_Groups_EditDescription))
+                    }
+                }
+            }
+            if (iAmAdmin && state.requests.isNotEmpty()) {
+                item {
+                    SectionHeader(stringResource(R.string.st_Whisper_Groups_Requests))
+                }
+                items(state.requests, key = { "req_${it.userId}" }) { req ->
+                    RequestRow(
+                        name = req.userName,
+                        onApprove = { viewModel.approveRequest(req.userId) },
+                        onDeny = { viewModel.denyRequest(req.userId) },
                     )
                 }
             }
@@ -833,8 +855,10 @@ private fun MuteDurationDialog(onDismiss: () -> Unit, onPick: (Long) -> Unit) {
 @Composable
 private fun SettingsCard(
     adminOnlySend: Boolean,
+    membersCanEdit: Boolean,
     description: String,
     onToggleSend: () -> Unit,
+    onToggleEdit: () -> Unit,
     onEditDesc: () -> Unit,
 ) {
     Card(
@@ -861,6 +885,22 @@ private fun SettingsCard(
                     )
                 }
                 Switch(checked = adminOnlySend, onCheckedChange = { onToggleSend() })
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        stringResource(R.string.st_Whisper_Groups_MembersCanEdit),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        stringResource(R.string.st_Whisper_Groups_MembersCanEditDesc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = membersCanEdit, onCheckedChange = { onToggleEdit() })
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Row(
@@ -1029,5 +1069,33 @@ private fun GroupGalleryDialog(
     )
     viewer?.let { bytes ->
         GroupImageViewer(bytes = bytes, onDismiss = { viewer = null })
+    }
+}
+
+/** One inbound join request (admins approve into an invite, or deny). */
+@Composable
+private fun RequestRow(name: String, onApprove: () -> Unit, onDeny: () -> Unit) {
+    Card(
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                name,
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onDeny) {
+                Text(stringResource(R.string.st_Whisper_Groups_Deny))
+            }
+            ToolzExpressiveButton(onClick = onApprove) {
+                Text(stringResource(R.string.st_Whisper_Groups_Approve), fontWeight = FontWeight.Bold)
+            }
+        }
     }
 }

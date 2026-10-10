@@ -32,8 +32,12 @@ import com.frerox.toolz.data.whisper.GroupPoll
 import com.frerox.toolz.data.whisper.GroupReplyRef
 import com.frerox.toolz.data.whisper.GroupVote
 import com.frerox.toolz.data.whisper.WhisperGroupContent
+import com.frerox.toolz.data.whisper.GROUP_REACTION_EMOJI
 import com.frerox.toolz.data.whisper.cachedGroupSystemEvents
+import com.frerox.toolz.data.whisper.fetchGroupReactions
+import com.frerox.toolz.data.whisper.observeGroupReactions
 import com.frerox.toolz.data.whisper.sendGroupContent
+import com.frerox.toolz.data.whisper.toggleGroupReaction
 import com.frerox.toolz.data.whisper.sendGroupImage
 import com.frerox.toolz.data.whisper.sendGroupMessage
 import com.frerox.toolz.data.whisper.sendGroupTyping
@@ -86,6 +90,12 @@ class WhisperGroupChatViewModel @Inject constructor(
         val memberNames: Map<String, String> = emptyMap(),
         /** Poll tallies by poll id (latest vote per sender wins). */
         val pollTallies: Map<String, PollTally> = emptyMap(),
+        /** Closed poll ids (admin froze the tally; voting disabled). */
+        val closedPolls: Set<String> = emptySet(),
+        /** Reactions by message client_id (emoji to user ids). */
+        val reactions: Map<String, Map<String, List<String>>> = emptyMap(),
+        /** Row ids whose images expired (rendered as expired, never fetched). */
+        val expiredImages: Set<String> = emptySet(),
         /** In-timeline activity (join/leave/rename/role/picture/settings). */
         val systemEvents: List<SysLine> = emptyList(),
         /** First unread message id at load (unread separator anchor). */
@@ -144,7 +154,10 @@ class WhisperGroupChatViewModel @Inject constructor(
                 }
             }
         }
-        watchJobs = listOf(logJob, msgJob, delJob, typingJob)
+        val reactJob = viewModelScope.launch {
+            runCatching { repository.observeGroupReactions(groupId).collect { refreshReactions() } }
+        }
+        watchJobs = listOf(logJob, msgJob, delJob, typingJob, reactJob)
     }
 
     override fun onCleared() {
@@ -170,6 +183,7 @@ class WhisperGroupChatViewModel @Inject constructor(
                     val names = repository.getFriends().getOrNull().orEmpty()
                         .associate { it.id to it.effectiveName }
                     val receipts = repository.fetchGroupReceipts(groupId).getOrNull().orEmpty()
+                    val reactionMap = repository.fetchGroupReactions(groupId).getOrNull().orEmpty()
                     val myId = repository.myId
                     val unread = list.filter { it.createdAt > markBefore && it.senderId != myId }
                     val systems = repository.cachedGroupSystemEvents(groupId).mapNotNull { raw ->
@@ -187,6 +201,8 @@ class WhisperGroupChatViewModel @Inject constructor(
                             receipts = receipts,
                             memberNames = names,
                             pollTallies = tallyPolls(list, myId),
+                            closedPolls = closedPollIds(list),
+                            reactions = reactionMap,
                             systemEvents = systems,
                             firstUnreadId = unread.firstOrNull()?.id,
                             unreadCount = unread.size,
@@ -221,7 +237,7 @@ class WhisperGroupChatViewModel @Inject constructor(
             val page = repository.fetchGroupMessages(groupId, PAGE_SIZE, before = cursor)
                 .getOrNull().orEmpty()
             if (page.isEmpty()) break
-            out.addAll(page.filter { it.vote == null && it.body.lowercase().contains(q) })
+            out.addAll(page.filter { it.vote == null && it.pollClose == null && it.body.lowercase().contains(q) })
             cursor = page.firstOrNull()?.createdAt ?: break
             if (page.size < PAGE_SIZE) break
         }
@@ -245,6 +261,7 @@ class WhisperGroupChatViewModel @Inject constructor(
                             loadingMore = false,
                             hasMore = older.size >= PAGE_SIZE,
                             pollTallies = tallyPolls(merged, repository.myId),
+                            closedPolls = closedPollIds(merged),
                         )
                     }
                 }
@@ -298,6 +315,7 @@ class WhisperGroupChatViewModel @Inject constructor(
     /** Votes (or re-votes — latest per sender wins the tally). */
     fun vote(pollId: String, opt: Int) {
         if (pollId.isBlank()) return
+        if (pollId in _uiState.value.closedPolls) return
         viewModelScope.launch {
             repository.sendGroupContent(groupId, WhisperGroupContent(vote = GroupVote(pollId, opt)))
                 .onSuccess { load() }
@@ -305,11 +323,39 @@ class WhisperGroupChatViewModel @Inject constructor(
         }
     }
 
-    fun sendImage(bytes: ByteArray, mime: String) {
+    /** Admins freeze a poll (tally stops, voting disables). */
+    fun closePoll(pollId: String) {
+        if (pollId.isBlank()) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(error = null) }
+            repository.sendGroupContent(groupId, WhisperGroupContent(t = "poll closed", pollClose = pollId))
+                .onSuccess { load() }
+                .onFailure { e -> _uiState.update { it.copy(error = err(e)) } }
+        }
+    }
+
+    /** Emoji tap: same emoji removes, anything else replaces. */
+    fun toggleReaction(msg: WhisperGroupChatMessage, emoji: String) {
+        if (emoji !in GROUP_REACTION_EMOJI || msg.clientId.isBlank()) return
+        viewModelScope.launch {
+            repository.toggleGroupReaction(groupId, msg.clientId, emoji)
+                .onSuccess { refreshReactions() }
+                .onFailure { e -> _uiState.update { it.copy(error = err(e)) } }
+        }
+    }
+
+    private fun refreshReactions() {
+        viewModelScope.launch {
+            val map = repository.fetchGroupReactions(groupId).getOrNull()
+            if (map != null) _uiState.update { it.copy(reactions = map) }
+        }
+    }
+
+    fun sendImage(bytes: ByteArray, mime: String, expiresAfterSeconds: Long? = null) {
         viewModelScope.launch { repository.clearGroupTyping(groupId) }
         viewModelScope.launch {
             _uiState.update { it.copy(isUploadingImage = true, error = null) }
-            repository.sendGroupImage(groupId, bytes, mime)
+            repository.sendGroupImage(groupId, bytes, mime, expiresAfterSeconds = expiresAfterSeconds)
                 .onSuccess { load() }
                 .onFailure { e ->
                     _uiState.update { it.copy(isUploadingImage = false, error = err(e)) }
@@ -327,10 +373,20 @@ class WhisperGroupChatViewModel @Inject constructor(
 
     fun loadImage(msg: WhisperGroupChatMessage) {
         val ref = msg.image ?: return
-        if (_uiState.value.images[msg.id] != null) return
+        if (_uiState.value.images[msg.id] != null || msg.id in _uiState.value.expiredImages) return
+        // Local expiry gate (openGroupImage also fails closed server-blind).
+        if (ref.exp != null && ref.exp * 1000 < System.currentTimeMillis()) {
+            _uiState.update { it.copy(expiredImages = it.expiredImages + msg.id) }
+            return
+        }
         viewModelScope.launch {
-            repository.openGroupImage(ref, "gmsg:${msg.id}").getOrNull()?.let { bytes ->
+            val out = repository.openGroupImage(ref, "gmsg:${msg.id}")
+            out.getOrNull()?.let { bytes ->
                 _uiState.update { it.copy(images = it.images + (msg.id to bytes)) }
+            } ?: run {
+                if (out.exceptionOrNull()?.message?.contains("expired") == true) {
+                    _uiState.update { it.copy(expiredImages = it.expiredImages + msg.id) }
+                }
             }
         }
     }
@@ -401,6 +457,10 @@ class WhisperGroupChatViewModel @Inject constructor(
         /** Group mutes reuse the 1:1 mute store under a reserved namespace. */
         fun muteKey(groupId: String) = "group:$groupId"
         const val PAGE_SIZE = 50
+
+        /** Poll ids frozen by an admin close (any close row wins, latest wins ties). */
+        fun closedPollIds(messages: List<WhisperGroupChatMessage>): Set<String> =
+            messages.mapNotNullTo(mutableSetOf()) { it.pollClose?.takeIf { id -> id.isNotBlank() } }
 
         /** Latest vote per sender per poll wins; my latest vote is tracked. */
         fun tallyPolls(messages: List<WhisperGroupChatMessage>, me: String): Map<String, PollTally> {

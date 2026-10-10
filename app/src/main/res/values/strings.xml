@@ -3898,6 +3898,17 @@
     <string name="st_Whisper_Groups_NewMessages">\u2193 %1$d new</string>
     <string name="st_Whisper_Groups_NewMessagesDivider">%1$d new messages</string>
     <string name="st_Whisper_Groups_MentionedYou">@You</string>
+    <string name="st_Whisper_Groups_PollClosed">Closed</string>
+    <string name="st_Whisper_Groups_ClosePoll">Close poll</string>
+    <string name="st_Whisper_Groups_JoinById">Join with ID</string>
+    <string name="st_Whisper_Groups_JoinByIdHint">Paste a group ID</string>
+    <string name="st_Whisper_Groups_RequestSent">Request sent \u2014 an admin will review it.</string>
+    <string name="st_Whisper_Groups_Requests">Join requests</string>
+    <string name="st_Whisper_Groups_Approve">Approve</string>
+    <string name="st_Whisper_Groups_Deny">Deny</string>
+    <string name="st_Whisper_Groups_NoRequests">No pending requests</string>
+    <string name="st_Whisper_Groups_MembersCanEdit">Members can edit picture + description</string>
+    <string name="st_Whisper_Groups_MembersCanEditDesc">When off, only admins can change them</string>
     <string name="st_Whisper_Groups_Degraded">Group history couldn\'t be fully verified — showing verified messages only.</string>
     <string name="st_Whisper_Groups_Photo">Photo</string>
     <string name="st_Whisper_Groups_Poll">Poll</string>
