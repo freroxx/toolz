@@ -159,6 +159,15 @@ data class WhisperGroupMembership(
     val pendingInvites: Set<String> = emptySet(),
     /** Latest verified picture event, null until the first one. */
     val picture: WhisperGroupPicture? = null,
+    /**
+     * True when the log contains an event that failed verification: the
+     * membership above covers the verified PREFIX only (every event before
+     * [badSeq]). The UI must banner this — history after the break is
+     * unverifiable, never silently trusted.
+     */
+    val degraded: Boolean = false,
+    /** Seq of the first unverifiable event, null when the log is fully clean. */
+    val badSeq: Long? = null,
 ) {
     val admins: Set<String> get() = members.filterValues { it == WhisperGroupRole.ADMIN }.keys
     fun isMember(userId: String): Boolean = members.containsKey(userId)
@@ -354,6 +363,43 @@ fun applyEvents(
         closed + open
     }
     return WhisperGroupMembership(groupId, epoch, members.toMap(), name, inviteAdminsOnly, ranges, invited.toSet(), picture)
+}
+
+/**
+ * Poison-tolerant wrapper around [applyEvents]: a single malformed or
+ * hostile event (any member can publish under their own actor key — RLS only
+ * checks coarse membership) must brick NEITHER the group NOR every other
+ * group. On the first unverifiable event the verified prefix still yields a
+ * usable membership flagged [WhisperGroupMembership.degraded]; history at and
+ * after [WhisperGroupMembership.badSeq] is dropped, never trusted. A bad
+ * CREATE (prefix of length 1) still fails the whole log — nothing verifiable
+ * exists without it.
+ */
+fun applyEventsTolerant(
+    groupId: String,
+    events: List<WhisperGroupEvent>,
+    verify: (payload: ByteArray, sigB64: String, signerX509B64: String) -> Boolean,
+    signerKeyOf: (userId: String) -> String?,
+): WhisperGroupMembership {
+    if (events.isEmpty()) error("Group has no history.")
+    try {
+        return applyEvents(groupId, events, verify, signerKeyOf)
+    } catch (first: RuntimeException) {
+        // Linear scan for the first failing prefix. O(k²) signature checks
+        // worst case; admin logs are tens of events, never thousands.
+        for (k in 1..events.size) {
+            val failed = runCatching {
+                applyEvents(groupId, events.subList(0, k), verify, signerKeyOf)
+            }.exceptionOrNull()
+            if (failed != null) {
+                if (k == 1) throw first
+                val good = applyEvents(groupId, events.subList(0, k - 1), verify, signerKeyOf)
+                android.util.Log.w("WhisperGroups", "log truncated at seq ${events[k - 1].seq}: ${failed.message}")
+                return good.copy(degraded = true, badSeq = events[k - 1].seq)
+            }
+        }
+        throw first
+    }
 }
 
 private fun isAdminSigned(
@@ -613,23 +659,61 @@ suspend fun WhisperRepository.fetchVerifiedMembership(groupId: String): Result<W
     requireMe()
     val group = db.from("whisper_groups").select { filter { eq("id", groupId) } }
         .decodeSingleOrNull<GroupRow>() ?: error("Group not found.")
-    val rows = db.from("whisper_group_events").select { filter { eq("group_id", groupId) } }
-        .decodeList<GroupEventRow>()
-    val events = rows.sortedBy { it.seq }.map { it.toModel() }
+    // Incremental sync: the local cache holds the verified prefix, so only
+    // rows past the cached watermark travel the network on a warm device.
+    val cached = groupDao.events(groupId)
+    val watermark = cached.maxOfOrNull { it.seq } ?: 0L
+    suspend fun fetchFresh(afterSeq: Long): List<WhisperGroupEvent> {
+        val rows = if (afterSeq > 0) {
+            db.from("whisper_group_events").select {
+                filter { eq("group_id", groupId); gt("seq", afterSeq) }
+            }.decodeList<GroupEventRow>()
+        } else {
+            db.from("whisper_group_events").select { filter { eq("group_id", groupId) } }
+                .decodeList<GroupEventRow>()
+        }
+        return rows.sortedBy { it.seq }.map { it.toModel() }
+    }
+    var events = (cached.map { it.toModel() } + fetchFresh(watermark))
+        .distinctBy { it.id }.sortedBy { it.seq }
     if (events.isEmpty()) error("Group has no history.")
-    // Pre-fetch every distinct actor key (bundle fetch is suspend; the
-    // verifier lambda below is a pure map read — never blocks).
-    val keys = mutableMapOf<String, String?>()
-    events.map { it.actor }.distinct().forEach { uid -> keys[uid] = signerKeyOf(uid) }
-    val membership = applyEvents(
-        groupId = groupId,
-        events = events,
-        verify = { payload, sig, signer -> groupVerify(payload, sig, signer) },
-        signerKeyOf = { uid -> keys[uid] },
-    )
-    persistGroupCache(group, membership, events)
+    suspend fun verifyAll(log: List<WhisperGroupEvent>): WhisperGroupMembership {
+        // Pre-fetch every distinct actor key (bundle fetch is suspend; the
+        // verifier lambda below is a pure map read — never blocks).
+        val keys = mutableMapOf<String, String?>()
+        log.map { it.actor }.distinct().forEach { uid -> keys[uid] = signerKeyOf(uid) }
+        return applyEventsTolerant(
+            groupId = groupId,
+            events = log,
+            verify = { payload, sig, signer -> groupVerify(payload, sig, signer) },
+            signerKeyOf = { uid -> keys[uid] },
+        )
+    }
+    var membership = verifyAll(events)
+    if (membership.degraded && (membership.badSeq ?: Long.MAX_VALUE) <= watermark) {
+        // The poison sits AT/BELOW the watermark: the local cache itself is
+        // suspect (diverged or poisoned). Drop it and refetch the full log —
+        // the tolerant path then truncates at the true first-bad event.
+        groupDao.clearEvents(groupId)
+        events = fetchFresh(0)
+        if (events.isEmpty()) error("Group has no history.")
+        membership = verifyAll(events)
+    }
+    val verifiedEvents = if (membership.degraded) events.filter { it.seq < (membership.badSeq ?: Long.MAX_VALUE) } else events
+    persistGroupCache(group, membership, verifiedEvents)
     membership
 }
+
+private fun WhisperGroupEventEntity.toModel() = WhisperGroupEvent(
+    id = id,
+    groupId = groupId,
+    seq = seq,
+    epoch = epoch,
+    type = WhisperGroupEventType.of(type) ?: error("unknown event type $type"),
+    actor = actor,
+    payloadJson = payload,
+    adminSig = adminSig,
+)
 
 suspend fun WhisperRepository.syncGroups(): Result<List<WhisperGroupMembership>> = runCatching {
     requireGroupsEnabled()
@@ -783,19 +867,87 @@ private suspend fun WhisperRepository.publishGroupEvent(
     actor: String,
     payload: String,
 ): Result<Unit> = runCatching {
-    val sig = crypto.signProtocol(groupEventSignBytes(groupId, seq, epoch, type, actor, payload))
-        ?: error("Could not sign the group event.")
-    db.from("whisper_group_events").insert(
-        GroupEventInsert(
-            groupId = groupId,
-            seq = seq,
-            epoch = epoch,
-            type = type.wire,
-            actor = actor,
-            payload = payload,
-            adminSig = sig,
-            clientVersionCode = groupClientVersion(),
-        ),
+    // Two admins acting at once race on nextGroupSeqEpoch: the loser hits the
+    // unique(group_id, seq) constraint (23505). Re-read the head, re-sign
+    // (the seq is inside the signed bytes) and retry — 3 attempts, then surface.
+    var attemptSeq = seq
+    var lastError: Throwable? = null
+    repeat(3) { attempt ->
+        val sig = crypto.signProtocol(groupEventSignBytes(groupId, attemptSeq, epoch, type, actor, payload))
+            ?: error("Could not sign the group event.")
+        val result = runCatching {
+            db.from("whisper_group_events").insert(
+                GroupEventInsert(
+                    groupId = groupId,
+                    seq = attemptSeq,
+                    epoch = epoch,
+                    type = type.wire,
+                    actor = actor,
+                    payload = payload,
+                    adminSig = sig,
+                    clientVersionCode = groupClientVersion(),
+                ),
+            )
+        }
+        if (result.isSuccess) return@runCatching
+        val err = result.exceptionOrNull()
+        if (!isGroupSeqCollision(err)) throw err ?: error("Could not publish the group event.")
+        lastError = err
+        if (attempt < 2) {
+            kotlinx.coroutines.delay(150L * (attempt + 1))
+            attemptSeq = nextGroupSeqEpoch(groupId).first
+        }
+    }
+    throw lastError ?: error("Could not publish the group event.")
+}
+
+/** True when the failure is the unique(group_id, seq) race (Postgres 23505). */
+private fun isGroupSeqCollision(e: Throwable?): Boolean {
+    var cur = e
+    while (cur != null) {
+        val msg = cur.message.orEmpty()
+        if (msg.contains("23505") || msg.contains("duplicate key", ignoreCase = true)) return true
+        cur = cur.cause
+    }
+    return false
+}
+
+/**
+ * Maps fail-closed transport errors to string resources. Raw server/client
+ * English ("stale epoch", "42501") must never reach the chat UI untranslated.
+ * Returns null when no mapping applies — callers fall back to the raw message.
+ */
+@androidx.annotation.StringRes
+fun mapGroupError(raw: String?): Int? {
+    if (raw.isNullOrBlank()) return null
+    val msg = raw.lowercase()
+    return when {
+        "group full" in msg || "12 max" in msg ->
+            com.frerox.toolz.R.string.st_Whisper_Groups_ErrFull
+        "quota exceeded" in msg ->
+            com.frerox.toolz.R.string.st_Whisper_Groups_ErrQuota
+        "stale epoch" in msg ->
+            com.frerox.toolz.R.string.st_Whisper_Groups_ErrStale
+        "no invite" in msg ->
+            com.frerox.toolz.R.string.st_Whisper_Groups_ErrNoInvite
+        "no longer a member" in msg || "not a member" in msg || "not_member" in msg ->
+            com.frerox.toolz.R.string.st_Whisper_Groups_ErrNotMember
+        "could not reach" in msg ->
+            com.frerox.toolz.R.string.st_Whisper_Groups_ErrUnreachable
+        "couldn't sync your groups" in msg ->
+            com.frerox.toolz.R.string.st_Whisper_Groups_ErrSync
+        "group_send_queued" in msg ->
+            com.frerox.toolz.R.string.st_Whisper_Groups_ErrQueued
+        else -> null
+    }
+}
+
+/** Resolves a group error to display text (mapped string or the raw message). */
+fun groupErrorText(context: android.content.Context, e: Throwable?): String {
+    val raw = e?.message
+    val res = mapGroupError(raw)
+    return if (res != null) context.getString(res) else raw ?: context.getString(
+        com.frerox.toolz.R.string.st_Whisper_Groups_ErrSync,
     )
 }
 
@@ -1002,25 +1154,53 @@ suspend fun WhisperRepository.sendGroupMessage(groupId: String, plaintext: Strin
     require(failed.isEmpty()) {
         "Could not reach ${failed.size} member(s) — message not sent. Retry when they're reachable."
     }
-    val row = GroupMessageInsert(
-        groupId = groupId,
-        senderId = me,
-        clientId = java.util.UUID.randomUUID().toString(),
-        content = encodeGroupRow(
-            WhisperGroupRowContent(
-                v = WhisperGroupsConfig.ENVELOPE_VERSION,
-                g = groupId,
-                e = m.epoch,
-                s = System.currentTimeMillis(),
-                senderId = me,
-                frames = frames,
-            ),
+    val clientId = java.util.UUID.randomUUID().toString()
+    val content = encodeGroupRow(
+        WhisperGroupRowContent(
+            v = WhisperGroupsConfig.ENVELOPE_VERSION,
+            g = groupId,
+            e = m.epoch,
+            s = System.currentTimeMillis(),
+            senderId = me,
+            frames = frames,
         ),
-        contentIv = "v3-group",
-        epoch = m.epoch,
-        clientVersionCode = groupClientVersion(),
     )
-    db.from("whisper_group_messages").insert(row)
+    val insertResult = runCatching {
+        db.from("whisper_group_messages").insert(
+            GroupMessageInsert(
+                groupId = groupId,
+                senderId = me,
+                clientId = clientId,
+                content = content,
+                contentIv = groupMessageIv(m.epoch),
+                epoch = m.epoch,
+                clientVersionCode = groupClientVersion(),
+            ),
+        )
+    }
+    if (insertResult.isSuccess) return@runCatching
+    val insertErr = insertResult.exceptionOrNull()
+    // Permanent rejections (quota, stale epoch, full, non-member) will fail
+    // the drain too — surface them, don't queue. Anything else (offline,
+    // timeouts) queues the sealed bundle: frames are already sealed per
+    // member, so the drain only replays the row insert (dup client_id = done).
+    val mapped = mapGroupError(insertErr?.message)
+    if (mapped != null) throw insertErr ?: error("Message not sent.")
+    outgoingQueue.enqueue(
+        WhisperQueuedMessage(
+            clientId = clientId,
+            senderId = me,
+            receiverId = "",
+            encryptedContent = content,
+            contentIv = groupMessageIv(m.epoch),
+            replyToId = null,
+            createdAt = java.time.Instant.now().toString(),
+            attempts = 0,
+            groupId = groupId,
+        ),
+    )
+    deliveryScheduler.scheduleNow()
+    error("group_send_queued")
 }
 
 /** Reads the chat: opens my frame of every row I belonged to at its epoch. */
@@ -1078,6 +1258,41 @@ suspend fun WhisperRepository.setGroupPicture(
     require(m.isAdmin(me)) { "Only admins can change the picture." }
     val (compressed, _) = compressImageForGroupUpload(imageBytes, mimeType)
     require(compressed.isNotEmpty()) { "Could not read that image." }
+    val published = runCatching {
+        publishPictureFrames(groupId, me, m, compressed).getOrThrow()
+    }
+    if (published.isSuccess) {
+        syncGroup(groupId).getOrThrow()
+        return@runCatching
+    }
+    // Offline/mid-flight failure: queue the ORIGINAL bytes — the drain
+    // re-runs compress/seal/upload/publish from scratch.
+    val b64 = java.util.Base64.getEncoder().encodeToString(imageBytes)
+    outgoingQueue.enqueue(
+        WhisperQueuedMessage(
+            clientId = "gpic:$groupId:${System.currentTimeMillis()}",
+            senderId = me,
+            receiverId = "",
+            encryptedContent = "$mimeType\n$b64",
+            contentIv = GROUP_PICTURE_OUTBOX_IV,
+            replyToId = null,
+            createdAt = java.time.Instant.now().toString(),
+            attempts = 0,
+            groupId = groupId,
+        ),
+    )
+    deliveryScheduler.scheduleNow()
+    android.util.Log.w("WhisperGroups", "setGroupPicture queued for $groupId: ${published.exceptionOrNull()?.message}")
+    error("group_send_queued")
+}
+
+/** Seal-per-member + upload + signed PICTURE event (shared by set + drain). */
+private suspend fun WhisperRepository.publishPictureFrames(
+    groupId: String,
+    me: String,
+    m: WhisperGroupMembership,
+    compressed: ByteArray,
+): Result<Unit> = runCatching {
     val (sealed, key) = newGroupPictureSeal(compressed)
     val png = WhisperImageCipherTransport.encode(sealed)
     val (url, _) = encryptedImageHost.upload(png, "group-$groupId", null).getOrThrow()
@@ -1098,7 +1313,6 @@ suspend fun WhisperRepository.setGroupPicture(
         groupId, seq, epoch, WhisperGroupEventType.PICTURE, me,
         buildGroupPicturePayload(url, "", frames),
     ).getOrThrow()
-    syncGroup(groupId).getOrThrow()
 }
 
 /** Opens the current picture for me (null = none set / not for me). */
@@ -1120,6 +1334,93 @@ suspend fun WhisperRepository.openGroupPicture(groupId: String): Result<ByteArra
     val png = encryptedImageHost.download(url).getOrThrow()
     val sealed = WhisperImageCipherTransport.decode(png) ?: error("Bad picture data.")
     openGroupPictureBytes(sealed, key) ?: error("Could not decrypt the picture.")
+}
+
+// ── Group outbox drain (offline sends + pictures) ───────────────────────
+// The 1:1 lane (flushOutgoingMessages) skips groupId != null rows; this lane
+// replays them. Message rows are ciphertext-only replays (frames sealed at
+// enqueue time; dup client_id = already delivered). Picture rows re-run the
+// full pipeline from the persisted original bytes. Drained on hub + chat
+// loads (app-open driven); the worker lane stays 1:1-only by design.
+
+private val groupFlushMutex = kotlinx.coroutines.sync.Mutex()
+
+/** content_iv for group message rows; carries the row epoch for the drain. */
+internal fun groupMessageIv(epoch: Long): String = "v3-group:$epoch"
+
+/** Test-visible: parses the epoch back out of [groupMessageIv]. */
+internal fun groupMessageIvEpoch(iv: String): Long? =
+    iv.removePrefix("v3-group:").toLongOrNull()?.takeIf { iv.startsWith("v3-group:") }
+
+/** Marker content_iv for queued group-picture retries (content = mime + \n + base64). */
+internal const val GROUP_PICTURE_OUTBOX_IV = "gpic"
+
+/**
+ * Replays my queued group rows; safe to call repeatedly (dup-safe by
+ * client_id, attempts-capped like the 1:1 lane). Returns delivered count.
+ */
+suspend fun WhisperRepository.flushGroupOutbox(): Int {
+    requireGroupsEnabled()
+    if (myId.isBlank()) return 0
+    return groupFlushMutex.withLock {
+        var delivered = 0
+        outgoingQueue.entries().filter { it.senderId == myId && it.groupId != null }.forEach { queued ->
+            if (queued.attempts >= 8) {
+                android.util.Log.w("WhisperGroups", "Dropping undeliverable queued group row after ${queued.attempts} attempts (clientId=${queued.clientId})")
+                outgoingQueue.remove(queued.clientId)
+                outgoingQueue.noteDropped(queued.clientId)
+                return@forEach
+            }
+            val result = runCatching {
+                if (queued.contentIv == GROUP_PICTURE_OUTBOX_IV) {
+                    drainGroupPicture(queued.groupId!!, queued.encryptedContent).getOrThrow()
+                } else {
+                    val epoch = groupMessageIvEpoch(queued.contentIv)
+                        ?: error("Bad queued group row.")
+                    db.from("whisper_group_messages").insert(
+                        GroupMessageInsert(
+                            groupId = queued.groupId!!,
+                            senderId = queued.senderId,
+                            clientId = queued.clientId,
+                            content = queued.encryptedContent,
+                            contentIv = queued.contentIv,
+                            epoch = epoch,
+                            clientVersionCode = groupClientVersion(),
+                        ),
+                    )
+                }
+            }
+            if (result.isSuccess || isGroupDupKey(result.exceptionOrNull())) {
+                outgoingQueue.remove(queued.clientId)
+                delivered++
+            } else {
+                outgoingQueue.replace(queued.copy(attempts = queued.attempts + 1))
+            }
+        }
+        delivered
+    }
+}
+
+/** Re-runs a queued picture set from persisted original bytes. */
+private suspend fun WhisperRepository.drainGroupPicture(groupId: String, packed: String): Result<Unit> = runCatching {
+    val split = packed.indexOf('\n')
+    require(split > 0) { "Bad queued group picture." }
+    val mime = packed.substring(0, split)
+    val bytes = runCatching {
+        java.util.Base64.getDecoder().decode(packed.substring(split + 1))
+    }.getOrNull() ?: error("Bad queued group picture.")
+    setGroupPicture(groupId, bytes, mime).getOrThrow()
+}
+
+/** True on unique(client_id) replays (a prior attempt delivered, response lost). */
+private fun isGroupDupKey(e: Throwable?): Boolean {
+    var cur = e
+    while (cur != null) {
+        val msg = cur.message.orEmpty()
+        if (msg.contains("23505") || msg.contains("duplicate key", ignoreCase = true)) return true
+        cur = cur.cause
+    }
+    return false
 }
 
 // ── Realtime (Postgres Changes, same teardown discipline as 1:1) ───────

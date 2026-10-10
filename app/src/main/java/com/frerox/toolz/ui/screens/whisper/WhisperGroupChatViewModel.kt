@@ -14,6 +14,7 @@ import com.frerox.toolz.data.whisper.WhisperMutePreferences
 import com.frerox.toolz.data.whisper.WhisperNotificationManager
 import com.frerox.toolz.data.whisper.WhisperRepository
 import com.frerox.toolz.data.whisper.fetchGroupMessages
+import com.frerox.toolz.data.whisper.flushGroupOutbox
 import com.frerox.toolz.data.whisper.groupsEnabled
 import com.frerox.toolz.data.whisper.observeGroupLog
 import com.frerox.toolz.data.whisper.sendGroupMessage
@@ -35,6 +36,7 @@ class WhisperGroupChatViewModel @Inject constructor(
     private val repository: WhisperRepository,
     private val mutePrefs: WhisperMutePreferences,
     private val notificationManager: WhisperNotificationManager,
+    @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -46,6 +48,8 @@ class WhisperGroupChatViewModel @Inject constructor(
         val isLoading: Boolean = true,
         val isSending: Boolean = false,
         val isMuted: Boolean = false,
+        /** True when the event log carries an unverifiable event (banner). */
+        val degraded: Boolean = false,
         val error: String? = null,
     )
 
@@ -84,16 +88,18 @@ class WhisperGroupChatViewModel @Inject constructor(
     fun load() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
+            // Drain queued group sends first so they land before the sync reads.
+            runCatching { repository.flushGroupOutbox() }
             val membership = repository.syncGroup(groupId)
             membership.onSuccess { m ->
                 val messages = repository.fetchGroupMessages(groupId)
                 messages.onSuccess { list ->
-                    _uiState.update { it.copy(membership = m, messages = list, isLoading = false) }
+                    _uiState.update { it.copy(membership = m, messages = list, isLoading = false, degraded = m.degraded) }
                 }.onFailure { e ->
-                    _uiState.update { it.copy(membership = m, isLoading = false, error = e.message) }
+                    _uiState.update { it.copy(membership = m, isLoading = false, degraded = m.degraded, error = err(e)) }
                 }
             }.onFailure { e ->
-                _uiState.update { it.copy(isLoading = false, error = e.message) }
+                _uiState.update { it.copy(isLoading = false, error = err(e)) }
             }
         }
     }
@@ -104,10 +110,13 @@ class WhisperGroupChatViewModel @Inject constructor(
             repository.sendGroupMessage(groupId, text)
                 .onSuccess { load() }
                 .onFailure { e ->
-                    _uiState.update { it.copy(isSending = false, error = e.message) }
+                    _uiState.update { it.copy(isSending = false, error = err(e)) }
                 }
         }
     }
+
+    private fun err(e: Throwable?): String =
+        com.frerox.toolz.data.whisper.groupErrorText(appContext, e)
 
     fun toggleMute() {
         val key = muteKey(groupId)

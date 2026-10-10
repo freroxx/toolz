@@ -165,6 +165,9 @@ fun WhisperGroupInfoScreen(
             item {
                 MuteRow(muted = state.isMuted, onToggle = { viewModel.toggleMute() })
             }
+            if (state.degraded) {
+                item { GroupDegradedBanner() }
+            }
             item {
                 NotifRow(
                     on = state.notifOn,

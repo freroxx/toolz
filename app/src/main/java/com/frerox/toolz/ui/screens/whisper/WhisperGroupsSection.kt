@@ -574,3 +574,25 @@ private fun PickedChipsRow(
         }
     }
 }
+
+/**
+ * Shared degraded-log banner (chat + info screens): the event log carries an
+ * unverifiable event, so membership/history cover the verified prefix only.
+ * Non-private so both screens reuse the identical copy and styling.
+ */
+@Composable
+fun GroupDegradedBanner() {
+    Surface(
+        color = MaterialTheme.colorScheme.tertiaryContainer,
+        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+        shape = RoundedCornerShape(20.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text(
+            stringResource(R.string.st_Whisper_Groups_Degraded),
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+        )
+    }
+}

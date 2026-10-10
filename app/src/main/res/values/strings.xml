@@ -3872,4 +3872,13 @@
     <string name="st_Whisper_Groups_NotifScopeMember">Join + leave only</string>
     <string name="st_Whisper_Groups_Disband">Disband group</string>
     <string name="st_Whisper_Groups_DisbandConfirm">Delete this group for everyone? The chat history, members and invites disappear permanently. This cannot be undone.</string>
+    <string name="st_Whisper_Groups_ErrFull">This group is full (12 members max).</string>
+    <string name="st_Whisper_Groups_ErrQuota">You\'re sending a lot right now. Wait a bit and retry.</string>
+    <string name="st_Whisper_Groups_ErrStale">The group just changed. Refreshing — retry in a moment.</string>
+    <string name="st_Whisper_Groups_ErrNoInvite">You need an invite to join this group.</string>
+    <string name="st_Whisper_Groups_ErrNotMember">You\'re no longer a member of this group.</string>
+    <string name="st_Whisper_Groups_ErrUnreachable">A member can\'t be reached right now — retry when they\'re online.</string>
+    <string name="st_Whisper_Groups_ErrSync">Couldn\'t sync. Check your connection and retry.</string>
+    <string name="st_Whisper_Groups_ErrQueued">Will send when you\'re back online.</string>
+    <string name="st_Whisper_Groups_Degraded">Group history couldn\'t be fully verified — showing verified messages only.</string>
 </resources>

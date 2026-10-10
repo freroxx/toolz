@@ -82,8 +82,11 @@ class WhisperRepository @Inject constructor(
     // WhisperEncryptedImageHost remains the production impl.
     internal val encryptedImageHost: EncryptedBlobHost,
     private val deletedStore: WhisperDeletedMessagesStore,
-    private val outgoingQueue: WhisperOutgoingQueue,
-    private val deliveryScheduler: WhisperDeliveryScheduler,
+    // Phase-2 groups outbox legs: widened private→internal (same precedent as
+    // crypto/encryptedImageHost above) so WhisperRepositoryGroups can enqueue +
+    // schedule group fan-out retries without touching any 1:1 call site.
+    internal val outgoingQueue: WhisperOutgoingQueue,
+    internal val deliveryScheduler: WhisperDeliveryScheduler,
     private val messageDao: WhisperMessageDao,
     private val keyTrustStore: WhisperKeyTrustStore,
     private val hiddenChatsStore: WhisperHiddenChatsStore,
@@ -1820,7 +1823,7 @@ class WhisperRepository @Inject constructor(
         if (myId.isBlank()) return 0
         return flushMutex.withLock {
             var delivered = 0
-            outgoingQueue.entries().filter { it.senderId == myId }.forEach { queued ->
+            outgoingQueue.entries().filter { it.senderId == myId && it.groupId == null }.forEach { queued ->
                 if (queued.attempts >= 8) {
                     android.util.Log.w("WhisperRepo", "Dropping undeliverable queued message after ${queued.attempts} attempts (clientId=${queued.clientId})")
                     outgoingQueue.remove(queued.clientId)

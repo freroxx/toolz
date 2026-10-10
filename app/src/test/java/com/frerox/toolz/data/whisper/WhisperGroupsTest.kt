@@ -357,4 +357,67 @@ class WhisperGroupsTest {
         assertTrue(WhisperGroupNotifTemplates.leavePoolSize() >= 8)
         assertTrue(WhisperGroupNotifTemplates.declinePoolSize() >= 5)
     }
+
+    @Test
+    fun `poisoned log truncates to verified prefix`() {
+        val keys2: (String) -> String? = { "KEY" }
+        val log = listOf(
+            create(),
+            ev(2, 0, WhisperGroupEventType.INVITE, admin, "\"u2\""),
+            ev(3, 1, WhisperGroupEventType.JOIN, "u2", "\"\""),
+            ev(4, 1, WhisperGroupEventType.RENAME, admin, "\"Evil\"", sig = "bad"),
+            ev(5, 1, WhisperGroupEventType.RENAME, admin, "\"Good\""),
+        )
+        // Strict path still fails closed on the poison.
+        try {
+            applyEvents(gid, log, verify, keys2)
+            fail("must throw")
+        } catch (e: IllegalArgumentException) {
+            assertTrue((e.message ?: "").contains("admin-signed"))
+        }
+        // Tolerant path keeps the verified prefix and flags it.
+        val m = applyEventsTolerant(gid, log, verify, keys2)
+        assertTrue(m.degraded)
+        assertEquals(4L, m.badSeq)
+        assertTrue(m.isMember("u2"))
+        assertEquals("Crew", m.name)
+        assertTrue(!m.isMember("intruder"))
+    }
+
+    @Test
+    fun `bad create still fails everything`() {
+        val keys2: (String) -> String? = { "KEY" }
+        try {
+            applyEventsTolerant(
+                gid,
+                listOf(ev(1, 0, WhisperGroupEventType.CREATE, admin, "\"x\"", sig = "bad")),
+                verify, keys2,
+            )
+            fail("must throw")
+        } catch (e: IllegalArgumentException) {
+            assertTrue((e.message ?: "").contains("signature"))
+        }
+    }
+
+    @Test
+    fun `error mapping covers fail-closed cases`() {
+        assertTrue(mapGroupError("group full (12 max)") != null)
+        assertTrue(mapGroupError("group send quota exceeded") != null)
+        assertTrue(mapGroupError("stale epoch") != null)
+        assertTrue(mapGroupError("no invite") != null)
+        assertTrue(mapGroupError("You are no longer a member of this group.") != null)
+        assertTrue(mapGroupError("Could not reach 2 member(s) — message not sent.") != null)
+        assertTrue(mapGroupError("group_send_queued") != null)
+        assertTrue(mapGroupError("some random network failure") == null)
+        assertTrue(mapGroupError(null) == null)
+        assertTrue(mapGroupError("") == null)
+    }
+
+    @Test
+    fun `group message iv round-trips epoch`() {
+        assertEquals(7L, groupMessageIvEpoch(groupMessageIv(7)))
+        assertEquals(0L, groupMessageIvEpoch(groupMessageIv(0)))
+        assertNull(groupMessageIvEpoch("v3-group"))
+        assertNull(groupMessageIvEpoch("garbage"))
+    }
 }

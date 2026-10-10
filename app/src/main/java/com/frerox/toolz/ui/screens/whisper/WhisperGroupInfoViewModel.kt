@@ -44,6 +44,7 @@ class WhisperGroupInfoViewModel @Inject constructor(
     private val repository: WhisperRepository,
     private val mutePrefs: WhisperMutePreferences,
     private val notifPrefs: WhisperGroupNotifPrefs,
+    @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -71,6 +72,8 @@ class WhisperGroupInfoViewModel @Inject constructor(
         val isLoading: Boolean = true,
         val isWorking: Boolean = false,
         val left: Boolean = false,
+        /** True when the event log carries an unverifiable event (banner). */
+        val degraded: Boolean = false,
         val error: String? = null,
     ) {
         // ByteArray breaks data-class equals; identity is by group state instead.
@@ -80,7 +83,7 @@ class WhisperGroupInfoViewModel @Inject constructor(
             canDisband == other.canDisband &&
             isMuted == other.isMuted && notifOn == other.notifOn &&
             isLoading == other.isLoading && isWorking == other.isWorking &&
-            left == other.left && error == other.error
+            left == other.left && degraded == other.degraded && error == other.error
         override fun hashCode(): Int = membership.hashCode()
     }
 
@@ -130,11 +133,12 @@ class WhisperGroupInfoViewModel @Inject constructor(
                         ),
                         isLoading = false,
                         isWorking = false,
+                        degraded = m.degraded,
                     )
                 }
                 loadPicture()
             }.onFailure { e ->
-                _uiState.update { it.copy(isLoading = false, isWorking = false, error = e.message) }
+                _uiState.update { it.copy(isLoading = false, isWorking = false, error = err(e)) }
             }
         }
     }
@@ -143,10 +147,13 @@ class WhisperGroupInfoViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isWorking = true, error = null) }
             block().onSuccess { load() }.onFailure { e ->
-                _uiState.update { it.copy(isWorking = false, error = e.message) }
+                _uiState.update { it.copy(isWorking = false, error = err(e)) }
             }
         }
     }
+
+    private fun err(e: Throwable?): String =
+        com.frerox.toolz.data.whisper.groupErrorText(appContext, e)
 
     fun addMember(userId: String) = work({ repository.inviteGroupMember(groupId, userId) })
 
@@ -185,7 +192,7 @@ class WhisperGroupInfoViewModel @Inject constructor(
             _uiState.update { it.copy(isWorking = true, error = null) }
             repository.setGroupPicture(groupId, bytes, mime)
                 .onSuccess { load() }
-                .onFailure { e -> _uiState.update { it.copy(isWorking = false, error = e.message) } }
+                .onFailure { e -> _uiState.update { it.copy(isWorking = false, error = err(e)) } }
         }
     }
 
@@ -208,7 +215,7 @@ class WhisperGroupInfoViewModel @Inject constructor(
             _uiState.update { it.copy(isWorking = true, error = null) }
             repository.leaveGroup(groupId)
                 .onSuccess { _uiState.update { it.copy(isWorking = false, left = true) } }
-                .onFailure { e -> _uiState.update { it.copy(isWorking = false, error = e.message) } }
+                .onFailure { e -> _uiState.update { it.copy(isWorking = false, error = err(e)) } }
         }
     }
 
@@ -218,7 +225,7 @@ class WhisperGroupInfoViewModel @Inject constructor(
             _uiState.update { it.copy(isWorking = true, error = null) }
             repository.disbandGroup(groupId)
                 .onSuccess { _uiState.update { it.copy(isWorking = false, left = true) } }
-                .onFailure { e -> _uiState.update { it.copy(isWorking = false, error = e.message) } }
+                .onFailure { e -> _uiState.update { it.copy(isWorking = false, error = err(e)) } }
         }
     }
 

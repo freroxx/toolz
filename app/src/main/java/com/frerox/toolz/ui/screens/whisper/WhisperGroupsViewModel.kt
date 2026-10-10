@@ -21,6 +21,7 @@ import com.frerox.toolz.data.whisper.cachedGroupMembers
 import com.frerox.toolz.data.whisper.cachedGroups
 import com.frerox.toolz.data.whisper.createGroup
 import com.frerox.toolz.data.whisper.declineGroupInvite
+import com.frerox.toolz.data.whisper.flushGroupOutbox
 import com.frerox.toolz.data.whisper.getFriends
 import com.frerox.toolz.data.whisper.groupsEnabled
 import com.frerox.toolz.data.whisper.joinGroup
@@ -97,6 +98,8 @@ class WhisperGroupsViewModel @Inject constructor(
     fun load() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
+            // Drain queued group sends first so they land before the sync reads.
+            runCatching { repository.flushGroupOutbox() }
             // Cached rows render instantly; the verified sync replaces them.
             _uiState.update { it.copy(groups = repository.cachedGroups()) }
             val friends = repository.getFriends().getOrNull().orEmpty()
@@ -129,7 +132,7 @@ class WhisperGroupsViewModel @Inject constructor(
                         invites = invites,
                         friends = friends,
                         isLoading = false,
-                        error = if (it.groups.isEmpty()) e.message else null,
+                        error = if (it.groups.isEmpty()) err(e) else null,
                     )
                 }
             }
@@ -169,7 +172,7 @@ class WhisperGroupsViewModel @Inject constructor(
                     load()
                     onJoined(groupId)
                 }
-                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+                .onFailure { e -> _uiState.update { it.copy(error = err(e)) } }
             _workingInvites.update { it - groupId }
         }
     }
@@ -181,7 +184,7 @@ class WhisperGroupsViewModel @Inject constructor(
             _uiState.update { it.copy(error = null) }
             repository.declineGroupInvite(groupId)
                 .onSuccess { load() }
-                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+                .onFailure { e -> _uiState.update { it.copy(error = err(e)) } }
             _workingInvites.update { it - groupId }
         }
     }
@@ -272,13 +275,13 @@ class WhisperGroupsViewModel @Inject constructor(
                 // a picture failure must not lose the created group.
                 if (pictureBytes != null) {
                     repository.setGroupPicture(groupId, pictureBytes, pictureMime)
-                        .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+                        .onFailure { e -> _uiState.update { it.copy(error = err(e)) } }
                 }
                 load()
                 _uiState.update { it.copy(createdGroupId = groupId) }
             }
             created.onFailure { e ->
-                _uiState.update { it.copy(isLoading = false, error = e.message) }
+                _uiState.update { it.copy(isLoading = false, error = err(e)) }
             }
         }
     }
@@ -290,4 +293,7 @@ class WhisperGroupsViewModel @Inject constructor(
     fun clearError() {
         _uiState.update { it.copy(error = null) }
     }
+
+    private fun err(e: Throwable?): String =
+        com.frerox.toolz.data.whisper.groupErrorText(appContext, e)
 }
