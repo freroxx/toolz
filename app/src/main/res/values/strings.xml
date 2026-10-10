@@ -3881,6 +3881,7 @@
     <string name="st_Whisper_Groups_ErrSync">Couldn\'t sync. Check your connection and retry.</string>
     <string name="st_Whisper_Groups_ErrQueued">Will send when you\'re back online.</string>
     <string name="st_Whisper_Groups_ErrAdminOnly">Only admins can send messages in this group.</string>
+    <string name="st_Whisper_Groups_ErrNoHistory">Couldn\u2019t load this group. Check your connection and retry.</string>
     <string name="st_Whisper_Groups_ErrLastAdmin">The last admin cannot leave — promote someone first.</string>
     <string name="st_Whisper_Groups_SenderNewMessage">%1$s: New message</string>
     <string name="st_Whisper_Groups_RemovedYou">You were removed from %1$s</string>

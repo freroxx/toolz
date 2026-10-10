@@ -3152,3 +3152,23 @@ alter table public.whisper_group_join_requests replica identity full;
 -- Webhook policy: NO webhooks on reactions / join-requests either. Reactions
 -- would spam a push per tap; requests are covered by a single admin ping via
 -- the invites webhook when approved (deny/withdraw stays silent in-app).
+
+-- ═══════════════ 20261011_whisper_groups_invitee_history.sql ═
+-- Join-path fix ("Group has no history" on Join): invitees could read the
+-- group row and WRITE join/decline events, but could never READ the event
+-- log — so fetchVerifiedMembership (and nextGroupSeqEpoch) saw zero rows.
+-- The invite OR-branch below mirrors the groups-select/invites pattern.
+-- Read-only for invitees (no UPDATE/DELETE policies exist on events); the
+-- log stays append-only and signature-checked client-side either way.
+drop policy if exists "whisper_group_events_select_member" on public.whisper_group_events;
+create policy "whisper_group_events_select_member" on public.whisper_group_events
+    for select using (
+        exists (
+            select 1 from public.whisper_group_members m
+            where m.group_id = whisper_group_events.group_id and m.user_id = auth.uid()
+        )
+        or exists (
+            select 1 from public.whisper_group_invites i
+            where i.group_id = whisper_group_events.group_id and i.user_id = auth.uid()
+        )
+    );

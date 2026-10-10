@@ -649,7 +649,7 @@ Group mutes reuse `WhisperMutePreferences` under `group:<id>` (durations
 supported by the store).
 
 Invites: creating a group sends persistent invites (never direct adds).
-Invite rows die only by join (trigger-consumed), decline (invitee), or cancel
+Invitees can also READ the event log (SELECT policy mirrors the invite exception — otherwise join fails with "no history"). Invite rows die only by join (trigger-consumed), decline (invitee), or cancel
 (any admin — explicit decision: owner-only was considered, any-admin chosen
 to match WhatsApp-style admin teams). No expiry. Invitees see the card on the
 Chats tab (survives restarts) and get pinged (realtime while open, FCM push

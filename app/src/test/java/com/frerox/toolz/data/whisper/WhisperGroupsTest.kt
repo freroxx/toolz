@@ -669,4 +669,9 @@ class WhisperGroupsTest {
         // Legacy rows without the new fields still parse (nulls, not crashes).
         assertNull(parseGroupContentBody("wg1:{\"t\":\"hi\"}").pollClose)
     }
+
+    @Test
+    fun `empty history maps to friendly string`() {
+        assertNotNull(mapGroupError("Group has no history."))
+    }
 }

@@ -1135,6 +1135,8 @@ fun mapGroupError(raw: String?): Int? {
         "last admin cannot leave" in msg || "cannot demote the last admin" in msg ||
             "cannot remove the last admin" in msg ->
             com.frerox.toolz.R.string.st_Whisper_Groups_ErrLastAdmin
+        "no history" in msg ->
+            com.frerox.toolz.R.string.st_Whisper_Groups_ErrNoHistory
         else -> null
     }
 }
