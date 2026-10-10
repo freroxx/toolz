@@ -449,4 +449,33 @@ class WhisperGroupsTest {
         assertNull(groupMessageIvEpoch("v3-group"))
         assertNull(groupMessageIvEpoch("garbage"))
     }
+
+    @Test
+    fun `content envelope round-trips all fields`() {
+        val c = WhisperGroupContent(
+            t = "hello",
+            img = GroupImageRef(url = "https://x/y", key = "a2V5", att = "a1", mime = "image/png"),
+            reply = GroupReplyRef(id = "c1", sender = "u2", text = "quoted"),
+            poll = GroupPoll(id = "p1", q = "Lunch?", opts = listOf("Yes", "No")),
+            vote = GroupVote(poll = "p1", opt = 0),
+            mentions = listOf("u2", "u3"),
+        )
+        val back = parseGroupContentBody(buildGroupContentBody(c))
+        assertEquals(c, back)
+        assertTrue(buildGroupContentBody(c).startsWith(GROUP_CONTENT_PREFIX))
+    }
+
+    @Test
+    fun `legacy bare text stays text`() {
+        assertEquals("plain hello", parseGroupContentBody("plain hello").t)
+        assertNull(parseGroupContentBody("plain hello").img)
+        // Corrupt structured bodies degrade to raw text, never crash.
+        assertEquals("wg1:{oops", parseGroupContentBody("wg1:{oops").t)
+    }
+
+    @Test
+    fun `tombstone keys are namespaced`() {
+        assertEquals("gmsg:abc", groupTombstoneKey("abc"))
+        assertTrue(!groupTombstoneKey("abc").contains("1:1"))
+    }
 }

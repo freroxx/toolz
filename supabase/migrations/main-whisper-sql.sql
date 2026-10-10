@@ -2779,3 +2779,83 @@ create policy "whisper_groups_delete_last_member" on public.whisper_groups
             where m.group_id = whisper_groups.id and m.user_id <> auth.uid()
         )
     );
+
+-- ═══════════════ 20261010_whisper_groups_receipts_typing.sql ═
+-- Parity slice: per-message seen receipts + ephemeral typing signals.
+-- Receipts are presence metadata (who saw which client_id when) — same
+-- posture as 1:1 read state, no content. Typing rows are upserts refreshed
+-- while typing; readers treat rows older than ~8s as gone (client-side).
+create table if not exists public.whisper_group_receipts (
+    group_id uuid not null references public.whisper_groups(id) on delete cascade,
+    message_id text not null,
+    user_id uuid not null,
+    at timestamptz not null default now(),
+    primary key (group_id, message_id, user_id)
+);
+
+alter table public.whisper_group_receipts enable row level security;
+
+drop policy if exists "whisper_group_receipts_select_member" on public.whisper_group_receipts;
+create policy "whisper_group_receipts_select_member" on public.whisper_group_receipts
+    for select using (
+        exists (
+            select 1 from public.whisper_group_members m
+            where m.group_id = whisper_group_receipts.group_id and m.user_id = auth.uid()
+        )
+    );
+
+drop policy if exists "whisper_group_receipts_insert_own" on public.whisper_group_receipts;
+create policy "whisper_group_receipts_insert_own" on public.whisper_group_receipts
+    for insert with check (
+        user_id = auth.uid()
+        and exists (
+            select 1 from public.whisper_group_members m
+            where m.group_id = whisper_group_receipts.group_id and m.user_id = auth.uid()
+        )
+    );
+
+create index if not exists whisper_group_receipts_group_idx
+    on public.whisper_group_receipts (group_id, at desc);
+
+create table if not exists public.whisper_group_typing (
+    group_id uuid not null references public.whisper_groups(id) on delete cascade,
+    user_id uuid not null,
+    updated_at timestamptz not null default now(),
+    primary key (group_id, user_id)
+);
+
+alter table public.whisper_group_typing enable row level security;
+
+drop policy if exists "whisper_group_typing_select_member" on public.whisper_group_typing;
+create policy "whisper_group_typing_select_member" on public.whisper_group_typing
+    for select using (
+        exists (
+            select 1 from public.whisper_group_members m
+            where m.group_id = whisper_group_typing.group_id and m.user_id = auth.uid()
+        )
+    );
+
+drop policy if exists "whisper_group_typing_write_own" on public.whisper_group_typing;
+create policy "whisper_group_typing_write_own" on public.whisper_group_typing
+    for all using (user_id = auth.uid())
+    with check (user_id = auth.uid());
+
+-- Realtime: receipts + typing join the publication (idempotent).
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'whisper_group_receipts'
+  ) then
+    alter publication supabase_realtime add table public.whisper_group_receipts;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'whisper_group_typing'
+  ) then
+    alter publication supabase_realtime add table public.whisper_group_typing;
+  end if;
+end $$;
+
+alter table public.whisper_group_receipts replica identity full;
+alter table public.whisper_group_typing replica identity full;

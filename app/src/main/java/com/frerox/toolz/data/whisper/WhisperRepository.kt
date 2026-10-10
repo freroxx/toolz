@@ -81,7 +81,9 @@ class WhisperRepository @Inject constructor(
     // host) can be bound to EncryptedBlobHost via a Hilt @Binds module —
     // WhisperEncryptedImageHost remains the production impl.
     internal val encryptedImageHost: EncryptedBlobHost,
-    private val deletedStore: WhisperDeletedMessagesStore,
+    // Phase-2 groups parity slice: widened private→internal (same precedent)
+    // for group delete-for-me tombstones + lazy group-image disk cache.
+    internal val deletedStore: WhisperDeletedMessagesStore,
     // Phase-2 groups outbox legs: widened private→internal (same precedent as
     // crypto/encryptedImageHost above) so WhisperRepositoryGroups can enqueue +
     // schedule group fan-out retries without touching any 1:1 call site.
@@ -97,7 +99,8 @@ class WhisperRepository @Inject constructor(
     @ApplicationScope internal val appScope: kotlinx.coroutines.CoroutineScope,
     // V3-FIX (task F): wired so clearAllLocalData also wipes the encrypted image disk
     // cache — sign-out must not leave another account's cached images readable.
-    private val imageDiskCache: WhisperImageDiskCache,
+    // Phase-2 groups parity slice: widened private→internal for lazy group images.
+    internal val imageDiskCache: WhisperImageDiskCache,
     // V6 (planwhisper.md §3.2): Double Ratchet live transport — persistent session
     // state, X3DH factory and SPK private halves for responder bootstrap.
     private val sessionStore: com.frerox.toolz.data.whisper.session.WhisperSessionStore,

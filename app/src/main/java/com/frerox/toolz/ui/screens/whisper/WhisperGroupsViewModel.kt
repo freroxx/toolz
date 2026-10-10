@@ -9,10 +9,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.whisper.GroupInviteInfo
 import com.frerox.toolz.data.whisper.GroupNotifScope
+import com.frerox.toolz.data.whisper.WhisperGroupChatMessage
 import com.frerox.toolz.data.whisper.WhisperGroupEntity
 import com.frerox.toolz.data.whisper.WhisperGroupMembership
 import com.frerox.toolz.data.whisper.WhisperGroupNotifPrefs
 import com.frerox.toolz.data.whisper.WhisperGroupNotifTemplates
+import com.frerox.toolz.data.whisper.WhisperGroupReadStore
 import com.frerox.toolz.data.whisper.WhisperMutePreferences
 import com.frerox.toolz.data.whisper.WhisperNotificationManager
 import com.frerox.toolz.data.whisper.WhisperProfile
@@ -21,6 +23,7 @@ import com.frerox.toolz.data.whisper.cachedGroupMembers
 import com.frerox.toolz.data.whisper.cachedGroups
 import com.frerox.toolz.data.whisper.createGroup
 import com.frerox.toolz.data.whisper.declineGroupInvite
+import com.frerox.toolz.data.whisper.fetchGroupMessages
 import com.frerox.toolz.data.whisper.flushGroupOutbox
 import com.frerox.toolz.data.whisper.getFriends
 import com.frerox.toolz.data.whisper.groupsEnabled
@@ -29,6 +32,7 @@ import com.frerox.toolz.data.whisper.myGroupInvites
 import com.frerox.toolz.data.whisper.observeGroupLog
 import com.frerox.toolz.data.whisper.observeGroupMessagesLive
 import com.frerox.toolz.data.whisper.observeMyGroupInvites
+import com.frerox.toolz.data.whisper.openGroupPicture
 import com.frerox.toolz.data.whisper.setGroupPicture
 import com.frerox.toolz.data.whisper.shouldNotifyGroupEvent
 import com.frerox.toolz.data.whisper.syncGroups
@@ -53,12 +57,24 @@ class WhisperGroupsViewModel @Inject constructor(
     mutePrefs: WhisperMutePreferences,
     private val notificationManager: WhisperNotificationManager,
     private val notifPrefs: WhisperGroupNotifPrefs,
+    private val readStore: WhisperGroupReadStore,
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) : ViewModel() {
+
+    /** Latest-message preview + unread for one group row (all String-safe equals). */
+    data class GroupPreview(
+        val text: String = "",
+        val time: String = "",
+        val senderName: String = "",
+        val unread: Int = 0,
+        val hasImage: Boolean = false,
+        val hasPoll: Boolean = false,
+    )
 
     data class UiState(
         val groups: List<WhisperGroupEntity> = emptyList(),
         val memberCounts: Map<String, Int> = emptyMap(),
+        val previews: Map<String, GroupPreview> = emptyMap(),
         val invites: List<GroupInviteInfo> = emptyList(),
         val friends: List<WhisperProfile> = emptyList(),
         val isLoading: Boolean = false,
@@ -69,6 +85,14 @@ class WhisperGroupsViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(UiState())
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
+
+    /**
+     * Decrypted group pictures by group id. ByteArray values defeat data-class
+     * equals, so this rides a SEPARATE flow updated only when bytes actually
+     * change (content-guarded) — rows recompose on real picture changes only.
+     */
+    private val _pictures = MutableStateFlow<Map<String, ByteArray>>(emptyMap())
+    val pictures: StateFlow<Map<String, ByteArray>> = _pictures.asStateFlow()
 
     /** Muted group ids (the mute store is shared with 1:1 under `group:` keys). */
     val mutedGroupIds: StateFlow<Set<String>> = mutePrefs.mutedUsers
@@ -126,6 +150,8 @@ class WhisperGroupsViewModel @Inject constructor(
                         isLoading = false,
                     )
                 }
+                // Previews + pictures resolve off the main sync path (decrypts).
+                refreshPreviews(fresh)
             }.onFailure { e ->
                 _uiState.update {
                     it.copy(
@@ -137,6 +163,56 @@ class WhisperGroupsViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    /**
+     * Latest-message previews + unread counts + picture thumbs, resolved after
+     * the main sync (each needs frame decrypts). Failures stay silent — a row
+     * without a preview still opens the chat.
+     */
+    private fun refreshPreviews(groups: List<WhisperGroupEntity>) {
+        viewModelScope.launch {
+            val me = repository.myId
+            val previews = mutableMapOf<String, GroupPreview>()
+            val pics = _pictures.value.toMutableMap()
+            var picsChanged = false
+            groups.forEach { g ->
+                runCatching {
+                    val recent = repository.fetchGroupMessages(g.id, 20).getOrThrow()
+                    val mark = readStore.readAt(g.id)
+                    val last = recent.lastOrNull()
+                    previews[g.id] = GroupPreview(
+                        text = last?.let { previewText(it) }.orEmpty(),
+                        time = last?.createdAt.orEmpty(),
+                        senderName = last?.senderName.orEmpty(),
+                        unread = if (last == null) 0 else recent.count { it.createdAt > mark && it.senderId != me },
+                        hasImage = last?.image != null,
+                        hasPoll = last?.poll != null,
+                    )
+                    // Picture thumb (content-guarded: no-op when unchanged).
+                    val bytes = repository.openGroupPicture(g.id).getOrNull()
+                    if (bytes != null) {
+                        if (pics[g.id]?.contentEquals(bytes) != true) {
+                            pics[g.id] = bytes
+                            picsChanged = true
+                        }
+                    } else if (pics.remove(g.id) != null) {
+                        picsChanged = true
+                    }
+                }
+            }
+            _uiState.update { it.copy(previews = previews) }
+            if (picsChanged) _pictures.value = pics
+            Unit
+        }
+    }
+
+    private fun previewText(m: WhisperGroupChatMessage): String = when {
+        m.poll != null -> "📊 ${m.poll.q.ifBlank { "Poll" }}"
+        m.image != null && m.body.isNotBlank() -> "📷 ${m.body}"
+        m.image != null -> "📷 Photo"
+        m.vote != null -> "Voted"
+        else -> m.body
     }
 
     /** Realtime invite lane: refetch + ping only genuinely new invites. */

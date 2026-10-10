@@ -47,6 +47,7 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import io.github.jan.supabase.realtime.channel
+import io.github.jan.supabase.realtime.decodeOldRecord
 import io.github.jan.supabase.realtime.decodeRecord
 import io.github.jan.supabase.realtime.postgresChangeFlow
 import io.github.jan.supabase.realtime.realtime
@@ -492,6 +493,73 @@ fun decodeGroupRow(raw: String): WhisperGroupRowContent? = runCatching {
     groupJson.decodeFromString(WhisperGroupRowContent.serializer(), raw)
 }.getOrNull()
 
+// ── Structured frame bodies (text/image/reply/poll/vote/mentions) ───────
+// A frame body is either legacy bare text (pre-parity sends) or
+// `wg1:<json>` (WhisperGroupContent). The prefix makes the two
+// unambiguous: old clients render the caption fallback carried in `t`,
+// new clients render the full card. Everything rides INSIDE the sealed
+// frame — the server never sees structure, only frame sizes.
+
+/** Prefix marking a structured group frame body. */
+const val GROUP_CONTENT_PREFIX = "wg1:"
+
+/** Image attachment reference: bytes live on the blob host, key sealed per member. */
+@Serializable
+data class GroupImageRef(
+    val url: String,
+    /** Base64 AES-256-GCM key for THIS image (sealed per member via the frame). */
+    val key: String,
+    val att: String? = null,
+    val mime: String = "image/jpeg",
+)
+
+/** Reply quote snapshot (names/text frozen at send time — no extra fetch). */
+@Serializable
+data class GroupReplyRef(
+    /** client_id of the quoted row (best-effort scroll target). */
+    val id: String,
+    val sender: String,
+    val text: String,
+)
+
+/** A poll card: question + up to 6 options (enforced at send time). */
+@Serializable
+data class GroupPoll(
+    /** Stable poll id (client UUID) votes reference. */
+    val id: String,
+    val q: String,
+    val opts: List<String>,
+)
+
+/** One vote: latest vote per sender per poll wins the tally. */
+@Serializable
+data class GroupVote(
+    val poll: String,
+    val opt: Int,
+)
+
+@Serializable
+data class WhisperGroupContent(
+    /** Caption / plain text (also the legacy fallback for old clients). */
+    val t: String = "",
+    val img: GroupImageRef? = null,
+    val reply: GroupReplyRef? = null,
+    val poll: GroupPoll? = null,
+    val vote: GroupVote? = null,
+    val mentions: List<String> = emptyList(),
+)
+
+fun buildGroupContentBody(c: WhisperGroupContent): String =
+    GROUP_CONTENT_PREFIX + groupJson.encodeToString(WhisperGroupContent.serializer(), c)
+
+/** Parses a frame body; legacy bare text becomes `t`, corrupt JSON degrades to `t = raw`. */
+fun parseGroupContentBody(raw: String): WhisperGroupContent {
+    if (!raw.startsWith(GROUP_CONTENT_PREFIX)) return WhisperGroupContent(t = raw)
+    return runCatching {
+        groupJson.decodeFromString(WhisperGroupContent.serializer(), raw.removePrefix(GROUP_CONTENT_PREFIX))
+    }.getOrDefault(WhisperGroupContent(t = raw))
+}
+
 // ── Server row DTOs (snake_case wire, mirror the SQL tables) ────────────
 
 @Serializable
@@ -594,12 +662,21 @@ internal data class GroupMessageInsert(
 data class WhisperGroupChatMessage(
     val id: String,
     val groupId: String,
+    /** Server row id; client_id rides separately for receipts/tombstones. */
+    val clientId: String = "",
     val senderId: String,
     val senderName: String,
     val body: String,
     val createdAt: String,
     val epoch: Long,
     val mine: Boolean,
+    val image: GroupImageRef? = null,
+    val reply: GroupReplyRef? = null,
+    val poll: GroupPoll? = null,
+    val vote: GroupVote? = null,
+    val mentions: List<String> = emptyList(),
+    /** Seen-by user ids for my messages (receipts lane; empty until loaded). */
+    val seenBy: List<String> = emptyList(),
 )
 
 // ── Transport ops (all flag-gated, 1:1 paths untouched) ─────────────────
@@ -1128,17 +1205,70 @@ suspend fun WhisperRepository.disbandGroup(groupId: String): Result<Unit> = runC
 /** Sends one message to every current member (fail-closed: all legs or nothing). */
 suspend fun WhisperRepository.sendGroupMessage(groupId: String, plaintext: String): Result<Unit> = runCatching {
     requireGroupsEnabled()
-    val me = requireMe()
     val clean = plaintext.trim()
     require(clean.isNotBlank()) { "Message is empty." }
     require(clean.length <= WhisperRepository.MAX_MESSAGE_CHARS) { "Message is too long." }
+    sendGroupContent(groupId, WhisperGroupContent(t = clean)).getOrThrow()
+}
+
+/**
+ * Sends structured content (text/image/reply/poll/vote/mentions) to every
+ * current member. The frame carries `wg1:<json>`; legacy bare-text readers
+ * still see `t`.
+ */
+suspend fun WhisperRepository.sendGroupContent(groupId: String, content: WhisperGroupContent): Result<Unit> = runCatching {
+    requireGroupsEnabled()
+    val me = requireMe()
     val m = syncGroup(groupId).getOrThrow()
     require(m.isMember(me)) { "You are no longer a member of this group." }
+    sealAndPublishContent(groupId, m, me, buildGroupContentBody(content)).getOrThrow()
+}
+
+/**
+ * Sends an image: compressed + AES-sealed + uploaded ONCE, then only the
+ * short key reference is fanned out per member (same economics as the group
+ * picture — never N copies of the bytes).
+ */
+suspend fun WhisperRepository.sendGroupImage(
+    groupId: String,
+    imageBytes: ByteArray,
+    mimeType: String,
+    caption: String = "",
+): Result<Unit> = runCatching {
+    requireGroupsEnabled()
+    val me = requireMe()
+    require(mimeType in setOf("image/jpeg", "image/png", "image/webp")) {
+        "Whisper supports JPEG, PNG, and WebP images."
+    }
+    val m = syncGroup(groupId).getOrThrow()
+    require(m.isMember(me)) { "You are no longer a member of this group." }
+    val (compressed, outMime) = compressImageForGroupUpload(imageBytes, mimeType)
+    require(compressed.isNotEmpty()) { "Could not read that image." }
+    val (sealed, key) = newGroupPictureSeal(compressed)
+    val png = WhisperImageCipherTransport.encode(sealed)
+    val (url, att) = encryptedImageHost.upload(png, "gmsg-$groupId-${System.currentTimeMillis()}", null).getOrThrow()
+    require(url.isNotBlank()) { "Picture upload failed." }
+    val ref = GroupImageRef(
+        url = url,
+        key = java.util.Base64.getEncoder().encodeToString(key),
+        att = att,
+        mime = outMime,
+    )
+    sendGroupContent(groupId, WhisperGroupContent(t = caption.trim(), img = ref)).getOrThrow()
+}
+
+/** Seals one frame per member and publishes the row (shared by text/image/poll paths). */
+private suspend fun WhisperRepository.sealAndPublishContent(
+    groupId: String,
+    m: WhisperGroupMembership,
+    me: String,
+    frameBody: String,
+): Result<Unit> = runCatching {
     val targets = m.members.keys.sorted()
     val frames = mutableMapOf<String, String>()
     val failed = mutableListOf<String>()
     for (memberId in targets) {
-        val frame = buildGroupFrameBody(groupId, m.epoch, System.currentTimeMillis(), clean)
+        val frame = buildGroupFrameBody(groupId, m.epoch, System.currentTimeMillis(), frameBody)
         val sealed = sealWithRatchet(me, memberId, frame)
         if (sealed == null) {
             failed.add(memberId)
@@ -1201,38 +1331,226 @@ suspend fun WhisperRepository.sendGroupMessage(groupId: String, plaintext: Strin
 /** Reads the chat: opens my frame of every row I belonged to at its epoch. */
 suspend fun WhisperRepository.fetchGroupMessages(
     groupId: String,
-    limit: Int = 200,
+    limit: Int = 50,
+    /** Pagination cursor: only rows strictly older than this created_at. */
+    before: String? = null,
 ): Result<List<WhisperGroupChatMessage>> = runCatching {
     requireGroupsEnabled()
     val me = requireMe()
     val m = syncGroup(groupId).getOrThrow()
     require(m.isMember(me)) { "You are no longer a member of this group." }
     val rows = db.from("whisper_group_messages").select {
-        filter { eq("group_id", groupId) }
+        filter {
+            eq("group_id", groupId)
+            if (before != null) lte("created_at", before)
+        }
         // Newest-first at the server so the LIMIT keeps the live head, never a
         // stale arbitrary slice; the client re-sorts ascending below.
         order("created_at", Order.DESCENDING)
         limit(limit.toLong())
     }.decodeList<GroupMessageRow>()
     val names = getFriends().getOrNull().orEmpty().associate { it.id to it.effectiveName }
-    rows.sortedWith(compareBy({ it.createdAt ?: "" }, { it.id })).mapNotNull { row ->
-        if (!m.isMemberAt(row.senderId, row.epoch) || !m.isMemberAt(me, row.epoch)) return@mapNotNull null
-        val body = decodeGroupRow(row.content) ?: return@mapNotNull null
-        if (body.g != groupId || body.e != row.epoch) return@mapNotNull null
-        val frame = body.frames[me] ?: return@mapNotNull null
-        val inner = openV3Frame(frame, row.senderId, row.senderId, me) ?: return@mapNotNull null
-        val text = openGroupFrameBody(groupId, row.epoch, inner) ?: return@mapNotNull null
-        WhisperGroupChatMessage(
-            id = row.id,
-            groupId = groupId,
-            senderId = row.senderId,
-            senderName = if (row.senderId == me) "You" else names[row.senderId] ?: "Member",
-            body = text,
-            createdAt = row.createdAt ?: "",
-            epoch = row.epoch,
-            mine = row.senderId == me,
+    rows.sortedWith(compareBy({ it.createdAt ?: "" }, { it.id }))
+        .distinctBy { it.id }
+        .mapNotNull { row ->
+            if (deletedStore.isMessageDeleted(groupTombstoneKey(row.clientId))) return@mapNotNull null
+            if (!m.isMemberAt(row.senderId, row.epoch) || !m.isMemberAt(me, row.epoch)) return@mapNotNull null
+            val body = decodeGroupRow(row.content) ?: return@mapNotNull null
+            if (body.g != groupId || body.e != row.epoch) return@mapNotNull null
+            val frame = body.frames[me] ?: return@mapNotNull null
+            val inner = openV3Frame(frame, row.senderId, row.senderId, me) ?: return@mapNotNull null
+            val opened = openGroupFrameBody(groupId, row.epoch, inner) ?: return@mapNotNull null
+            val content = parseGroupContentBody(opened)
+            WhisperGroupChatMessage(
+                id = row.id,
+                groupId = groupId,
+                clientId = row.clientId,
+                senderId = row.senderId,
+                senderName = if (row.senderId == me) "You" else names[row.senderId] ?: "Member",
+                body = content.t,
+                createdAt = row.createdAt ?: "",
+                epoch = row.epoch,
+                mine = row.senderId == me,
+                image = content.img,
+                reply = content.reply,
+                poll = content.poll,
+                vote = content.vote,
+                mentions = content.mentions,
+            )
+        }
+}
+
+/** Local tombstone key for a group message row (delete-for-me). */
+fun groupTombstoneKey(clientId: String): String = "gmsg:$clientId"
+
+/** Hides one group message on this device only (delete-for-me). */
+suspend fun WhisperRepository.deleteGroupMessageForMe(clientId: String) {
+    requireGroupsEnabled()
+    if (clientId.isBlank()) return
+    deletedStore.markMessageDeletedSuspend(groupTombstoneKey(clientId))
+}
+
+/** Sender-side wipe: deletes the row for everyone (RLS is sender-only). */
+suspend fun WhisperRepository.deleteGroupMessageForEveryone(groupId: String, rowId: String): Result<Unit> = runCatching {
+    requireGroupsEnabled()
+    val me = requireMe()
+    val rows = db.from("whisper_group_messages").select { filter { eq("id", rowId) } }
+        .decodeList<GroupMessageRow>()
+    val row = rows.firstOrNull() ?: error("Message not found.")
+    require(row.senderId == me) { "Only the sender can delete for everyone." }
+    require(row.groupId == groupId) { "Message is not in this group." }
+    db.from("whisper_group_messages").delete { filter { eq("id", rowId) } }
+}
+
+// ── Seen receipts ───────────────────────────────────────────────────────
+
+@Serializable
+internal data class GroupReceiptRow(
+    @SerialName("group_id") val groupId: String,
+    @SerialName("message_id") val messageId: String,
+    @SerialName("user_id") val userId: String,
+)
+
+@Serializable
+internal data class GroupReceiptInsert(
+    @SerialName("group_id") val groupId: String,
+    @SerialName("message_id") val messageId: String,
+    @SerialName("user_id") val userId: String,
+)
+
+@Serializable
+internal data class GroupTypingRow(
+    @SerialName("group_id") val groupId: String,
+    @SerialName("user_id") val userId: String,
+    @SerialName("updated_at") val updatedAt: String? = null,
+)
+
+/** Marks client_ids as seen by me (fire-and-forget from the chat screen). */
+suspend fun WhisperRepository.markGroupSeen(groupId: String, clientIds: List<String>): Result<Unit> = runCatching {
+    requireGroupsEnabled()
+    val me = requireMe()
+    if (groupId.isBlank() || clientIds.isEmpty()) return@runCatching
+    // Upserts are idempotent (PK covers group+message+user); failures are
+    // best-effort — receipts are presence metadata, never load-bearing.
+    clientIds.distinct().take(100).forEach { cid ->
+        runCatching {
+            db.from("whisper_group_receipts").upsert(
+                GroupReceiptInsert(groupId = groupId, messageId = cid, userId = me),
+            )
+        }
+    }
+}
+
+/** Seen-by map for a group (message client_id → user ids), newest-first capped. */
+suspend fun WhisperRepository.fetchGroupReceipts(groupId: String): Result<Map<String, List<String>>> = runCatching {
+    requireGroupsEnabled()
+    requireMe()
+    if (groupId.isBlank()) return@runCatching emptyMap()
+    val rows = db.from("whisper_group_receipts").select {
+        filter { eq("group_id", groupId) }
+        order("at", Order.DESCENDING)
+        limit(2000)
+    }.decodeList<GroupReceiptRow>()
+    rows.groupBy({ it.messageId }, { it.userId })
+}
+
+// ── Typing signals ──────────────────────────────────────────────────────
+
+/** Freshness window: typing rows older than this read as gone. */
+const val GROUP_TYPING_FRESH_MS = 8_000L
+
+/** Refreshes my typing signal (call throttled from the UI, ~3s). */
+suspend fun WhisperRepository.sendGroupTyping(groupId: String): Result<Unit> = runCatching {
+    requireGroupsEnabled()
+    val me = requireMe()
+    if (groupId.isBlank()) return@runCatching
+    runCatching {
+        // Plain upsert: the (group_id, user_id) PK is the conflict target
+        // (same idiom as the 1:1 typing lane).
+        db.from("whisper_group_typing").upsert(
+            mapOf("group_id" to groupId, "user_id" to me),
         )
     }
+}
+
+/** Clears my typing signal (on send, on leave, on dispose). */
+suspend fun WhisperRepository.clearGroupTyping(groupId: String) {
+    runCatching {
+        requireGroupsEnabled()
+        val me = myId
+        if (groupId.isBlank() || me.isBlank()) return
+        db.from("whisper_group_typing").delete {
+            filter { eq("group_id", groupId); eq("user_id", me) }
+        }
+    }
+}
+
+/** Live typing user ids for one group (stale rows pruned client-side). */
+fun WhisperRepository.observeGroupTyping(groupId: String): kotlinx.coroutines.flow.Flow<List<String>> =
+    kotlinx.coroutines.flow.callbackFlow {
+        requireGroupsEnabled()
+        if (groupId.isBlank()) { close(); return@callbackFlow }
+        val me = myId
+        val channel = groupChannel("grouppg_typing_$groupId")
+        suspend fun current(): List<String> {
+            val cutoff = System.currentTimeMillis() - GROUP_TYPING_FRESH_MS
+            return runCatching {
+                db.from("whisper_group_typing").select { filter { eq("group_id", groupId) } }
+                    .decodeList<GroupTypingRow>()
+            }.getOrDefault(emptyList())
+                .filter { it.userId != me && it.userId.isNotBlank() }
+                .filter { row ->
+                    val ts = row.updatedAt?.let {
+                        runCatching { java.time.OffsetDateTime.parse(it).toInstant().toEpochMilli() }.getOrNull()
+                    } ?: 0L
+                    ts >= cutoff
+                }
+                .map { it.userId }
+                .distinct()
+        }
+        // Emit the current set immediately so late subscribers see typists.
+        launch { trySend(current()) }
+        val changes = channel.postgresChangeFlow<io.github.jan.supabase.realtime.PostgresAction>(schema = "public") {
+            table = "whisper_group_typing"
+            filter("group_id", io.github.jan.supabase.postgrest.query.filter.FilterOperator.EQ, groupId)
+        }
+        val job = launch {
+            changes.collect {
+                // Debounce: re-read the table (one cheap select per change burst).
+                kotlinx.coroutines.delay(300)
+                trySend(current())
+            }
+        }
+        awaitClose {
+            job.cancel()
+            launch { runCatchingCE { realtime.removeChannel(channel) } }
+        }
+    }
+
+// ── Lazy group-image open (disk-cached, per-message key) ────────────────
+
+/**
+ * Downloads + decrypts one group image attachment for me (disk-cached by
+ * url+key fingerprint so scrolling never re-decrypts). Null when the frame
+ * isn't mine or the bytes are bad.
+ */
+suspend fun WhisperRepository.openGroupImage(ref: GroupImageRef, cacheId: String): Result<ByteArray?> = runCatching {
+    requireGroupsEnabled()
+    requireMe()
+    val fp = runCatching {
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        md.update(ref.url.toByteArray())
+        md.update(ref.key.toByteArray())
+        md.digest().joinToString("") { "%02x".format(it) }
+    }.getOrDefault(ref.url)
+    imageDiskCache.get(cacheId, fp)?.let { return@runCatching it }
+    val key = runCatching { java.util.Base64.getDecoder().decode(ref.key) }.getOrNull()
+        ?: error("Bad image key.")
+    val png = encryptedImageHost.download(ref.url).getOrThrow()
+    val sealed = WhisperImageCipherTransport.decode(png) ?: error("Bad image data.")
+    val plain = openGroupPictureBytes(sealed, key) ?: error("Could not decrypt the image.")
+    runCatching { imageDiskCache.put(cacheId, fp, plain) }
+    plain
 }
 
 // ── Group picture (encrypted, same stack as chat images) ────────────────
@@ -1501,6 +1819,38 @@ fun WhisperRepository.observeGroupMessagesLive(groupId: String): kotlinx.corouti
                     else -> null
                 }
                 if (row != null) trySend(WhisperGroupMessagePing(groupId, row.senderId, row.clientId))
+            }
+        }
+        awaitClose {
+            job.cancel()
+            launch { runCatchingCE { realtime.removeChannel(channel) } }
+        }
+    }
+
+/**
+ * Fires with the row id of every DELETED message row of one group
+ * (sender-side wipe). Chat screens reload on this; the section invite/msg
+ * ping lane ignores deletes (no notification for a withdrawal).
+ */
+fun WhisperRepository.observeGroupMessageDeletes(groupId: String): kotlinx.coroutines.flow.Flow<String> =
+    kotlinx.coroutines.flow.callbackFlow {
+        requireGroupsEnabled()
+        if (groupId.isBlank()) { close(); return@callbackFlow }
+        val channel = groupChannel("grouppg_msgdel_$groupId")
+        val changes = channel.postgresChangeFlow<io.github.jan.supabase.realtime.PostgresAction>(schema = "public") {
+            table = "whisper_group_messages"
+            filter("group_id", io.github.jan.supabase.postgrest.query.filter.FilterOperator.EQ, groupId)
+        }
+        val job = launch {
+            changes.collect { action ->
+                // Deletes carry the old row (replica identity full); the id is
+                // all the chat needs to drop the line on its next reload.
+                val id = when (action) {
+                    is io.github.jan.supabase.realtime.PostgresAction.Delete ->
+                        runCatching { action.decodeOldRecord<GroupMessageRow>() }.getOrNull()?.id
+                    else -> null
+                }
+                if (id != null) trySend(id)
             }
         }
         awaitClose {
