@@ -100,6 +100,13 @@ class WhisperMutePreferences @Inject constructor(
         _mutedUsers.update { it - userId }
     }
 
+    /**
+     * Epoch-ms a mute runs until (Long.MAX_VALUE = forever, 0 = not muted).
+     * Pure read for expiry subtitles — additive, no behavior change.
+     */
+    fun mutedUntilMs(userId: String): Long =
+        if (userId !in _mutedUsers.value) 0L else prefs.getLong("mute_$userId", 0L)
+
     /** Remove expired mute entries from prefs and in-memory state. */
     fun pruneExpiredMutes() {
         val now = System.currentTimeMillis()

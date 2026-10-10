@@ -66,6 +66,8 @@ class WhisperGroupInfoViewModel @Inject constructor(
         /** True when I'm the only member left: disband replaces leave. */
         val canDisband: Boolean = false,
         val isMuted: Boolean = false,
+        /** Mute expiry epoch-ms (Long.MAX_VALUE = forever, 0 = not muted). */
+        val mutedUntilMs: Long = 0L,
         /** Effective group-notifications toggle (role default until overridden). */
         val notifOn: Boolean = true,
         val pictureBytes: ByteArray? = null,
@@ -81,7 +83,7 @@ class WhisperGroupInfoViewModel @Inject constructor(
             membership == other.membership && members == other.members &&
             pending == other.pending && myId == other.myId && amOwner == other.amOwner &&
             canDisband == other.canDisband &&
-            isMuted == other.isMuted && notifOn == other.notifOn &&
+            isMuted == other.isMuted && mutedUntilMs == other.mutedUntilMs && notifOn == other.notifOn &&
             isLoading == other.isLoading && isWorking == other.isWorking &&
             left == other.left && degraded == other.degraded && error == other.error
         override fun hashCode(): Int = membership.hashCode()
@@ -104,6 +106,7 @@ class WhisperGroupInfoViewModel @Inject constructor(
             membership.onSuccess { m ->
                 val names = repository.getFriends().getOrNull().orEmpty()
                     .associate { it.id to it.effectiveName }
+                val muteKey = WhisperGroupChatViewModel.muteKey(groupId)
                 _uiState.update {
                     it.copy(
                         membership = m,
@@ -126,6 +129,7 @@ class WhisperGroupInfoViewModel @Inject constructor(
                         myId = me,
                         amOwner = repository.cachedGroups().firstOrNull { it.id == groupId }?.createdBy == me,
                         canDisband = m.members.size <= 1 && m.isMember(me),
+                        mutedUntilMs = mutePrefs.mutedUntilMs(muteKey),
                         notifOn = notifPrefs.isEnabled(
                             groupId,
                             (repository.cachedGroups().firstOrNull { it.id == groupId }?.createdBy == me) ||
@@ -232,7 +236,15 @@ class WhisperGroupInfoViewModel @Inject constructor(
     fun toggleMute() {
         val key = WhisperGroupChatViewModel.muteKey(groupId)
         if (mutePrefs.isMuted(key)) mutePrefs.unmuteUser(key) else mutePrefs.muteUser(key)
-        _uiState.update { it.copy(isMuted = mutePrefs.isMuted(key)) }
+        _uiState.update { it.copy(isMuted = mutePrefs.isMuted(key), mutedUntilMs = mutePrefs.mutedUntilMs(key)) }
+    }
+
+    /** Mutes for a duration (Long.MAX_VALUE = forever). */
+    fun muteFor(durationMs: Long) {
+        val key = WhisperGroupChatViewModel.muteKey(groupId)
+        val until = if (durationMs == Long.MAX_VALUE) Long.MAX_VALUE else System.currentTimeMillis() + durationMs
+        mutePrefs.muteUser(key, until)
+        _uiState.update { it.copy(isMuted = true, mutedUntilMs = until) }
     }
 
     fun loadFriends(onResult: (List<WhisperProfile>) -> Unit) {

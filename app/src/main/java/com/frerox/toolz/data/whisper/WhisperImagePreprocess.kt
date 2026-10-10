@@ -94,3 +94,67 @@ fun openGroupPictureBytes(sealed: ByteArray, key: ByteArray): ByteArray? = runCa
     }
     cipher.doFinal(sealed.copyOfRange(12, sealed.size))
 }.getOrNull()
+
+/** Cap for gallery picks bound for group sends (OOM guard at the read site). */
+const val GROUP_MAX_PICK_BYTES = 12 * 1024 * 1024
+
+/** Bounded stream read for group image picks; throws past the cap. */
+fun readBoundedGroupImageBytes(input: java.io.InputStream): ByteArray {
+    val output = ByteArrayOutputStream()
+    val buffer = ByteArray(16 * 1024)
+    var total = 0
+    while (true) {
+        val read = input.read(buffer)
+        if (read < 0) break
+        total += read
+        require(total <= GROUP_MAX_PICK_BYTES) { "That image is too large to send." }
+        output.write(buffer, 0, read)
+    }
+    return output.toByteArray()
+}
+
+/**
+ * In-chat image preprocess: same EXIF-strip + 1920 + JPEG82 pipeline as the
+ * group picture path but WITHOUT the square avatar crop (chat photos keep
+ * their aspect ratio).
+ */
+suspend fun compressGroupChatImage(bytes: ByteArray, mimeType: String): Pair<ByteArray, String> =
+    withContext(Dispatchers.Default) {
+        runCatching {
+            var bitmap = decodeBoundedBitmap(bytes, 1920, 1920) ?: return@withContext bytes to mimeType
+            try {
+                val exif = androidx.exifinterface.media.ExifInterface(java.io.ByteArrayInputStream(bytes))
+                val orientation = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
+                val matrix = android.graphics.Matrix()
+                when (orientation) {
+                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+                    androidx.exifinterface.media.ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+                    androidx.exifinterface.media.ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+                    else -> {}
+                }
+                if (!matrix.isIdentity) {
+                    val rotated = android.graphics.Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+                    if (rotated != bitmap) { bitmap.recycle(); bitmap = rotated }
+                }
+            } catch (_: Exception) {}
+            val maxDimension = 1920
+            val scaledBitmap = if (bitmap.width > maxDimension || bitmap.height > maxDimension) {
+                val ratio = min(maxDimension.toFloat() / bitmap.width, maxDimension.toFloat() / bitmap.height)
+                val b = Bitmap.createScaledBitmap(bitmap, (bitmap.width * ratio).roundToInt().coerceAtLeast(1), (bitmap.height * ratio).roundToInt().coerceAtLeast(1), true)
+                if (b != bitmap) bitmap.recycle()
+                b
+            } else {
+                bitmap
+            }
+            val keepAlpha = mimeType in GROUP_ALPHA_CAPABLE_MIMES && scaledBitmap.hasAlpha()
+            val format = if (keepAlpha) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG
+            val outMime = if (keepAlpha) "image/png" else "image/jpeg"
+            val out = ByteArrayOutputStream()
+            scaledBitmap.compress(format, 82, out)
+            scaledBitmap.recycle()
+            val result = out.toByteArray()
+            if (result.isNotEmpty() && result.size < bytes.size) result to outMime else bytes to mimeType
+        }.getOrDefault(bytes to mimeType)
+    }

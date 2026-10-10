@@ -86,6 +86,7 @@ fun WhisperGroupsSection(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val mutedIds by viewModel.mutedGroupIds.collectAsStateWithLifecycle()
     val workingInvites by viewModel.workingInvites.collectAsStateWithLifecycle()
+    val pictures by viewModel.pictures.collectAsStateWithLifecycle()
     var showCreate by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.createdGroupId) {
@@ -132,9 +133,11 @@ fun WhisperGroupsSection(
         state.groups.forEach { group ->
             GroupRowCard(
                 name = group.name.ifBlank { "Group" },
-                subtitle = "${state.memberCounts[group.id] ?: 0} ${stringResource(R.string.st_Whisper_Groups_Members)}",
                 groupId = group.id,
                 muted = group.id in mutedIds,
+                memberCount = state.memberCounts[group.id] ?: 0,
+                preview = state.previews[group.id],
+                picture = pictures[group.id],
                 onOpen = { onNavigateToGroup(group.id) },
             )
         }
@@ -209,12 +212,17 @@ private fun GroupInviteCard(
 @Composable
 private fun GroupRowCard(
     name: String,
-    subtitle: String,
     groupId: String,
     muted: Boolean,
+    memberCount: Int,
+    preview: WhisperGroupsViewModel.GroupPreview?,
+    picture: ByteArray?,
     onOpen: () -> Unit,
 ) {
     val haptic = rememberToolzHapticFeedback()
+    val bitmap = remember(picture) {
+        picture?.let { runCatching { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size) }.getOrNull() }
+    }
     ExpressiveCard(
         onClick = { haptic.click(); onOpen() },
         modifier = Modifier.fillMaxWidth(),
@@ -224,7 +232,16 @@ private fun GroupRowCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            GroupAvatar(name = name, groupId = groupId, size = 52.dp)
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap.asImageBitmap(),
+                    contentDescription = null,
+                    modifier = Modifier.size(52.dp).clip(CircleShape),
+                    contentScale = ContentScale.Crop,
+                )
+            } else {
+                GroupAvatar(name = name, groupId = groupId, size = 52.dp)
+            }
             Column(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(3.dp),
@@ -247,17 +264,77 @@ private fun GroupRowCard(
                             modifier = Modifier.size(13.dp),
                         )
                     }
+                    Spacer(Modifier.width(8.dp))
+                    if (preview != null && preview.time.isNotBlank()) {
+                        Text(
+                            formatGroupListTime(preview.time),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (preview.unread > 0) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = if (preview.unread > 0) FontWeight.Bold else FontWeight.Normal,
+                        )
+                    }
                 }
-                Text(
-                    subtitle,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        if (preview != null && (preview.text.isNotBlank() || preview.hasImage || preview.hasPoll)) {
+                            val sender = preview.senderName.takeIf { it.isNotBlank() }?.let { "$it: " }.orEmpty()
+                            sender + preview.text.ifBlank {
+                                when {
+                                    preview.hasPoll -> stringResource(R.string.st_Whisper_Groups_Poll)
+                                    preview.hasImage -> stringResource(R.string.st_Whisper_Groups_Photo)
+                                    else -> ""
+                                }
+                            }
+                        } else {
+                            "$memberCount ${stringResource(R.string.st_Whisper_Groups_Members)}"
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if ((preview?.unread ?: 0) > 0) MaterialTheme.colorScheme.onSurface
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = if ((preview?.unread ?: 0) > 0) FontWeight.SemiBold else FontWeight.Normal,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    val unreadCount = preview?.unread ?: 0
+                    if (unreadCount > 0) {
+                        Spacer(Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier.clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary)
+                                .padding(horizontal = 7.dp, vertical = 2.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                if (unreadCount > 99) "99+" else "$unreadCount",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimary,
+                            )
+                        }
+                    }
+                }
             }
         }
     }
+}
+
+/** Row timestamp: HH:mm today, Yesterday, else dd MMM. */
+@Composable
+internal fun formatGroupListTime(iso: String): String {
+    val yesterday = stringResource(R.string.st_Whisper_Groups_Yesterday)
+    return runCatching {
+        val odt = java.time.OffsetDateTime.parse(iso)
+        val today = java.time.LocalDate.now()
+        val date = odt.toLocalDate()
+        when {
+            date.isEqual(today) -> "%02d:%02d".format(odt.hour, odt.minute)
+            date.isEqual(today.minusDays(1)) -> yesterday
+            date.year == today.year -> "${date.dayOfMonth} ${date.month.name.lowercase().replaceFirstChar { it.uppercase() }.take(3)}"
+            else -> "${date.dayOfMonth} ${date.month.name.lowercase().replaceFirstChar { it.uppercase() }.take(3)} ${date.year}"
+        }
+    }.getOrDefault("")
 }
 
 /** Compact error + retry banner, mirroring the tab's initial-load banner. */

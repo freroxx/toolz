@@ -96,6 +96,8 @@ fun WhisperGroupInfoScreen(
     var showRename by remember { mutableStateOf(false) }
     var showLeave by remember { mutableStateOf(false) }
     var showDisband by remember { mutableStateOf(false) }
+    var showMuteDurations by remember { mutableStateOf(false) }
+    var memberQuery by remember { mutableStateOf("") }
     var pendingBlock by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(state.left) {
@@ -105,6 +107,15 @@ fun WhisperGroupInfoScreen(
     val membership = state.membership
     val iAmAdmin = membership?.isAdmin(state.myId) == true
     val canInvite = membership?.canInvite(state.myId) == true
+    val mq = memberQuery.trim().lowercase()
+    val visibleMembers = remember(state.members, mq) {
+        if (mq.isBlank()) state.members
+        else state.members.filter { it.name.lowercase().contains(mq) }
+    }
+    val visiblePending = remember(state.pending, mq) {
+        if (mq.isBlank()) state.pending
+        else state.pending.filter { it.name.lowercase().contains(mq) }
+    }
 
     Scaffold(
         modifier = Modifier.fillMaxSize().toolzBackground(),
@@ -163,7 +174,14 @@ fun WhisperGroupInfoScreen(
                 }
             }
             item {
-                MuteRow(muted = state.isMuted, onToggle = { viewModel.toggleMute() })
+                MuteRow(
+                    muted = state.isMuted,
+                    mutedUntilMs = state.mutedUntilMs,
+                    onToggle = {
+                        if (state.isMuted) viewModel.toggleMute()
+                        else showMuteDurations = true
+                    },
+                )
             }
             if (state.degraded) {
                 item { GroupDegradedBanner() }
@@ -178,6 +196,17 @@ fun WhisperGroupInfoScreen(
             item {
                 SectionHeader(stringResource(R.string.st_Whisper_Groups_Members))
             }
+            item {
+                OutlinedTextField(
+                    value = memberQuery,
+                    onValueChange = { memberQuery = it },
+                    label = { Text(stringResource(R.string.st_Whisper_Groups_MemberSearchHint)) },
+                    leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(20.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
             if (canInvite) {
                 item {
                     ToolzExpressiveButton(onClick = { showAdd = true }, modifier = Modifier.fillMaxWidth()) {
@@ -187,7 +216,7 @@ fun WhisperGroupInfoScreen(
                     }
                 }
             }
-            items(state.members, key = { it.userId }) { member ->
+            items(visibleMembers, key = { it.userId }) { member ->
                 MemberRow(
                     name = member.name,
                     userId = member.userId,
@@ -199,13 +228,13 @@ fun WhisperGroupInfoScreen(
                     onBlock = { pendingBlock = member.userId },
                 )
             }
-            if (state.pending.isNotEmpty() && iAmAdmin) {
+            if (visiblePending.isNotEmpty() && iAmAdmin) {
                 item {
                     SectionHeader(
                         "${stringResource(R.string.st_Whisper_Groups_InvitedLabel)} (${state.pending.size})",
                     )
                 }
-                items(state.pending, key = { "pending_${it.userId}" }) { entry ->
+                items(visiblePending, key = { "pending_${it.userId}" }) { entry ->
                     PendingInviteRow(
                         name = entry.name,
                         onCancel = { viewModel.cancelInvite(entry.userId) },
@@ -274,6 +303,12 @@ fun WhisperGroupInfoScreen(
             },
         )
     }
+    if (showMuteDurations) {
+        MuteDurationDialog(
+            onDismiss = { showMuteDurations = false },
+            onPick = { durationMs -> showMuteDurations = false; viewModel.muteFor(durationMs) },
+        )
+    }
     if (showDisband) {
         AlertDialog(
             onDismissRequest = { showDisband = false },
@@ -307,7 +342,7 @@ fun WhisperGroupInfoScreen(
 }
 
 @Composable
-private fun MuteRow(muted: Boolean, onToggle: () -> Unit) {
+private fun MuteRow(muted: Boolean, mutedUntilMs: Long, onToggle: () -> Unit) {
     Card(
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
@@ -318,11 +353,28 @@ private fun MuteRow(muted: Boolean, onToggle: () -> Unit) {
         ) {
             Icon(if (muted) Icons.Rounded.VolumeOff else Icons.Rounded.VolumeUp, contentDescription = null)
             Spacer(Modifier.width(12.dp))
-            Text(
-                if (muted) stringResource(R.string.st_Whisper_Groups_Unmute) else stringResource(R.string.st_Whisper_Groups_Mute),
-                style = MaterialTheme.typography.titleSmall,
-                modifier = Modifier.weight(1f),
-            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    if (muted) stringResource(R.string.st_Whisper_Groups_Unmute) else stringResource(R.string.st_Whisper_Groups_Mute),
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                if (muted && mutedUntilMs != 0L && mutedUntilMs != Long.MAX_VALUE) {
+                    val until = remember(mutedUntilMs) {
+                        runCatching {
+                            val d = java.time.Instant.ofEpochMilli(mutedUntilMs)
+                                .atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+                            "${d.dayOfMonth} ${d.month.name.lowercase().replaceFirstChar { it.uppercase() }.take(3)}"
+                        }.getOrDefault("")
+                    }
+                    if (until.isNotBlank()) {
+                        Text(
+                            stringResource(R.string.st_Whisper_Groups_MutedUntil, until),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
             Switch(checked = muted, onCheckedChange = { onToggle() })
         }
     }
@@ -609,4 +661,33 @@ private fun PendingInviteRow(name: String, onCancel: () -> Unit) {
             }
         }
     }
+}
+
+/** Mute duration picker (8h / 1 week / always). */
+@Composable
+private fun MuteDurationDialog(onDismiss: () -> Unit, onPick: (Long) -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.st_Whisper_Groups_MuteFor), fontWeight = FontWeight.Bold) },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(
+                    onClick = { onPick(8L * 60 * 60 * 1000) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(stringResource(R.string.st_Whisper_Groups_Mute8h), modifier = Modifier.fillMaxWidth()) }
+                TextButton(
+                    onClick = { onPick(7L * 24 * 60 * 60 * 1000) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(stringResource(R.string.st_Whisper_Groups_MuteWeek), modifier = Modifier.fillMaxWidth()) }
+                TextButton(
+                    onClick = { onPick(Long.MAX_VALUE) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(stringResource(R.string.st_Whisper_Groups_MuteAlways), modifier = Modifier.fillMaxWidth()) }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.st_Whisper_Cancel)) }
+        },
+    )
 }

@@ -1242,7 +1242,8 @@ suspend fun WhisperRepository.sendGroupImage(
     }
     val m = syncGroup(groupId).getOrThrow()
     require(m.isMember(me)) { "You are no longer a member of this group." }
-    val (compressed, outMime) = compressImageForGroupUpload(imageBytes, mimeType)
+    // Chat photos keep aspect ratio (the picture path square-crops for avatars).
+    val (compressed, outMime) = compressGroupChatImage(imageBytes, mimeType)
     require(compressed.isNotEmpty()) { "Could not read that image." }
     val (sealed, key) = newGroupPictureSeal(compressed)
     val png = WhisperImageCipherTransport.encode(sealed)
