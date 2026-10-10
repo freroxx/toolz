@@ -717,12 +717,24 @@ private fun formatGroupTime(iso: String): String = runCatching {
     "%02d:%02d".format(instant.hour, instant.minute)
 }.getOrDefault("")
 
-/** Resolves @Name tokens in a draft to member ids (longest-name-first). */
+/**
+ * Resolves @Name tokens in a draft to member ids (longest-name-first, with
+ * span consumption: "@Ann Lee" must not also match "@Ann").
+ */
 internal fun resolveMentionIds(draft: String, memberNames: Map<String, String>): List<String> {
     if ("@" !in draft) return emptyList()
+    val consumed = mutableListOf<IntRange>()
     return memberNames.entries
         .sortedByDescending { it.value.length }
-        .filter { (id, name) -> name.isNotBlank() && "@$name" in draft }
+        .filter { (_, name) ->
+            if (name.isBlank()) return@filter false
+            val idx = draft.indexOf("@$name")
+            if (idx < 0) return@filter false
+            val range = idx..<idx + name.length + 1
+            if (consumed.any { it.first <= range.last && range.first <= it.last }) return@filter false
+            consumed.add(range)
+            true
+        }
         .map { it.key }
         .distinct()
 }

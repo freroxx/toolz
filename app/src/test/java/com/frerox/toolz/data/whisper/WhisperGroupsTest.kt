@@ -5,6 +5,8 @@
 
 package com.frerox.toolz.data.whisper
 
+import com.frerox.toolz.ui.screens.whisper.WhisperGroupChatViewModel
+import com.frerox.toolz.ui.screens.whisper.resolveMentionIds
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -559,5 +561,35 @@ class WhisperGroupsTest {
         } catch (e: IllegalStateException) {
             assertTrue((e.message ?: "").contains("settings payload"))
         }
+    }
+
+    @Test
+    fun `poll tally keeps latest vote per sender`() {
+        fun msg(id: String, sender: String, poll: String, opt: Int) = WhisperGroupChatMessage(
+            id = id, groupId = gid, clientId = "c-$id", senderId = sender,
+            senderName = sender, body = "", createdAt = "", epoch = 1, mine = false,
+            vote = GroupVote(poll, opt),
+        )
+        val tally = WhisperGroupChatViewModel.tallyPolls(
+            listOf(
+                msg("1", "u2", "p1", 0),
+                msg("2", "u3", "p1", 1),
+                msg("3", "u2", "p1", 1),
+            ),
+            me = "u2",
+        )
+        val p1 = tally["p1"]!!
+        assertEquals(2, p1.counts[1])
+        assertNull(p1.counts[0])
+        assertEquals(1, p1.myVote)
+    }
+
+    @Test
+    fun `mention resolver prefers longest names`() {
+        val names = mapOf("id1" to "Ann", "id2" to "Ann Lee", "id3" to "Bo")
+        assertEquals(listOf("id2"), resolveMentionIds("hey @Ann Lee, sup", names))
+        assertEquals(listOf("id1"), resolveMentionIds("hey @Ann, sup", names))
+        assertEquals(emptyList<String>(), resolveMentionIds("no mentions here", names))
+        assertEquals(emptyList<String>(), resolveMentionIds("hey @Zed", names))
     }
 }
