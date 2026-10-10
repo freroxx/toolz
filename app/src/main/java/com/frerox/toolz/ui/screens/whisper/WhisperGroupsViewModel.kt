@@ -73,6 +73,8 @@ class WhisperGroupsViewModel @Inject constructor(
         val unread: Int = 0,
         val hasImage: Boolean = false,
         val hasPoll: Boolean = false,
+        /** True when an unread line mentions me (row shows an @You chip). */
+        val mentionedMe: Boolean = false,
     )
 
     data class UiState(
@@ -197,6 +199,9 @@ class WhisperGroupsViewModel @Inject constructor(
                                 unread = if (last == null) 0 else unread,
                                 hasImage = last?.image != null,
                                 hasPoll = last?.poll != null,
+                                mentionedMe = recent.any {
+                                    me in it.mentions && it.senderId != me && it.createdAt > mark
+                                },
                             )
                             // Picture thumb (content-guarded at merge time).
                             val bytes = repository.openGroupPicture(g.id).getOrNull()

@@ -3892,6 +3892,12 @@
     <string name="st_Whisper_Groups_Renamed">%1$s updated the group</string>
     <string name="st_Whisper_Groups_PictureUpdated">%1$s updated the group picture</string>
     <string name="st_Whisper_Groups_SettingsUpdated">%1$s updated the group settings</string>
+    <string name="st_Whisper_Groups_Save">Save</string>
+    <string name="st_Whisper_Groups_SavedToGallery">Saved to gallery</string>
+    <string name="st_Whisper_Groups_SaveFailed">Couldn\u2019t save. Try again.</string>
+    <string name="st_Whisper_Groups_NewMessages">\u2193 %1$d new</string>
+    <string name="st_Whisper_Groups_NewMessagesDivider">%1$d new messages</string>
+    <string name="st_Whisper_Groups_MentionedYou">@You</string>
     <string name="st_Whisper_Groups_Degraded">Group history couldn\'t be fully verified — showing verified messages only.</string>
     <string name="st_Whisper_Groups_Photo">Photo</string>
     <string name="st_Whisper_Groups_Poll">Poll</string>

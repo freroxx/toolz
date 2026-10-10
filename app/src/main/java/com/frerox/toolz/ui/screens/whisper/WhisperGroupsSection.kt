@@ -30,6 +30,7 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AddPhotoAlternate
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Groups
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.NotificationsOff
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
@@ -53,6 +54,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -298,6 +301,22 @@ private fun GroupRowCard(
                         modifier = Modifier.weight(1f, fill = false),
                     )
                     val unreadCount = preview?.unread ?: 0
+                    if (preview?.mentionedMe == true) {
+                        Spacer(Modifier.width(6.dp))
+                        Box(
+                            modifier = Modifier.clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.tertiaryContainer)
+                                .padding(horizontal = 7.dp, vertical = 2.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                stringResource(R.string.st_Whisper_Groups_MentionedYou),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                            )
+                        }
+                    }
                     if (unreadCount > 0) {
                         Spacer(Modifier.width(8.dp))
                         Box(
@@ -676,13 +695,16 @@ fun GroupDegradedBanner() {
 
 /**
  * Shared fullscreen group-image viewer (chat bubbles + info gallery).
- * Non-private so both screens reuse it.
+ * Non-private so both screens reuse it. Save mirrors the 1:1 save-to-gallery
+ * path (MediaStore, no extra permission on Q+).
  */
 @Composable
 fun GroupImageViewer(bytes: ByteArray, onDismiss: () -> Unit) {
     val bitmap = remember(bytes) {
         runCatching { android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }.getOrNull()
     }
+    val context = LocalContext.current
+    val saveScope = rememberCoroutineScope()
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
@@ -699,12 +721,78 @@ fun GroupImageViewer(bytes: ByteArray, onDismiss: () -> Unit) {
                     contentScale = ContentScale.Fit,
                 )
             }
-            IconButton(
-                onClick = onDismiss,
+            Row(
                 modifier = Modifier.align(Alignment.TopEnd).padding(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.Rounded.Close, contentDescription = null, tint = MaterialTheme.colorScheme.surface)
+                IconButton(onClick = {
+                    saveScope.launch {
+                        val ok = saveGroupImageToGallery(context, bytes)
+                        android.widget.Toast.makeText(
+                            context,
+                            context.getString(
+                                if (ok) R.string.st_Whisper_Groups_SavedToGallery
+                                else R.string.st_Whisper_Groups_SaveFailed,
+                            ),
+                            android.widget.Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                }) {
+                    Icon(Icons.Rounded.Download, contentDescription = null, tint = MaterialTheme.colorScheme.surface)
+                }
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Rounded.Close, contentDescription = null, tint = MaterialTheme.colorScheme.surface)
+                }
             }
         }
     }
 }
+
+/** MediaStore save for decrypted group images (mirrors the 1:1 helper). */
+internal suspend fun saveGroupImageToGallery(context: android.content.Context, bytes: ByteArray): Boolean =
+    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val resolver = context.contentResolver
+        try {
+            val filename = "Whisper_${System.currentTimeMillis()}.jpg"
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                val contentValues = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, filename)
+                    put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                    put(
+                        android.provider.MediaStore.MediaColumns.RELATIVE_PATH,
+                        android.os.Environment.DIRECTORY_PICTURES + "/Whisper",
+                    )
+                    put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1)
+                }
+                val uri = resolver.insert(
+                    android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues,
+                ) ?: return@withContext false
+                try {
+                    resolver.openOutputStream(uri)?.use { it.write(bytes) } ?: return@withContext false
+                    contentValues.clear()
+                    contentValues.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0)
+                    resolver.update(uri, contentValues, null, null)
+                } catch (e: Exception) {
+                    runCatching { resolver.delete(uri, null, null) }
+                    return@withContext false
+                }
+            } else {
+                val contentValues = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, filename)
+                    put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                }
+                val uri = resolver.insert(
+                    android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues,
+                ) ?: return@withContext false
+                val wrote = resolver.openOutputStream(uri)?.use { it.write(bytes) } != null
+                if (!wrote) {
+                    runCatching { resolver.delete(uri, null, null) }
+                    return@withContext false
+                }
+            }
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }

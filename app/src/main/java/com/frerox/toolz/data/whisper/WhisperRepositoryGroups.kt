@@ -1567,6 +1567,29 @@ suspend fun WhisperRepository.fetchGroupMessages(
         }
 }
 
+/**
+ * Verified-log entry for the in-timeline activity feed (join/leave/rename…).
+ * Read from the LOCAL verified-prefix cache — no decrypt, no network. The
+ * server log is the authority; the cache only ever holds verified rows.
+ */
+data class GroupSystemRaw(
+    val seq: Long,
+    val type: String,
+    val actor: String,
+    val payload: String,
+    val createdAtMs: Long,
+)
+
+/** Verified activity entries for one group, oldest-first (for system bubbles). */
+suspend fun WhisperRepository.cachedGroupSystemEvents(groupId: String): List<GroupSystemRaw> {
+    requireGroupsEnabled()
+    if (groupId.isBlank()) return emptyList()
+    return runCatching {
+        groupDao.events(groupId).sortedBy { it.seq }
+            .map { GroupSystemRaw(it.seq, it.type, it.actor, it.payload, it.createdAtMs) }
+    }.getOrDefault(emptyList())
+}
+
 /** Local tombstone key for a group message row (delete-for-me). */
 fun groupTombstoneKey(clientId: String): String = "gmsg:$clientId"
 

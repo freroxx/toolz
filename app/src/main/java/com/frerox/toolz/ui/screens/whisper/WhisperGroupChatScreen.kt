@@ -59,6 +59,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -102,7 +103,7 @@ fun WhisperGroupChatScreen(
 ) {
     if (!groupsEnabled()) return
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    var draft by remember { mutableStateOf("") }
+    var draft by rememberSaveable(viewModel.groupId) { mutableStateOf("") }
     val listState = rememberLazyListState()
     val scrollScope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -114,16 +115,51 @@ fun WhisperGroupChatScreen(
     var showPollCreate by remember { mutableStateOf(false) }
     // Vote rows are tally data (rendered in poll cards below); they carry no
     // readable body, so they stay out of the line list.
-    val visible = remember(state.messages, searchQuery) {
-        val base = state.messages.filter { it.vote == null }
-        val q = searchQuery.trim().lowercase()
-        if (q.isBlank()) base else base.filter { it.body.lowercase().contains(q) }
+    val visible = remember(state.messages) { state.messages.filter { it.vote == null } }
+
+    // Full-history search results (decrypted page-by-page in the VM; the
+    // timeline filter only ever saw the loaded page).
+    var searchResults by remember { mutableStateOf<List<WhisperGroupChatMessage>?>(null) }
+    var searchingNow by remember { mutableStateOf(false) }
+    LaunchedEffect(searching, searchQuery) {
+        if (!searching || searchQuery.trim().length < 2) {
+            searchResults = null
+            searchingNow = false
+        } else {
+            searchingNow = true
+            kotlinx.coroutines.delay(400)
+            // Query may have changed during debounce; re-check before running.
+            val q = searchQuery
+            if (searching && searchQuery == q) {
+                searchResults = viewModel.searchAll(q)
+                searchingNow = false
+            }
+        }
     }
 
-    // Auto-scroll only when the NEWEST line changes (paging prepends must not
-    // yank the viewport to the bottom).
+    // Open at the first unread (WhatsApp behavior); live arrivals still pin
+    // to the bottom. Paging prepends never yank the viewport.
+    var scrolledInitial by remember(viewModel.groupId) { mutableStateOf(false) }
+    LaunchedEffect(state.messages.size, state.systemEvents.size) {
+        if (!scrolledInitial && (visible.isNotEmpty() || state.systemEvents.isNotEmpty())) {
+            scrolledInitial = true
+            val feed0 = buildFeed(visible, state.systemEvents, state.firstUnreadId, state.unreadCount)
+            val anchor = feed0.indexOfFirst {
+                it is FeedItem.UnreadMark
+            }.takeIf { it >= 0 } ?: (feed0.size - 1)
+            if (anchor >= 0) listState.scrollToItem(anchor)
+        }
+    }
     LaunchedEffect(visible.lastOrNull()?.id) {
-        if (visible.isNotEmpty()) listState.animateScrollToItem(visible.size - 1)
+        if (scrolledInitial && visible.isNotEmpty()) {
+            val lastIdx = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index
+            val total = listState.layoutInfo.totalItemsCount
+            // Only auto-pin when already near the bottom (reading history
+            // must not yank on every arrival).
+            if (lastIdx == null || total == 0 || lastIdx >= total - 3) {
+                listState.animateScrollToItem(visible.size - 1)
+            }
+        }
     }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -312,8 +348,37 @@ fun WhisperGroupChatScreen(
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
                 }
+            } else if (searching && searchQuery.trim().length >= 2) {
+                SearchResultsList(
+                    query = searchQuery,
+                    loading = searchingNow,
+                    results = searchResults,
+                    onPick = { msg ->
+                        searching = false
+                        searchQuery = ""
+                        searchResults = null
+                        val idx = buildFeed(visible, state.systemEvents, state.firstUnreadId, state.unreadCount)
+                            .indexOfFirst { it is FeedItem.Msg && it.msg.id == msg.id }
+                        if (idx >= 0) scrollScope.launch { listState.animateScrollToItem(idx) }
+                        else android.widget.Toast.makeText(
+                            context,
+                            context.getString(R.string.st_Whisper_Groups_LoadOlder),
+                            android.widget.Toast.LENGTH_SHORT,
+                        ).show()
+                    },
+                )
             } else {
-                val feed = remember(visible) { buildFeed(visible) }
+                val feed = remember(visible, state.systemEvents, state.firstUnreadId, state.unreadCount) {
+                    buildFeed(visible, state.systemEvents, state.firstUnreadId, state.unreadCount)
+                }
+                val atBottom = remember {
+                    androidx.compose.runtime.derivedStateOf {
+                        val info = listState.layoutInfo
+                        val last = info.visibleItemsInfo.lastOrNull()?.index
+                        last == null || info.totalItemsCount == 0 || last >= info.totalItemsCount - 2
+                    }
+                }
+                androidx.compose.foundation.layout.Box(modifier = Modifier.fillMaxSize()) {
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
@@ -336,10 +401,14 @@ fun WhisperGroupChatScreen(
                         when (val it = feed[idx]) {
                             is FeedItem.Day -> "day_${it.label}"
                             is FeedItem.Msg -> it.msg.id
+                            is FeedItem.Sys -> "sys_${it.seq}"
+                            is FeedItem.UnreadMark -> "unread_mark"
                         }
                     }) { idx ->
                         when (val item = feed[idx]) {
                             is FeedItem.Day -> DayDivider(label = groupDayLabel(item.label))
+                            is FeedItem.Sys -> SysBubble(text = item.text)
+                            is FeedItem.UnreadMark -> UnreadDivider(count = item.count)
                             is FeedItem.Msg -> {
                                 val msg = item.msg
                                 GroupBubble(
@@ -364,6 +433,24 @@ fun WhisperGroupChatScreen(
                                     },
                                 )
                             }
+                        }
+                    }
+                    }
+                    // Jump-to-latest: appears with pending unread once the user
+                    // scrolls up (WhatsApp-style). Tapping pins to the bottom.
+                    if (state.unreadCount > 0 && !atBottom.value) {
+                        androidx.compose.material3.ExtendedFloatingActionButton(
+                            onClick = {
+                                scrollScope.launch {
+                                    listState.animateScrollToItem(feed.size - 1)
+                                }
+                            },
+                            modifier = Modifier.align(androidx.compose.ui.Alignment.BottomEnd)
+                                .padding(end = 4.dp, bottom = 12.dp),
+                        ) {
+                            Text(
+                                stringResource(R.string.st_Whisper_Groups_NewMessages, state.unreadCount),
+                            )
                         }
                     }
                 }
@@ -447,18 +534,49 @@ private fun typingLine(names: List<String>): String = when (names.size) {
 private sealed interface FeedItem {
     data class Day(val label: String) : FeedItem
     data class Msg(val msg: WhisperGroupChatMessage) : FeedItem
+    data class Sys(val seq: Long, val text: String) : FeedItem
+    data class UnreadMark(val count: Int) : FeedItem
 }
 
-private fun buildFeed(visible: List<WhisperGroupChatMessage>): List<FeedItem> {
+private fun msgTimeMs(iso: String): Long = runCatching {
+    java.time.OffsetDateTime.parse(iso).toInstant().toEpochMilli()
+}.getOrDefault(Long.MIN_VALUE)
+
+private fun dayOf(ms: Long): String = runCatching {
+    java.time.Instant.ofEpochMilli(ms).atZone(java.time.ZoneId.systemDefault()).toLocalDate().toString()
+}.getOrDefault("")
+
+private fun buildFeed(
+    visible: List<WhisperGroupChatMessage>,
+    systems: List<WhisperGroupChatViewModel.SysLine> = emptyList(),
+    firstUnreadId: String? = null,
+    unreadCount: Int = 0,
+): List<FeedItem> {
+    data class Row(val ms: Long, val order: Int, val item: FeedItem)
+    val rows = mutableListOf<Row>()
+    visible.forEach { msg ->
+        rows.add(Row(msgTimeMs(msg.createdAt), 1, FeedItem.Msg(msg)))
+    }
+    systems.forEach { sys ->
+        // System lines without a timestamp (0) sort before everything.
+        rows.add(Row(if (sys.atMs > 0) sys.atMs else Long.MIN_VALUE, 0, FeedItem.Sys(sys.seq, sys.text)))
+    }
+    rows.sortWith(compareBy<Row> { it.ms }.thenBy { it.order })
     val out = mutableListOf<FeedItem>()
     var lastDay: String? = null
-    visible.forEach { msg ->
-        val day = groupDayKey(msg.createdAt)
-        if (day != lastDay) {
+    var unreadInserted = firstUnreadId == null
+    rows.forEach { row ->
+        val day = dayOf(row.ms)
+        if (day != lastDay && day.isNotBlank()) {
             lastDay = day
             out.add(FeedItem.Day(day))
         }
-        out.add(FeedItem.Msg(msg))
+        val item = row.item
+        if (!unreadInserted && item is FeedItem.Msg && item.msg.id == firstUnreadId) {
+            out.add(FeedItem.UnreadMark(unreadCount))
+            unreadInserted = true
+        }
+        out.add(item)
     }
     return out
 }
@@ -480,6 +598,110 @@ private fun groupDayLabel(day: String): String {
             val d = java.time.LocalDate.parse(day)
             "${d.dayOfMonth} ${d.month.name.lowercase().replaceFirstChar { it.uppercase() }.take(3)} ${d.year}"
         }.getOrDefault("")
+    }
+}
+
+@Composable
+private fun SysBubble(text: String) {
+    Box(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ) {
+            Text(
+                text,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun UnreadDivider(count: Int) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.primary)
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.primaryContainer,
+        ) {
+            Text(
+                stringResource(R.string.st_Whisper_Groups_NewMessagesDivider, count),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+            )
+        }
+        HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.primary)
+    }
+}
+
+@Composable
+private fun SearchResultsList(
+    query: String,
+    loading: Boolean,
+    results: List<WhisperGroupChatMessage>?,
+    onPick: (WhisperGroupChatMessage) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        if (loading && results == null) {
+            Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(modifier = Modifier.size(28.dp))
+            }
+        }
+        val list = results.orEmpty()
+        if (!loading && results != null) {
+            Text(
+                if (list.isEmpty()) "" else "${list.size}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+                textAlign = TextAlign.End,
+            )
+        }
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            items(list, key = { it.id }) { msg ->
+                Column(
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                        .clickable { onPick(msg) }
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                ) {
+                    Text(
+                        msg.senderName,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                    )
+                    Text(
+                        msg.body,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        formatGroupTime(msg.createdAt),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.align(Alignment.End),
+                    )
+                }
+            }
+        }
     }
 }
 

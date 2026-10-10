@@ -32,6 +32,7 @@ import com.frerox.toolz.data.whisper.GroupPoll
 import com.frerox.toolz.data.whisper.GroupReplyRef
 import com.frerox.toolz.data.whisper.GroupVote
 import com.frerox.toolz.data.whisper.WhisperGroupContent
+import com.frerox.toolz.data.whisper.cachedGroupSystemEvents
 import com.frerox.toolz.data.whisper.sendGroupContent
 import com.frerox.toolz.data.whisper.sendGroupImage
 import com.frerox.toolz.data.whisper.sendGroupMessage
@@ -85,7 +86,20 @@ class WhisperGroupChatViewModel @Inject constructor(
         val memberNames: Map<String, String> = emptyMap(),
         /** Poll tallies by poll id (latest vote per sender wins). */
         val pollTallies: Map<String, PollTally> = emptyMap(),
+        /** In-timeline activity (join/leave/rename/role/picture/settings). */
+        val systemEvents: List<SysLine> = emptyList(),
+        /** First unread message id at load (unread separator anchor). */
+        val firstUnreadId: String? = null,
+        /** Unread count at load (latest-FAB badge). */
+        val unreadCount: Int = 0,
         val error: String? = null,
+    )
+
+    /** One centered activity line from the verified event log. */
+    data class SysLine(
+        val seq: Long,
+        val text: String,
+        val atMs: Long,
     )
 
     /** Vote tally for one poll card. */
@@ -147,6 +161,8 @@ class WhisperGroupChatViewModel @Inject constructor(
             _uiState.update { it.copy(isLoading = true, error = null) }
             // Drain queued group sends first so they land before the sync reads.
             runCatching { repository.flushGroupOutbox() }
+            // Capture the read watermark BEFORE this load marks everything read.
+            val markBefore = readStore.readAt(groupId)
             val membership = repository.syncGroup(groupId)
             membership.onSuccess { m ->
                 val messages = repository.fetchGroupMessages(groupId)
@@ -154,6 +170,13 @@ class WhisperGroupChatViewModel @Inject constructor(
                     val names = repository.getFriends().getOrNull().orEmpty()
                         .associate { it.id to it.effectiveName }
                     val receipts = repository.fetchGroupReceipts(groupId).getOrNull().orEmpty()
+                    val myId = repository.myId
+                    val unread = list.filter { it.createdAt > markBefore && it.senderId != myId }
+                    val systems = repository.cachedGroupSystemEvents(groupId).mapNotNull { raw ->
+                        sysText(raw.type, raw.actor, raw.payload, names, myId)?.let { text ->
+                            SysLine(seq = raw.seq, text = text, atMs = raw.createdAtMs)
+                        }
+                    }
                     _uiState.update {
                         it.copy(
                             membership = m,
@@ -163,7 +186,10 @@ class WhisperGroupChatViewModel @Inject constructor(
                             degraded = m.degraded,
                             receipts = receipts,
                             memberNames = names,
-                            pollTallies = tallyPolls(list, repository.myId),
+                            pollTallies = tallyPolls(list, myId),
+                            systemEvents = systems,
+                            firstUnreadId = unread.firstOrNull()?.id,
+                            unreadCount = unread.size,
                         )
                     }
                     // Seen receipts + read watermark (fire-and-forget).
@@ -178,6 +204,28 @@ class WhisperGroupChatViewModel @Inject constructor(
                 _uiState.update { it.copy(isLoading = false, error = err(e)) }
             }
         }
+    }
+
+    /**
+     * Full-history search: pages the whole log (up to 500 rows) decrypting
+     * each page. Server rows are opaque, so search is client-side by
+     * necessity; results are newest-last like the timeline.
+     */
+    suspend fun searchAll(query: String): List<WhisperGroupChatMessage> {
+        val q = query.trim().lowercase()
+        if (q.isBlank()) return emptyList()
+        val out = mutableListOf<WhisperGroupChatMessage>()
+        var cursor: String? = null
+        var guard = 0
+        while (guard++ < 10) {
+            val page = repository.fetchGroupMessages(groupId, PAGE_SIZE, before = cursor)
+                .getOrNull().orEmpty()
+            if (page.isEmpty()) break
+            out.addAll(page.filter { it.vote == null && it.body.lowercase().contains(q) })
+            cursor = page.firstOrNull()?.createdAt ?: break
+            if (page.size < PAGE_SIZE) break
+        }
+        return out.sortedWith(compareBy({ it.createdAt }, { it.id }))
     }
 
     /** Prepends the next older page (cursor = oldest loaded created_at). */
@@ -311,6 +359,39 @@ class WhisperGroupChatViewModel @Inject constructor(
 
     fun clearError() {
         _uiState.update { it.copy(error = null) }
+    }
+
+    /**
+     * Human line for one verified event, or null when the type carries no
+     * timeline meaning (create shows once, invites are cards, votes aren't
+     * events). Subject payloads resolve via friend names ("You" for me).
+     */
+    private fun sysText(
+        type: String,
+        actor: String,
+        payload: String,
+        names: Map<String, String>,
+        me: String,
+    ): String? {
+        fun name(id: String): String = if (id == me) "You" else names[id] ?: "Someone"
+        fun subject(): String = payload.trim().trim('"').takeIf {
+            it.length >= 10 && it.all { c -> c.isLetterOrDigit() || c == '-' }
+        }?.let { name(it) } ?: "Someone"
+        return when (type) {
+            "create" -> "${name(actor)} created the group"
+            "join" -> "${name(actor)} joined"
+            "leave" -> "${name(actor)} left"
+            "remove" -> "${name(actor)} removed ${subject()}"
+            "promote" -> "${name(actor)} made ${subject()} an admin"
+            "demote" -> "${name(actor)} removed ${subject()} as admin"
+            "rename" -> "${name(actor)} changed the group name"
+            "picture" -> "${name(actor)} updated the group picture"
+            "settings" -> "${name(actor)} updated the group settings"
+            "decline" -> "${name(actor)} declined the invite"
+            "cancel" -> "${name(actor)} revoked an invite for ${subject()}"
+            "invite" -> "${name(actor)} invited ${subject()}"
+            else -> null
+        }
     }
 
     private fun err(e: Throwable?): String =
