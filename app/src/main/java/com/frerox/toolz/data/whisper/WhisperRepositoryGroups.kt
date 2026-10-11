@@ -927,6 +927,7 @@ suspend fun WhisperRepository.syncGroups(): Result<List<WhisperGroupMembership>>
     // into a hung list (the "does not load" class); each leg still isolates.
     val ok = java.util.Collections.synchronizedList(mutableListOf<WhisperGroupMembership>())
     val failures = java.util.concurrent.atomic.AtomicInteger(0)
+    val firstFailure = java.util.concurrent.atomic.AtomicReference<Throwable?>(null)
     kotlinx.coroutines.coroutineScope {
         myRows.map { row ->
             async {
@@ -934,6 +935,7 @@ suspend fun WhisperRepository.syncGroups(): Result<List<WhisperGroupMembership>>
                     .onSuccess { ok.add(it) }
                     .onFailure {
                         failures.incrementAndGet()
+                        firstFailure.compareAndSet(null, it)
                         val msg = it.message.orEmpty()
                         if ("no longer a member" in msg || "Group not found" in msg) {
                             runCatching {
@@ -947,7 +949,15 @@ suspend fun WhisperRepository.syncGroups(): Result<List<WhisperGroupMembership>>
             }
         }.awaitAll()
     }
-    if (ok.isEmpty() && failures.get() > 0) error("Couldn't sync your groups. Check your connection and retry.")
+    // Total failure: with a single group the per-group reason IS the sync
+    // result (a generic "couldn't sync" would bury e.g. the no-history /
+    // not-member cause), so rethrow it for the mapped error text. Multiple
+    // groups keep the generic message (causes may differ per group).
+    if (ok.isEmpty() && failures.get() > 0) {
+        val cause = firstFailure.get()
+        if (myRows.size == 1 && cause != null) throw cause
+        error("Couldn't sync your groups. Check your connection and retry.")
+    }
     // Kicked/disbanded groups vanish from the server members list but linger
     // in the local cache (nothing else clears them): evict cached groups
     // outside the authoritative server set. Transient per-group failures stay
