@@ -348,6 +348,7 @@ class SettingsRepository @Inject constructor(
     private val WIDGET_TOOLBAR_SLOTS = stringSetPreferencesKey("widget_toolbar_slots")
     private val WIDGET_TAP_ACTION = stringPreferencesKey("widget_tap_action") // "OPEN_APP" | "CURRENT_TOOL"
     private val WIDGET_HAPTICS = booleanPreferencesKey("widget_haptics")
+    private val APP_WIDGETS_ENABLED = booleanPreferencesKey("app_widgets_enabled")
 
     // New Settings
     private val HAPTIC_FEEDBACK = booleanPreferencesKey("haptic_feedback")
@@ -858,6 +859,7 @@ class SettingsRepository @Inject constructor(
     }
     val widgetTapAction: Flow<String> = dataStore.data.map { it[WIDGET_TAP_ACTION] ?: "OPEN_APP" }
     val widgetHaptics: Flow<Boolean> = dataStore.data.map { it[WIDGET_HAPTICS] ?: true }
+    val appWidgetsEnabled: Flow<Boolean> = dataStore.data.map { it[APP_WIDGETS_ENABLED] ?: true }
 
     // New Flows
     val hapticFeedback: Flow<Boolean> = dataStore.data.map { it[HAPTIC_FEEDBACK] ?: true }
@@ -1402,7 +1404,9 @@ class SettingsRepository @Inject constructor(
     // Widget setters
     suspend fun setWidgetBackgroundColor(color: Int) { dataStore.edit { it[WIDGET_BACKGROUND_COLOR] = color } }
     suspend fun setWidgetAccentColor(color: Int) { dataStore.edit { it[WIDGET_ACCENT_COLOR] = color } }
+    @Deprecated("App widgets are always opaque now. Per-widget opacity lives in Living Frames.")
     suspend fun setWidgetOpacity(opacity: Float) { dataStore.edit { it[WIDGET_OPACITY] = opacity.coerceIn(0f, 1f) } }
+    suspend fun setAppWidgetsEnabled(enabled: Boolean) { dataStore.edit { it[APP_WIDGETS_ENABLED] = enabled } }
     suspend fun setWidgetFollowDynamic(enabled: Boolean) { dataStore.edit { it[WIDGET_FOLLOW_DYNAMIC] = enabled } }
     suspend fun setWidgetShowArt(enabled: Boolean) { dataStore.edit { it[WIDGET_SHOW_ART] = enabled } }
     suspend fun setWidgetShowQueue(enabled: Boolean) { dataStore.edit { it[WIDGET_SHOW_QUEUE] = enabled } }

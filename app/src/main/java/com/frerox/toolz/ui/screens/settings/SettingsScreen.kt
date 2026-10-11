@@ -124,7 +124,7 @@ fun SettingsScreen(
 
     val widgetBgColor by viewModel.widgetBackgroundColor.collectAsState(initial = 0xFFFFFFFF.toInt())
     val widgetAccentColor by viewModel.widgetAccentColor.collectAsState(initial = 0xFF4CAF50.toInt())
-    val widgetOpacity by viewModel.widgetOpacity.collectAsState(initial = 0.9f)
+    val appWidgetsEnabled by viewModel.appWidgetsEnabled.collectAsState(initial = true)
     val widgetFollowDynamic by viewModel.widgetFollowDynamic.collectAsState(initial = true)
     val widgetShowArt by viewModel.widgetShowArt.collectAsState(initial = true)
     val widgetShowQueue by viewModel.widgetShowQueue.collectAsState(initial = true)
@@ -1005,6 +1005,16 @@ fun SettingsScreen(
                             isExpanded = expandedSection == "WIDGETS" || searchQuery.isNotEmpty(),
                             onExpandToggle = { expandedSection = if (expandedSection == "WIDGETS") null else "WIDGETS" }
                         ) {
+                            if (matches(searchQuery, "widget", "home screen", "music", "pomodoro", "enable", "disable", "app widgets")) {
+                                SettingsToggleItem(
+                                    title = "App widgets",
+                                    subtitle = if (appWidgetsEnabled) "Music, Pomodoro, Toolbar & Stopwatch on home screen" else "App widgets off — Living Frames keep working",
+                                    icon = Icons.Rounded.Widgets,
+                                    checked = appWidgetsEnabled,
+                                    onCheckedChange = { viewModel.setAppWidgetsEnabled(it) }
+                                )
+                            }
+                            if (!appWidgetsEnabled) return@SettingsExpandableSection
                             if (matches(searchQuery, "widget", "home screen", "music", "pomodoro", "screen time", "toolbar", "appearance", "transparency", "accent")) {
                                 SettingsToggleItem(
                                     title = "Follow dynamic color",
@@ -1026,21 +1036,6 @@ fun SettingsScreen(
                                             vibrationManager?.vibrateClick()
                                             viewModel.setWidgetAccentColor(it)
                                         }
-                                    )
-                                }
-                            }
-                            if (matches(searchQuery, "widget", "opacity", "transparency", "background")) {
-                                SettingsItem(
-                                    title = "Widget opacity",
-                                    subtitle = "Background transparency: ${(widgetOpacity * 100).toInt()}%",
-                                    icon = Icons.Rounded.Opacity
-                                ) {
-                                    Slider(
-                                        value = widgetOpacity,
-                                        onValueChange = { viewModel.setWidgetOpacity(it) },
-                                        valueRange = 0.4f..1f,
-                                        modifier = Modifier.padding(top = 8.dp),
-                                        colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.primary, activeTrackColor = MaterialTheme.colorScheme.primary)
                                     )
                                 }
                             }

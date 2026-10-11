@@ -266,11 +266,13 @@ suspend fun readWidgetAppearance(context: Context): WidgetAppearance {
             context.applicationContext,
             WidgetAppearanceEntryPoint::class.java
         ).settingsRepository()
+        // App widgets are always opaque now — global opacity setting removed.
+        // Per-widget opacity lives in Living Frames only.
         WidgetAppearance(
             followDynamic = repo.widgetFollowDynamic.firstOrNull() ?: true,
             customAccent = repo.widgetAccentColor.firstOrNull(),
             customBackground = repo.widgetBackgroundColor.firstOrNull(),
-            opacity = (repo.widgetOpacity.firstOrNull() ?: 1f).coerceIn(0.4f, 1f),
+            opacity = 1f,
             showArt = repo.widgetShowArt.firstOrNull() ?: true,
             showQueue = repo.widgetShowQueue.firstOrNull() ?: true,
             haptics = repo.widgetHaptics.firstOrNull() ?: true
@@ -300,14 +302,14 @@ fun resolveWidgetAccent(trackHex: String?, appearance: WidgetAppearance): Color?
 }
 
 /**
- * Custom background with opacity — null when followDynamic (use GlanceTheme
- * surface). Applied by all 4 widgets to their outer container.
+ * Custom background — always opaque for app widgets (global opacity removed).
+ * Null when followDynamic (use GlanceTheme surface). Applied by all 4 widgets.
  */
 fun widgetBackgroundProvider(appearance: WidgetAppearance): ColorProvider? {
     if (appearance.followDynamic) return null
     val base = appearance.customBackground ?: return null
     return try {
-        Color(base).copy(alpha = appearance.opacity).toWidgetColorProvider()
+        Color(base).toWidgetColorProvider()
     } catch (_: Exception) {
         null
     }

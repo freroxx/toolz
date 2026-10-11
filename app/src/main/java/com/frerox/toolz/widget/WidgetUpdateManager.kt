@@ -35,11 +35,16 @@ import com.frerox.toolz.widget.glance.StopwatchWidgetStateDefinition
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.flow.first
 
 @Singleton
 class WidgetUpdateManager @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val settingsRepository: com.frerox.toolz.data.settings.SettingsRepository
 ) {
+    private suspend fun appWidgetsEnabled(): Boolean = try {
+        settingsRepository.appWidgetsEnabled.first()
+    } catch (_: Exception) { true }
     suspend fun updateMusicWidget(
         title: String,
         artist: String,
@@ -59,6 +64,7 @@ class WidgetUpdateManager @Inject constructor(
         isShuffleOn: Boolean = false,
         repeatMode: Int = 0
     ) {
+        if (!appWidgetsEnabled()) return
         // P2-08 fix: Guard getGlanceIds — can throw if AppWidgetHost not ready (e.g. after reboot)
         val glanceIds = try {
             GlanceAppWidgetManager(context).getGlanceIds(MusicGlanceWidget::class.java)
@@ -110,6 +116,7 @@ class WidgetUpdateManager @Inject constructor(
         sessionsDone: Int? = null,
         sessionsGoal: Int? = null
     ) {
+        if (!appWidgetsEnabled()) return
         // P-P1-03: guard getGlanceIds (throws when host not ready, e.g. after reboot).
         val glanceIds = try {
             GlanceAppWidgetManager(context).getGlanceIds(PomodoroGlanceWidget::class.java)
@@ -144,6 +151,7 @@ class WidgetUpdateManager @Inject constructor(
     }
 
     suspend fun updateSearchBarWidget() {
+        if (!appWidgetsEnabled()) return
         // Live toolbar is QuickActionsGlanceWidget served by SearchBarWidgetReceiver.
         // SearchBarGlanceWidget class is dead — don't update it (zero ids, wasted work).
         try {
@@ -158,6 +166,7 @@ class WidgetUpdateManager @Inject constructor(
         lapCount: Int,
         lastLapMs: Long
     ) {
+        if (!appWidgetsEnabled()) return
         val glanceIds = try {
             GlanceAppWidgetManager(context).getGlanceIds(StopwatchGlanceWidget::class.java)
         } catch (e: Exception) {
@@ -186,6 +195,7 @@ class WidgetUpdateManager @Inject constructor(
     }
 
     suspend fun refreshAllWidgets() {
+        if (!appWidgetsEnabled()) return
         try {
             QuickActionsGlanceWidget().updateAll(context)
         } catch (_: Exception) { }

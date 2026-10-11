@@ -97,7 +97,7 @@ class SettingsViewModel @Inject constructor(
 
     val widgetBackgroundColor = repository.widgetBackgroundColor
     val widgetAccentColor = repository.widgetAccentColor
-    val widgetOpacity = repository.widgetOpacity
+    val appWidgetsEnabled = repository.appWidgetsEnabled
     val widgetFollowDynamic = repository.widgetFollowDynamic
     val widgetShowArt = repository.widgetShowArt
     val widgetShowQueue = repository.widgetShowQueue
@@ -201,7 +201,11 @@ class SettingsViewModel @Inject constructor(
 
     fun setWidgetBackgroundColor(color: Int) = viewModelScope.launch { repository.setWidgetBackgroundColor(color); refreshWidgets() }
     fun setWidgetAccentColor(color: Int) = viewModelScope.launch { repository.setWidgetAccentColor(color); refreshWidgets() }
-    fun setWidgetOpacity(opacity: Float) = viewModelScope.launch { repository.setWidgetOpacity(opacity); refreshWidgets() }
+    fun setAppWidgetsEnabled(enabled: Boolean) = viewModelScope.launch {
+        repository.setAppWidgetsEnabled(enabled)
+        com.frerox.toolz.widget.livingframes.LivingFramesWidgetHelper.setAppWidgetsComponentEnabled(context, enabled)
+        refreshWidgets()
+    }
     fun setWidgetFollowDynamic(enabled: Boolean) = viewModelScope.launch { repository.setWidgetFollowDynamic(enabled); refreshWidgets() }
     fun setWidgetShowArt(enabled: Boolean) = viewModelScope.launch { repository.setWidgetShowArt(enabled); refreshWidgets() }
     fun setWidgetShowQueue(enabled: Boolean) = viewModelScope.launch { repository.setWidgetShowQueue(enabled); refreshWidgets() }
