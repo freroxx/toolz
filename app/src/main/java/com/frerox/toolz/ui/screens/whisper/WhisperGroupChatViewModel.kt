@@ -49,6 +49,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 
 /**
@@ -102,7 +104,19 @@ class WhisperGroupChatViewModel @Inject constructor(
         val firstUnreadId: String? = null,
         /** Unread count at load (latest-FAB badge). */
         val unreadCount: Int = 0,
+        /** Optimistic outgoing text rows (shown until the real row lands). */
+        val pending: List<PendingMessage> = emptyList(),
         val error: String? = null,
+    )
+
+    /** A text message that is sending (or failed) and not in the log yet. */
+    data class PendingMessage(
+        val localId: String,
+        val text: String,
+        val reply: GroupReplyRef?,
+        val mentionIds: List<String>,
+        val createdAtMs: Long,
+        val failed: Boolean = false,
     )
 
     /** One centered activity line from the verified event log. */
@@ -123,6 +137,9 @@ class WhisperGroupChatViewModel @Inject constructor(
 
     private var watchJobs: List<Job> = emptyList()
     private var lastTypingSentMs = 0L
+
+    /** Text sends go out strictly in order (parallel seals could reorder). */
+    private val sendMutex = Mutex()
 
     init {
         if (groupsEnabled() && groupId.isNotBlank()) {
@@ -169,8 +186,8 @@ class WhisperGroupChatViewModel @Inject constructor(
         super.onCleared()
     }
 
-    fun load() {
-        viewModelScope.launch {
+    fun load(): Job {
+        return viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
             // Drain queued group sends first so they land before the sync reads.
             runCatching { repository.flushGroupOutbox() }
@@ -197,6 +214,8 @@ class WhisperGroupChatViewModel @Inject constructor(
                             isLoading = false,
                             hasMore = list.size >= PAGE_SIZE,
                             degraded = m.degraded,
+                            isSending = false,
+                            isUploadingImage = false,
                             receipts = receipts,
                             memberNames = names,
                             pollTallies = tallyPolls(list, myId),
@@ -213,10 +232,17 @@ class WhisperGroupChatViewModel @Inject constructor(
                         list.lastOrNull()?.createdAt?.let { readStore.markRead(groupId, it) }
                     }
                 }.onFailure { e ->
-                    _uiState.update { it.copy(membership = m, isLoading = false, degraded = m.degraded, error = err(e)) }
+                    _uiState.update {
+                        it.copy(
+                            membership = m, isLoading = false, degraded = m.degraded,
+                            isSending = false, isUploadingImage = false, error = err(e),
+                        )
+                    }
                 }
             }.onFailure { e ->
-                _uiState.update { it.copy(isLoading = false, error = err(e)) }
+                _uiState.update {
+                    it.copy(isLoading = false, isSending = false, isUploadingImage = false, error = err(e))
+                }
             }
         }
     }
@@ -282,14 +308,55 @@ class WhisperGroupChatViewModel @Inject constructor(
             return
         }
         viewModelScope.launch { repository.clearGroupTyping(groupId) }
+        val pending = PendingMessage(
+            localId = java.util.UUID.randomUUID().toString(),
+            text = clean,
+            reply = reply,
+            mentionIds = mentionIds,
+            createdAtMs = System.currentTimeMillis(),
+        )
+        _uiState.update { it.copy(pending = it.pending + pending, error = null) }
+        dispatchPending(pending)
+    }
+
+    private fun dispatchPending(p: PendingMessage) {
         viewModelScope.launch {
-            _uiState.update { it.copy(isSending = true, error = null) }
-            repository.sendGroupContent(groupId, WhisperGroupContent(t = clean, reply = reply, mentions = mentionIds))
-                .onSuccess { load() }
+            _uiState.update { s ->
+                s.copy(
+                    isSending = true,
+                    pending = s.pending.map { if (it.localId == p.localId) it.copy(failed = false) else it },
+                )
+            }
+            val result = sendMutex.withLock {
+                repository.sendGroupContent(
+                    groupId,
+                    WhisperGroupContent(t = p.text, reply = p.reply, mentions = p.mentionIds),
+                )
+            }
+            result
+                .onSuccess {
+                    // Swap the optimistic row for the real one in one beat.
+                    load().join()
+                    _uiState.update { s -> s.copy(pending = s.pending.filterNot { it.localId == p.localId }) }
+                }
                 .onFailure { e ->
-                    _uiState.update { it.copy(isSending = false, error = err(e)) }
+                    _uiState.update { s ->
+                        s.copy(
+                            isSending = false,
+                            pending = s.pending.map { if (it.localId == p.localId) it.copy(failed = true) else it },
+                            error = err(e),
+                        )
+                    }
                 }
         }
+    }
+
+    fun retryPending(localId: String) {
+        _uiState.value.pending.firstOrNull { it.localId == localId && it.failed }?.let { dispatchPending(it) }
+    }
+
+    fun discardPending(localId: String) {
+        _uiState.update { s -> s.copy(pending = s.pending.filterNot { it.localId == localId }) }
     }
 
     /** Sends a poll card (question + 2..6 options). */

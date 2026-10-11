@@ -94,12 +94,17 @@ class WhisperGroupInfoViewModel @Inject constructor(
         val degraded: Boolean = false,
         val error: String? = null,
     ) {
-        // ByteArray breaks data-class equals; identity is by group state instead.
+        // ByteArray breaks data-class equals, so compare content explicitly.
+        // Every field must take part: StateFlow drops "equal" updates, so a
+        // field missing here (picture, requests, gallery) would never reach the UI.
         override fun equals(other: Any?): Boolean = other is UiState &&
             membership == other.membership && members == other.members &&
             pending == other.pending && myId == other.myId && amOwner == other.amOwner &&
             canDisband == other.canDisband &&
             isMuted == other.isMuted && mutedUntilMs == other.mutedUntilMs && notifOn == other.notifOn &&
+            pictureBytes.contentEquals(other.pictureBytes) &&
+            requests == other.requests && gallery == other.gallery &&
+            galleryBytes.keys == other.galleryBytes.keys &&
             isLoading == other.isLoading && isWorking == other.isWorking &&
             left == other.left && degraded == other.degraded && error == other.error
         override fun hashCode(): Int = membership.hashCode()

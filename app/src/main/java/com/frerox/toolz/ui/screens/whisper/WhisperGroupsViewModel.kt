@@ -193,7 +193,8 @@ class WhisperGroupsViewModel @Inject constructor(
                         runCatching {
                             val recent = repository.fetchGroupMessages(g.id, 20).getOrThrow()
                             val mark = readStore.readAt(g.id)
-                            val last = recent.lastOrNull()
+                            // Votes / poll-close rows are tally data, never a preview line.
+                            val last = recent.lastOrNull { it.vote == null && it.pollClose == null }
                             val unread = repository.countGroupUnread(g.id, mark, me)
                             val preview = GroupPreview(
                                 text = last?.let { previewText(it) }.orEmpty(),
@@ -235,11 +236,12 @@ class WhisperGroupsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Plain text only: the row renders the media icon and the localized
+     * "Photo" / "Poll" label itself from [GroupPreview.hasImage]/[GroupPreview.hasPoll].
+     */
     private fun previewText(m: WhisperGroupChatMessage): String = when {
-        m.poll != null -> "📊 ${m.poll.q.ifBlank { "Poll" }}"
-        m.image != null && m.body.isNotBlank() -> "📷 ${m.body}"
-        m.image != null -> "📷 Photo"
-        m.vote != null -> "Voted"
+        m.poll != null -> m.poll.q
         else -> m.body
     }
 

@@ -3,102 +3,70 @@
  * GPL-3.0 License
  */
 
+@file:OptIn(ExperimentalMaterial3Api::class)
+
 package com.frerox.toolz.ui.screens.whisper
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.AddPhotoAlternate
-import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.DeleteForever
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.NotificationsActive
-import androidx.compose.material.icons.rounded.Flag
-import androidx.compose.material.icons.rounded.PersonRemove
+import androidx.compose.material.icons.rounded.NotificationsOff
+import androidx.compose.material.icons.rounded.PersonAdd
 import androidx.compose.material.icons.rounded.PhotoLibrary
-import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Share
-import androidx.compose.material.icons.rounded.Star
-import androidx.compose.material.icons.rounded.VolumeOff
-import androidx.compose.material.icons.rounded.VolumeUp
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
+import androidx.compose.material.icons.rounded.Notifications
+import androidx.compose.material.icons.rounded.AdminPanelSettings
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import kotlinx.coroutines.launch
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.groupsEnabled
-import com.frerox.toolz.ui.components.ToolzExpressiveButton
-import com.frerox.toolz.ui.components.ToolzTonalExpressiveButton
+import com.frerox.toolz.ui.components.ExpressiveLinearProgressIndicator
 import com.frerox.toolz.ui.theme.toolzBackground
+import kotlinx.coroutines.launch
 
 /**
- * Phase-2 groups: admin console + member list + danger zone.
- * Owner = first admin (creation order); admins manage members, rename,
- * invites follow the group's invite mode; everyone gets mute + leave.
+ * Group info: profile header, quick actions, settings, requests, members,
+ * invites and the danger zone. Owner = first admin (creation order); admins
+ * manage members, rename and settings; everyone gets mute + leave.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WhisperGroupInfoScreen(
     onNavigateBack: () -> Unit,
@@ -108,16 +76,17 @@ fun WhisperGroupInfoScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     var showAdd by remember { mutableStateOf(false) }
     var showRename by remember { mutableStateOf(false) }
+    var showDescEdit by remember { mutableStateOf(false) }
     var showLeave by remember { mutableStateOf(false) }
     var showDisband by remember { mutableStateOf(false) }
     var showMuteDurations by remember { mutableStateOf(false) }
+    var showShare by remember { mutableStateOf(false) }
+    var showGallery by remember { mutableStateOf(false) }
     var memberQuery by remember { mutableStateOf("") }
+    var memberSheet by remember { mutableStateOf<WhisperGroupInfoViewModel.MemberEntry?>(null) }
     var pendingBlock by remember { mutableStateOf<String?>(null) }
     var transferTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
     var reportTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
-    var showDescEdit by remember { mutableStateOf(false) }
-    var showShare by remember { mutableStateOf(false) }
-    var showGallery by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.left) {
         if (state.left) onNavigateBack()
@@ -126,18 +95,20 @@ fun WhisperGroupInfoScreen(
     val membership = state.membership
     val iAmAdmin = membership?.isAdmin(state.myId) == true
     val canInvite = membership?.canInvite(state.myId) == true
+    val canEditInfo = iAmAdmin || membership?.membersCanEdit == true
+    val groupName = membership?.name?.ifBlank { "Group" } ?: "Group"
+    val adminCount = membership?.members?.count { it.value.wire == "admin" } ?: 0
+
     val mq = memberQuery.trim().lowercase()
     val visibleMembers = remember(state.members, mq) {
-        if (mq.isBlank()) state.members
-        else state.members.filter { it.name.lowercase().contains(mq) }
-    }
-    val visiblePending = remember(state.pending, mq) {
-        if (mq.isBlank()) state.pending
-        else state.pending.filter { it.name.lowercase().contains(mq) }
+        if (mq.isBlank()) state.members else state.members.filter { it.name.lowercase().contains(mq) }
     }
 
     val snackbar = remember { SnackbarHostState() }
-    val snackScope = rememberCoroutineScope()
+    val scope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
+    val notify: (String) -> Unit = { msg -> scope.launch { snackbar.showGroupNotice(msg) } }
+
     Scaffold(
         modifier = Modifier.fillMaxSize().toolzBackground(),
         snackbarHost = { GroupSnackbarHost(state = snackbar) },
@@ -149,7 +120,9 @@ fun WhisperGroupInfoScreen(
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = GroupCd.back())
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                ),
             )
         },
     ) { padding ->
@@ -157,301 +130,326 @@ fun WhisperGroupInfoScreen(
             GroupUiCenterLoading(modifier = Modifier.fillMaxSize().padding(padding))
             return@Scaffold
         }
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp).groupFadingEdge(),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            item {
-                Spacer(Modifier.size(4.dp))
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                    GroupPictureHeader(
-                        pictureBytes = state.pictureBytes,
-                        name = membership?.name?.ifBlank { "Group" } ?: "Group",
+        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+            GroupAnimatedReveal(visible = state.isWorking) {
+                ExpressiveLinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                )
+            }
+            GroupUiBanner(
+                message = state.error.orEmpty(),
+                visible = state.error != null,
+                isError = true,
+                actionLabel = stringResource(R.string.st_Whisper_Groups_Retry),
+                onAction = { viewModel.load() },
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize().groupScrollFade(listState),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 32.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                item(key = "hero") {
+                    GroupHero(
+                        name = groupName,
                         groupId = viewModel.groupId,
-                        canChange = iAmAdmin || membership?.membersCanEdit == true,
-                        onPick = { bytes, mime -> viewModel.setPicture(bytes, mime) },
-                        onError = { msg -> snackScope.launch { snackbar.showGroupNotice(msg) } },
-                    )
-                    Spacer(Modifier.size(8.dp))
-                    Text(
-                        membership?.name?.ifBlank { "Group" } ?: "Group",
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Black,
-                    )
-                    val nMembers = state.members.size
-                    Text(
-                        "$nMembers " + stringResource(
-                            if (nMembers == 1) R.string.st_Whisper_Groups_Member
-                            else R.string.st_Whisper_Groups_Members,
-                        ) + " · " +
-                            if (membership?.inviteAdminsOnly == true) stringResource(R.string.st_Whisper_Groups_InviteAdmins)
-                            else stringResource(R.string.st_Whisper_Groups_InviteAll),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    if (!membership?.description.isNullOrBlank()) {
-                        Spacer(Modifier.size(4.dp))
-                        Text(
-                            membership?.description.orEmpty(),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(horizontal = 24.dp),
-                        )
-                    }
-                    if (iAmAdmin) {
-                        TextButton(onClick = { showRename = true }) {
-                            Icon(Icons.Rounded.Edit, contentDescription = stringResource(R.string.st_Whisper_Groups_Rename), modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text(stringResource(R.string.st_Whisper_Groups_Rename))
-                        }
-                    }
-                }
-            }
-            item {
-                MuteRow(
-                    muted = state.isMuted,
-                    mutedUntilMs = state.mutedUntilMs,
-                    onToggle = {
-                        if (state.isMuted) viewModel.toggleMute()
-                        else showMuteDurations = true
-                    },
-                )
-            }
-            if (state.degraded) {
-                item { GroupDegradedBanner() }
-            }
-            item {
-                NotifRow(
-                    on = state.notifOn,
-                    isOwnerOrAdmin = iAmAdmin || state.amOwner,
-                    onToggle = { viewModel.toggleNotif() },
-                )
-            }
-            if (iAmAdmin) {
-                item {
-                    SettingsCard(
-                        adminOnlySend = membership?.adminOnlySend == true,
-                        membersCanEdit = membership?.membersCanEdit == true,
+                        pictureBytes = state.pictureBytes,
+                        canChangePicture = canEditInfo,
+                        onPickPicture = { bytes, mime -> viewModel.setPicture(bytes, mime) },
+                        onPictureError = notify,
+                        canRename = iAmAdmin,
+                        onRename = { showRename = true },
+                        memberCount = state.members.size,
+                        inviteLabel = stringResource(
+                            if (membership?.inviteAdminsOnly == true) R.string.st_Whisper_Groups_InviteAdmins
+                            else R.string.st_Whisper_Groups_InviteAll,
+                        ),
                         description = membership?.description.orEmpty(),
-                        onToggleSend = { viewModel.saveSettings(adminOnlySend = membership?.adminOnlySend != true) },
-                        onToggleEdit = { viewModel.saveSettings(editMembers = membership?.membersCanEdit != true) },
-                        onEditDesc = { showDescEdit = true },
+                        canEditDescription = canEditInfo,
+                        onEditDescription = { showDescEdit = true },
                     )
                 }
-            }
-            // Description editing follows the same flag as the picture.
-            if (!iAmAdmin && membership?.membersCanEdit == true) {
-                item {
-                    TextButton(onClick = { showDescEdit = true }, modifier = Modifier.fillMaxWidth()) {
-                        Text(stringResource(R.string.st_Whisper_Groups_EditDescription))
+                if (state.degraded) {
+                    item(key = "degraded") {
+                        Column(Modifier.padding(vertical = 6.dp)) { GroupDegradedBanner() }
                     }
                 }
-            }
-            if (iAmAdmin && state.requests.isNotEmpty()) {
-                stickyHeader {
-                    Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
-                        SectionHeader(stringResource(R.string.st_Whisper_Groups_Requests))
-                    }
-                }
-                items(state.requests, key = { "req_${it.userId}" }) { req ->
-                    RequestRow(
-                        name = req.userName,
-                        onApprove = { viewModel.approveRequest(req.userId) },
-                        onDeny = { viewModel.denyRequest(req.userId) },
-                    )
-                }
-            }
-            item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ToolzTonalExpressiveButton(onClick = { showShare = true }, modifier = Modifier.weight(1f)) {
-                        Icon(Icons.Rounded.Share, contentDescription = stringResource(R.string.st_Whisper_Groups_Share), modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text(stringResource(R.string.st_Whisper_Groups_Share), fontWeight = FontWeight.Bold)
-                    }
-                    ToolzTonalExpressiveButton(
-                        onClick = { viewModel.loadGallery(); showGallery = true },
-                        modifier = Modifier.weight(1f),
+                item(key = "actions") {
+                    val mutedUntil = remember(state.mutedUntilMs) { formatMutedUntil(state.mutedUntilMs) }
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        Icon(Icons.Rounded.PhotoLibrary, contentDescription = stringResource(R.string.st_Whisper_Groups_Gallery), modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text(stringResource(R.string.st_Whisper_Groups_Gallery), fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-            stickyHeader {
-                Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
-                    SectionHeader(stringResource(R.string.st_Whisper_Groups_Members))
-                }
-            }
-            item {
-                OutlinedTextField(
-                    value = memberQuery,
-                    onValueChange = { memberQuery = it },
-                    label = { Text(stringResource(R.string.st_Whisper_Groups_MemberSearchHint)) },
-                    leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = GroupCd.search()) },
-                    singleLine = true,
-                    shape = RoundedCornerShape(20.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-            if (canInvite) {
-                item {
-                    ToolzExpressiveButton(onClick = { showAdd = true }, modifier = Modifier.fillMaxWidth()) {
-                        Icon(Icons.Rounded.Add, contentDescription = stringResource(R.string.st_Whisper_Groups_AddMembers), modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text(stringResource(R.string.st_Whisper_Groups_AddMembers), fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-            val adminCount = membership?.members?.count { it.value.wire == "admin" } ?: 0
-            items(visibleMembers, key = { it.userId }) { member ->
-                MemberRow(
-                    name = member.name,
-                    userId = member.userId,
-                    role = member.role,
-                    isMe = member.isMe,
-                    iAmAdmin = iAmAdmin,
-                    canDemote = iAmAdmin && member.role == "admin" && adminCount > 1,
-                    canTransfer = state.amOwner,
-                    onPromote = { viewModel.promoteMember(member.userId) },
-                    onDemote = { viewModel.demoteMember(member.userId) },
-                    onMakeOwner = { transferTarget = member.userId to member.name },
-                    onRemove = { viewModel.removeMember(member.userId) },
-                    onBlock = { pendingBlock = member.userId },
-                    onReport = { reportTarget = member.userId to member.name },
-                )
-            }
-            if (visiblePending.isNotEmpty() && iAmAdmin) {
-                stickyHeader {
-                    Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
-                        SectionHeader(
-                            "${stringResource(R.string.st_Whisper_Groups_InvitedLabel)} (${state.pending.size})",
+                        QuickActionTile(
+                            icon = if (state.isMuted) Icons.Rounded.NotificationsOff else Icons.Rounded.NotificationsActive,
+                            label = stringResource(
+                                if (state.isMuted) R.string.st_Whisper_Groups_Unmute else R.string.st_Whisper_Groups_Mute,
+                            ),
+                            supporting = if (state.isMuted && mutedUntil.isNotBlank()) {
+                                stringResource(R.string.st_Whisper_Groups_MutedUntil, mutedUntil)
+                            } else null,
+                            active = state.isMuted,
+                            onClick = {
+                                if (state.isMuted) viewModel.toggleMute() else showMuteDurations = true
+                            },
+                            modifier = Modifier.weight(1f),
+                        )
+                        QuickActionTile(
+                            icon = Icons.Rounded.Share,
+                            label = stringResource(R.string.st_Whisper_Groups_Share),
+                            onClick = { showShare = true },
+                            modifier = Modifier.weight(1f),
+                        )
+                        QuickActionTile(
+                            icon = Icons.Rounded.PhotoLibrary,
+                            label = stringResource(R.string.st_Whisper_Groups_Gallery),
+                            onClick = { viewModel.loadGallery(); showGallery = true },
+                            modifier = Modifier.weight(1f),
                         )
                     }
                 }
-                items(visiblePending, key = { "pending_${it.userId}" }) { entry ->
-                    PendingInviteRow(
-                        name = entry.name,
-                        onCancel = { viewModel.cancelInvite(entry.userId) },
+
+                // ── Settings (connected list) ────────────────────────────────
+                val canEditDesc = canEditInfo
+                val settingsCount = 1 + (if (iAmAdmin) 2 else 0) + (if (canEditDesc) 1 else 0)
+                item(key = "settings_label") {
+                    GroupSectionLabel(stringResource(R.string.st_Whisper_Groups_Settings))
+                }
+                item(key = "set_notif") {
+                    SettingSwitchRow(
+                        shape = segmentShape(0, settingsCount),
+                        icon = Icons.Rounded.Notifications,
+                        title = stringResource(R.string.st_Whisper_Groups_NotifToggle),
+                        supporting = stringResource(
+                            when {
+                                !state.notifOn -> R.string.st_Whisper_Groups_NotifToggleOff
+                                iAmAdmin || state.amOwner -> R.string.st_Whisper_Groups_NotifScopeOwner
+                                else -> R.string.st_Whisper_Groups_NotifScopeMember
+                            },
+                        ),
+                        checked = state.notifOn,
+                        onToggle = { viewModel.toggleNotif() },
                     )
                 }
-            }
-            item {
-                Spacer(Modifier.size(4.dp))
-                DangerZoneCard {
-                    ToolzExpressiveButton(
-                        onClick = { showLeave = true },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Icon(Icons.AutoMirrored.Rounded.Logout, contentDescription = stringResource(R.string.st_Whisper_Groups_Leave), modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text(stringResource(R.string.st_Whisper_Groups_Leave), fontWeight = FontWeight.Bold)
+                if (iAmAdmin) {
+                    item(key = "set_send") {
+                        SettingSwitchRow(
+                            shape = segmentShape(1, settingsCount),
+                            icon = Icons.Rounded.Lock,
+                            title = stringResource(R.string.st_Whisper_Groups_AdminOnlySend),
+                            supporting = stringResource(R.string.st_Whisper_Groups_AdminOnlySendDesc),
+                            checked = membership?.adminOnlySend == true,
+                            onToggle = { viewModel.saveSettings(adminOnlySend = membership?.adminOnlySend != true) },
+                        )
                     }
-                    // Last member standing: leave is blocked server-side, so disband
-                    // (delete the group) replaces it instead of a dead button.
-                    if (state.canDisband) {
-                        Spacer(Modifier.size(8.dp))
-                        ToolzExpressiveButton(
-                            onClick = { showDisband = true },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.error,
-                                contentColor = MaterialTheme.colorScheme.onError,
-                            ),
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Icon(Icons.Rounded.DeleteForever, contentDescription = stringResource(R.string.st_Whisper_Groups_Disband), modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text(stringResource(R.string.st_Whisper_Groups_Disband), fontWeight = FontWeight.Bold)
-                        }
+                    item(key = "set_edit") {
+                        SettingSwitchRow(
+                            shape = segmentShape(2, settingsCount),
+                            icon = Icons.Rounded.AdminPanelSettings,
+                            title = stringResource(R.string.st_Whisper_Groups_MembersCanEdit),
+                            supporting = stringResource(R.string.st_Whisper_Groups_MembersCanEditDesc),
+                            checked = membership?.membersCanEdit == true,
+                            onToggle = { viewModel.saveSettings(editMembers = membership?.membersCanEdit != true) },
+                        )
                     }
                 }
-                Spacer(Modifier.size(24.dp))
-            }
-            item {
-                GroupUiBanner(
-                    message = state.error.orEmpty(),
-                    visible = state.error != null,
-                    isError = true,
-                    actionLabel = stringResource(R.string.st_Whisper_Groups_Retry),
-                    onAction = { viewModel.load() },
-                )
+                if (canEditDesc) {
+                    item(key = "set_desc") {
+                        GroupListRow(
+                            shape = segmentShape(settingsCount - 1, settingsCount),
+                            onClick = { showDescEdit = true },
+                            leading = {
+                                Icon(
+                                    Icons.Rounded.Edit, contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            },
+                            title = stringResource(R.string.st_Whisper_Groups_Description),
+                            supporting = membership?.description.orEmpty()
+                                .ifBlank { stringResource(R.string.st_Whisper_Groups_DescriptionHint) },
+                            trailing = {
+                                Text(
+                                    stringResource(R.string.st_Whisper_Groups_EditDescription),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            },
+                        )
+                    }
+                }
+
+                // ── Join requests (admins) ───────────────────────────────────
+                if (iAmAdmin && state.requests.isNotEmpty()) {
+                    item(key = "req_label") {
+                        GroupSectionLabel(
+                            stringResource(R.string.st_Whisper_Groups_Requests),
+                            trailing = "${state.requests.size}",
+                        )
+                    }
+                    items(state.requests.size, key = { "req_${state.requests[it].userId}" }) { idx ->
+                        val req = state.requests[idx]
+                        RequestRow(
+                            shape = segmentShape(idx, state.requests.size),
+                            userId = req.userId,
+                            name = req.userName,
+                            onApprove = { viewModel.approveRequest(req.userId) },
+                            onDeny = { viewModel.denyRequest(req.userId) },
+                        )
+                    }
+                }
+
+                // ── Members ──────────────────────────────────────────────────
+                item(key = "members_label") {
+                    GroupSectionLabel(
+                        stringResource(R.string.st_Whisper_Groups_Members),
+                        trailing = "${state.members.size}",
+                    )
+                }
+                if (state.members.size > 8) {
+                    item(key = "member_search") {
+                        GroupSearchField(
+                            value = memberQuery,
+                            onValueChange = { memberQuery = it },
+                            placeholder = stringResource(R.string.st_Whisper_Groups_MemberSearchHint),
+                            modifier = Modifier.padding(vertical = 6.dp),
+                        )
+                    }
+                }
+                val memberSegments = visibleMembers.size + if (canInvite) 1 else 0
+                if (canInvite) {
+                    item(key = "member_add") {
+                        GroupListRow(
+                            shape = segmentShape(0, memberSegments),
+                            onClick = { showAdd = true },
+                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                            leading = {
+                                Icon(
+                                    Icons.Rounded.PersonAdd, contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                )
+                            },
+                            title = stringResource(R.string.st_Whisper_Groups_AddMembers),
+                            titleColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        )
+                    }
+                }
+                items(visibleMembers.size, key = { "member_${visibleMembers[it].userId}" }) { idx ->
+                    val member = visibleMembers[idx]
+                    MemberRow(
+                        shape = segmentShape(idx + if (canInvite) 1 else 0, memberSegments),
+                        member = member,
+                        onClick = if (member.isMe) null else ({ memberSheet = member }),
+                    )
+                }
+
+                // ── Outstanding invites (admins) ─────────────────────────────
+                if (iAmAdmin && state.pending.isNotEmpty()) {
+                    item(key = "pending_label") {
+                        GroupSectionLabel(
+                            stringResource(R.string.st_Whisper_Groups_InvitedLabel),
+                            trailing = "${state.pending.size}",
+                        )
+                    }
+                    items(state.pending.size, key = { "pending_${state.pending[it].userId}" }) { idx ->
+                        val entry = state.pending[idx]
+                        PendingInviteRow(
+                            shape = segmentShape(idx, state.pending.size),
+                            userId = entry.userId,
+                            name = entry.name,
+                            onCancel = { viewModel.cancelInvite(entry.userId) },
+                        )
+                    }
+                }
+
+                // ── Danger zone (leave / disband live here only) ─────────────
+                item(key = "danger_gap") { Spacer(Modifier.height(18.dp)) }
+                val dangerCount = if (state.canDisband) 2 else 1
+                item(key = "danger_leave") {
+                    GroupListRow(
+                        shape = segmentShape(0, dangerCount),
+                        onClick = { showLeave = true },
+                        containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
+                        leading = {
+                            Icon(
+                                Icons.AutoMirrored.Rounded.Logout, contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                            )
+                        },
+                        title = stringResource(R.string.st_Whisper_Groups_Leave),
+                        titleColor = MaterialTheme.colorScheme.error,
+                    )
+                }
+                // Last member standing: leave is blocked server-side, so disband
+                // (delete the group) is offered next to it.
+                if (state.canDisband) {
+                    item(key = "danger_disband") {
+                        GroupListRow(
+                            shape = segmentShape(1, dangerCount),
+                            onClick = { showDisband = true },
+                            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
+                            leading = {
+                                Icon(
+                                    Icons.Rounded.DeleteForever, contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error,
+                                )
+                            },
+                            title = stringResource(R.string.st_Whisper_Groups_Disband),
+                            titleColor = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
             }
         }
     }
 
+    // ── Sheets & dialogs ─────────────────────────────────────────────────────
     if (showAdd) {
-        AddMemberDialog(
-            viewModel = viewModel,
+        AddMemberSheet(
+            loadFriends = { cb -> viewModel.loadFriends(cb) },
             excludedIds = state.members.map { it.userId }.toSet() + state.pending.map { it.userId }.toSet(),
+            onAdd = { ids -> viewModel.addMembers(ids) },
             onDismiss = { showAdd = false },
         )
     }
     if (showRename) {
-        RenameDialog(
-            current = membership?.name.orEmpty(),
+        GroupTextEditDialog(
+            title = stringResource(R.string.st_Whisper_Groups_Rename),
+            label = stringResource(R.string.st_Whisper_Groups_NameHint),
+            initial = membership?.name.orEmpty(),
+            maxLength = 64,
+            confirmLabel = stringResource(R.string.st_Whisper_Groups_Rename),
+            allowBlank = false,
+            singleLine = true,
             onDismiss = { showRename = false },
             onConfirm = { viewModel.rename(it); showRename = false },
         )
     }
-    if (showLeave) {
-        AlertDialog(
-            onDismissRequest = { showLeave = false },
-            title = { Text(stringResource(R.string.st_Whisper_Groups_Leave), fontWeight = FontWeight.Bold) },
-            text = { Text(stringResource(R.string.st_Whisper_Groups_LeaveConfirm)) },
-            confirmButton = {
-                ToolzExpressiveButton(onClick = { showLeave = false; viewModel.leave() }) {
-                    Text(stringResource(R.string.st_Whisper_Groups_Leave), fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showLeave = false }) { Text(stringResource(R.string.st_Whisper_Cancel)) }
-            },
-        )
-    }
-    transferTarget?.let { (uid, name) ->
-        AlertDialog(
-            onDismissRequest = { transferTarget = null },
-            title = { Text(stringResource(R.string.st_Whisper_Groups_MakeOwner), fontWeight = FontWeight.Bold) },
-            text = { Text(stringResource(R.string.st_Whisper_Groups_MakeOwnerConfirm, name)) },
-            confirmButton = {
-                ToolzExpressiveButton(onClick = { viewModel.transferOwnership(uid); transferTarget = null }) {
-                    Text(stringResource(R.string.st_Whisper_Groups_MakeOwner), fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { transferTarget = null }) { Text(stringResource(R.string.st_Whisper_Cancel)) }
-            },
-        )
-    }
-    reportTarget?.let { (uid, name) ->
-        AlertDialog(
-            onDismissRequest = { reportTarget = null },
-            title = { Text(stringResource(R.string.st_Whisper_Groups_Report), fontWeight = FontWeight.Bold) },
-            text = { Text(stringResource(R.string.st_Whisper_Groups_ReportConfirm, name)) },
-            confirmButton = {
-                ToolzExpressiveButton(onClick = { viewModel.reportMember(uid); reportTarget = null }) {
-                    Text(stringResource(R.string.st_Whisper_Groups_Report), fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { reportTarget = null }) { Text(stringResource(R.string.st_Whisper_Cancel)) }
-            },
-        )
-    }
     if (showDescEdit) {
-        DescEditDialog(
-            current = membership?.description.orEmpty(),
+        GroupTextEditDialog(
+            title = stringResource(R.string.st_Whisper_Groups_Description),
+            label = stringResource(R.string.st_Whisper_Groups_DescriptionHint),
+            initial = membership?.description.orEmpty(),
+            maxLength = 140,
+            confirmLabel = stringResource(R.string.st_Whisper_Groups_EditDescription),
+            allowBlank = true,
+            singleLine = false,
             onDismiss = { showDescEdit = false },
             onConfirm = { viewModel.saveSettings(description = it); showDescEdit = false },
         )
     }
+    if (showMuteDurations) {
+        MuteDurationSheet(
+            onDismiss = { showMuteDurations = false },
+            onPick = { durationMs -> viewModel.muteFor(durationMs) },
+        )
+    }
     if (showShare) {
-        ShareGroupDialog(
+        ShareGroupSheet(
             groupId = viewModel.groupId,
-            groupName = membership?.name?.ifBlank { "Group" } ?: "Group",
+            groupName = groupName,
             onDismiss = { showShare = false },
-            onMessage = { msg -> snackScope.launch { snackbar.showGroupNotice(msg) } },
+            onMessage = notify,
         )
     }
     if (showGallery) {
@@ -460,698 +458,80 @@ fun WhisperGroupInfoScreen(
             bytesById = state.galleryBytes,
             onRequestBytes = { viewModel.loadGalleryImage(it) },
             onDismiss = { showGallery = false },
-            onMessage = { msg -> snackScope.launch { snackbar.showGroupNotice(msg) } },
+            onMessage = notify,
         )
     }
-    if (showMuteDurations) {
-        MuteDurationDialog(
-            onDismiss = { showMuteDurations = false },
-            onPick = { durationMs -> showMuteDurations = false; viewModel.muteFor(durationMs) },
+    memberSheet?.let { member ->
+        MemberActionsSheet(
+            member = member,
+            iAmAdmin = iAmAdmin,
+            canDemote = iAmAdmin && member.role == "admin" && adminCount > 1,
+            canTransfer = state.amOwner,
+            onDismiss = { memberSheet = null },
+            onPromote = { viewModel.promoteMember(member.userId) },
+            onDemote = { viewModel.demoteMember(member.userId) },
+            onMakeOwner = { transferTarget = member.userId to member.name },
+            onRemove = { viewModel.removeMember(member.userId) },
+            onBlock = { pendingBlock = member.userId },
+            onReport = { reportTarget = member.userId to member.name },
+        )
+    }
+    if (showLeave) {
+        GroupConfirmDialog(
+            title = stringResource(R.string.st_Whisper_Groups_Leave),
+            text = stringResource(R.string.st_Whisper_Groups_LeaveConfirm),
+            confirmLabel = stringResource(R.string.st_Whisper_Groups_Leave),
+            destructive = true,
+            onConfirm = { showLeave = false; viewModel.leave() },
+            onDismiss = { showLeave = false },
         )
     }
     if (showDisband) {
-        AlertDialog(
-            onDismissRequest = { showDisband = false },
-            title = { Text(stringResource(R.string.st_Whisper_Groups_Disband), fontWeight = FontWeight.Bold) },
-            text = { Text(stringResource(R.string.st_Whisper_Groups_DisbandConfirm)) },
-            confirmButton = {
-                ToolzExpressiveButton(onClick = { showDisband = false; viewModel.disband() }) {
-                    Text(stringResource(R.string.st_Whisper_Groups_Disband), fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDisband = false }) { Text(stringResource(R.string.st_Whisper_Cancel)) }
-            },
+        GroupConfirmDialog(
+            title = stringResource(R.string.st_Whisper_Groups_Disband),
+            text = stringResource(R.string.st_Whisper_Groups_DisbandConfirm),
+            confirmLabel = stringResource(R.string.st_Whisper_Groups_Disband),
+            destructive = true,
+            onConfirm = { showDisband = false; viewModel.disband() },
+            onDismiss = { showDisband = false },
+        )
+    }
+    transferTarget?.let { (uid, name) ->
+        GroupConfirmDialog(
+            title = stringResource(R.string.st_Whisper_Groups_MakeOwner),
+            text = stringResource(R.string.st_Whisper_Groups_MakeOwnerConfirm, name),
+            confirmLabel = stringResource(R.string.st_Whisper_Groups_MakeOwner),
+            onConfirm = { viewModel.transferOwnership(uid); transferTarget = null },
+            onDismiss = { transferTarget = null },
+        )
+    }
+    reportTarget?.let { (uid, name) ->
+        GroupConfirmDialog(
+            title = stringResource(R.string.st_Whisper_Groups_Report),
+            text = stringResource(R.string.st_Whisper_Groups_ReportConfirm, name),
+            confirmLabel = stringResource(R.string.st_Whisper_Groups_Report),
+            destructive = true,
+            onConfirm = { viewModel.reportMember(uid); reportTarget = null },
+            onDismiss = { reportTarget = null },
         )
     }
     pendingBlock?.let { uid ->
-        AlertDialog(
-            onDismissRequest = { pendingBlock = null },
-            title = { Text(stringResource(R.string.st_Whisper_Groups_Block), fontWeight = FontWeight.Bold) },
-            text = { Text(stringResource(R.string.st_Whisper_Groups_BlockConfirm)) },
-            confirmButton = {
-                ToolzExpressiveButton(onClick = { pendingBlock = null; viewModel.blockMember(uid) }) {
-                    Text(stringResource(R.string.st_Whisper_Groups_Block), fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingBlock = null }) { Text(stringResource(R.string.st_Whisper_Cancel)) }
-            },
+        GroupConfirmDialog(
+            title = stringResource(R.string.st_Whisper_Groups_Block),
+            text = stringResource(R.string.st_Whisper_Groups_BlockConfirm),
+            confirmLabel = stringResource(R.string.st_Whisper_Groups_Block),
+            destructive = true,
+            onConfirm = { pendingBlock = null; viewModel.blockMember(uid) },
+            onDismiss = { pendingBlock = null },
         )
     }
 }
 
-@Composable
-private fun MuteRow(muted: Boolean, mutedUntilMs: Long, onToggle: () -> Unit) {
-    Card(
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(if (muted) Icons.Rounded.VolumeOff else Icons.Rounded.VolumeUp, contentDescription = if (muted) GroupCd.unmute() else GroupCd.mute())
-            Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    if (muted) stringResource(R.string.st_Whisper_Groups_Unmute) else stringResource(R.string.st_Whisper_Groups_Mute),
-                    style = MaterialTheme.typography.titleSmall,
-                )
-                if (muted && mutedUntilMs != 0L && mutedUntilMs != Long.MAX_VALUE) {
-                    val until = remember(mutedUntilMs) {
-                        runCatching {
-                            val d = java.time.Instant.ofEpochMilli(mutedUntilMs)
-                                .atZone(java.time.ZoneId.systemDefault()).toLocalDate()
-                            "${d.dayOfMonth} ${d.month.name.lowercase().replaceFirstChar { it.uppercase() }.take(3)}"
-                        }.getOrDefault("")
-                    }
-                    if (until.isNotBlank()) {
-                        Text(
-                            stringResource(R.string.st_Whisper_Groups_MutedUntil, until),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-            Switch(checked = muted, onCheckedChange = { onToggle() })
-        }
-    }
-}
-
-@Composable
-private fun MemberRow(
-    name: String,
-    userId: String,
-    role: String,
-    isMe: Boolean,
-    iAmAdmin: Boolean,
-    canDemote: Boolean,
-    canTransfer: Boolean,
-    onPromote: () -> Unit,
-    onDemote: () -> Unit,
-    onMakeOwner: () -> Unit,
-    onRemove: () -> Unit,
-    onBlock: () -> Unit,
-    onReport: () -> Unit,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-    ) {
-        Column(modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                GroupAvatar(name = name, groupId = userId, size = 40.dp)
-                Spacer(Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    if (role == "admin") {
-                        Text(
-                            stringResource(R.string.st_Whisper_Groups_Admin),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
-                }
-            }
-            if (expanded && !isMe) {
-                Spacer(Modifier.size(8.dp))
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        if (iAmAdmin && role != "admin") {
-                            TextButton(onClick = onPromote) {
-                                Icon(Icons.Rounded.Star, contentDescription = stringResource(R.string.st_Whisper_Groups_MakeAdmin), modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text(stringResource(R.string.st_Whisper_Groups_MakeAdmin))
-                            }
-                        }
-                        if (canDemote) {
-                            TextButton(onClick = onDemote) {
-                                Text(stringResource(R.string.st_Whisper_Groups_Demote))
-                            }
-                        }
-                        if (canTransfer) {
-                            TextButton(onClick = onMakeOwner) {
-                                Text(stringResource(R.string.st_Whisper_Groups_MakeOwner))
-                            }
-                        }
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        if (iAmAdmin) {
-                            TextButton(onClick = onRemove) {
-                                Icon(Icons.Rounded.PersonRemove, contentDescription = stringResource(R.string.st_Whisper_Groups_Remove), modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text(stringResource(R.string.st_Whisper_Groups_Remove))
-                            }
-                        }
-                        TextButton(onClick = onBlock) {
-                            Icon(Icons.Rounded.Block, contentDescription = stringResource(R.string.st_Whisper_Groups_Block), modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text(stringResource(R.string.st_Whisper_Groups_Block))
-                        }
-                        TextButton(onClick = onReport) {
-                            Icon(Icons.Rounded.Flag, contentDescription = stringResource(R.string.st_Whisper_Groups_Report), modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text(
-                                stringResource(R.string.st_Whisper_Groups_Report),
-                                color = MaterialTheme.colorScheme.error,
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun AddMemberDialog(
-    viewModel: WhisperGroupInfoViewModel,
-    excludedIds: Set<String>,
-    onDismiss: () -> Unit,
-) {
-    var friends by remember { mutableStateOf<List<com.frerox.toolz.data.whisper.WhisperProfile>>(emptyList()) }
-    val picked = remember { mutableStateListOf<String>() }
-    var query by remember { mutableStateOf("") }
-    LaunchedEffect(Unit) {
-        viewModel.loadFriends { friends = it.filter { it.id !in excludedIds } }
-    }
-    val visible = remember(friends, query) {
-        val q = query.trim().lowercase()
-        if (q.isBlank()) friends
-        else friends.filter {
-            it.effectiveName.lowercase().contains(q) || it.username.lowercase().contains(q)
-        }
-    }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.st_Whisper_Groups_AddMembers), fontWeight = FontWeight.Bold) },
-        text = {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    label = { Text(stringResource(R.string.st_Whisper_Groups_SearchHint)) },
-                    leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = GroupCd.search()) },
-                    singleLine = true,
-                    shape = RoundedCornerShape(20.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.size(8.dp))
-                LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 280.dp)) {
-                    items(visible, key = { it.id }) { friend ->
-                        val selected = friend.id in picked
-                        Row(
-                            modifier = Modifier.fillMaxWidth().clickable {
-                                if (selected) picked.remove(friend.id) else picked.add(friend.id)
-                            }.padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Checkbox(
-                                checked = selected,
-                                onCheckedChange = {
-                                    if (selected) picked.remove(friend.id) else picked.add(friend.id)
-                                },
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text(friend.effectiveName, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            ToolzExpressiveButton(
-                onClick = { viewModel.addMembers(picked.toList()); onDismiss() },
-                enabled = picked.isNotEmpty(),
-            ) {
-                Text(
-                    if (picked.isEmpty()) stringResource(R.string.st_Whisper_Groups_AddMembers)
-                    else "${stringResource(R.string.st_Whisper_Groups_AddMembers)} (${picked.size})",
-                    fontWeight = FontWeight.Bold,
-                )
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.st_Whisper_Cancel)) }
-        },
-    )
-}
-
-@Composable
-private fun RenameDialog(current: String, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
-    var name by remember(current) { mutableStateOf(current) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.st_Whisper_Groups_Rename), fontWeight = FontWeight.Bold) },
-        text = {
-            OutlinedTextField(
-                value = name,
-                onValueChange = { if (it.length <= 64) name = it },
-                label = { Text(stringResource(R.string.st_Whisper_Groups_NameHint)) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        },
-        confirmButton = {
-            ToolzExpressiveButton(onClick = { onConfirm(name) }) {
-                Text(stringResource(R.string.st_Whisper_Groups_Rename), fontWeight = FontWeight.Bold)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.st_Whisper_Cancel)) }
-        },
-    )
-}
-
-/** Group picture header: decrypted picture when present, initial avatar otherwise. */
-@Composable
-private fun GroupPictureHeader(
-    pictureBytes: ByteArray?,
-    name: String,
-    groupId: String,
-    canChange: Boolean,
-    onPick: (ByteArray, String) -> Unit,
-    onError: (String) -> Unit = {},
-) {
-    val context = LocalContext.current
-    val tooBig = stringResource(R.string.st_Whisper_Error_ImageTooLarge)
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        runCatching {
-            val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
-            val bytes = context.contentResolver.openInputStream(uri)?.use {
-                com.frerox.toolz.data.whisper.readBoundedGroupImageBytes(it)
-            } ?: error("empty")
-            onPick(bytes, mime)
-        }.onFailure { onError(tooBig) }
-    }
-    val bitmap = remember(pictureBytes) {
-        pictureBytes?.let {
-            runCatching { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size) }.getOrNull()
-        }
-    }
-    Box(
-        modifier = Modifier.size(96.dp).clip(CircleShape).clickable(
-            enabled = canChange,
-            onClick = { picker.launch("image/*") },
-        ),
-        contentAlignment = Alignment.Center,
-    ) {
-        if (bitmap != null) {
-            Image(
-                bitmap = bitmap.asImageBitmap(),
-                contentDescription = GroupCd.picture(),
-                modifier = Modifier.size(96.dp).clip(CircleShape),
-                contentScale = ContentScale.Crop,
-            )
-        } else {
-            GroupAvatar(name = name, groupId = groupId, size = 96.dp)
-        }
-        if (canChange) {
-            Box(
-                modifier = Modifier.size(96.dp).clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.25f)),
-                contentAlignment = Alignment.BottomEnd,
-            ) {
-                Icon(
-                    Icons.Rounded.AddPhotoAlternate,
-                    contentDescription = GroupCd.picture(),
-                    tint = MaterialTheme.colorScheme.surface,
-                    modifier = Modifier.size(24.dp).padding(3.dp),
-                )
-            }
-        }
-    }
-}
-
-/** Per-group event toggle: role default until the user overrides it. */
-@Composable
-private fun NotifRow(on: Boolean, isOwnerOrAdmin: Boolean, onToggle: () -> Unit) {
-    Card(
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                Icons.Rounded.NotificationsActive,
-                contentDescription = if (on) GroupCd.unmute() else GroupCd.mute(),
-                tint = if (on) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-            )
-            Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    stringResource(R.string.st_Whisper_Groups_NotifToggle),
-                    style = MaterialTheme.typography.titleSmall,
-                )
-                Text(
-                    if (on) {
-                        if (isOwnerOrAdmin) stringResource(R.string.st_Whisper_Groups_NotifScopeOwner)
-                        else stringResource(R.string.st_Whisper_Groups_NotifScopeMember)
-                    } else {
-                        stringResource(R.string.st_Whisper_Groups_NotifToggleOff)
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Switch(checked = on, onCheckedChange = { onToggle() })
-        }
-    }
-}
-
-/** Outstanding invite with owner-only cancel. */
-@Composable
-private fun PendingInviteRow(name: String, onCancel: () -> Unit) {
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        ),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(
-                    stringResource(R.string.st_Whisper_Groups_InvitedLabel),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            TextButton(onClick = onCancel) {
-                Text(stringResource(R.string.st_Whisper_Groups_CancelInvite))
-            }
-        }
-    }
-}
-
-/** Mute duration picker (8h / 1 week / always). */
-@Composable
-private fun MuteDurationDialog(onDismiss: () -> Unit, onPick: (Long) -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.st_Whisper_Groups_MuteFor), fontWeight = FontWeight.Bold) },
-        text = {
-            Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(
-                    onClick = { onPick(8L * 60 * 60 * 1000) },
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text(stringResource(R.string.st_Whisper_Groups_Mute8h), modifier = Modifier.fillMaxWidth()) }
-                TextButton(
-                    onClick = { onPick(7L * 24 * 60 * 60 * 1000) },
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text(stringResource(R.string.st_Whisper_Groups_MuteWeek), modifier = Modifier.fillMaxWidth()) }
-                TextButton(
-                    onClick = { onPick(Long.MAX_VALUE) },
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text(stringResource(R.string.st_Whisper_Groups_MuteAlways), modifier = Modifier.fillMaxWidth()) }
-            }
-        },
-        confirmButton = {},
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.st_Whisper_Cancel)) }
-        },
-    )
-}
-
-/** Admin console: send-mode toggle + description (signed SETTINGS event). */
-@Composable
-private fun SettingsCard(
-    adminOnlySend: Boolean,
-    membersCanEdit: Boolean,
-    description: String,
-    onToggleSend: () -> Unit,
-    onToggleEdit: () -> Unit,
-    onEditDesc: () -> Unit,
-) {
-    Card(
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-    ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-            Text(
-                stringResource(R.string.st_Whisper_Groups_Settings),
-                style = MaterialTheme.typography.titleSmall,
-                modifier = Modifier.padding(bottom = 4.dp),
-            )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        stringResource(R.string.st_Whisper_Groups_AdminOnlySend),
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        stringResource(R.string.st_Whisper_Groups_AdminOnlySendDesc),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Switch(checked = adminOnlySend, onCheckedChange = { onToggleSend() })
-            }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        stringResource(R.string.st_Whisper_Groups_MembersCanEdit),
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        stringResource(R.string.st_Whisper_Groups_MembersCanEditDesc),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Switch(checked = membersCanEdit, onCheckedChange = { onToggleEdit() })
-            }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        stringResource(R.string.st_Whisper_Groups_Description),
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        description.ifBlank { stringResource(R.string.st_Whisper_Groups_DescriptionHint) },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                TextButton(onClick = onEditDesc) {
-                    Text(stringResource(R.string.st_Whisper_Groups_EditDescription))
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun DescEditDialog(current: String, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
-    var desc by remember(current) { mutableStateOf(current) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.st_Whisper_Groups_Description), fontWeight = FontWeight.Bold) },
-        text = {
-            OutlinedTextField(
-                value = desc,
-                onValueChange = { if (it.length <= 140) desc = it },
-                label = { Text(stringResource(R.string.st_Whisper_Groups_DescriptionHint)) },
-                minLines = 2,
-                maxLines = 4,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        },
-        confirmButton = {
-            ToolzExpressiveButton(onClick = { onConfirm(desc.trim()) }) {
-                Text(stringResource(R.string.st_Whisper_Groups_EditDescription), fontWeight = FontWeight.Bold)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.st_Whisper_Cancel)) }
-        },
-    )
-}
-
-/** Share sheet: QR of the group id + copy helpers (join still needs an invite). */
-@Composable
-private fun ShareGroupDialog(
-    groupId: String,
-    groupName: String,
-    onDismiss: () -> Unit,
-    onMessage: (String) -> Unit = {},
-) {
-    val context = LocalContext.current
-    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
-    val qr = remember(groupId) {
-        runCatching {
-            com.frerox.toolz.util.CryptoManager.generateQrCode("WHISPER-GROUP:$groupId", 512)
-        }.getOrNull()
-    }
-    val qrBitmap = remember(qr) { qr?.asImageBitmap() }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.st_Whisper_Groups_Share), fontWeight = FontWeight.Bold) },
-        text = {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                if (qrBitmap != null) {
-                    Image(
-                        bitmap = qrBitmap,
-                        contentDescription = stringResource(R.string.st_Whisper_Groups_Share),
-                        modifier = Modifier.size(200.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surface),
-                    )
-                }
-                Text(
-                    stringResource(R.string.st_Whisper_Groups_ShareText, groupName),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ToolzTonalExpressiveButton(onClick = {
-                        clipboard.setText(AnnotatedString(groupId))
-                        onMessage(context.getString(R.string.st_Whisper_Groups_Copied))
-                    }) {
-                        Text(stringResource(R.string.st_Whisper_Groups_CopyId))
-                    }
-                }
-            }
-        },
-        confirmButton = {},
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.st_Whisper_Cancel)) }
-        },
-    )
-}
-
-/** Shared-photos grid; thumbs decrypt lazily, tap opens the fullscreen viewer. */
-@Composable
-private fun GroupGalleryDialog(
-    photos: List<WhisperGroupInfoViewModel.GalleryItem>,
-    bytesById: Map<String, ByteArray>,
-    onRequestBytes: (WhisperGroupInfoViewModel.GalleryItem) -> Unit,
-    onDismiss: () -> Unit,
-    onMessage: (String) -> Unit = {},
-) {
-    var viewer by remember { mutableStateOf<ByteArray?>(null) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.st_Whisper_Groups_Gallery), fontWeight = FontWeight.Bold) },
-        text = {
-            if (photos.isEmpty()) {
-                Text(
-                    stringResource(R.string.st_Whisper_Groups_GalleryEmpty),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(3),
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp).groupFadingEdge(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    items(photos.size, key = { photos[it].rowId }) { idx ->
-                        val item = photos[idx]
-                        LaunchedEffect(item.rowId) { onRequestBytes(item) }
-                        val bytes = bytesById[item.rowId]
-                        val bitmap = remember(bytes) {
-                            bytes?.let {
-                                runCatching { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size) }.getOrNull()
-                            }
-                        }
-                        Box(
-                            modifier = Modifier.size(96.dp).clip(RoundedCornerShape(12.dp))
-                                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                                .clickable(enabled = bytes != null) { viewer = bytes },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            if (bitmap != null) {
-                                Image(
-                                    bitmap = bitmap.asImageBitmap(),
-                                    contentDescription = item.caption.ifBlank { null },
-                                    modifier = Modifier.size(96.dp),
-                                    contentScale = ContentScale.Crop,
-                                )
-                            } else {
-                                GroupUiInlineLoading()
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {},
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.st_Whisper_Cancel)) }
-        },
-    )
-    viewer?.let { bytes ->
-        GroupImageViewer(bytes = bytes, onDismiss = { viewer = null }, onMessage = onMessage)
-    }
-}
-
-/** One inbound join request (admins approve into an invite, or deny). */
-@Composable
-private fun RequestRow(name: String, onApprove: () -> Unit, onDeny: () -> Unit) {
-    Card(
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                name,
-                style = MaterialTheme.typography.titleSmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            TextButton(onClick = onDeny) {
-                Text(stringResource(R.string.st_Whisper_Groups_Deny))
-            }
-            ToolzExpressiveButton(onClick = onApprove) {
-                Text(stringResource(R.string.st_Whisper_Groups_Approve), fontWeight = FontWeight.Bold)
-            }
-        }
-    }
-}
-
-/** Visually separated destructive actions (leave / disband live here only). */
-@Composable
-private fun DangerZoneCard(content: @Composable () -> Unit) {
-    Card(
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f),
-        ),
-    ) {
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            content()
-        }
-    }
+/** Short local date ("3 Oct") for a timed mute; empty for forever / not muted. */
+private fun formatMutedUntil(ms: Long): String {
+    if (ms == 0L || ms == Long.MAX_VALUE) return ""
+    return runCatching {
+        val z = java.time.Instant.ofEpochMilli(ms).atZone(java.time.ZoneId.systemDefault())
+        java.time.format.DateTimeFormatter.ofPattern("d MMM", java.util.Locale.getDefault()).format(z)
+    }.getOrDefault("")
 }
