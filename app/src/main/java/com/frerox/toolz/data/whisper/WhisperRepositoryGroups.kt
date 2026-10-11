@@ -279,6 +279,25 @@ internal fun groupSignBytesSha8(bytes: ByteArray): String = runCatching {
         .take(4).joinToString("") { "%02x".format(it) }
 }.getOrDefault("????????")
 
+/**
+ * Publish-side record of exact sign bytes, keyed `group|seq|type`.
+ * Lets a later verify failure print BOTH hashes in one message: equal
+ * hashes prove the row round-tripped and the signer/key is at fault;
+ * differing hashes prove the server (or transport) mutated the row.
+ * Bounded best-effort diagnostic only — never read for trust decisions.
+ */
+private val publishedEventSha8 = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+private fun publishedShaKey(groupId: String, seq: Long, typeWire: String) = "$groupId|$seq|$typeWire"
+
+internal fun publishedSha8Of(groupId: String, seq: Long, typeWire: String): String? =
+    publishedEventSha8[publishedShaKey(groupId, seq, typeWire)]
+
+private fun recordPublishedSha8(groupId: String, seq: Long, typeWire: String, signBytes: ByteArray) {
+    if (publishedEventSha8.size > 500) publishedEventSha8.clear()
+    publishedEventSha8[publishedShaKey(groupId, seq, typeWire)] = groupSignBytesSha8(signBytes)
+}
+
 /** Rebuilds membership from seq-ordered events; throws fail-closed on any violation. */
 fun applyEvents(
     groupId: String,
@@ -310,8 +329,10 @@ fun applyEvents(
             require(members.isEmpty()) { "duplicate create" }
             val signer = signerKeyOf(ev.actor)
             val signBytes = groupEventSignBytes(ev.groupId, ev.seq, ev.epoch, type, ev.actor, ev.payloadJson)
+            val published = publishedSha8Of(ev.groupId, ev.seq, type.wire)
+                ?.let { ", published sha8=$it" }.orEmpty()
             require(signer != null && verify(signBytes, ev.adminSig, signer)) {
-                "bad create signature (bytes sha8=${groupSignBytesSha8(signBytes)})"
+                "bad create signature (bytes sha8=${groupSignBytesSha8(signBytes)}$published)"
             }
             members[ev.actor] = WhisperGroupRole.ADMIN
             joinEpoch[ev.actor] = ev.epoch
@@ -1078,6 +1099,33 @@ suspend fun WhisperRepository.createGroup(
             actor = me,
             payload = payload,
         ).getOrThrow()
+        // Round-trip guard: re-read the CREATE row and re-verify it against
+        // the local key BEFORE fanning out invites. If the server (schema
+        // cache, trigger, truncation) stored anything other than exactly what
+        // was signed, fail here with the precise field diff instead of a
+        // later undiagnosable "bad create signature". A denied re-read stays
+        // soft — the closing sync reports the authoritative error.
+        runCatching {
+            val row = db.from("whisper_group_events").select {
+                filter { eq("group_id", groupId); eq("seq", 1L) }
+            }.decodeSingleOrNull<GroupEventRow>() ?: return@runCatching
+            val selfKey = crypto.protocolSigningPublicKeyBase64()
+            val backBytes = groupEventSignBytes(row.groupId, row.seq, row.epoch, WhisperGroupEventType.CREATE, row.actor, row.payload)
+            val ok = selfKey != null && crypto.verifyProtocol(backBytes, row.adminSig, selfKey)
+            if (!ok) {
+                val diff = buildList {
+                    if (row.seq != 1L) add("seq=${row.seq}")
+                    if (row.epoch != 0L) add("epoch=${row.epoch}")
+                    if (row.type != WhisperGroupEventType.CREATE.wire) add("type=${row.type}")
+                    if (row.actor != me) add("actor?")
+                    if (row.payload != payload) add("payload[${payload.length}->${row.payload.length}]")
+                }.joinToString(",").ifBlank { "fields match, sigLen=${row.adminSig.length}" }
+                error("Group create did not survive the server round-trip ($diff).")
+            }
+        }.onFailure { e ->
+            if (e.message?.startsWith("Group create did not survive") == true) throw e
+            android.util.Log.w("WhisperGroups", "create round-trip re-read soft-failed: ${e.message}")
+        }
     } catch (e: Throwable) {
         // No history: tear the whole stub down (row + admin row).
         runCatching { db.from("whisper_group_members").delete { filter { eq("group_id", groupId); eq("user_id", me) } } }
@@ -1159,7 +1207,10 @@ private suspend fun WhisperRepository.publishGroupEvent(
                 ),
             )
         }
-        if (result.isSuccess) return@runCatching
+        if (result.isSuccess) {
+            recordPublishedSha8(groupId, attemptSeq, type.wire, signBytes)
+            return@runCatching
+        }
         val err = result.exceptionOrNull()
         if (!isGroupSeqCollision(err)) throw err ?: error("Could not publish the group event.")
         lastError = err
