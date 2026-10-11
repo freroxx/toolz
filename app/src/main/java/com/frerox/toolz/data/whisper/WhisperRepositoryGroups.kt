@@ -917,7 +917,33 @@ private suspend fun WhisperRepository.fetchVerifiedMembershipInner(groupId: Stri
             signerKeyOf = { uid -> keys[uid] },
         )
     }
-    var membership = verifyAll(events)
+    // A dead CREATE never verifies (fail-closed by design): attribute it so
+    // the message says WHOSE key discontinuity orphaned the group instead of
+    // a bare hash. Self-created + current key ≠ creating key almost always
+    // means reinstall / data-clear / debug↔release switch (AndroidKeyStore
+    // is scoped to the install); peer-created means the creator's key moved.
+    val me = requireMe()
+    suspend fun verifyOrDiagnose(log: List<WhisperGroupEvent>): WhisperGroupMembership {
+        try {
+            return verifyAll(log)
+        } catch (e: Throwable) {
+            val raw = e.message.orEmpty()
+            val creator = log.firstOrNull { it.type == WhisperGroupEventType.CREATE }?.actor
+            if ("bad create signature" in raw && creator != null) {
+                val why = if (creator == me) {
+                    "your current install cannot verify your own group's creation — " +
+                        "this install's signing key is not the one that created it " +
+                        "(reinstall, data clear, or debug/release switch). Create a fresh group."
+                } else {
+                    "the group creator's signing key changed since creation " +
+                        "(they reinstalled or switched builds). Ask them to create a fresh group."
+                }
+                error("$raw — $why")
+            }
+            throw e
+        }
+    }
+    var membership = verifyOrDiagnose(events)
     if (membership.degraded && (membership.badSeq ?: Long.MAX_VALUE) <= watermark) {
         // The poison sits AT/BELOW the watermark: the local cache itself is
         // suspect (diverged or poisoned). Drop it and refetch the full log —
@@ -925,7 +951,7 @@ private suspend fun WhisperRepository.fetchVerifiedMembershipInner(groupId: Stri
         groupDao.clearEvents(groupId)
         events = fetchFresh(0)
         if (events.isEmpty()) error("Group has no history.")
-        membership = verifyAll(events)
+        membership = verifyOrDiagnose(events)
     }
     val verifiedEvents = if (membership.degraded) events.filter { it.seq < (membership.badSeq ?: Long.MAX_VALUE) } else events
     persistGroupCache(group, membership, verifiedEvents)
