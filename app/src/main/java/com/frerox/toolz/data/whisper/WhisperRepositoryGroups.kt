@@ -268,6 +268,17 @@ fun groupEventSignBytes(
 ): ByteArray =
     "WG-EVENT|$groupId|$seq|$epoch|${type.wire}|$actor|$payloadJson".toByteArray(Charsets.UTF_8)
 
+/**
+ * Short SHA-256 prefix of the exact sign bytes, for failure diagnostics.
+ * Content-free (hash only): lets a publish-side log and a verify-side
+ * failure be compared to prove whether the server round-tripped the row
+ * byte-identically, without ever printing ids, names, or keys.
+ */
+internal fun groupSignBytesSha8(bytes: ByteArray): String = runCatching {
+    java.security.MessageDigest.getInstance("SHA-256").digest(bytes)
+        .take(4).joinToString("") { "%02x".format(it) }
+}.getOrDefault("????????")
+
 /** Rebuilds membership from seq-ordered events; throws fail-closed on any violation. */
 fun applyEvents(
     groupId: String,
@@ -298,8 +309,9 @@ fun applyEvents(
         if (type == WhisperGroupEventType.CREATE) {
             require(members.isEmpty()) { "duplicate create" }
             val signer = signerKeyOf(ev.actor)
-            require(signer != null && verify(groupEventSignBytes(ev.groupId, ev.seq, ev.epoch, type, ev.actor, ev.payloadJson), ev.adminSig, signer)) {
-                "bad create signature"
+            val signBytes = groupEventSignBytes(ev.groupId, ev.seq, ev.epoch, type, ev.actor, ev.payloadJson)
+            require(signer != null && verify(signBytes, ev.adminSig, signer)) {
+                "bad create signature (bytes sha8=${groupSignBytesSha8(signBytes)})"
             }
             members[ev.actor] = WhisperGroupRole.ADMIN
             joinEpoch[ev.actor] = ev.epoch
@@ -1114,8 +1126,25 @@ private suspend fun WhisperRepository.publishGroupEvent(
     var attemptEpoch = epoch
     var lastError: Throwable? = null
     repeat(3) { attempt ->
-        val sig = crypto.signProtocol(groupEventSignBytes(groupId, attemptSeq, attemptEpoch, type, actor, payload))
+        val signBytes = groupEventSignBytes(groupId, attemptSeq, attemptEpoch, type, actor, payload)
+        val sig = crypto.signProtocol(signBytes)
             ?: error("Could not sign the group event.")
+        // Publish-time self-check: the bytes just signed must verify against
+        // our own published key BEFORE they touch the network. A mismatch
+        // means the local signing key and published key desynced — publishing
+        // would poison the log with an event nobody (including us) can
+        // verify. Fail fast with a truthful message instead of a later
+        // "bad create signature" mystery. Content-free log (hash + lengths).
+        val selfKey = crypto.protocolSigningPublicKeyBase64()
+        if (selfKey == null || !crypto.verifyProtocol(signBytes, sig, selfKey)) {
+            android.util.Log.e(
+                "WhisperGroups",
+                "publish self-check failed type=${type.wire} seq=$attemptSeq " +
+                    "sha8=${groupSignBytesSha8(signBytes)} sigLen=${sig.length} " +
+                    "keyLen=${selfKey?.length ?: -1}",
+            )
+            error("Group event failed its own signature check (local signing key mismatch).")
+        }
         val result = runCatching {
             db.from("whisper_group_events").insert(
                 GroupEventInsert(
