@@ -494,6 +494,7 @@ class DashboardViewModel @Inject constructor(
                 ToolItem(com.frerox.toolz.R.string.st_Tool_FileConverter, Icons.Rounded.Transform, Screen.FileConverter.createRoute(), com.frerox.toolz.R.string.st_Tool_FileConverter_Desc, Color(0xFFFB8C00)),
                 ToolItem(com.frerox.toolz.R.string.st_Tool_SoundMeter, Icons.Rounded.GraphicEq, Screen.SoundMeter.route, com.frerox.toolz.R.string.st_Tool_SoundMeter_Desc, Color(0xFF00B0FF)),
                 ToolItem(com.frerox.toolz.R.string.st_Tool_BackgroundRemover, Icons.Rounded.Portrait, Screen.BackgroundRemover.createRoute(), com.frerox.toolz.R.string.st_Tool_BackgroundRemover_Desc, Color(0xFF673AB7)),
+                ToolItem(com.frerox.toolz.R.string.st_Tool_LivingFrames, Icons.Rounded.Image, Screen.LivingWidgets.route, com.frerox.toolz.R.string.st_Tool_LivingFrames_Desc, Color(0xFFEC407A)),
             ),
         ),
         ToolCategory(

@@ -145,6 +145,13 @@ sealed class Screen(val route: String) {
     object PurgeShot : Screen("purge_shot")
     object ToolShortcuts : Screen("tool_shortcuts")
 
+    // Living Widgets — animated home-screen widgets (GIF / video loops / photo).
+    // Route was "living_frames" in 1.1.7; LivingFrames below is a legacy alias
+    // so already-pinned widget tap intents keep resolving.
+    object LivingWidgets : Screen("living_widgets")
+    @Deprecated("Legacy route alias — use LivingWidgets")
+    object LivingFrames : Screen("living_frames")
+
     // Whisper — Privacy Messaging
     object WhisperOnboarding : Screen("whisper_onboarding")
     object WhisperAuth : Screen("whisper_auth")

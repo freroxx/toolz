@@ -553,6 +553,10 @@
     <string name="st_Tool_BackgroundRemover_Desc">Remove BG with AI</string>
     <string name="st_Tool_PurgeShot">PurgeShot</string>
     <string name="st_Tool_PurgeShot_Desc">Auto-delete shots</string>
+    <string name="st_Tool_LivingFrames">Living Widgets</string>
+    <string name="st_Tool_LivingFrames_Desc">GIF &amp; video widgets</string>
+    <string name="widget_living_frames_label">Toolz Living Widget</string>
+    <string name="widget_living_frames_desc">Looping GIF, video or photo frame on your home screen</string>
     <string name="st_BackgroundRemover_Pick">Pick Image</string>
     <string name="st_BackgroundRemover_Save">Save Image</string>
     <string name="st_BackgroundRemover_Clear">Clear</string>

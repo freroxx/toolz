@@ -1444,6 +1444,19 @@ fun ToolzNavHost(
                 settingsRepository = settingsRepository
             )
         }
+        composable(Screen.LivingWidgets.route) {
+            com.frerox.toolz.ui.screens.livingframes.LivingWidgetsScreen(
+                onBack = { toolOnBack() }
+            )
+        }
+        // Legacy route alias (1.1.7 pinned widgets carry "living_frames").
+        composable(Screen.LivingFrames.route) {
+            androidx.compose.runtime.LaunchedEffect(Unit) {
+                navController.navigate(Screen.LivingWidgets.route) {
+                    popUpTo(Screen.LivingFrames.route) { inclusive = true }
+                }
+            }
+        }
         composable(Screen.PeriodicTable.route) {
             PeriodicTableScreen(onBack = { toolOnBack() })
         }

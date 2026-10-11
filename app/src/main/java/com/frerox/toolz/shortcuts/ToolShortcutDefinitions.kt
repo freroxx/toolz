@@ -7,7 +7,7 @@ import com.frerox.toolz.ui.navigation.Screen
 
 /**
  * Central definitions for Tool Shortcuts.
- * Derived from DashboardViewModel.getDashboardCategories() – 49 tools.
+ * Derived from DashboardViewModel.getDashboardCategories() – 50 tools.
  * This is the single source of truth for shortcuts (static + pinned).
  *
  * Each shortcut maps to a route understood by MainActivity.resolveExternalNavigationRoute
@@ -28,7 +28,7 @@ object ToolShortcutDefinitions {
     const val EXTRA_FROM_SHORTCUT = "from_shortcut"
     const val EXTRA_SHORTCUT_ID = "shortcut_id"
 
-    // All 49 tools in dashboard order (6+5+6+8+11+13)
+    // All 50 tools in dashboard order (6+5+7+8+11+13)
     val all: List<ToolShortcutDef> = listOf(
         // SmartFlow & AI (6)
         ToolShortcutDef(
@@ -131,7 +131,7 @@ object ToolShortcutDefinitions {
             route = Screen.WorldClock.route,
             rank = 11
         ),
-        // Media & Audio (6)
+        // Media & Audio (7)
         ToolShortcutDef(
             id = "shortcut_media_downloader",
             labelRes = R.string.st_Tool_MediaDownloader,
@@ -185,6 +185,15 @@ object ToolShortcutDefinitions {
             iconRes = R.drawable.ic_shortcut_background_remover,
             route = Screen.BackgroundRemover.createRoute(),
             rank = 17
+        ),
+        ToolShortcutDef(
+            id = "shortcut_living_frames",
+            labelRes = R.string.st_Tool_LivingFrames,
+            shortLabelRes = R.string.st_Tool_LivingFrames,
+            descriptionRes = R.string.st_Tool_LivingFrames_Desc,
+            iconRes = R.drawable.ic_shortcut_living_frames,
+            route = Screen.LivingWidgets.route,
+            rank = 49
         ),
         // Utilities & Math (8)
         ToolShortcutDef(
