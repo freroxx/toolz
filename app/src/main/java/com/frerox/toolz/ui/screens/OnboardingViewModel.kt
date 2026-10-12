@@ -53,9 +53,30 @@ class OnboardingViewModel @Inject constructor(
         val notificationsEnabled: Boolean = true,
         val backgroundNotificationsEnabled: Boolean = true,
         val vaultEnabled: Boolean = true,
+        val whisperNotificationsEnabled: Boolean = true,
         val shizukuAuthorized: Boolean = false,
         val deviceSpecs: DeviceSpecHelper.DeviceSpecs? = null,
-        val updateState: UpdateCheckResult? = null
+        val updateState: UpdateCheckResult? = null,
+        // Step 6 — Preferences (curated subset grouped into AI / Notifications /
+        // Interface & HUD / News). Defaults mirror SettingsRepository.
+        val offlineMode: Boolean = false,
+        val autoOffline: Boolean = true,
+        val offlinePopup: Boolean = true,
+        val aiSearchChat: Boolean = true,
+        val clipboardAi: Boolean = true,
+        val aiClipboardMonitoring: Boolean = false,
+        val pdfAiTools: Boolean = true,
+        val notepadAiTools: Boolean = true,
+        val musicAi: Boolean = true,
+        val hapticFeedback: Boolean = true,
+        val showRecentTools: Boolean = true,
+        val showQuickNotes: Boolean = true,
+        val showDashboardStats: Boolean = true,
+        val showToolzPill: Boolean = true,
+        val newsEnabled: Boolean = true,
+        val newsNotifications: Boolean = true,
+        // Step 7 — Language (codes match locales_config + Settings).
+        val appLanguage: String = "en"
     )
 
     private val _uiState = MutableStateFlow(OnboardingState())
@@ -83,6 +104,24 @@ class OnboardingViewModel @Inject constructor(
     fun updateNotifications(enabled: Boolean) = _uiState.update { it.copy(notificationsEnabled = enabled) }
     fun updateBackgroundNotifications(enabled: Boolean) = _uiState.update { it.copy(backgroundNotificationsEnabled = enabled) }
     fun updateVault(enabled: Boolean) = _uiState.update { it.copy(vaultEnabled = enabled) }
+    fun updateWhisperNotifications(enabled: Boolean) = _uiState.update { it.copy(whisperNotificationsEnabled = enabled) }
+    fun updateOfflineMode(enabled: Boolean) = _uiState.update { it.copy(offlineMode = enabled) }
+    fun updateAutoOffline(enabled: Boolean) = _uiState.update { it.copy(autoOffline = enabled) }
+    fun updateOfflinePopup(enabled: Boolean) = _uiState.update { it.copy(offlinePopup = enabled) }
+    fun updateAiSearchChat(enabled: Boolean) = _uiState.update { it.copy(aiSearchChat = enabled) }
+    fun updateClipboardAi(enabled: Boolean) = _uiState.update { it.copy(clipboardAi = enabled) }
+    fun updateAiClipboardMonitoring(enabled: Boolean) = _uiState.update { it.copy(aiClipboardMonitoring = enabled) }
+    fun updatePdfAiTools(enabled: Boolean) = _uiState.update { it.copy(pdfAiTools = enabled) }
+    fun updateNotepadAiTools(enabled: Boolean) = _uiState.update { it.copy(notepadAiTools = enabled) }
+    fun updateMusicAi(enabled: Boolean) = _uiState.update { it.copy(musicAi = enabled) }
+    fun updateHapticFeedback(enabled: Boolean) = _uiState.update { it.copy(hapticFeedback = enabled) }
+    fun updateShowRecentTools(enabled: Boolean) = _uiState.update { it.copy(showRecentTools = enabled) }
+    fun updateShowQuickNotes(enabled: Boolean) = _uiState.update { it.copy(showQuickNotes = enabled) }
+    fun updateShowDashboardStats(enabled: Boolean) = _uiState.update { it.copy(showDashboardStats = enabled) }
+    fun updateShowToolzPill(enabled: Boolean) = _uiState.update { it.copy(showToolzPill = enabled) }
+    fun updateNewsEnabled(enabled: Boolean) = _uiState.update { it.copy(newsEnabled = enabled) }
+    fun updateNewsNotifications(enabled: Boolean) = _uiState.update { it.copy(newsNotifications = enabled) }
+    fun updateAppLanguage(lang: String) = _uiState.update { it.copy(appLanguage = lang) }
 
     fun checkForUpdates() {
         viewModelScope.launch {
@@ -104,6 +143,26 @@ class OnboardingViewModel @Inject constructor(
             settingsRepository.setNotificationsEnabled(s.notificationsEnabled)
             settingsRepository.setBackgroundNotificationsEnabled(s.backgroundNotificationsEnabled)
             settingsRepository.setNotificationVaultEnabled(s.vaultEnabled)
+            settingsRepository.setWhisperNotificationsEnabled(s.whisperNotificationsEnabled)
+            // Preferences step
+            settingsRepository.setOfflineModeEnabled(s.offlineMode)
+            settingsRepository.setAutoOfflineEnabled(s.autoOffline)
+            settingsRepository.setOfflinePopupEnabled(s.offlinePopup)
+            settingsRepository.setAiSearchChatEnabled(s.aiSearchChat)
+            settingsRepository.setClipboardAiEnabled(s.clipboardAi)
+            settingsRepository.setAiClipboardMonitoringEnabled(s.aiClipboardMonitoring)
+            settingsRepository.setPdfAiToolsEnabled(s.pdfAiTools)
+            settingsRepository.setNotepadAiToolsEnabled(s.notepadAiTools)
+            settingsRepository.setMusicAiEnabled(s.musicAi)
+            settingsRepository.setHapticFeedback(s.hapticFeedback)
+            settingsRepository.setShowRecentTools(s.showRecentTools)
+            settingsRepository.setShowQuickNotes(s.showQuickNotes)
+            settingsRepository.setShowDashboardStats(s.showDashboardStats)
+            settingsRepository.setShowToolzPill(s.showToolzPill)
+            settingsRepository.setNewsEnabled(s.newsEnabled)
+            settingsRepository.setNewsNotificationsEnabled(s.newsNotifications)
+            // Language step
+            settingsRepository.setAppLanguage(s.appLanguage)
             
             if (s.groqApiKey.isNotBlank()) {
                 aiSettingsManager.setApiKey(s.groqApiKey, "Groq")
