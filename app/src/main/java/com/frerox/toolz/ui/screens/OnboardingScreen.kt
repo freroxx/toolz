@@ -74,24 +74,43 @@ import androidx.compose.material.icons.automirrored.rounded.HelpOutline
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Analytics
+import androidx.compose.material.icons.rounded.Alarm
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.CloudOff
+import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.DeveloperBoard
+import androidx.compose.material.icons.rounded.DirectionsRun
+import androidx.compose.material.icons.rounded.DocumentScanner
+import androidx.compose.material.icons.rounded.EditNote
+import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Gradient
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Hub
 import androidx.compose.material.icons.rounded.Insights
+import androidx.compose.material.icons.rounded.Layers
+import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.Memory
+import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.Newspaper
+import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.NotificationsOff
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Security
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Storage
+import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.SystemUpdate
+import androidx.compose.material.icons.rounded.Vibration
 import androidx.compose.material.icons.rounded.VpnKey
+import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -189,7 +208,7 @@ fun OnboardingScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val vibrationManager = LocalVibrationManager.current
-    val pageCount = 7
+    val pageCount = 9
     val pagerState = rememberPagerState(pageCount = { pageCount })
     var showSkipDialog by remember { mutableStateOf(false) }
     var isFinishing by remember { mutableStateOf(false) }
@@ -222,6 +241,8 @@ fun OnboardingScreen(
         total++; if (uiState.groqApiKey.isNotBlank()) done++
         total++; if (uiState.notificationsEnabled) done++
         total++; if (uiState.shizukuAuthorized) done++
+        total++; if (uiState.appLanguage.isNotBlank()) done++
+        total++; if (uiState.newsEnabled) done++
         done.toFloat() / total
     }
 
@@ -341,14 +362,43 @@ fun OnboardingScreen(
                                 notificationsEnabled = uiState.notificationsEnabled,
                                 backgroundNotificationsEnabled = uiState.backgroundNotificationsEnabled,
                                 vaultEnabled = uiState.vaultEnabled,
+                                whisperNotificationsEnabled = uiState.whisperNotificationsEnabled,
                                 shizukuAuthorized = uiState.shizukuAuthorized,
                                 onNotificationsChange = viewModel::updateNotifications,
                                 onBackgroundNotificationsChange = viewModel::updateBackgroundNotifications,
                                 onVaultChange = viewModel::updateVault,
+                                onWhisperNotificationsChange = viewModel::updateWhisperNotifications,
                                 refreshShizuku = viewModel::refreshShizukuStatus,
                                 onNext = goNext
                             )
-                            6 -> ReadyStep(
+                            6 -> PreferencesStep(
+                                state = uiState,
+                                onOfflineModeChange = viewModel::updateOfflineMode,
+                                onAutoOfflineChange = viewModel::updateAutoOffline,
+                                onOfflinePopupChange = viewModel::updateOfflinePopup,
+                                onAiSearchChatChange = viewModel::updateAiSearchChat,
+                                onClipboardAiChange = viewModel::updateClipboardAi,
+                                onAiClipboardMonitoringChange = viewModel::updateAiClipboardMonitoring,
+                                onPdfAiToolsChange = viewModel::updatePdfAiTools,
+                                onNotepadAiToolsChange = viewModel::updateNotepadAiTools,
+                                onMusicAiChange = viewModel::updateMusicAi,
+                                onNotificationsChange = viewModel::updateNotifications,
+                                onWhisperNotificationsChange = viewModel::updateWhisperNotifications,
+                                onHapticChange = viewModel::updateHapticFeedback,
+                                onRecentToolsChange = viewModel::updateShowRecentTools,
+                                onQuickNotesChange = viewModel::updateShowQuickNotes,
+                                onDashboardStatsChange = viewModel::updateShowDashboardStats,
+                                onToolzPillChange = viewModel::updateShowToolzPill,
+                                onNewsChange = viewModel::updateNewsEnabled,
+                                onNewsNotificationsChange = viewModel::updateNewsNotifications,
+                                onNext = goNext
+                            )
+                            7 -> LanguageStep(
+                                selected = uiState.appLanguage,
+                                onLanguageChange = viewModel::updateAppLanguage,
+                                onNext = goNext
+                            )
+                            8 -> ReadyStep(
                                 name = uiState.name,
                                 onComplete = {
                                     vibrationManager?.vibrateSuccess()
@@ -362,7 +412,7 @@ fun OnboardingScreen(
             }
 
             // Confetti layer on top of background
-            if (pagerState.currentPage == 6 && !isFinishing) {
+            if (pagerState.currentPage == 8 && !isFinishing) {
                 Box(modifier = Modifier.fillMaxSize().zIndex(5f)) {
                     PomodoroSuccessConfetti(onFinished = {})
                 }
@@ -711,7 +761,7 @@ fun PersonaStep(
         verticalArrangement = Arrangement.Center
     ) {
         StaggeredEntrance(index = 0) {
-            SectionHeader(eyebrow = "Step 2 of 5", title = "Make it yours")
+            SectionHeader(eyebrow = "Step 2 of 7", title = "Make it yours")
         }
 
         Spacer(Modifier.height(28.dp))
@@ -808,7 +858,7 @@ fun SystemStep(
         verticalArrangement = Arrangement.Center
     ) {
         StaggeredEntrance(index = 0) {
-            SectionHeader(eyebrow = "Step 3 of 5", title = "Tuned for your device")
+            SectionHeader(eyebrow = "Step 3 of 7", title = "Tuned for your device")
         }
 
         Spacer(Modifier.height(28.dp))
@@ -913,7 +963,7 @@ fun IntelligenceStep(apiKey: String, onApiKeyChange: (String) -> Unit, onNext: (
         verticalArrangement = Arrangement.Center
     ) {
         StaggeredEntrance(index = 0) {
-            SectionHeader(eyebrow = "Step 4 of 5", title = "Turn on AI features")
+            SectionHeader(eyebrow = "Step 4 of 7", title = "Turn on AI features")
         }
 
         Spacer(Modifier.height(28.dp))
@@ -1048,10 +1098,12 @@ fun AccessStep(
     notificationsEnabled: Boolean,
     backgroundNotificationsEnabled: Boolean,
     vaultEnabled: Boolean,
+    whisperNotificationsEnabled: Boolean,
     shizukuAuthorized: Boolean,
     onNotificationsChange: (Boolean) -> Unit,
     onBackgroundNotificationsChange: (Boolean) -> Unit,
     onVaultChange: (Boolean) -> Unit,
+    onWhisperNotificationsChange: (Boolean) -> Unit,
     refreshShizuku: () -> Unit,
     onNext: () -> Unit
 ) {
@@ -1060,22 +1112,36 @@ fun AccessStep(
     var usageStatsGranted by remember { mutableStateOf(hasUsageStatsPermission(context)) }
     var notificationListenerGranted by remember { mutableStateOf(hasNotificationListenerPermission(context)) }
     var accessibilityGranted by remember { mutableStateOf(isAccessibilityServiceEnabled(context)) }
+    var allFilesGranted by remember { mutableStateOf(hasAllFilesAccess(context)) }
+    var overlayGranted by remember { mutableStateOf(canDrawOverlays(context)) }
+    var exactAlarmGranted by remember { mutableStateOf(canScheduleExactAlarms(context)) }
+    var installPackagesGranted by remember { mutableStateOf(canRequestPackageInstalls(context)) }
+    var writeSettingsGranted by remember { mutableStateOf(canWriteSystemSettings(context)) }
     var showShizukuSetup by remember { mutableStateOf(false) }
+
+    fun refreshSpecial() {
+        usageStatsGranted = hasUsageStatsPermission(context)
+        notificationListenerGranted = hasNotificationListenerPermission(context)
+        accessibilityGranted = isAccessibilityServiceEnabled(context)
+        allFilesGranted = hasAllFilesAccess(context)
+        overlayGranted = canDrawOverlays(context)
+        exactAlarmGranted = canScheduleExactAlarms(context)
+        installPackagesGranted = canRequestPackageInstalls(context)
+        writeSettingsGranted = canWriteSystemSettings(context)
+        refreshShizuku()
+    }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                usageStatsGranted = hasUsageStatsPermission(context)
-                notificationListenerGranted = hasNotificationListenerPermission(context)
-                accessibilityGranted = isAccessibilityServiceEnabled(context)
-                refreshShizuku()
+                refreshSpecial()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    val permissions = mutableListOf(
+    val runtimePermissions = mutableListOf(
         Manifest.permission.CAMERA,
         Manifest.permission.RECORD_AUDIO,
         Manifest.permission.ACCESS_FINE_LOCATION,
@@ -1093,16 +1159,58 @@ fun AccessStep(
             @Suppress("DEPRECATION")
             add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
         }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            add(Manifest.permission.BLUETOOTH_CONNECT)
+            add(Manifest.permission.NEARBY_WIFI_DEVICES)
+        }
     }
-    val permissionsState = rememberMultiplePermissionsState(permissions)
+    val permissionsState = rememberMultiplePermissionsState(runtimePermissions)
 
-    val grantedCount = listOf(
-        permissionsState.allPermissionsGranted,
-        usageStatsGranted,
-        notificationListenerGranted,
-        accessibilityGranted,
-        shizukuAuthorized
-    ).count { it }
+    fun isGranted(perm: String): Boolean {
+        // Perfect per-permission check: direct PackageManager state, not the
+        // bundled allPermissionsGranted flag. Refreshes on every recomposition
+        // (and ON_RESUME refreshes specials above).
+        return try {
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context, perm
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        } catch (_: Exception) { false }
+    }
+
+    val cameraGranted = isGranted(Manifest.permission.CAMERA)
+    val micGranted = isGranted(Manifest.permission.RECORD_AUDIO)
+    val fineLocGranted = isGranted(Manifest.permission.ACCESS_FINE_LOCATION)
+    val coarseLocGranted = isGranted(Manifest.permission.ACCESS_COARSE_LOCATION)
+    val activityGranted = isGranted(Manifest.permission.ACTIVITY_RECOGNITION)
+    val postNotifGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        isGranted(Manifest.permission.POST_NOTIFICATIONS)
+    } else true
+    val mediaAudioGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        isGranted(Manifest.permission.READ_MEDIA_AUDIO)
+    } else isGranted(Manifest.permission.READ_EXTERNAL_STORAGE)
+    val mediaImagesGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        isGranted(Manifest.permission.READ_MEDIA_IMAGES)
+    } else isGranted(Manifest.permission.READ_EXTERNAL_STORAGE)
+    val mediaVideoGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        isGranted(Manifest.permission.READ_MEDIA_VIDEO)
+    } else isGranted(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+    val bluetoothGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        isGranted(Manifest.permission.BLUETOOTH_CONNECT)
+    } else true
+    val nearbyGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        isGranted(Manifest.permission.NEARBY_WIFI_DEVICES)
+    } else true
+
+    val permissionChecks = listOf(
+        cameraGranted, micGranted, fineLocGranted, coarseLocGranted, activityGranted,
+        postNotifGranted, mediaAudioGranted, mediaImagesGranted, mediaVideoGranted,
+        bluetoothGranted, nearbyGranted,
+        usageStatsGranted, notificationListenerGranted, accessibilityGranted,
+        allFilesGranted, overlayGranted, exactAlarmGranted, installPackagesGranted,
+        writeSettingsGranted, shizukuAuthorized
+    )
+    val grantedCount = permissionChecks.count { it }
+    val totalCount = permissionChecks.size
 
     Column(
         modifier = Modifier
@@ -1112,9 +1220,9 @@ fun AccessStep(
     ) {
         StaggeredEntrance(index = 0) {
             SectionHeader(
-                eyebrow = "Step 5 of 5",
+                eyebrow = "Step 5 of 7",
                 title = "Choose what to share",
-                trailing = "$grantedCount/5 on"
+                trailing = "$grantedCount/$totalCount on"
             )
         }
 
@@ -1135,23 +1243,103 @@ fun AccessStep(
                 LazyColumn(modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp).height(400.dp)) {
                     item {
                         Spacer(Modifier.height(8.dp))
-                        CardEyebrow("Device access")
+                        CardEyebrow("Camera, mic & sensors")
                         Spacer(Modifier.height(4.dp))
                     }
 
                     item {
-                        ProtocolRow("Camera, mic & location", "For scanning and location-based tools", Icons.Rounded.DeveloperBoard, permissionsState.allPermissionsGranted) {
+                        ProtocolRow("Camera", "QR + document scanning", Icons.Rounded.DeveloperBoard, cameraGranted) {
                             permissionsState.launchMultiplePermissionRequest()
                         }
                     }
                     item {
-                        ProtocolRow("Files", "So Toolz can open and process files you pick", Icons.Rounded.Storage, false) {
+                        ProtocolRow("Microphone", "Voice notes, sound meter, karaoke", Icons.Rounded.Mic, micGranted) {
+                            permissionsState.launchMultiplePermissionRequest()
+                        }
+                    }
+                    item {
+                        ProtocolRow("Activity recognition", "Step counter + fitness tools", Icons.Rounded.DirectionsRun, activityGranted) {
+                            permissionsState.launchMultiplePermissionRequest()
+                        }
+                    }
+                    item {
+                        Spacer(Modifier.height(16.dp))
+                        CardEyebrow("Location & nearby")
+                        Spacer(Modifier.height(4.dp))
+                    }
+                    item {
+                        ProtocolRow("Precise location", "Compass, maps + nearby tools", Icons.Rounded.LocationOn, fineLocGranted) {
+                            permissionsState.launchMultiplePermissionRequest()
+                        }
+                    }
+                    item {
+                        ProtocolRow("Approximate location", "Coarse fallback when precise is off", Icons.Rounded.LocationOn, coarseLocGranted) {
+                            permissionsState.launchMultiplePermissionRequest()
+                        }
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        item {
+                            ProtocolRow("Nearby Wi-Fi devices", "Network suite scanning (never for location)", Icons.Rounded.Wifi, nearbyGranted) {
+                                permissionsState.launchMultiplePermissionRequest()
+                            }
+                        }
+                        item {
+                            ProtocolRow("Bluetooth devices", "Audio + nearby accessories", Icons.Rounded.Bluetooth, bluetoothGranted) {
+                                permissionsState.launchMultiplePermissionRequest()
+                            }
+                        }
+                    }
+                    item {
+                        Spacer(Modifier.height(16.dp))
+                        CardEyebrow("System notifications")
+                        Spacer(Modifier.height(4.dp))
+                    }
+                    item {
+                        ProtocolRow(
+                            "Post notifications",
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) "Android 13+ runtime permission" else "Granted by default on this Android version",
+                            Icons.Rounded.NotificationsActive, postNotifGranted
+                        ) {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                permissionsState.launchMultiplePermissionRequest()
+                            } else {
+                                openAppNotificationSettings(context)
+                            }
+                        }
+                    }
+                    item {
+                        Spacer(Modifier.height(16.dp))
+                        CardEyebrow("Files & media")
+                        Spacer(Modifier.height(4.dp))
+                    }
+                    item {
+                        ProtocolRow("Music files", "Play your local audio library", Icons.Rounded.MusicNote, mediaAudioGranted) {
+                            permissionsState.launchMultiplePermissionRequest()
+                        }
+                    }
+                    item {
+                        ProtocolRow("Photos", "Background remover + file tools", Icons.Rounded.Storage, mediaImagesGranted) {
+                            permissionsState.launchMultiplePermissionRequest()
+                        }
+                    }
+                    item {
+                        ProtocolRow("Videos", "Converter + living frames", Icons.Rounded.Storage, mediaVideoGranted) {
+                            permissionsState.launchMultiplePermissionRequest()
+                        }
+                    }
+                    item {
+                        ProtocolRow("All-files access", "Manage Toolz exports anywhere (Android 11+)", Icons.Rounded.FolderOpen, allFilesGranted) {
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                                 context.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
                             } else {
                                 permissionsState.launchMultiplePermissionRequest()
                             }
                         }
+                    }
+                    item {
+                        Spacer(Modifier.height(16.dp))
+                        CardEyebrow("System & advanced")
+                        Spacer(Modifier.height(4.dp))
                     }
                     item {
                         ProtocolRow("Usage insights", "See time spent in apps, stays local", Icons.Rounded.Analytics, usageStatsGranted) {
@@ -1169,6 +1357,26 @@ fun AccessStep(
                         }
                     }
                     item {
+                        ProtocolRow("Display over apps", "Floating pill + quick controls", Icons.Rounded.Layers, overlayGranted) {
+                            openOverlaySettings(context)
+                        }
+                    }
+                    item {
+                        ProtocolRow("Exact alarms", "Timers, tasks + calendar reminders", Icons.Rounded.Alarm, exactAlarmGranted) {
+                            openExactAlarmSettings(context)
+                        }
+                    }
+                    item {
+                        ProtocolRow("Install updates", "One-tap APK installs from Toolz", Icons.Rounded.SystemUpdate, installPackagesGranted) {
+                            openInstallUnknownSettings(context)
+                        }
+                    }
+                    item {
+                        ProtocolRow("Modify system settings", "Caffeinate screen-timeout control", Icons.Rounded.Settings, writeSettingsGranted) {
+                            openWriteSettings(context)
+                        }
+                    }
+                    item {
                         ProtocolRow("Shizuku", "Unlocks advanced tools without root", Icons.Rounded.Shield, shizukuAuthorized) {
                             if (com.frerox.toolz.util.shizuku.ShizukuHelper.isAuthorized()) {
                                 // Already authorized
@@ -1178,6 +1386,19 @@ fun AccessStep(
                                 showShizukuSetup = true
                             }
                         }
+                    }
+                    item {
+                        Spacer(Modifier.height(16.dp))
+                        CardEyebrow("Always included")
+                        Spacer(Modifier.height(4.dp))
+                    }
+                    item {
+                        Text(
+                            "Internet, network state, vibration, boot-completed, Bluetooth basics and foreground services are granted automatically — no action needed.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                            modifier = Modifier.padding(vertical = 6.dp)
+                        )
                     }
 
                     item {
@@ -1192,6 +1413,10 @@ fun AccessStep(
                     }
                     item {
                         OnboardingToggleExpressive("Background notifications", "Lets you know if anything is running on the background", Icons.Rounded.NotificationsOff, backgroundNotificationsEnabled, onBackgroundNotificationsChange)
+                        Spacer(Modifier.height(10.dp))
+                    }
+                    item {
+                        OnboardingToggleExpressive("Whisper messages", "Chat + call alerts from Whisper", Icons.Rounded.NotificationsActive, whisperNotificationsEnabled, onWhisperNotificationsChange)
                         Spacer(Modifier.height(10.dp))
                     }
                     item {
@@ -1222,7 +1447,189 @@ fun AccessStep(
     }
 }
 
-// ── Step 6: Ready ────────────────────────────────────────────────────────────
+// ── Step 6: Preferences ──────────────────────────────────────────────────────
+// Curated subset of Settings grouped into AI / Notifications /
+// Interface (Interaction & HUD) / News, plus Offline controls.
+// Same polished design: SectionHeader + ExpressiveCard + OnboardingToggleExpressive.
+
+@Composable
+fun PreferencesStep(
+    state: OnboardingViewModel.OnboardingState,
+    onOfflineModeChange: (Boolean) -> Unit,
+    onAutoOfflineChange: (Boolean) -> Unit,
+    onOfflinePopupChange: (Boolean) -> Unit,
+    onAiSearchChatChange: (Boolean) -> Unit,
+    onClipboardAiChange: (Boolean) -> Unit,
+    onAiClipboardMonitoringChange: (Boolean) -> Unit,
+    onPdfAiToolsChange: (Boolean) -> Unit,
+    onNotepadAiToolsChange: (Boolean) -> Unit,
+    onMusicAiChange: (Boolean) -> Unit,
+    onNotificationsChange: (Boolean) -> Unit,
+    onWhisperNotificationsChange: (Boolean) -> Unit,
+    onHapticChange: (Boolean) -> Unit,
+    onRecentToolsChange: (Boolean) -> Unit,
+    onQuickNotesChange: (Boolean) -> Unit,
+    onDashboardStatsChange: (Boolean) -> Unit,
+    onToolzPillChange: (Boolean) -> Unit,
+    onNewsChange: (Boolean) -> Unit,
+    onNewsNotificationsChange: (Boolean) -> Unit,
+    onNext: () -> Unit
+) {
+    val scrollState = rememberScrollState()
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp)
+            .verticalScroll(scrollState),
+        verticalArrangement = Arrangement.Center
+    ) {
+        StaggeredEntrance(index = 0) {
+            SectionHeader(eyebrow = "Step 6 of 7", title = "Fine-tune Toolz")
+        }
+        Spacer(Modifier.height(12.dp))
+        StaggeredEntrance(index = 1) {
+            Text(
+                "These match Settings — change anything later. Offline stays safe: no blur crashes.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f)
+            )
+        }
+        Spacer(Modifier.height(20.dp))
+        StaggeredEntrance(index = 2) {
+            ExpressiveCard(onClick = {}, modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    CardEyebrow("Offline")
+                    OnboardingToggleExpressive("Offline Mode", "Force everything offline", Icons.Rounded.CloudOff, state.offlineMode, onOfflineModeChange)
+                    OnboardingToggleExpressive("Auto-offline mode", "Auto-switch when connection is lost (on by default)", Icons.Rounded.Sync, state.autoOffline, onAutoOfflineChange)
+                    OnboardingToggleExpressive("Offline / Online popup", "Show transition overlay", Icons.Rounded.Notifications, state.offlinePopup, onOfflinePopupChange)
+                    Spacer(Modifier.height(8.dp))
+                    CardEyebrow("AI")
+                    OnboardingToggleExpressive("AI search chat", "Conversational answers in Search", Icons.Rounded.AutoAwesome, state.aiSearchChat, onAiSearchChatChange)
+                    OnboardingToggleExpressive("Clipboard AI", "Summarize + badges in Clipboard", Icons.Rounded.ContentPaste, state.clipboardAi, onClipboardAiChange)
+                    OnboardingToggleExpressive("Clipboard monitoring", "Background AI suggestions (off by default)", Icons.Rounded.AutoAwesome, state.aiClipboardMonitoring, onAiClipboardMonitoringChange)
+                    OnboardingToggleExpressive("PDF AI tools", "Summarize + extract in reader", Icons.Rounded.DocumentScanner, state.pdfAiTools, onPdfAiToolsChange)
+                    OnboardingToggleExpressive("Notepad AI tools", "Rewrite + style in notes", Icons.Rounded.EditNote, state.notepadAiTools, onNotepadAiToolsChange)
+                    OnboardingToggleExpressive("Music AI", "Lyrics meaning + smart picks", Icons.Rounded.MusicNote, state.musicAi, onMusicAiChange)
+                    Spacer(Modifier.height(8.dp))
+                    CardEyebrow("Notifications")
+                    OnboardingToggleExpressive("Push notifications", "Real-time updates from Toolz", Icons.Rounded.NotificationsActive, state.notificationsEnabled, onNotificationsChange)
+                    OnboardingToggleExpressive("Whisper messages", "Chat + call alerts", Icons.Rounded.NotificationsActive, state.whisperNotificationsEnabled, onWhisperNotificationsChange)
+                    Spacer(Modifier.height(8.dp))
+                    CardEyebrow("Interface (Interaction & HUD)")
+                    OnboardingToggleExpressive("Haptic feedback", "Touch vibrations", Icons.Rounded.Vibration, state.hapticFeedback, onHapticChange)
+                    OnboardingToggleExpressive("Floating pill", "Quick Toolz overlay", Icons.Rounded.Hub, state.showToolzPill, onToolzPillChange)
+                    OnboardingToggleExpressive("Recent tools", "Show on home", Icons.Rounded.History, state.showRecentTools, onRecentToolsChange)
+                    OnboardingToggleExpressive("Quick notes", "Notes on dashboard", Icons.Rounded.EditNote, state.showQuickNotes, onQuickNotesChange)
+                    OnboardingToggleExpressive("Home stats", "Dashboard usage stats", Icons.Rounded.Insights, state.showDashboardStats, onDashboardStatsChange)
+                    Spacer(Modifier.height(8.dp))
+                    CardEyebrow("News")
+                    OnboardingToggleExpressive("Toolz News", "Announcement popups (critical always shows)", Icons.Rounded.Newspaper, state.newsEnabled, onNewsChange)
+                    OnboardingToggleExpressive("News notifications", "Notify when news drops", Icons.Rounded.Notifications, state.newsNotifications, onNewsNotificationsChange)
+                }
+            }
+        }
+        Spacer(Modifier.height(32.dp))
+        StaggeredEntrance(index = 3) {
+            ToolzExpressiveButton(
+                onClick = onNext,
+                modifier = Modifier.fillMaxWidth().height(60.dp),
+                shape = ExtraLargeExpressiveShape
+            ) {
+                Text("Continue", fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
+// ── Step 7: Language ─────────────────────────────────────────────────────────
+// Shows available languages so users can choose. Same polished design.
+
+@Composable
+fun LanguageStep(
+    selected: String,
+    onLanguageChange: (String) -> Unit,
+    onNext: () -> Unit
+) {
+    val context = LocalContext.current
+    val languages = listOf(
+        Triple("English", "en", "🇺🇸"),
+        Triple("Português (Brasil)", "pt-BR", "🇧🇷"),
+        Triple("Español", "es", "🇪🇸"),
+        Triple("Français", "fr", "🇫🇷")
+    )
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        verticalArrangement = Arrangement.Center
+    ) {
+        StaggeredEntrance(index = 0) {
+            SectionHeader(eyebrow = "Step 7 of 7", title = "Pick a language")
+        }
+        Spacer(Modifier.height(12.dp))
+        StaggeredEntrance(index = 1) {
+            Text(
+                "Toolz speaks your language. You can change this anytime in Settings.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f)
+            )
+        }
+        Spacer(Modifier.height(20.dp))
+        StaggeredEntrance(index = 2) {
+            ExpressiveCard(onClick = {}, modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    languages.forEach { (name, code, flag) ->
+                        val isSelected = selected == code
+                        Surface(
+                            onClick = {
+                                onLanguageChange(code)
+                                try {
+                                    androidx.appcompat.app.AppCompatDelegate.setApplicationLocales(
+                                        androidx.core.os.LocaleListCompat.forLanguageTags(code)
+                                    )
+                                } catch (_: Exception) { }
+                            },
+                            shape = MediumExpressiveShape,
+                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,
+                            border = if (isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)) else null,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(flag, fontSize = 20.sp)
+                                Spacer(Modifier.width(14.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(name, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyLarge,
+                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface)
+                                    Text(
+                                        if (isSelected) "Active" else "Switch to $name",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = (if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant).copy(alpha = 0.75f)
+                                    )
+                                }
+                                if (isSelected) {
+                                    Icon(Icons.Rounded.CheckCircle, null,
+                                        tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(22.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(32.dp))
+        StaggeredEntrance(index = 3) {
+            ToolzExpressiveButton(
+                onClick = onNext,
+                modifier = Modifier.fillMaxWidth().height(60.dp),
+                shape = ExtraLargeExpressiveShape
+            ) {
+                Text("Continue", fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
+// ── Step 8: Ready ────────────────────────────────────────────────────────────
 
 @Composable
 fun ReadyStep(name: String, onComplete: () -> Unit) {
@@ -1529,13 +1936,52 @@ fun AccessStepPreview() {
             notificationsEnabled = true,
             backgroundNotificationsEnabled = true,
             vaultEnabled = true,
+            whisperNotificationsEnabled = true,
             shizukuAuthorized = false,
             onNotificationsChange = {},
             onBackgroundNotificationsChange = {},
             onVaultChange = {},
+            onWhisperNotificationsChange = {},
             refreshShizuku = {},
             onNext = {}
         )
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun PreferencesStepPreview() {
+    ToolzTheme(performanceMode = true) {
+        PreferencesStep(
+            state = OnboardingViewModel.OnboardingState(name = "Explorer"),
+            onOfflineModeChange = {},
+            onAutoOfflineChange = {},
+            onOfflinePopupChange = {},
+            onAiSearchChatChange = {},
+            onClipboardAiChange = {},
+            onAiClipboardMonitoringChange = {},
+            onPdfAiToolsChange = {},
+            onNotepadAiToolsChange = {},
+            onMusicAiChange = {},
+            onNotificationsChange = {},
+            onWhisperNotificationsChange = {},
+            onHapticChange = {},
+            onRecentToolsChange = {},
+            onQuickNotesChange = {},
+            onDashboardStatsChange = {},
+            onToolzPillChange = {},
+            onNewsChange = {},
+            onNewsNotificationsChange = {},
+            onNext = {}
+        )
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun LanguageStepPreview() {
+    ToolzTheme(performanceMode = true) {
+        LanguageStep(selected = "en", onLanguageChange = {}, onNext = {})
     }
 }
 
@@ -1575,4 +2021,112 @@ private fun isAccessibilityServiceEnabled(context: Context): Boolean {
     } catch (e: Exception) {
         false
     }
+}
+
+private fun hasAllFilesAccess(context: Context): Boolean {
+    return try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            android.os.Environment.isExternalStorageManager()
+        } else {
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context, Manifest.permission.WRITE_EXTERNAL_STORAGE
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
+    } catch (_: Exception) { false }
+}
+
+private fun canDrawOverlays(context: Context): Boolean {
+    return try {
+        Settings.canDrawOverlays(context)
+    } catch (_: Exception) { false }
+}
+
+private fun canScheduleExactAlarms(context: Context): Boolean {
+    return try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val am = context.getSystemService(Context.ALARM_SERVICE) as? android.app.AlarmManager
+            am?.canScheduleExactAlarms() == true
+        } else true
+    } catch (_: Exception) { false }
+}
+
+private fun canRequestPackageInstalls(context: Context): Boolean {
+    return try {
+        context.packageManager.canRequestPackageInstalls()
+    } catch (_: Exception) { false }
+}
+
+private fun canWriteSystemSettings(context: Context): Boolean {
+    return try {
+        Settings.System.canWrite(context)
+    } catch (_: Exception) { false }
+}
+
+private fun openAppNotificationSettings(context: Context) {
+    try {
+        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+            }
+        } else {
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.parse("package:${context.packageName}")
+            }
+        }
+        context.startActivity(intent)
+    } catch (_: Exception) { }
+}
+
+private fun openOverlaySettings(context: Context) {
+    try {
+        context.startActivity(
+            Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:${context.packageName}")
+            )
+        )
+    } catch (_: Exception) {
+        try { context.startActivity(Intent(Settings.ACTION_SETTINGS)) } catch (_: Exception) { }
+    }
+}
+
+private fun openExactAlarmSettings(context: Context) {
+    try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            context.startActivity(
+                Intent(
+                    Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                    Uri.parse("package:${context.packageName}")
+                )
+            )
+        } else {
+            context.startActivity(Intent(Settings.ACTION_SETTINGS))
+        }
+    } catch (_: Exception) { }
+}
+
+private fun openInstallUnknownSettings(context: Context) {
+    try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.startActivity(
+                Intent(
+                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:${context.packageName}")
+                )
+            )
+        } else {
+            context.startActivity(Intent(Settings.ACTION_SETTINGS))
+        }
+    } catch (_: Exception) { }
+}
+
+private fun openWriteSettings(context: Context) {
+    try {
+        context.startActivity(
+            Intent(
+                Settings.ACTION_MANAGE_WRITE_SETTINGS,
+                Uri.parse("package:${context.packageName}")
+            )
+        )
+    } catch (_: Exception) { }
 }
