@@ -124,9 +124,6 @@ import com.frerox.toolz.ui.theme.ToolzTheme
 import com.frerox.toolz.ui.theme.toolzBackground
 import androidx.compose.ui.tooling.preview.Preview
 import com.frerox.toolz.service.StepCounterService
-import android.graphics.RenderEffect
-import android.graphics.Shader
-import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.graphicsLayer
 import com.frerox.toolz.ui.components.OfflineTransitionOverlay
 import com.frerox.toolz.util.OfflineManager
@@ -252,10 +249,21 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
 
             var offlineOverlayVisible by remember { mutableStateOf(false) }
             var offlineOverlayReady by remember { mutableStateOf(false) }
-            var lastOfflineState by remember { mutableStateOf(offlineState) }
+            var lastOfflineState by remember { mutableStateOf<OfflineState?>(null) }
+            var offlineFirstEmissionDone by remember { mutableStateOf(false) }
+            var blurSupported by remember { mutableStateOf(true) }
             val offlinePopupEnabled by settingsRepository.offlinePopupEnabled.collectAsState(initial = true)
 
             LaunchedEffect(offlineState, offlinePopupEnabled) {
+                // Never show the transition overlay for the initial emission on cold
+                // start (e.g. persisted manual Offline Mode). Only real transitions
+                // after the first stable value trigger the popup + blur. This breaks
+                // the permanent crash loop where every launch immediately blurred.
+                if (!offlineFirstEmissionDone) {
+                    lastOfflineState = offlineState
+                    offlineFirstEmissionDone = true
+                    return@LaunchedEffect
+                }
                 if (offlineState != lastOfflineState) {
                     lastOfflineState = offlineState
                     // Offline/online popup toggle (Settings → Interaction & HUD, on by default).
@@ -283,10 +291,23 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
             }
 
             val blurAnim by animateFloatAsState(
-                targetValue = if (offlineOverlayVisible) 30f else 0f,
+                targetValue = if (offlineOverlayVisible) 20f else 0f,
                 animationSpec = tween(600),
                 label = "blur"
             )
+            // MIUI-safe blur: SafeBlur clamps radius and swallows native
+            // `nativePtr is null` failures. On first failure blur is latched off
+            // for the rest of the session (overlay still shows, just unblurred).
+            val safeBlurEffect = remember(blurAnim, blurSupported, performanceMode) {
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) null
+                else if (performanceMode || !blurSupported) null
+                else if (blurAnim < com.frerox.toolz.util.SafeBlur.MIN_RADIUS) null
+                else com.frerox.toolz.util.SafeBlur.createBlurOrNull(blurAnim)
+            }
+            val shouldLatchBlurOff = safeBlurEffect == null && blurAnim >= com.frerox.toolz.util.SafeBlur.MIN_RADIUS && !performanceMode && blurSupported && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && offlineOverlayVisible
+            if (shouldLatchBlurOff) {
+                SideEffect { blurSupported = false }
+            }
 
             ToolzTheme(
                 darkTheme = isDark,
@@ -310,11 +331,9 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
                             .fillMaxSize()
                             .toolzBackground()
                             .then(
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !performanceMode && blurAnim > 0f) {
+                                if (safeBlurEffect != null) {
                                     Modifier.graphicsLayer {
-                                        renderEffect = RenderEffect
-                                            .createBlurEffect(blurAnim, blurAnim, Shader.TileMode.CLAMP)
-                                            .asComposeRenderEffect()
+                                        renderEffect = safeBlurEffect
                                     }
                                 } else Modifier
                             )
