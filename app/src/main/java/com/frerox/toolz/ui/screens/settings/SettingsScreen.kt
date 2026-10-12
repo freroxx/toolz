@@ -218,6 +218,7 @@ fun SettingsScreen(
     val aiSearchEnabled by viewModel.aiSearchEnabled.collectAsState(initial = false)
     val aiSearchChatEnabled by viewModel.aiSearchChatEnabled.collectAsState(initial = false)
     val offlineModeEnabled by viewModel.offlineModeEnabled.collectAsState(initial = false)
+    val autoOfflineEnabled by viewModel.autoOfflineEnabled.collectAsState(initial = true)
 
     val musicShakeToSkip by viewModel.musicShakeToSkip.collectAsState(initial = false)
     val musicShakeSensitivity by viewModel.musicShakeSensitivity.collectAsState(initial = 0.3f)
@@ -577,6 +578,15 @@ fun SettingsScreen(
                                     icon = Icons.Rounded.CloudOff,
                                     checked = offlineModeEnabled,
                                     onCheckedChange = { viewModel.setOfflineModeEnabled(it) }
+                                )
+                            }
+                            if (matches(searchQuery, "auto", "offline", "automatic", "network", "connection")) {
+                                SettingsToggleItem(
+                                    title = "Auto-offline mode",
+                                    subtitle = "Switch to offline automatically when connection is lost. Off = only manual Offline Mode switches state.",
+                                    icon = Icons.Rounded.Sync,
+                                    checked = autoOfflineEnabled,
+                                    onCheckedChange = { viewModel.setAutoOfflineEnabled(it) }
                                 )
                             }
                             if (!offlineModeEnabled) {

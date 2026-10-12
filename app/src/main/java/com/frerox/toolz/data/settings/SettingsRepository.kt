@@ -617,6 +617,10 @@ class SettingsRepository @Inject constructor(
 
     // Offline Mode
     private val OFFLINE_MODE_ENABLED = booleanPreferencesKey("offline_mode_enabled")
+    // Auto-offline: when ON (default), loss of connectivity switches state to OFFLINE
+    // automatically. When OFF, only the manual Offline Mode toggle can switch state
+    // (fully manual — network loss is ignored).
+    private val AUTO_OFFLINE_ENABLED = booleanPreferencesKey("auto_offline_enabled")
 
     // Focus Flow Session Active (Blocks distractions)
     private val FOCUS_FLOW_SESSION_ACTIVE = booleanPreferencesKey("focus_flow_session_active")
@@ -666,6 +670,7 @@ class SettingsRepository @Inject constructor(
     }
 
     val offlineModeEnabled: Flow<Boolean> = dataStore.data.map { it[OFFLINE_MODE_ENABLED] ?: false }
+    val autoOfflineEnabled: Flow<Boolean> = dataStore.data.map { it[AUTO_OFFLINE_ENABLED] ?: true }
 
     val focusFlowSessionActive: Flow<Boolean> = dataStore.data.map { it[FOCUS_FLOW_SESSION_ACTIVE] ?: false }
 
@@ -1753,6 +1758,10 @@ class SettingsRepository @Inject constructor(
 
     suspend fun setOfflineModeEnabled(enabled: Boolean) {
         dataStore.edit { it[OFFLINE_MODE_ENABLED] = enabled }
+    }
+
+    suspend fun setAutoOfflineEnabled(enabled: Boolean) {
+        dataStore.edit { it[AUTO_OFFLINE_ENABLED] = enabled }
     }
 
     suspend fun setFocusFlowSessionActive(active: Boolean) {

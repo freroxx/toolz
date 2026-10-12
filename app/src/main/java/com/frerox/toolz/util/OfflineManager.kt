@@ -39,10 +39,16 @@ class OfflineManager @Inject constructor(
 
     val offlineState: Flow<OfflineState> = combine(
         connectivityObserver.observe(),
-        settingsRepository.offlineModeEnabled
-    ) { networkStatus, manualOffline ->
+        settingsRepository.offlineModeEnabled,
+        settingsRepository.autoOfflineEnabled
+    ) { networkStatus, manualOffline, autoOffline ->
         val isInternetAvailable = networkStatus == ConnectivityObserver.Status.Available
-        if (manualOffline || !isInternetAvailable) {
+        // Manual toggle always wins. Automatic network-loss switching only applies
+        // when Auto-offline is ON (default). When OFF, the app stays ONLINE unless
+        // the user explicitly enabled manual Offline Mode (fully manual).
+        if (manualOffline) {
+            OfflineState.OFFLINE
+        } else if (!isInternetAvailable && autoOffline) {
             OfflineState.OFFLINE
         } else {
             OfflineState.ONLINE

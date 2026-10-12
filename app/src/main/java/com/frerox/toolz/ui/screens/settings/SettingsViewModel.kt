@@ -138,6 +138,7 @@ class SettingsViewModel @Inject constructor(
     val userName = repository.userName
     val autoUpdateEnabled = repository.autoUpdateEnabled
     val offlineModeEnabled = repository.offlineModeEnabled
+    val autoOfflineEnabled = repository.autoOfflineEnabled
 
     val musicAudioFocus = repository.musicAudioFocus
     val musicAudioFocusDucking = repository.musicAudioFocusDucking
@@ -239,6 +240,7 @@ class SettingsViewModel @Inject constructor(
     fun setAppLanguage(lang: String) = viewModelScope.launch { repository.setAppLanguage(lang) }
     fun setAutoUpdateEnabled(enabled: Boolean) = viewModelScope.launch { repository.setAutoUpdateEnabled(enabled) }
     fun setOfflineModeEnabled(enabled: Boolean) = viewModelScope.launch { repository.setOfflineModeEnabled(enabled) }
+    fun setAutoOfflineEnabled(enabled: Boolean) = viewModelScope.launch { repository.setAutoOfflineEnabled(enabled) }
 
     fun setMusicAudioFocus(enabled: Boolean) = viewModelScope.launch { repository.setMusicAudioFocus(enabled) }
     fun setMusicAudioFocusDucking(enabled: Boolean) = viewModelScope.launch { repository.setMusicAudioFocusDucking(enabled) }
