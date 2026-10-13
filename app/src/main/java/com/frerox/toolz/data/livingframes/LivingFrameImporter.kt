@@ -19,7 +19,13 @@ package com.frerox.toolz.data.livingframes
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import android.graphics.ImageDecoder
+import android.graphics.Matrix
+import android.graphics.Movie
+import android.graphics.drawable.AnimatedImageDrawable
+import android.media.ExifInterface
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
@@ -34,346 +40,388 @@ import kotlin.math.roundToInt
 
 data class LivingFrameImportResult(
     val frame: LivingFrame,
-    val droppedFrames: Int = 0
+    /** Something worth telling the user (single-frame GIF, skipped photos…). */
+    val note: String? = null
 )
 
+data class VideoProbe(val durationMs: Long, val width: Int, val height: Int)
+
 /**
- * Decodes GIF / video / photo sources into small Binder-safe WebP frames.
- * Caps keep home-widget updates under the ~1MB Binder limit and avoid
- * TransactionTooLarge crashes (see research notes in LivingFrameModels).
+ * Turns GIFs, video windows, photos and photo sets into stored WebP frames.
+ *
+ * Timing rule: the playback fps is always derived from (frames captured ÷
+ * real duration covered), never assumed. The previous importer sampled a
+ * whole clip into a capped frame count but kept the requested fps, so long
+ * clips played back sped up.
  */
 @Singleton
 class LivingFrameImporter @Inject constructor(
     @ApplicationContext private val context: Context,
     private val repo: LivingFramesRepository,
-    private val codecExtractor: LivingFrameCodecExtractor
+    private val codec: LivingFrameCodecExtractor
 ) {
-    suspend fun importGif(uri: Uri, fps: Int, name: String = "GIF Loop"): LivingFrameImportResult =
+    // -- public API --------------------------------------------------------
+
+    suspend fun probeVideo(uri: Uri): VideoProbe? = withContext(Dispatchers.IO) {
+        val r = MediaMetadataRetriever()
+        try {
+            r.setDataSource(context, uri)
+            val dur = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
+                ?: return@withContext null
+            val w = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+            val h = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+            VideoProbe(dur, w, h)
+        } catch (_: Exception) { null } finally {
+            runCatching { r.release() }
+        }
+    }
+
+    suspend fun videoThumbnail(uri: Uri, atMs: Long, maxSide: Int = 480): Bitmap? =
         withContext(Dispatchers.IO) {
-            val id = repo.newId()
-            val targetFps = LivingFrameEngine.clampFps(fps)
-            val frames = decodeGifFrames(uri, targetFps)
-            val kept = frames.take(LivingFramesRepository.MAX_FRAMES)
-            val dropped = (frames.size - kept.size).coerceAtLeast(0)
-            storeFrames(id, kept, name, LivingFrameType.GIF, targetFps, uri.toString(), dropped)
+            val r = MediaMetadataRetriever()
+            try {
+                r.setDataSource(context, uri)
+                r.getFrameAtTime(atMs.coerceAtLeast(0L) * 1000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                    ?.let { downscale(it, maxSide) }
+            } catch (_: Exception) { null } finally {
+                runCatching { r.release() }
+            }
+        }
+
+    suspend fun importGif(uri: Uri, onProgress: (Float) -> Unit = {}): LivingFrameImportResult =
+        withContext(Dispatchers.IO) {
+            val decoded = decodeAnimated(uri, onProgress)
+                ?: throw IllegalArgumentException("Couldn't read that GIF.")
+            if (decoded.frames.size == 1) {
+                val res = store(
+                    decoded.frames, "Photo Frame", LivingFrameType.PHOTO, 1, uri.toString(),
+                    onProgress, 0.6f
+                )
+                return@withContext res.copy(note = "That GIF has a single frame, so it was added as a photo.")
+            }
+            store(decoded.frames, "GIF Loop", LivingFrameType.GIF, decoded.fps, uri.toString(), onProgress, 0.6f)
         }
 
     suspend fun importVideo(
         uri: Uri,
-        fps: Int,
-        name: String = "Video Loop",
-        maxDurationMs: Long = 10_000L
+        startMs: Long,
+        lengthMs: Long,
+        onProgress: (Float) -> Unit = {}
     ): LivingFrameImportResult = withContext(Dispatchers.IO) {
-        val id = repo.newId()
-        val targetFps = LivingFrameEngine.clampFps(fps)
-        // Path 1 — full MediaCodec decode: exact uniform samples, no seek dupes.
+        val len = lengthMs.coerceIn(500L, 6_000L)
+        val targetFps = LivingFrameFps.snap(minOf(15f, LivingFramesRepository.MAX_FRAMES * 1000f / len))
+        val count = (len / 1000f * targetFps).roundToInt().coerceIn(2, LivingFramesRepository.MAX_FRAMES)
+
         var frames: List<Bitmap> = try {
-            codecExtractor.extract(
-                uri, targetFps, maxDurationMs,
-                LivingFramesRepository.STORE_SIDE_VIDEO,
-                LivingFramesRepository.MAX_FRAMES
-            )
+            codec.extract(
+                uri, startMs, len, count, LivingFramesRepository.STORE_SIDE_VIDEO
+            ) { onProgress(it * 0.6f) }
         } catch (_: Exception) { emptyList() }
-        // Path 2 — retriever fallback.
         if (frames.isEmpty()) {
-            frames = extractVideoFrames(uri, targetFps, maxDurationMs)
+            frames = retrieverFrames(uri, startMs, len, count) { onProgress(it * 0.6f) }
         }
-        // Uniqueness gate: refuse to build a dead loop from duplicate frames.
-        frames = dedupeFrames(frames)
-        require(frames.size >= 2) { "Couldn't extract motion from this video — try a different clip." }
-        storeFrames(id, frames, name, LivingFrameType.VIDEO, targetFps, uri.toString(), 0)
+        if (frames.size < 2 || !hasMotion(frames)) {
+            frames.forEach { runCatching { it.recycle() } }
+            throw IllegalArgumentException("No motion in that part of the video. Try another start point.")
+        }
+        val fps = LivingFrameFps.snap(frames.size * 1000f / len)
+        store(frames, "Video Loop", LivingFrameType.VIDEO, fps, uri.toString(), onProgress, 0.6f)
     }
 
-    /**
-     * Drop consecutive near-duplicate frames (64-bit aHash, hamming ≤ 4).
-     * Seek-based extraction often repeats keyframes; without this the widget
-     * "animates" identical bitmaps and looks stuck on frame one.
-     */
-    fun dedupeFrames(frames: List<Bitmap>): List<Bitmap> {
-        if (frames.size <= 1) return frames
-        val out = ArrayList<Bitmap>(frames.size)
-        var lastHash: Long? = null
-        frames.forEach { bmp ->
-            val h = try { frameHash(bmp) } catch (_: Exception) { null }
-            if (h == null || lastHash == null || hamming(h, lastHash) > 4) {
-                out.add(bmp)
-                if (h != null) lastHash = h
-            } else {
-                try { bmp.recycle() } catch (_: Exception) {}
-            }
-        }
-        return out.ifEmpty { frames }
-    }
-
-    private fun frameHash(bmp: Bitmap): Long {
-        val tiny = Bitmap.createScaledBitmap(bmp, 8, 8, true)
-        try {
-            var sum = 0L
-            val px = IntArray(64)
-            tiny.getPixels(px, 0, 8, 0, 0, 8, 8)
-            for (p in px) {
-                sum += ((p shr 16) and 0xFF) * 3 + ((p shr 8) and 0xFF) * 4 + (p and 0xFF)
-            }
-            val avg = sum / (64 * 8)
-            var hash = 0L
-            for (p in px) {
-                hash = hash shl 1
-                val g = (((p shr 16) and 0xFF) * 3 + ((p shr 8) and 0xFF) * 4 + (p and 0xFF)) / 8
-                if (g > avg) hash = hash or 1L
-            }
-            return hash
-        } finally {
-            try { tiny.recycle() } catch (_: Exception) {}
-        }
-    }
-
-    private fun hamming(a: Long, b: Long): Int {
-        var x = a xor b
-        var n = 0
-        while (x != 0L) {
-            n += (x and 1L).toInt()
-            x = x ushr 1
-        }
-        return n
-    }
-
-    suspend fun importPhoto(uri: Uri, name: String): LivingFrameImportResult =
+    suspend fun importPhoto(uri: Uri, onProgress: (Float) -> Unit = {}): LivingFrameImportResult =
         withContext(Dispatchers.IO) {
-            val id = repo.newId()
-            val bmp = loadDownscaled(uri, LivingFramesRepository.STORE_SIDE_STATIC)
-                ?: throw IllegalArgumentException("Could not decode image")
-            storeFrames(id, listOf(bmp), name, LivingFrameType.PHOTO, 1, uri.toString(), 0)
+            val bmp = loadDownscaled(uri, LivingFramesRepository.STORE_SIDE_PHOTO)
+                ?: throw IllegalArgumentException("Couldn't read that image.")
+            store(listOf(bmp), "Photo Frame", LivingFrameType.PHOTO, 1, uri.toString(), onProgress, 0f)
         }
 
-    suspend fun importSlideshow(uris: List<Uri>, name: String): LivingFrameImportResult =
+    suspend fun importSlideshow(uris: List<Uri>, onProgress: (Float) -> Unit = {}): LivingFrameImportResult =
         withContext(Dispatchers.IO) {
-            val id = repo.newId()
-            val bmps = uris.take(20).mapNotNull { loadDownscaled(it, LivingFramesRepository.STORE_SIDE_STATIC) }
-            require(bmps.isNotEmpty()) { "No decodable images" }
-            storeFrames(id, bmps, name, LivingFrameType.SLIDESHOW, 1, "${bmps.size} photos", 0)
+            val picked = uris.take(LivingFramesRepository.MAX_SLIDES)
+            val bmps = ArrayList<Bitmap>()
+            picked.forEachIndexed { i, u ->
+                loadDownscaled(u, LivingFramesRepository.STORE_SIDE_PHOTO)?.let { bmps.add(it) }
+                onProgress((i + 1) / picked.size.toFloat() * 0.6f)
+            }
+            require(bmps.isNotEmpty()) { "None of those photos could be read." }
+            val skipped = uris.size - bmps.size
+            val note = when {
+                uris.size > LivingFramesRepository.MAX_SLIDES ->
+                    "Slideshows hold up to ${LivingFramesRepository.MAX_SLIDES} photos; the rest were left out."
+                skipped > 0 -> "$skipped photo${if (skipped == 1) "" else "s"} couldn't be read and were skipped."
+                else -> null
+            }
+            store(bmps, "Slideshow", LivingFrameType.SLIDESHOW, 1, "${bmps.size} photos", onProgress, 0.6f)
+                .copy(note = note)
         }
 
-    // -- decoders ----------------------------------------------------------
+    // -- GIF / animated image decoding ---------------------------------------
 
-    private fun decodeGifFrames(uri: Uri, fps: Int): List<Bitmap> {
-        val out = mutableListOf<Bitmap>()
-        val maxSide = LivingFramesRepository.STORE_SIDE_ANIMATED
+    private class Decoded(val frames: List<Bitmap>, val fps: Int)
+
+    private fun decodeAnimated(uri: Uri, onProgress: (Float) -> Unit): Decoded? {
+        val side = LivingFramesRepository.STORE_SIDE_GIF
+        // Path 1: Movie. Deterministic seeking across one real loop.
         try {
-            // Path 1 — android.graphics.Movie: deterministic sampling across one
-            // real loop duration (no wall-clock drift, no missing-bounds bug).
-            try {
-                context.contentResolver.openInputStream(uri)?.use { ins ->
-                    @Suppress("DEPRECATION")
-                    val movie = android.graphics.Movie.decodeStream(ins)
-                    if (movie != null && movie.width() > 0 && movie.height() > 0) {
-                        val w = movie.width()
-                        val h = movie.height()
-                        val scale = maxSide.toFloat() / maxOf(w, h).toFloat()
-                        val tw = (w * minOf(1f, scale)).roundToInt().coerceAtLeast(1)
-                        val th = (h * minOf(1f, scale)).roundToInt().coerceAtLeast(1)
-                        val dur = movie.duration().takeIf { it > 0 } ?: 1000
-                        val count = ((dur.toLong() * fps) / 1000L).toInt()
-                            .coerceIn(1, LivingFramesRepository.MAX_FRAMES)
-                        repeat(count) { i ->
-                            try {
-                                movie.setTime((i * dur / count) % dur.coerceAtLeast(1))
-                                val bmp = Bitmap.createBitmap(tw, th, Bitmap.Config.ARGB_8888)
-                                val c = android.graphics.Canvas(bmp)
-                                c.scale(tw.toFloat() / w, th.toFloat() / h)
-                                movie.draw(c, 0f, 0f)
-                                out.add(bmp)
-                            } catch (_: Exception) { }
-                        }
-                        if (out.isNotEmpty() && out.any { !isBlankFrame(it) }) {
-                            return out.take(LivingFramesRepository.MAX_FRAMES)
-                        }
-                        out.forEach { try { it.recycle() } catch (_: Exception) {} }
-                        out.clear()
+            context.contentResolver.openInputStream(uri)?.use { ins ->
+                @Suppress("DEPRECATION")
+                val movie = Movie.decodeStream(ins)
+                if (movie != null && movie.width() > 0 && movie.height() > 0 && movie.duration() > 0) {
+                    val w = movie.width()
+                    val h = movie.height()
+                    val dur = movie.duration()
+                    val scale = minOf(1f, side / maxOf(w, h).toFloat())
+                    val tw = (w * scale).roundToInt().coerceAtLeast(1)
+                    val th = (h * scale).roundToInt().coerceAtLeast(1)
+                    val count = (dur / 1000f * 15f).roundToInt().coerceIn(2, LivingFramesRepository.MAX_FRAMES)
+                    val out = ArrayList<Bitmap>(count)
+                    for (i in 0 until count) {
+                        try {
+                            movie.setTime((i.toLong() * dur / count).toInt())
+                            val bmp = Bitmap.createBitmap(tw, th, Bitmap.Config.ARGB_8888)
+                            val c = Canvas(bmp)
+                            c.scale(tw / w.toFloat(), th / h.toFloat())
+                            movie.draw(c, 0f, 0f)
+                            out.add(bmp)
+                        } catch (_: Exception) {}
+                        onProgress((i + 1) / count.toFloat() * 0.6f)
                     }
+                    if (out.size >= 2 && out.any { !isBlank(it) }) {
+                        return Decoded(out, LivingFrameFps.snap(out.size * 1000f / dur))
+                    }
+                    out.forEach { runCatching { it.recycle() } }
                 }
-            } catch (_: Exception) { }
-            // Path 2 — AnimatedImageDrawable with EXPLICIT bounds (unset bounds
-            // draw nothing — the old "stuck on first frame" bug).
-            if (Build.VERSION.SDK_INT >= 28) {
+            }
+        } catch (_: Exception) {}
+
+        // Path 2: animated WebP / HEIF through ImageDecoder, sampled in real time.
+        if (Build.VERSION.SDK_INT >= 28) {
+            try {
                 val src = ImageDecoder.createSource(context.contentResolver, uri)
                 val drawable = ImageDecoder.decodeDrawable(src)
-                if (drawable is android.graphics.drawable.AnimatedImageDrawable) {
+                if (drawable is AnimatedImageDrawable) {
                     val w = drawable.intrinsicWidth.coerceAtLeast(1)
                     val h = drawable.intrinsicHeight.coerceAtLeast(1)
                     drawable.setBounds(0, 0, w, h)
-                    val scale = maxSide.toFloat() / maxOf(w, h).toFloat()
-                    val tw = (w * minOf(1f, scale)).roundToInt().coerceAtLeast(1)
-                    val th = (h * minOf(1f, scale)).roundToInt().coerceAtLeast(1)
-                    val totalMs = 3000L // sample 3s window; looping GIFs repeat anyway
-                    val count = ((totalMs * fps) / 1000L).toInt()
-                        .coerceIn(1, LivingFramesRepository.MAX_FRAMES)
+                    val scale = minOf(1f, side / maxOf(w, h).toFloat())
+                    val tw = (w * scale).roundToInt().coerceAtLeast(1)
+                    val th = (h * scale).roundToInt().coerceAtLeast(1)
+                    val fps = 12
+                    val count = 36
+                    val out = ArrayList<Bitmap>(count)
                     drawable.start()
-                    repeat(count) {
-                        try {
-                            val bmp = Bitmap.createBitmap(tw, th, Bitmap.Config.ARGB_8888)
-                            val c = android.graphics.Canvas(bmp)
-                            c.save()
-                            c.scale(tw.toFloat() / w, th.toFloat() / h)
-                            drawable.draw(c)
-                            c.restore()
-                            out.add(bmp)
-                            Thread.sleep(1000L / fps.coerceAtLeast(1))
-                        } catch (_: Exception) { }
+                    for (i in 0 until count) {
+                        val bmp = Bitmap.createBitmap(tw, th, Bitmap.Config.ARGB_8888)
+                        val c = Canvas(bmp)
+                        c.scale(tw / w.toFloat(), th / h.toFloat())
+                        drawable.draw(c)
+                        out.add(bmp)
+                        onProgress((i + 1) / count.toFloat() * 0.6f)
+                        Thread.sleep(1000L / fps)
                     }
-                    try { drawable.stop() } catch (_: Exception) {}
-                    if (out.isNotEmpty() && out.any { !isBlankFrame(it) }) {
-                        return out.take(LivingFramesRepository.MAX_FRAMES)
-                    }
-                    out.forEach { try { it.recycle() } catch (_: Exception) {} }
-                    out.clear()
-                }
-            }
-            // Path 3 — honest static fallback: real first frame (never blank set).
-            loadDownscaled(uri, maxSide)?.let {
-                if (!isBlankFrame(it)) out.add(it)
-                else try { it.recycle() } catch (_: Exception) {}
-            }
-        } catch (_: Exception) {
-            try {
-                loadDownscaled(uri, maxSide)?.let {
-                    if (out.isEmpty() && !isBlankFrame(it)) out.add(it)
+                    runCatching { drawable.stop() }
+                    if (out.any { !isBlank(it) }) return Decoded(out, fps)
+                    out.forEach { runCatching { it.recycle() } }
                 }
             } catch (_: Exception) {}
         }
-        return out
+
+        // Path 3: honest static fallback.
+        val still = loadDownscaled(uri, side) ?: return null
+        return Decoded(listOf(still), 1)
     }
 
-    /** True when every sampled pixel is (near-)transparent — a failed decode. */
-    private fun isBlankFrame(bmp: Bitmap): Boolean {
-        return try {
-            val w = bmp.width
-            val h = bmp.height
-            if (w <= 0 || h <= 0 || bmp.isRecycled) return true
+    private fun isBlank(bmp: Bitmap): Boolean = try {
+        val w = bmp.width
+        val h = bmp.height
+        if (w <= 0 || h <= 0 || bmp.isRecycled) {
+            true
+        } else {
             val step = maxOf(1, minOf(w, h) / 16)
+            var seen = false
             var y = 0
-            while (y < h) {
+            while (y < h && !seen) {
                 var x = 0
                 while (x < w) {
-                    if ((bmp.getPixel(x, y) ushr 24) > 8) return false
+                    if ((bmp.getPixel(x, y) ushr 24) > 8) { seen = true; break }
                     x += step
                 }
                 y += step
             }
-            true
-        } catch (_: Exception) { true }
-    }
+            !seen
+        }
+    } catch (_: Exception) { true }
 
-    private fun extractVideoFrames(uri: Uri, fps: Int, maxDurationMs: Long): List<Bitmap> {
-        val out = mutableListOf<Bitmap>()
-        var retriever: MediaMetadataRetriever? = null
+    // -- video fallback --------------------------------------------------------
+
+    private fun retrieverFrames(
+        uri: Uri, startMs: Long, lengthMs: Long, count: Int, onProgress: (Float) -> Unit
+    ): List<Bitmap> {
+        val out = ArrayList<Bitmap>()
+        val r = MediaMetadataRetriever()
         try {
-            retriever = MediaMetadataRetriever()
-            retriever.setDataSource(context, uri)
-            val durMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
-                ?.toLongOrNull() ?: 3000L
-            val capped = minOf(durMs, maxDurationMs).coerceAtLeast(500L)
-            val count = LivingFrameEngine.maxFramesFor(capped, fps)
-                .coerceIn(1, LivingFramesRepository.MAX_FRAMES)
-            repeat(count) { i ->
+            r.setDataSource(context, uri)
+            for (i in 0 until count) {
                 try {
-                    val tUs = (i * capped * 1000L / count).coerceAtLeast(0L)
-                    val raw = retriever.getFrameAtTime(tUs, MediaMetadataRetriever.OPTION_CLOSEST)
-                        ?: return@repeat
-                    out.add(downscale(raw, LivingFramesRepository.STORE_SIDE_VIDEO))
-                    if (raw !== out.last()) {
-                        // downscale() copies; recycle original to save memory.
-                        try { if (!raw.isRecycled) raw.recycle() } catch (_: Exception) {}
+                    val tUs = (startMs + i * lengthMs / count) * 1000L
+                    r.getFrameAtTime(tUs, MediaMetadataRetriever.OPTION_CLOSEST)?.let {
+                        out.add(downscale(it, LivingFramesRepository.STORE_SIDE_VIDEO))
                     }
-                } catch (_: Exception) { }
+                } catch (_: Exception) {}
+                onProgress((i + 1) / count.toFloat())
             }
         } catch (_: Exception) {
         } finally {
-            try { retriever?.release() } catch (_: Exception) {}
+            runCatching { r.release() }
         }
-        if (out.isEmpty()) throw IllegalArgumentException("Could not extract video frames")
         return out
     }
 
-    private fun loadDownscaled(uri: Uri, maxSide: Int): Bitmap? {
-        return try {
-            // Two-pass via file descriptor (bounds first, then sampled decode).
-            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                android.graphics.BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, bounds)
-                if (bounds.outWidth <= 0) return null
+    // -- motion check (average hash) -----------------------------------------------
+
+    /** True when at least one frame differs visibly from the first. Never drops frames. */
+    private fun hasMotion(frames: List<Bitmap>): Boolean {
+        val base = hash(frames.first()) ?: return true
+        return frames.drop(1).any { f ->
+            val h = hash(f) ?: return@any false
+            java.lang.Long.bitCount(h xor base) > 2
+        }
+    }
+
+    private fun hash(bmp: Bitmap): Long? = try {
+        val tiny = Bitmap.createScaledBitmap(bmp, 8, 8, true)
+        val px = IntArray(64)
+        tiny.getPixels(px, 0, 8, 0, 0, 8, 8)
+        if (tiny !== bmp) tiny.recycle()
+        val lum = IntArray(64) { i ->
+            val p = px[i]
+            (((p shr 16) and 0xFF) * 3 + ((p shr 8) and 0xFF) * 4 + (p and 0xFF)) / 8
+        }
+        val avg = lum.sum() / 64
+        var h = 0L
+        for (v in lum) { h = h shl 1; if (v > avg) h = h or 1L }
+        h
+    } catch (_: Exception) { null }
+
+    // -- image loading (EXIF-aware) ---------------------------------------------------
+
+    private fun loadDownscaled(uri: Uri, maxSide: Int): Bitmap? = try {
+        val raw: Bitmap? = if (Build.VERSION.SDK_INT >= 28) {
+            val src = ImageDecoder.createSource(context.contentResolver, uri)
+            ImageDecoder.decodeBitmap(src) { decoder, info, _ ->
+                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                val longest = maxOf(info.size.width, info.size.height)
                 var sample = 1
-                while (maxOf(bounds.outWidth, bounds.outHeight) / sample > maxSide) sample *= 2
-                val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
-                val bmp = android.graphics.BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, opts)
-                    ?: return null
-                downscale(bmp, maxSide)
+                while (longest / (sample * 2) >= maxSide) sample *= 2
+                if (sample > 1) decoder.setTargetSampleSize(sample)
             }
-        } catch (_: Exception) { null }
+        } else {
+            legacyDecode(uri, maxSide)
+        }
+        raw?.let { downscale(it, maxSide) }
+    } catch (_: Exception) { null }
+
+    private fun legacyDecode(uri: Uri, maxSide: Int): Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+        if (bounds.outWidth <= 0) return null
+        val longest = maxOf(bounds.outWidth, bounds.outHeight)
+        var sample = 1
+        while (longest / (sample * 2) >= maxSide) sample *= 2
+        val bmp = context.contentResolver.openInputStream(uri)?.use {
+            BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })
+        } ?: return null
+        if (Build.VERSION.SDK_INT < 24) return bmp
+        val degrees = try {
+            context.contentResolver.openInputStream(uri)?.use { ins ->
+                when (ExifInterface(ins).getAttributeInt(ExifInterface.TAG_ORIENTATION, 1)) {
+                    ExifInterface.ORIENTATION_ROTATE_90 -> 90f
+                    ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+                    ExifInterface.ORIENTATION_ROTATE_270 -> 270f
+                    else -> 0f
+                }
+            } ?: 0f
+        } catch (_: Exception) { 0f }
+        if (degrees == 0f) return bmp
+        val rotated = Bitmap.createBitmap(
+            bmp, 0, 0, bmp.width, bmp.height, Matrix().apply { postRotate(degrees) }, true
+        )
+        if (rotated !== bmp) bmp.recycle()
+        return rotated
     }
 
     private fun downscale(src: Bitmap, maxSide: Int): Bitmap {
         val longest = maxOf(src.width, src.height)
         if (longest <= maxSide) return src
-        val scale = maxSide.toFloat() / longest.toFloat()
-        val tw = (src.width * scale).roundToInt().coerceAtLeast(1)
-        val th = (src.height * scale).roundToInt().coerceAtLeast(1)
+        val s = maxSide / longest.toFloat()
         return try {
-            Bitmap.createScaledBitmap(src, tw, th, true)
+            val scaled = Bitmap.createScaledBitmap(
+                src, (src.width * s).roundToInt().coerceAtLeast(1), (src.height * s).roundToInt().coerceAtLeast(1), true
+            )
+            if (scaled !== src) src.recycle()
+            scaled
         } catch (_: Exception) { src }
     }
 
-    private suspend fun storeFrames(
-        id: String,
+    // -- storage -------------------------------------------------------------------------
+
+    private fun webp(): Bitmap.CompressFormat =
+        if (Build.VERSION.SDK_INT >= 30) Bitmap.CompressFormat.WEBP_LOSSY
+        else @Suppress("DEPRECATION") Bitmap.CompressFormat.WEBP
+
+    private suspend fun store(
         frames: List<Bitmap>,
         name: String,
         type: LivingFrameType,
         fps: Int,
         sourceLabel: String,
-        dropped: Int
-    ): LivingFrameImportResult = withContext(Dispatchers.IO) {
+        onProgress: (Float) -> Unit,
+        progressFloor: Float
+    ): LivingFrameImportResult {
         require(frames.isNotEmpty()) { "Nothing to import" }
-        val dir = repo.frameDir(id)
-        var totalBytes = 0L
-        frames.forEachIndexed { i, bmp ->
-            try {
-                val f = File(dir, "frame_%04d.webp".format(i))
-                FileOutputStream(f).use { fos ->
-                    @Suppress("DEPRECATION")
-                    bmp.compress(Bitmap.CompressFormat.WEBP, 80, fos)
-                }
-                totalBytes += f.length()
-            } catch (_: Exception) {}
-        }
-        // Cover = first frame.
+        val id = repo.newId()
+        val dir = repo.ensureFrameDir(id)
         try {
-            val cover = File(dir, "cover.webp")
-            FileOutputStream(cover).use { fos ->
-                @Suppress("DEPRECATION")
-                frames.first().compress(Bitmap.CompressFormat.WEBP, 85, fos)
+            var total = 0L
+            val quality = if (type == LivingFrameType.PHOTO || type == LivingFrameType.SLIDESHOW) 88 else 82
+            frames.forEachIndexed { i, bmp ->
+                val f = File(dir, "frame_%04d.webp".format(i))
+                FileOutputStream(f).use { bmp.compress(webp(), quality, it) }
+                total += f.length()
+                onProgress(progressFloor + (1f - progressFloor) * (i + 1) / frames.size)
             }
-        } catch (_: Exception) {}
-        val first = frames.first()
-        val avg = if (frames.isNotEmpty()) totalBytes / frames.size else 0L
-        val frame = LivingFrame(
-            id = id,
-            name = name.ifBlank { defaultName(type) },
-            type = type,
-            frameCount = frames.size,
-            width = first.width,
-            height = first.height,
-            fps = LivingFrameEngine.clampFps(fps),
-            sourceLabel = sourceLabel.take(120),
-            avgFrameBytes = avg
-        )
-        repo.upsert(frame)
-        try { frames.forEach { if (!it.isRecycled) it.recycle() } } catch (_: Exception) {}
-        LivingFrameImportResult(frame, dropped)
+            val first = frames.first()
+            val cover = downscaleCopy(first, LivingFramesRepository.COVER_SIDE)
+            FileOutputStream(File(dir, "cover.webp")).use { cover.compress(webp(), 80, it) }
+            if (cover !== first) cover.recycle()
+
+            val frame = LivingFrame(
+                id = id,
+                name = name,
+                type = type,
+                frameCount = frames.size,
+                width = first.width,
+                height = first.height,
+                fps = LivingFrameFps.snap(fps),
+                avgFrameBytes = total / frames.size,
+                sourceLabel = sourceLabel.take(120)
+            )
+            repo.upsert(frame)
+            return LivingFrameImportResult(frame)
+        } catch (e: Exception) {
+            runCatching { dir.deleteRecursively() }
+            throw e
+        } finally {
+            frames.forEach { runCatching { if (!it.isRecycled) it.recycle() } }
+        }
     }
 
-    private fun defaultName(type: LivingFrameType): String = when (type) {
-        LivingFrameType.GIF -> "GIF Loop"
-        LivingFrameType.VIDEO -> "Video Loop"
-        LivingFrameType.PHOTO -> "Photo Frame"
-        LivingFrameType.SLIDESHOW -> "Slideshow"
+    private fun downscaleCopy(src: Bitmap, maxSide: Int): Bitmap {
+        val longest = maxOf(src.width, src.height)
+        if (longest <= maxSide) return src
+        val s = maxSide / longest.toFloat()
+        return Bitmap.createScaledBitmap(
+            src, (src.width * s).roundToInt().coerceAtLeast(1), (src.height * s).roundToInt().coerceAtLeast(1), true
+        )
     }
 }

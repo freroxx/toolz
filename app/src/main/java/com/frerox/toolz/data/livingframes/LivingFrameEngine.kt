@@ -17,78 +17,108 @@
 
 package com.frerox.toolz.data.livingframes
 
-/** Pure playback math — unit-tested, no Android dependencies. */
+import kotlin.math.ceil
+import kotlin.math.roundToInt
+
+/** Pure math: playback order, render budgeting, shuffle. No Android dependencies. */
 object LivingFrameEngine {
 
-    /** Frame interval for a target fps, clamped to [LivingFrameFps.MIN..MAX]. */
-    fun intervalMs(fps: Int): Long = LivingFrameFps.intervalMs(fps)
+    /**
+     * Child order for the widget's flipper. BOOMERANG replays the middle
+     * frames backwards (0..n-1, n-2..1) so the loop seam has no duplicate.
+     */
+    fun playbackOrder(frameCount: Int, mode: LivingFrameLoopMode): List<Int> {
+        if (frameCount <= 1) return listOf(0)
+        val forward = (0 until frameCount).toList()
+        return when (mode) {
+            LivingFrameLoopMode.LOOP -> forward
+            LivingFrameLoopMode.BOOMERANG ->
+                if (frameCount == 2) forward else forward + (frameCount - 2 downTo 1).toList()
+        }
+    }
+
+    fun loopDurationMs(frameCount: Int, fps: Int, mode: LivingFrameLoopMode): Long {
+        val steps = playbackOrder(frameCount, mode).size
+        return steps * 1000L / LivingFrameFps.snap(fps).coerceAtLeast(1)
+    }
 
     /**
-     * Next frame index given current position, frame count and loop mode.
-     * @param direction +1 forward, -1 backward (used by BOOMERANG).
-     * @return Pair(nextIndex, nextDirection)
+     * How a widget gets rendered so the RemoteViews fit the system's bitmap
+     * memory ceiling. [bytes] counts unique bitmaps only.
      */
-    fun nextIndex(
-        current: Int,
-        direction: Int,
+    data class RenderPlan(
+        val scale: Float,
+        val step: Int,
+        val rgb565: Boolean,
+        val frames: Int,
+        val outW: Int,
+        val outH: Int,
+        val bytes: Long,
+        val effectiveFps: Int
+    ) {
+        val reduced: Boolean get() = scale < 0.999f || step > 1 || rgb565
+    }
+
+    private val SCALES = floatArrayOf(1f, 0.85f, 0.7f, 0.6f)
+
+    /**
+     * Preference order: full frames at full size, then cheaper pixel format,
+     * then lower resolution, and only then fewer frames (fps is rescaled so
+     * the loop keeps its real-time length).
+     */
+    fun plan(
         frameCount: Int,
-        loopMode: LivingFrameLoopMode
-    ): Pair<Int, Int> {
-        if (frameCount <= 1) return 0 to 1
-        return when (loopMode) {
-            LivingFrameLoopMode.LOOP -> ((current + 1) % frameCount) to 1
-            LivingFrameLoopMode.ONCE -> (minOf(current + 1, frameCount - 1)) to 1
-            LivingFrameLoopMode.BOOMERANG -> {
-                var dir = if (direction == 0) 1 else direction
-                var next = current + dir
-                if (next >= frameCount) {
-                    dir = -1
-                    next = (frameCount - 2).coerceAtLeast(0)
-                } else if (next < 0) {
-                    dir = 1
-                    next = minOf(1, frameCount - 1)
+        widthPx: Int,
+        heightPx: Int,
+        opaque: Boolean,
+        fps: Int,
+        budgetBytes: Long
+    ): RenderPlan {
+        val n = frameCount.coerceAtLeast(1)
+        var fallback: RenderPlan? = null
+        for (step in 1..4) {
+            val kept = ceil(n / step.toFloat()).toInt().coerceAtLeast(1)
+            for (scale in SCALES) {
+                val w = (widthPx * scale).roundToInt().coerceAtLeast(2)
+                val h = (heightPx * scale).roundToInt().coerceAtLeast(2)
+                val formats = if (opaque) listOf(false, true) else listOf(false)
+                for (is565 in formats) {
+                    val bpp = if (is565) 2L else 4L
+                    val bytes = kept.toLong() * w * h * bpp
+                    val p = RenderPlan(
+                        scale, step, is565, kept, w, h, bytes,
+                        LivingFrameFps.snap(fps / step.toFloat())
+                    )
+                    fallback = p
+                    if (bytes <= budgetBytes) return p
                 }
-                next to dir
             }
         }
+        return fallback!!
     }
 
-    /** Sequence of indices for [steps] ticks starting at [start] — handy for previews/tests. */
-    fun sequence(
-        start: Int,
-        steps: Int,
-        frameCount: Int,
-        loopMode: LivingFrameLoopMode
-    ): List<Int> {
-        if (frameCount <= 0 || steps <= 0) return emptyList()
-        val out = ArrayList<Int>(steps)
-        var idx = start.coerceIn(0, frameCount - 1)
-        var dir = 1
-        repeat(steps) {
-            out.add(idx)
-            val (n, d) = nextIndex(idx, dir, frameCount, loopMode)
-            idx = n
-            dir = d
+    /** Deterministic shuffle cycle: same widget + cycle always gives the same order. */
+    fun shuffleOrder(count: Int, seed: Long): List<Int> =
+        (0 until count).shuffled(java.util.Random(seed))
+
+    /**
+     * Slideshow cursor → photo index. [position] only ever increases; each
+     * cycle through [count] photos is its own shuffle, and a cycle never
+     * starts on the photo the previous one ended on.
+     */
+    fun slideIndex(position: Int, count: Int, shuffle: Boolean, seed: Long): Int {
+        if (count <= 1) return 0
+        val pos = position.coerceAtLeast(0)
+        if (!shuffle || count == 2) return pos % count
+        val cycle = pos / count
+        val inCycle = pos % count
+        val order = shuffleOrder(count, seed + cycle).toMutableList()
+        if (cycle > 0) {
+            val prevLast = shuffleOrder(count, seed + cycle - 1).last()
+            if (order[0] == prevLast) {
+                val t = order[0]; order[0] = order[1]; order[1] = t
+            }
         }
-        return out
-    }
-
-    /** Whether playback is finished and should hold (ONCE mode at last frame). */
-    fun isFinished(current: Int, frameCount: Int, loopMode: LivingFrameLoopMode): Boolean =
-        loopMode == LivingFrameLoopMode.ONCE && current >= frameCount - 1
-
-    /** Clamp fps into the supported widget range. */
-    fun clampFps(fps: Int): Int = fps.coerceIn(LivingFrameFps.MIN, LivingFrameFps.MAX)
-
-    /** Max importable frames for a clip of [durationMs] at [fps]. */
-    fun maxFramesFor(durationMs: Long, fps: Int): Int =
-        ((durationMs.coerceAtLeast(0L) * clampFps(fps)) / 1000L).toInt().coerceAtLeast(1)
-
-    /** Downscale factor so the longest side fits [maxSide]. */
-    fun sampleSize(srcW: Int, srcH: Int, maxSide: Int): Int {
-        if (srcW <= 0 || srcH <= 0) return 1
-        var sample = 1
-        while (maxOf(srcW, srcH) / sample > maxSide) sample *= 2
-        return sample
+        return order[inCycle]
     }
 }

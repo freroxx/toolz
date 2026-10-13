@@ -21,26 +21,31 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.ImageFormat
+import android.graphics.Matrix
 import android.graphics.Rect
 import android.graphics.YuvImage
+import android.media.Image
 import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
+import android.os.SystemClock
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlin.math.roundToInt
 
 /**
- * Full-decode video frame extraction (MediaExtractor + MediaCodec, no
- * surface). Unlike MediaMetadataRetriever seeks — which snap per-codec and
- * silently duplicate/drop frames — this decodes the stream and captures
- * exact uniform samples. Throws when nothing usable comes out so the
- * importer fails loudly instead of building a dead loop.
+ * Full-decode frame extraction (MediaExtractor + MediaCodec, no surface).
+ * Decodes the stream and captures exact uniform samples inside a window, so
+ * the loop plays at true speed — unlike seek-based retrievers that snap to
+ * keyframes and silently duplicate frames.
+ *
+ * Fixes over the previous extractor: honours the container's rotation tag
+ * (portrait phone clips used to come out sideways), honours the decoder's
+ * crop rect, supports a start offset, and reports progress.
  */
 @Singleton
 class LivingFrameCodecExtractor @Inject constructor(
@@ -48,167 +53,181 @@ class LivingFrameCodecExtractor @Inject constructor(
 ) {
     suspend fun extract(
         uri: Uri,
-        fps: Int,
-        maxDurationMs: Long,
+        startMs: Long,
+        lengthMs: Long,
+        count: Int,
         targetSide: Int,
-        maxFrames: Int
+        onProgress: (Float) -> Unit = {}
     ): List<Bitmap> = withContext(Dispatchers.IO) {
-        val targetFps = fps.coerceIn(LivingFrameFps.MIN, LivingFrameFps.MAX)
         var extractor: MediaExtractor? = null
         var codec: MediaCodec? = null
+        val out = ArrayList<Bitmap>(count)
         try {
-            extractor = MediaExtractor()
-            extractor.setDataSource(context, uri, null)
+            extractor = MediaExtractor().also { it.setDataSource(context, uri, null) }
             var track = -1
             var format: MediaFormat? = null
             for (i in 0 until extractor.trackCount) {
                 val f = extractor.getTrackFormat(i)
-                val mime = f.getString(MediaFormat.KEY_MIME) ?: continue
-                if (mime.startsWith("video/")) {
-                    track = i
-                    format = f
-                    break
+                if ((f.getString(MediaFormat.KEY_MIME) ?: "").startsWith("video/")) {
+                    track = i; format = f; break
                 }
             }
             require(track >= 0 && format != null) { "No video track" }
             extractor.selectTrack(track)
-            val durationUs = try {
-                format.getLong(MediaFormat.KEY_DURATION)
-            } catch (_: Exception) { 3_000_000L }.coerceAtLeast(500_000L)
-            val cappedUs = minOf(durationUs, maxDurationMs * 1000L)
-            val mime = format.getString(MediaFormat.KEY_MIME) ?: "video/avc"
-            val count = ((cappedUs / 1_000_000.0 * targetFps).toInt())
-                .coerceIn(1, maxFrames)
-            val targets = LongArray(count) { i -> i * cappedUs / count }
 
+            val rotation = if (format.containsKey(MediaFormat.KEY_ROTATION))
+                format.getInteger(MediaFormat.KEY_ROTATION) else 0
+            val startUs = startMs.coerceAtLeast(0L) * 1000L
+            val lengthUs = lengthMs.coerceAtLeast(100L) * 1000L
+            val targets = LongArray(count) { i -> startUs + i * lengthUs / count }
+            if (startUs > 0L) extractor.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+
+            val mime = format.getString(MediaFormat.KEY_MIME) ?: "video/avc"
             codec = MediaCodec.createDecoderByType(mime)
             codec.configure(format, null, null, 0)
             codec.start()
 
-            val out = ArrayList<Bitmap>(count)
-            val startMs = android.os.SystemClock.elapsedRealtime()
+            val info = MediaCodec.BufferInfo()
+            val startedAt = SystemClock.elapsedRealtime()
+            var lastOutputAt = startedAt
             var inputEos = false
-            var targetIdx = 0
-            val bufferInfo = MediaCodec.BufferInfo()
-            var lastFrameMs = android.os.SystemClock.elapsedRealtime()
+            var next = 0
 
-            while (targetIdx < count) {
-                // Watchdog: never spend longer than ~45s decoding.
-                if (android.os.SystemClock.elapsedRealtime() - startMs > 45_000L) break
+            while (next < count) {
+                val now = SystemClock.elapsedRealtime()
+                if (now - startedAt > 45_000L) break // never decode forever
                 if (!inputEos) {
                     val inIdx = codec.dequeueInputBuffer(10_000L)
                     if (inIdx >= 0) {
-                        try {
-                            val inBuf = codec.getInputBuffer(inIdx)
-                            if (inBuf == null) {
-                                codec.queueInputBuffer(inIdx, 0, 0, 0L, 0)
-                            } else {
-                                val n = extractor.readSampleData(inBuf, 0)
-                                if (n < 0) {
-                                    codec.queueInputBuffer(
-                                        inIdx, 0, 0, 0L, MediaCodec.BUFFER_FLAG_END_OF_STREAM
-                                    )
-                                    inputEos = true
-                                } else {
-                                    codec.queueInputBuffer(
-                                        inIdx, 0, n, extractor.sampleTime, extractor.sampleFlags
-                                    )
-                                    extractor.advance()
-                                }
-                            }
-                        } catch (_: Exception) {
-                            try { codec.queueInputBuffer(inIdx, 0, 0, 0L, 0) } catch (_: Exception) {}
+                        val buf = codec.getInputBuffer(inIdx)
+                        val n = if (buf != null) extractor.readSampleData(buf, 0) else -1
+                        if (n < 0) {
+                            codec.queueInputBuffer(inIdx, 0, 0, 0L, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            inputEos = true
+                        } else {
+                            codec.queueInputBuffer(inIdx, 0, n, extractor.sampleTime, 0)
+                            extractor.advance()
                         }
                     }
                 }
-                val outIdx = codec.dequeueOutputBuffer(bufferInfo, 10_000L)
+                val outIdx = codec.dequeueOutputBuffer(info, 10_000L)
                 if (outIdx >= 0) {
-                    lastFrameMs = android.os.SystemClock.elapsedRealtime()
+                    lastOutputAt = SystemClock.elapsedRealtime()
                     try {
-                        val pts = bufferInfo.presentationTimeUs
-                        val isEos = (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
-                        // Capture every target this frame covers (catch-up safe,
-                        // decode once even if several targets land on it).
-                        if (bufferInfo.size > 0) {
+                        val eos = (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
+                        if (info.size > 0) {
+                            // One decoded picture can satisfy several targets (slow clips).
                             var covered = 0
-                            while (targetIdx + covered < count && pts >= targets[targetIdx + covered]) covered++
+                            while (next + covered < count && info.presentationTimeUs >= targets[next + covered]) covered++
                             if (covered > 0) {
-                                yuvToBitmap(codec, outIdx, targetSide)?.let { bmp ->
-                                    repeat(covered) { out.add(if (it == 0) bmp else bmp.copy(bmp.config ?: Bitmap.Config.ARGB_8888, false) ?: bmp) }
+                                val bmp = yuvToBitmap(codec, outIdx, targetSide, rotation)
+                                if (bmp != null) {
+                                    repeat(covered) { k ->
+                                        out.add(if (k == 0) bmp else bmp.copy(bmp.config ?: Bitmap.Config.ARGB_8888, false) ?: bmp)
+                                    }
+                                    next += covered
+                                    onProgress(next / count.toFloat())
                                 }
-                                targetIdx += covered
                             }
-                        } else if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-                            // EOS with no data — stop draining.
                         }
-                        if (isEos) break
+                        if (eos) break
                     } finally {
-                        try { codec.releaseOutputBuffer(outIdx, false) } catch (_: Exception) {}
+                        runCatching { codec.releaseOutputBuffer(outIdx, false) }
                     }
                 } else if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                    lastFrameMs = android.os.SystemClock.elapsedRealtime()
+                    lastOutputAt = SystemClock.elapsedRealtime()
                 }
-                if (inputEos && android.os.SystemClock.elapsedRealtime() - lastFrameMs > 5_000L) break
+                if (inputEos && SystemClock.elapsedRealtime() - lastOutputAt > 5_000L) break
             }
             require(out.isNotEmpty()) { "Decoder produced no frames" }
             out
         } finally {
-            try { codec?.stop() } catch (_: Exception) {}
-            try { codec?.release() } catch (_: Exception) {}
-            try { extractor?.release() } catch (_: Exception) {}
+            runCatching { codec?.stop() }
+            runCatching { codec?.release() }
+            runCatching { extractor?.release() }
         }
     }
 
-    private fun yuvToBitmap(codec: MediaCodec, index: Int, targetSide: Int): Bitmap? {
+    private fun yuvToBitmap(codec: MediaCodec, index: Int, targetSide: Int, rotation: Int): Bitmap? {
         return try {
             val image = codec.getOutputImage(index) ?: return null
             try {
-                val w = (image.width / 2 * 2).coerceAtLeast(2)
-                val h = (image.height / 2 * 2).coerceAtLeast(2)
-                val nv21 = yuv420ToNv21(image, w, h) ?: return null
-                val yuv = YuvImage(nv21, ImageFormat.NV21, w, h, null)
+                val crop = image.cropRect
+                val w = (crop.width() / 2 * 2).coerceAtLeast(2)
+                val h = (crop.height() / 2 * 2).coerceAtLeast(2)
+                val nv21 = yuv420ToNv21(image, crop.left, crop.top, w, h) ?: return null
                 val stream = ByteArrayOutputStream(w * h)
-                if (!yuv.compressToJpeg(Rect(0, 0, w, h), 88, stream)) return null
+                val ok = YuvImage(nv21, ImageFormat.NV21, w, h, null)
+                    .compressToJpeg(Rect(0, 0, w, h), 90, stream)
+                if (!ok) return null
                 val bytes = stream.toByteArray()
                 val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
                 if (bounds.outWidth <= 0) return null
+                val longest = maxOf(bounds.outWidth, bounds.outHeight)
                 var sample = 1
-                while (maxOf(bounds.outWidth, bounds.outHeight) / sample > targetSide) sample *= 2
-                val opts = BitmapFactory.Options().apply { inSampleSize = sample }
-                BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+                while (longest / (sample * 2) >= targetSide) sample *= 2
+                var bmp = BitmapFactory.decodeByteArray(
+                    bytes, 0, bytes.size,
+                    BitmapFactory.Options().apply { inSampleSize = sample }
+                ) ?: return null
+                // Exact fit to the storage tier.
+                val side = maxOf(bmp.width, bmp.height)
+                if (side > targetSide) {
+                    val s = targetSide / side.toFloat()
+                    val scaled = Bitmap.createScaledBitmap(
+                        bmp, (bmp.width * s).toInt().coerceAtLeast(1), (bmp.height * s).toInt().coerceAtLeast(1), true
+                    )
+                    if (scaled !== bmp) bmp.recycle()
+                    bmp = scaled
+                }
+                if (rotation % 360 != 0) {
+                    val rotated = Bitmap.createBitmap(
+                        bmp, 0, 0, bmp.width, bmp.height,
+                        Matrix().apply { postRotate(rotation.toFloat()) }, true
+                    )
+                    if (rotated !== bmp) bmp.recycle()
+                    bmp = rotated
+                }
+                bmp
             } finally {
-                try { image.close() } catch (_: Exception) {}
+                runCatching { image.close() }
             }
         } catch (_: Exception) { null }
     }
 
-    private fun yuv420ToNv21(image: android.media.Image, w: Int, h: Int): ByteArray? {
+    private fun yuv420ToNv21(image: Image, xOff: Int, yOff: Int, w: Int, h: Int): ByteArray? {
         return try {
             val planes = image.planes
             if (planes.size < 3) return null
             val nv21 = ByteArray(w * h + w * h / 2)
-            // Y plane, row by row (respect stride).
             val yBuf = planes[0].buffer
             val yStride = planes[0].rowStride
+            val yPix = planes[0].pixelStride
             var pos = 0
             for (row in 0 until h) {
-                yBuf.position(row * yStride)
-                yBuf.get(nv21, pos, w)
+                val base = (row + yOff) * yStride + xOff * yPix
+                if (yPix == 1) {
+                    yBuf.position(base)
+                    yBuf.get(nv21, pos, w)
+                } else {
+                    for (col in 0 until w) nv21[pos + col] = yBuf.get(base + col * yPix)
+                }
                 pos += w
             }
-            // Interleaved VU from U/V planes (absolute gets — position-safe).
             val uBuf = planes[1].buffer
             val vBuf = planes[2].buffer
             val uRow = planes[1].rowStride
             val vRow = planes[2].rowStride
             val uPix = planes[1].pixelStride
             val vPix = planes[2].pixelStride
+            val cx = xOff / 2
+            val cy = yOff / 2
             for (row in 0 until h / 2) {
                 for (col in 0 until w / 2) {
                     val o = pos + row * w + col * 2
-                    nv21[o] = vBuf.get(row * vRow + col * vPix)
-                    nv21[o + 1] = uBuf.get(row * uRow + col * uPix)
+                    nv21[o] = vBuf.get((row + cy) * vRow + (col + cx) * vPix)
+                    nv21[o + 1] = uBuf.get((row + cy) * uRow + (col + cx) * uPix)
                 }
             }
             nv21

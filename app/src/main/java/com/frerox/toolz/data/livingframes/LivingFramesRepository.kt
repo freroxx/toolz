@@ -22,11 +22,17 @@ import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
@@ -34,62 +40,95 @@ import java.io.File
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlin.math.roundToInt
 
 /**
- * File + JSON storage for Living Frames. No Room migration needed:
- * - frames/<id>/frame_XXXX.webp (downscaled, Binder-safe)
- * - frames.json (metadata)
- * - living_frames_bindings prefs (appWidgetId -> frameId)
+ * File + JSON storage. No Room.
+ *  - frames/<id>/frame_XXXX.webp   stored frames
+ *  - frames/<id>/cover.webp        small thumbnail for lists
+ *  - frames.json                   metadata (written atomically)
+ *  - living_frames_bindings prefs  appWidgetId -> frameId
+ *
+ * Setting edits (sliders etc.) update memory instantly and hit disk through
+ * a debounced writer; structural changes (import, delete) flush immediately.
  */
 @Singleton
 class LivingFramesRepository @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
-    private val json = Json { ignoreUnknownKeys = true }
-    private val dir: File get() = File(context.filesDir, "living_frames").apply { mkdirs() }
-    private val metaFile: File get() = File(dir, "frames.json")
+    private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true }
+    private val serializer = ListSerializer(LivingFrame.serializer())
+    private val root: File get() = File(context.filesDir, "living_frames")
+    private val metaFile: File get() = File(root, "frames.json")
     private val bindings: SharedPreferences by lazy {
         context.getSharedPreferences("living_frames_bindings", Context.MODE_PRIVATE)
     }
 
+    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val writeLock = Mutex()
+    private val loadLock = Mutex()
+    private val persistSignal = Channel<Unit>(Channel.CONFLATED)
+    @Volatile private var loaded = false
+
     private val _frames = MutableStateFlow<List<LivingFrame>>(emptyList())
     val frames: Flow<List<LivingFrame>> = _frames.asStateFlow()
 
-    suspend fun load() = withContext(Dispatchers.IO) {
-        try {
-            if (!metaFile.exists()) {
+    init {
+        ioScope.launch {
+            for (signal in persistSignal) {
+                delay(300L)
+                writeNow()
+            }
+        }
+    }
+
+    // -- loading ---------------------------------------------------------
+
+    /** Loads once per process; every caller (UI, receivers, workers) may call it freely. */
+    suspend fun ensureLoaded() {
+        if (loaded) return
+        load()
+    }
+
+    suspend fun load() = loadLock.withLock {
+        withContext(Dispatchers.IO) {
+            try {
+                if (!metaFile.exists()) {
+                    _frames.value = emptyList()
+                    return@withContext
+                }
+                val list = json.decodeFromString(serializer, metaFile.readText())
+                // Drop sets whose files are gone (cleared storage, partial deletes).
+                val (valid, dropped) = list.partition { frameFile(it.id, 0).exists() }
+                dropped.forEach { runCatching { frameDir(it.id).deleteRecursively() } }
+                _frames.value = valid.sortedByDescending { it.createdAt }
+                if (dropped.isNotEmpty()) writeNow()
+            } catch (_: Exception) {
                 _frames.value = emptyList()
-                return@withContext
+            } finally {
+                loaded = true
             }
-            val list = json.decodeFromString(ListSerializer(LivingFrame.serializer()), metaFile.readText())
-            // Validate: drop sets whose frame files are gone (partial deletes,
-            // cleared storage) so neither widget nor preview can wedge on them.
-            val valid = list.filter { frameFile(it.id, 0).exists() }
-            val dropped = list.filterNot { frameFile(it.id, 0).exists() }
-            dropped.forEach { try { frameDir(it.id).deleteRecursively() } catch (_: Exception) {} }
-            val sorted = valid.sortedByDescending { it.createdAt }
-            if (dropped.isNotEmpty()) {
-                try {
-                    metaFile.writeText(json.encodeToString(ListSerializer(LivingFrame.serializer()), sorted))
-                } catch (_: Exception) {}
-            }
-            _frames.value = sorted
-        } catch (_: Exception) {
-            _frames.value = emptyList()
         }
     }
 
     fun snapshot(): List<LivingFrame> = _frames.value
+    fun get(id: String): LivingFrame? = _frames.value.firstOrNull { it.id == id }
 
-    fun frameDir(id: String): File = File(dir, id).apply { mkdirs() }
+    // -- paths -----------------------------------------------------------
 
-    fun frameFile(id: String, index: Int): File =
-        File(frameDir(id), "frame_%04d.webp".format(index))
-
+    fun frameDir(id: String): File = File(root, id)
+    fun ensureFrameDir(id: String): File = frameDir(id).apply { mkdirs() }
+    fun frameFile(id: String, index: Int): File = File(frameDir(id), "frame_%04d.webp".format(index))
     fun coverFile(id: String): File = File(frameDir(id), "cover.webp")
 
-    suspend fun decodeFrame(id: String, index: Int, maxSide: Int = 512): Bitmap? =
+    // -- decoding --------------------------------------------------------
+
+    /**
+     * Decodes frame [index] so its longest side is at least [minSide] (when
+     * the stored file is that large), never more than 2× that. Using the
+     * smallest power-of-two sample that still covers the target keeps widgets
+     * sharp without decoding full-size files.
+     */
+    suspend fun decodeAtLeast(id: String, index: Int, minSide: Int): Bitmap? =
         withContext(Dispatchers.IO) {
             try {
                 val f = frameFile(id, index)
@@ -97,124 +136,57 @@ class LivingFramesRepository @Inject constructor(
                 val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 BitmapFactory.decodeFile(f.absolutePath, bounds)
                 if (bounds.outWidth <= 0) return@withContext null
+                val longest = maxOf(bounds.outWidth, bounds.outHeight)
                 var sample = 1
-                while (maxOf(bounds.outWidth, bounds.outHeight) / sample > maxSide) sample *= 2
-                val opts = BitmapFactory.Options().apply { inSampleSize = sample }
-                BitmapFactory.decodeFile(f.absolutePath, opts)
+                while (longest / (sample * 2) >= minSide) sample *= 2
+                BitmapFactory.decodeFile(
+                    f.absolutePath,
+                    BitmapFactory.Options().apply { inSampleSize = sample }
+                )
             } catch (_: Exception) { null }
         }
 
-    suspend fun decodeCover(id: String): Bitmap? = withContext(Dispatchers.IO) {
-        try {
-            val f = coverFile(id)
-            if (f.exists()) BitmapFactory.decodeFile(f.absolutePath) else null
-        } catch (_: Exception) { null }
-    }
+    // -- mutation --------------------------------------------------------
 
-    /**
-     * Widget-ready bitmap for pushing: per-type resolution tier, RGB_565 for
-     * opaque photo/video stills (halves the Binder payload), ARGB_8888 for
-     * GIFs (transparency), with per-widget opacity + rounded corners baked in
-     * (RemoteViews cannot do either). See budget table in helper.
-     */
-    suspend fun decodeWidgetFrame(frame: LivingFrame, index: Int): Bitmap? =
-        withContext(Dispatchers.IO) {
-            try {
-                val isGif = frame.type == LivingFrameType.GIF
-                val isVideo = frame.type == LivingFrameType.VIDEO
-                val maxSide = when {
-                    isGif -> PUSH_SIDE_ANIMATED
-                    isVideo -> PUSH_SIDE_VIDEO
-                    else -> PUSH_SIDE_STATIC
-                }
-                var bmp = decodeFrame(frame.id, index, maxSide) ?: return@withContext null
-                // Exact-fit: inSampleSize undershoots (powers of two), so scale
-                // precisely to the tier for consistent sharpness.
-                if (maxOf(bmp.width, bmp.height) > maxSide) {
-                    try {
-                        val scale = maxSide.toFloat() / maxOf(bmp.width, bmp.height).toFloat()
-                        val tw = (bmp.width * scale).roundToInt().coerceAtLeast(1)
-                        val th = (bmp.height * scale).roundToInt().coerceAtLeast(1)
-                        val scaled = Bitmap.createScaledBitmap(bmp, tw, th, true)
-                        try { bmp.recycle() } catch (_: Exception) {}
-                        bmp = scaled
-                    } catch (_: Exception) {}
-                }
-                val needsAlpha = isGif || frame.opacity < 0.999f || frame.cornerRadiusDp > 0
-                if (!needsAlpha && frame.fit == LivingFrameFit.FILL) {
-                    // Opaque fast path: halve Binder bytes with zero visible loss.
-                    try {
-                        val flat = bmp.copy(Bitmap.Config.RGB_565, false)
-                        try { bmp.recycle() } catch (_: Exception) {}
-                        if (flat != null) bmp = flat
-                    } catch (_: Exception) {}
-                    return@withContext bmp
-                }
-                // Effect path: ARGB canvas, rounded corners, scaled alpha.
-                // Capped at 512px so the 4-byte format stays in Binder budget.
-                try {
-                    if (maxOf(bmp.width, bmp.height) > 512) {
-                        val scale = 512f / maxOf(bmp.width, bmp.height).toFloat()
-                        val tw = (bmp.width * scale).roundToInt().coerceAtLeast(1)
-                        val th = (bmp.height * scale).roundToInt().coerceAtLeast(1)
-                        val scaled = Bitmap.createScaledBitmap(bmp, tw, th, true)
-                        try { bmp.recycle() } catch (_: Exception) {}
-                        bmp = scaled
-                    }
-                    val w = bmp.width
-                    val h = bmp.height
-                    if (w <= 0 || h <= 0) return@withContext bmp
-                    val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-                    val canvas = android.graphics.Canvas(out)
-                    if (frame.cornerRadiusDp > 0) {
-                        val fraction = (frame.cornerRadiusDp / 32f).coerceIn(0f, 1f)
-                        val radius = fraction * minOf(w, h) * 0.22f
-                        if (radius > 1f) {
-                            val path = android.graphics.Path().apply {
-                                addRoundRect(
-                                    android.graphics.RectF(0f, 0f, w.toFloat(), h.toFloat()),
-                                    radius, radius,
-                                    android.graphics.Path.Direction.CW
-                                )
-                            }
-                            canvas.clipPath(path)
-                        }
-                    }
-                    val paint = android.graphics.Paint(
-                        android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG
-                    ).apply { alpha = (frame.opacity.coerceIn(0f, 1f) * 255).toInt() }
-                    canvas.drawBitmap(bmp, 0f, 0f, paint)
-                    try { bmp.recycle() } catch (_: Exception) {}
-                    out
-                } catch (_: Exception) {
-                    bmp
-                }
-            } catch (_: Exception) { null }
-        }
-
-    suspend fun upsert(frame: LivingFrame) = withContext(Dispatchers.IO) {
-        val next = (_frames.value.filterNot { it.id == frame.id } + frame)
+    /** Insert or replace, flushed to disk before returning. */
+    suspend fun upsert(frame: LivingFrame) {
+        _frames.value = (_frames.value.filterNot { it.id == frame.id } + frame)
             .sortedByDescending { it.createdAt }
-        persist(next)
+        withContext(Dispatchers.IO) { writeNow() }
     }
 
-    suspend fun update(id: String, transform: (LivingFrame) -> LivingFrame) {
-        val cur = _frames.value.firstOrNull { it.id == id } ?: return
-        upsert(transform(cur))
+    /** In-memory immediately, persisted shortly after. Safe to call per slider tick. */
+    fun update(id: String, transform: (LivingFrame) -> LivingFrame) {
+        _frames.value = _frames.value.map { if (it.id == id) transform(it) else it }
+        persistSignal.trySend(Unit)
     }
 
-    suspend fun delete(id: String) = withContext(Dispatchers.IO) {
-        try { frameDir(id).deleteRecursively() } catch (_: Exception) {}
-        // Unbind widgets pointing at this frame.
-        try {
-            val ed = bindings.edit()
-            bindings.all.forEach { (k, v) -> if (v == id) ed.remove(k) }
-            ed.apply()
-        } catch (_: Exception) {}
-        persist(_frames.value.filterNot { it.id == id })
+    suspend fun delete(id: String) {
+        withContext(Dispatchers.IO) {
+            runCatching { frameDir(id).deleteRecursively() }
+            runCatching {
+                val ed = bindings.edit()
+                bindings.all.forEach { (k, v) -> if (v == id) ed.remove(k) }
+                ed.apply()
+            }
+        }
+        _frames.value = _frames.value.filterNot { it.id == id }
+        withContext(Dispatchers.IO) { writeNow() }
     }
 
     fun newId(): String = UUID.randomUUID().toString().take(8)
+
+    private suspend fun writeNow() = writeLock.withLock {
+        try {
+            root.mkdirs()
+            val tmp = File(root, "frames.json.tmp")
+            tmp.writeText(json.encodeToString(serializer, _frames.value))
+            if (!tmp.renameTo(metaFile)) {
+                metaFile.writeText(tmp.readText())
+                tmp.delete()
+            }
+        } catch (_: Exception) {}
+    }
 
     // -- widget bindings ---------------------------------------------------
 
@@ -233,30 +205,27 @@ class LivingFramesRepository @Inject constructor(
             if (v == frameId && k.startsWith("w_")) k.removePrefix("w_").toIntOrNull() else null
         }
 
-    fun allBoundWidgetIds(): List<Int> =
-        bindings.all.mapNotNull { (k, _) ->
-            if (k.startsWith("w_")) k.removePrefix("w_").toIntOrNull() else null
+    /** Drops bindings for widgets the launcher no longer has. */
+    fun pruneBindings(liveWidgetIds: Set<Int>): List<Int> {
+        val stale = bindings.all.keys
+            .filter { it.startsWith("w_") }
+            .mapNotNull { it.removePrefix("w_").toIntOrNull() }
+            .filter { it !in liveWidgetIds }
+        if (stale.isNotEmpty()) {
+            val ed = bindings.edit()
+            stale.forEach { ed.remove("w_$it") }
+            ed.apply()
         }
-
-    fun get(id: String): LivingFrame? = _frames.value.firstOrNull { it.id == id }
-
-    private suspend fun persist(list: List<LivingFrame>) = withContext(Dispatchers.IO) {
-        try {
-            metaFile.writeText(json.encodeToString(ListSerializer(LivingFrame.serializer()), list))
-        } catch (_: Exception) {}
-        _frames.update { list }
+        return stale
     }
 
     companion object {
-        /** Binder-safe ceiling: frames must stay small or updates throw. */
-        const val MAX_FRAME_SIDE = 320
-        const val MAX_FRAMES = 90
-        /** Quality tiers — see push-budget table in LivingFramesWidgetHelper. */
-        const val STORE_SIDE_ANIMATED = 480
-        const val STORE_SIDE_STATIC = 960
-        const val STORE_SIDE_VIDEO = 640
-        const val PUSH_SIDE_ANIMATED = 448
-        const val PUSH_SIDE_STATIC = 720
-        const val PUSH_SIDE_VIDEO = 560
+        /** Animated clips are short loops; the launcher holds every frame in memory. */
+        const val MAX_FRAMES = 40
+        const val MAX_SLIDES = 30
+        const val STORE_SIDE_GIF = 540
+        const val STORE_SIDE_VIDEO = 720
+        const val STORE_SIDE_PHOTO = 1280
+        const val COVER_SIDE = 400
     }
 }
