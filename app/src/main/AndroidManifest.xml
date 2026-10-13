@@ -623,45 +623,18 @@
             android:label="@string/widget_living_frames_label">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-                <action android:name="com.frerox.toolz.LIVING_FRAME_TAP" />
-                <action android:name="com.frerox.toolz.LIVING_FRAME_NEXT" />
-                <action android:name="com.frerox.toolz.LIVING_FRAME_SLIDE" />
-                <action android:name="com.frerox.toolz.LIVING_FRAME_PINNED" />
             </intent-filter>
             <meta-data android:name="android.appwidget.provider"
                 android:resource="@xml/living_frames_widget_info" />
         </receiver>
 
-        <service
-            android:name=".widget.livingframes.LivingFramesPlaybackService"
-            android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="specialUse">
-            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_TYPE"
-                android:value="Living Frames home-screen animation" />
-        </service>
-
         <receiver android:name=".widget.livingframes.LivingFramesBootReceiver"
-            android:enabled="true"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED" />
-                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
-                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
-                <action android:name="android.intent.action.USER_PRESENT" />
-                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
-            </intent-filter>
-            <intent-filter>
-                <action android:name="android.intent.action.PACKAGE_REPLACED" />
-                <data android:scheme="package" />
-            </intent-filter>
-        </receiver>
-
-        <receiver android:name=".widget.livingframes.LivingFramesBootReceiver$AppWidgetRefresh"
             android:enabled="true"
             android:exported="false">
             <intent-filter>
-                <action android:name="com.frerox.toolz.LIVING_FRAMES_REBIND" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
             </intent-filter>
         </receiver>
 
