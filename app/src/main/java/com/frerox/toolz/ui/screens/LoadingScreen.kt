@@ -77,7 +77,7 @@ fun LoadingOverlay(
                         scaleY = contentScale.value
                     }
             ) {
-                // Simplified Expressive Logo
+                // Simplified Expressive Logo (new Toolz mark)
                 Surface(
                     modifier = Modifier.size(120.dp),
                     shape = ExtraLargeExpressiveShape,
@@ -85,11 +85,9 @@ fun LoadingOverlay(
                     border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Image(
-                            painter = painterResource(id = R.drawable.app_logo),
-                            contentDescription = null,
+                        ToolzMark(
+                            presetId = "grape-haze",
                             modifier = Modifier.size(120.dp).clip(ExtraLargeExpressiveShape),
-                            contentScale = androidx.compose.ui.layout.ContentScale.Crop
                         )
                     }
                 }

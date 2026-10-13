@@ -445,7 +445,7 @@ object NotificationHelper {
     }
 
     private fun buildToolzLargeIcon(context: Context): android.graphics.Bitmap? = try {
-        val raw = android.graphics.BitmapFactory.decodeResource(context.resources, R.drawable.ic_launcher_logo)
+        val raw = android.graphics.BitmapFactory.decodeResource(context.resources, R.drawable.toolz_base)
             ?: android.graphics.BitmapFactory.decodeResource(context.resources, R.drawable.ic_launcher_foreground)
             ?: return null
         val cacheKey = "${raw.width}x${raw.height}"

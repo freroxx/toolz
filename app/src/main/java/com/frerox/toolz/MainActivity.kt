@@ -670,11 +670,9 @@ fun UpdateOverlayContent(
                         .background(MaterialTheme.colorScheme.primaryContainer),
                     contentAlignment = Alignment.Center
                 ) {
-                    Image(
-                        painter = painterResource(id = R.drawable.app_logo),
-                        contentDescription = null,
+                    com.frerox.toolz.ui.components.ToolzMark(
+                        presetId = "grape-haze",
                         modifier = Modifier.size(140.dp).clip(RoundedCornerShape(40.dp)),
-                        contentScale = ContentScale.Crop
                     )
                 }
 

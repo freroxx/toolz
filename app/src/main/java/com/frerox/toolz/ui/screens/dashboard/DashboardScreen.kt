@@ -2266,11 +2266,9 @@ fun UpdateBanner(version: String, onUpdate: () -> Unit, onDismiss: () -> Unit) {
             ) {
                 Surface(Modifier.size(48.dp), SmallExpressiveShape, color = MaterialTheme.colorScheme.primary) {
                     Box(contentAlignment = Alignment.Center) {
-                        Image(
-                            painter = painterResource(id = R.drawable.app_logo),
-                            contentDescription = null,
+                        com.frerox.toolz.ui.components.ToolzMark(
+                            presetId = "grape-haze",
                             modifier = Modifier.size(48.dp).clip(SmallExpressiveShape),
-                            contentScale = ContentScale.Crop
                         )
                     }
                 }
