@@ -24,18 +24,18 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import com.frerox.toolz.data.livingframes.LivingFrameType
 import com.frerox.toolz.data.livingframes.LivingFramesRepository
+import com.frerox.toolz.widget.livingframes.LivingFramesSlideshow
 import com.frerox.toolz.widget.livingframes.LivingFramesWidgetHelper
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import java.util.concurrent.TimeUnit
 
 /**
- * Self-healing for Living Widgets. Repairs what dies without a foreground
- * context: slideshow alarms (OEMs + reboot clear them) and stale photo
- * covers. It deliberately does NOT start the fps loop — background FGS
- * starts are denied on Android 12+, so GIF/video resume when the tool opens.
+ * Hourly housekeeping: re-arms slideshow alarms that an OEM or a reboot
+ * killed, drops bindings for widgets the launcher no longer has, and renders
+ * any widget that has never been rendered. It never touches widgets that are
+ * already fine, so it costs next to nothing.
  */
 @HiltWorker
 class LivingFramesWatchdogWorker @AssistedInject constructor(
@@ -45,37 +45,26 @@ class LivingFramesWatchdogWorker @AssistedInject constructor(
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
-        return try {
-            repo.load()
+        try {
+            repo.ensureLoaded()
             val ctx = applicationContext
-            LivingFramesWidgetHelper.allWidgetIds(ctx).forEach { id ->
+            val ids = LivingFramesWidgetHelper.allWidgetIds(ctx)
+            repo.pruneBindings(ids.toSet()).forEach {
+                LivingFramesSlideshow.cancel(ctx, it)
+                LivingFramesWidgetHelper.clearInfo(ctx, it)
+            }
+            ids.forEach { id ->
                 try {
-                    val frame = repo.boundFrame(id)?.let { repo.get(it) } ?: return@forEach
-                    when (frame.type) {
-                        LivingFrameType.SLIDESHOW -> {
-                            if (LivingFramesWidgetHelper.slideIntervalMin(ctx, id) <= 0) {
-                                LivingFramesWidgetHelper.scheduleSlideshow(
-                                    ctx, id, frame.slideshowIntervalMin
-                                )
-                            }
-                        }
-                        LivingFrameType.PHOTO -> {
-                            repo.decodeWidgetFrame(frame, 0)?.let { bmp ->
-                                try {
-                                    LivingFramesWidgetHelper.pushFrame(ctx, id, frame, bmp)
-                                } finally {
-                                    try { bmp.recycle() } catch (_: Exception) {}
-                                }
-                            }
-                        }
-                        else -> { /* fps loop owns GIF/video; needs foreground */ }
+                    val frame = repo.boundFrame(id)?.let { repo.get(it) }
+                    if (frame == null || LivingFramesWidgetHelper.readInfo(ctx, id) == null) {
+                        LivingFramesWidgetHelper.refresh(ctx, repo, id)
+                    } else if (frame.isSlideshow) {
+                        LivingFramesSlideshow.ensureScheduled(ctx, id, frame.slideshowIntervalMin)
                     }
                 } catch (_: Exception) {}
             }
-            Result.success()
-        } catch (_: Exception) {
-            Result.success()
-        }
+        } catch (_: Exception) {}
+        return Result.success()
     }
 
     companion object {
@@ -86,9 +75,7 @@ class LivingFramesWatchdogWorker @AssistedInject constructor(
                 WorkManager.getInstance(context).enqueueUniquePeriodicWork(
                     UNIQUE,
                     ExistingPeriodicWorkPolicy.KEEP,
-                    PeriodicWorkRequestBuilder<LivingFramesWatchdogWorker>(
-                        15, TimeUnit.MINUTES
-                    ).build()
+                    PeriodicWorkRequestBuilder<LivingFramesWatchdogWorker>(1, TimeUnit.HOURS).build()
                 )
             } catch (_: Exception) {}
         }
