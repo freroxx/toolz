@@ -37,6 +37,19 @@ class SettingsRepository @Inject constructor(
     private val CUSTOM_PRIMARY_COLOR = intPreferencesKey("custom_primary_color")
     private val CUSTOM_SECONDARY_COLOR = intPreferencesKey("custom_secondary_color")
     private val BACKGROUND_GRADIENT_ENABLED = booleanPreferencesKey("background_gradient_enabled")
+    // App Skin — icon + skin appearance (additive, never rename existing theme keys)
+    private val APP_ICON_PRESET_ID = stringPreferencesKey("app_icon_preset_id")
+    private val APP_ICON_SHAPE = stringPreferencesKey("app_icon_shape") // HEXAGON | CIRCLE | PILL
+    private val APP_ICON_ADAPT_THEME = booleanPreferencesKey("app_icon_adapt_theme")
+    private val APP_ICON_FOLLOW_DYNAMIC = booleanPreferencesKey("app_icon_follow_dynamic")
+    private val APP_ICON_BG_OVERRIDE = intPreferencesKey("app_icon_bg_override")
+    private val APP_ICON_FG_OVERRIDE = intPreferencesKey("app_icon_fg_override")
+    private val APP_ICON_STROKE_OVERRIDE = intPreferencesKey("app_icon_stroke_override")
+    private val APP_ICON_GRADIENT_ENABLED = booleanPreferencesKey("app_icon_gradient_enabled")
+    private val ACTIVE_SKIN_ID = stringPreferencesKey("active_skin_id")
+    private val SKINS_CACHE_JSON = stringPreferencesKey("skins_cache_json")
+    private val SKINS_LAST_SYNC = longPreferencesKey("skins_last_sync")
+    private val SKINS_FEED_VERSION = intPreferencesKey("skins_feed_version")
     private val SHUTTER_SOUND_ENABLED = booleanPreferencesKey("shutter_sound_enabled")
     private val SHUTTER_SOUND_URI = stringPreferencesKey("shutter_sound_uri")
     private val WORLD_CLOCK_ZONES = stringSetPreferencesKey("world_clock_zones")
@@ -699,6 +712,19 @@ class SettingsRepository @Inject constructor(
         }
     }
     val backgroundGradientEnabled: Flow<Boolean> = dataStore.data.map { it[BACKGROUND_GRADIENT_ENABLED] ?: true }
+    // App Skin flows
+    val appIconPresetId: Flow<String> = dataStore.data.map { it[APP_ICON_PRESET_ID] ?: "grape-haze" }
+    val appIconShape: Flow<String> = dataStore.data.map { it[APP_ICON_SHAPE] ?: "HEXAGON" }
+    val appIconAdaptTheme: Flow<Boolean> = dataStore.data.map { it[APP_ICON_ADAPT_THEME] ?: true }
+    val appIconFollowDynamic: Flow<Boolean> = dataStore.data.map { it[APP_ICON_FOLLOW_DYNAMIC] ?: true }
+    val appIconBgOverride: Flow<Int?> = dataStore.data.map { it[APP_ICON_BG_OVERRIDE] }
+    val appIconFgOverride: Flow<Int?> = dataStore.data.map { it[APP_ICON_FG_OVERRIDE] }
+    val appIconStrokeOverride: Flow<Int?> = dataStore.data.map { it[APP_ICON_STROKE_OVERRIDE] }
+    val appIconGradientEnabled: Flow<Boolean> = dataStore.data.map { it[APP_ICON_GRADIENT_ENABLED] ?: true }
+    val activeSkinId: Flow<String?> = dataStore.data.map { it[ACTIVE_SKIN_ID] }
+    val skinsCacheJson: Flow<String?> = dataStore.data.map { it[SKINS_CACHE_JSON] }
+    val skinsLastSync: Flow<Long> = dataStore.data.map { it[SKINS_LAST_SYNC] ?: 0L }
+    val skinsFeedVersion: Flow<Int> = dataStore.data.map { it[SKINS_FEED_VERSION] ?: -1 }
     val shutterSoundEnabled: Flow<Boolean> = dataStore.data.map { it[SHUTTER_SOUND_ENABLED] ?: true }
     val shutterSoundUri: Flow<String?> = dataStore.data.map { it[SHUTTER_SOUND_URI] ?: defaultShutterUri }
     val worldClockZones: Flow<Set<String>> = dataStore.data.map { it[WORLD_CLOCK_ZONES] ?: setOf("UTC", "America/New_York", "Europe/London", "Asia/Tokyo") }
@@ -1159,6 +1185,45 @@ class SettingsRepository @Inject constructor(
         }
     }
     suspend fun setBackgroundGradientEnabled(enabled: Boolean) { dataStore.edit { it[BACKGROUND_GRADIENT_ENABLED] = enabled } }
+    // App Skin setters
+    suspend fun setAppIconPresetId(id: String) { dataStore.edit { it[APP_ICON_PRESET_ID] = id.take(64) } }
+    suspend fun setAppIconShape(shape: String) { dataStore.edit { it[APP_ICON_SHAPE] = shape.uppercase().take(16) } }
+    suspend fun setAppIconAdaptTheme(enabled: Boolean) { dataStore.edit { it[APP_ICON_ADAPT_THEME] = enabled } }
+    suspend fun setAppIconFollowDynamic(enabled: Boolean) { dataStore.edit { it[APP_ICON_FOLLOW_DYNAMIC] = enabled } }
+    suspend fun setAppIconBgOverride(color: Int?) { dataStore.edit { if (color == null) it.remove(APP_ICON_BG_OVERRIDE) else it[APP_ICON_BG_OVERRIDE] = color } }
+    suspend fun setAppIconFgOverride(color: Int?) { dataStore.edit { if (color == null) it.remove(APP_ICON_FG_OVERRIDE) else it[APP_ICON_FG_OVERRIDE] = color } }
+    suspend fun setAppIconStrokeOverride(color: Int?) { dataStore.edit { if (color == null) it.remove(APP_ICON_STROKE_OVERRIDE) else it[APP_ICON_STROKE_OVERRIDE] = color } }
+    suspend fun setAppIconGradientEnabled(enabled: Boolean) { dataStore.edit { it[APP_ICON_GRADIENT_ENABLED] = enabled } }
+    suspend fun setActiveSkinId(id: String?) { dataStore.edit { if (id == null) it.remove(ACTIVE_SKIN_ID) else it[ACTIVE_SKIN_ID] = id.take(64) } }
+    suspend fun setSkinsCacheJson(json: String) { dataStore.edit { it[SKINS_CACHE_JSON] = json.take(200_000) } }
+    suspend fun setSkinsLastSync(ts: Long) { dataStore.edit { it[SKINS_LAST_SYNC] = ts } }
+    suspend fun setSkinsFeedVersion(v: Int) { dataStore.edit { it[SKINS_FEED_VERSION] = v } }
+    /** Atomic skin apply: theme + colors + icon in one edit. */
+    suspend fun applySkin(
+        themeMode: String,
+        dynamicColor: Boolean,
+        primary: Int?,
+        secondary: Int?,
+        gradient: Boolean,
+        iconPresetId: String,
+        iconAdaptTheme: Boolean,
+        iconFollowDynamic: Boolean,
+        iconShape: String,
+        activeSkinId: String?,
+    ) {
+        dataStore.edit { p ->
+            p[THEME_MODE] = themeMode.take(16)
+            p[DYNAMIC_COLOR] = dynamicColor
+            if (primary == null) p.remove(CUSTOM_PRIMARY_COLOR) else p[CUSTOM_PRIMARY_COLOR] = primary
+            if (secondary == null) p.remove(CUSTOM_SECONDARY_COLOR) else p[CUSTOM_SECONDARY_COLOR] = secondary
+            p[BACKGROUND_GRADIENT_ENABLED] = gradient
+            p[APP_ICON_PRESET_ID] = iconPresetId.take(64)
+            p[APP_ICON_ADAPT_THEME] = iconAdaptTheme
+            p[APP_ICON_FOLLOW_DYNAMIC] = iconFollowDynamic
+            p[APP_ICON_SHAPE] = iconShape.uppercase().take(16)
+            if (activeSkinId == null) p.remove(ACTIVE_SKIN_ID) else p[ACTIVE_SKIN_ID] = activeSkinId.take(64)
+        }
+    }
     suspend fun setShutterSoundEnabled(enabled: Boolean) { dataStore.edit { it[SHUTTER_SOUND_ENABLED] = enabled } }
     suspend fun setShutterSoundUri(uri: String) { dataStore.edit { it[SHUTTER_SOUND_URI] = uri } }
     suspend fun addWorldClockZone(zone: String) {
