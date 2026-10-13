@@ -208,7 +208,7 @@ fun OnboardingScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val vibrationManager = LocalVibrationManager.current
-    val pageCount = 9
+    val pageCount = 10
     val pagerState = rememberPagerState(pageCount = { pageCount })
     var showSkipDialog by remember { mutableStateOf(false) }
     var isFinishing by remember { mutableStateOf(false) }
@@ -393,12 +393,21 @@ fun OnboardingScreen(
                                 onNewsNotificationsChange = viewModel::updateNewsNotifications,
                                 onNext = goNext
                             )
-                            7 -> LanguageStep(
+                            7 -> StyleStep(
+                                state = uiState,
+                                onIconPresetChange = viewModel::updateIconPreset,
+                                onIconShapeChange = viewModel::updateIconShape,
+                                onIconAdaptChange = viewModel::updateIconAdaptTheme,
+                                onIconFollowChange = viewModel::updateIconFollowDynamic,
+                                onSkinApply = viewModel::applySkinPreset,
+                                onNext = goNext
+                            )
+                            8 -> LanguageStep(
                                 selected = uiState.appLanguage,
                                 onLanguageChange = viewModel::updateAppLanguage,
                                 onNext = goNext
                             )
-                            8 -> ReadyStep(
+                            9 -> ReadyStep(
                                 name = uiState.name,
                                 onComplete = {
                                     vibrationManager?.vibrateSuccess()
@@ -412,7 +421,7 @@ fun OnboardingScreen(
             }
 
             // Confetti layer on top of background
-            if (pagerState.currentPage == 8 && !isFinishing) {
+            if (pagerState.currentPage == 9 && !isFinishing) {
                 Box(modifier = Modifier.fillMaxSize().zIndex(5f)) {
                     PomodoroSuccessConfetti(onFinished = {})
                 }
@@ -550,10 +559,8 @@ fun WelcomeStep(onNext: () -> Unit) {
                     color = MaterialTheme.colorScheme.primaryContainer,
                     tonalElevation = 3.dp
                 ) {
-                    Image(
-                        painter = painterResource(R.drawable.app_logo),
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
+                    com.frerox.toolz.ui.components.ToolzMark(
+                        presetId = "grape-haze",
                         modifier = Modifier.fillMaxSize().clip(SquircleShape)
                     )
                 }
@@ -1703,7 +1710,7 @@ fun ReadyStep(name: String, onComplete: () -> Unit) {
 // ── Shared ───────────────────────────────────────────────────────────────────
 
 @Composable
-private fun SectionHeader(eyebrow: String, title: String, trailing: String? = null) {
+internal fun SectionHeader(eyebrow: String, title: String, trailing: String? = null) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1742,7 +1749,7 @@ private fun SectionHeader(eyebrow: String, title: String, trailing: String? = nu
 }
 
 @Composable
-private fun CardEyebrow(text: String) {
+internal fun CardEyebrow(text: String) {
     Text(
         text.uppercase(),
         style = MaterialTheme.typography.labelMedium,

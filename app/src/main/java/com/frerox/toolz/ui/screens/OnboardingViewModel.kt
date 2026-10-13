@@ -76,7 +76,13 @@ class OnboardingViewModel @Inject constructor(
         val newsEnabled: Boolean = true,
         val newsNotifications: Boolean = true,
         // Step 7 — Language (codes match locales_config + Settings).
-        val appLanguage: String = "en"
+        val appLanguage: String = "en",
+        // App Skin step — icon + skin (defaults mirror SettingsRepository)
+        val iconPresetId: String = "grape-haze",
+        val iconShape: String = "HEXAGON",
+        val iconAdaptTheme: Boolean = true,
+        val iconFollowDynamic: Boolean = true,
+        val activeSkinId: String? = null,
     )
 
     private val _uiState = MutableStateFlow(OnboardingState())
@@ -122,6 +128,21 @@ class OnboardingViewModel @Inject constructor(
     fun updateNewsEnabled(enabled: Boolean) = _uiState.update { it.copy(newsEnabled = enabled) }
     fun updateNewsNotifications(enabled: Boolean) = _uiState.update { it.copy(newsNotifications = enabled) }
     fun updateAppLanguage(lang: String) = _uiState.update { it.copy(appLanguage = lang) }
+    fun updateIconPreset(id: String) = _uiState.update { it.copy(iconPresetId = id, activeSkinId = null) }
+    fun updateIconShape(shape: String) = _uiState.update { it.copy(iconShape = shape) }
+    fun updateIconAdaptTheme(enabled: Boolean) = _uiState.update { it.copy(iconAdaptTheme = enabled) }
+    fun updateIconFollowDynamic(enabled: Boolean) = _uiState.update { it.copy(iconFollowDynamic = enabled) }
+    fun applySkinPreset(skin: com.frerox.toolz.data.skin.SkinDto) = _uiState.update {
+        it.copy(
+            themeMode = skin.themeMode,
+            dynamicColor = skin.dynamicColor,
+            iconPresetId = skin.iconPresetId,
+            iconShape = skin.iconShape,
+            iconAdaptTheme = skin.iconAdaptTheme,
+            iconFollowDynamic = skin.iconFollowDynamic,
+            activeSkinId = skin.id,
+        )
+    }
 
     fun checkForUpdates() {
         viewModelScope.launch {
@@ -163,6 +184,12 @@ class OnboardingViewModel @Inject constructor(
             settingsRepository.setNewsNotificationsEnabled(s.newsNotifications)
             // Language step
             settingsRepository.setAppLanguage(s.appLanguage)
+            // App Skin step
+            settingsRepository.setAppIconPresetId(s.iconPresetId)
+            settingsRepository.setAppIconShape(s.iconShape)
+            settingsRepository.setAppIconAdaptTheme(s.iconAdaptTheme)
+            settingsRepository.setAppIconFollowDynamic(s.iconFollowDynamic)
+            settingsRepository.setActiveSkinId(s.activeSkinId)
             
             if (s.groqApiKey.isNotBlank()) {
                 aiSettingsManager.setApiKey(s.groqApiKey, "Groq")
