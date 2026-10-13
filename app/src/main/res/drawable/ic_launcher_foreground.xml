@@ -1,7 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- New Toolz mark: base (hexagon) -> second_layer (coat) -> circle (fg) -> pill (carve). -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item
-        android:drawable="@drawable/ic_launcher_logo"
+        android:drawable="@drawable/toolz_base"
+        android:width="72dp"
+        android:height="72dp"
+        android:gravity="center" />
+    <item
+        android:drawable="@drawable/toolz_second_layer"
+        android:width="72dp"
+        android:height="72dp"
+        android:gravity="center" />
+    <item
+        android:drawable="@drawable/toolz_circle"
+        android:width="72dp"
+        android:height="72dp"
+        android:gravity="center" />
+    <item
+        android:drawable="@drawable/toolz_pill"
         android:width="72dp"
         android:height="72dp"
         android:gravity="center" />
