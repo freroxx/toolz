@@ -318,6 +318,8 @@ class SettingsViewModel @Inject constructor(
     val activeSkinId = repository.activeSkinId
     val skins = skinRepository.skins
     val skinsSyncing = skinRepository.syncing
+    val mySubmissions = skinRepository.mySubmissions
+    val submissionStatuses = skinRepository.submissionStatuses
 
     fun setAppIconPresetId(id: String) = viewModelScope.launch {
         repository.setAppIconPresetId(id)
@@ -339,15 +341,19 @@ class SettingsViewModel @Inject constructor(
         repository.setAppIconStrokeOverride(null)
     }
     fun refreshSkins(force: Boolean = false) = viewModelScope.launch {
-        try { skinRepository.syncIfStale(force) } catch (_: Exception) { }
+        try {
+            skinRepository.refreshMySubmissions()
+            skinRepository.syncIfStale(force)
+            skinRepository.refreshSubmissionStatuses()
+        } catch (_: Exception) { }
     }
     fun applySkin(skin: com.frerox.toolz.data.skin.SkinDto) = viewModelScope.launch {
         try { skinRepository.apply(skin) } catch (_: Exception) { }
     }
-    fun submitCurrentAsSkin(name: String, onResult: (Result<String>) -> Unit) = viewModelScope.launch {
+    fun submitCurrentAsSkin(name: String, author: String, onResult: (Result<String>) -> Unit) = viewModelScope.launch {
         try {
-            val snap = skinRepository.snapshotCurrent(name)
-            val r = skinRepository.submit(name, snap)
+            val snap = skinRepository.snapshotCurrent(name, author)
+            val r = skinRepository.submit(name, author, snap)
             onResult(r)
         } catch (e: Exception) {
             onResult(Result.failure(e))

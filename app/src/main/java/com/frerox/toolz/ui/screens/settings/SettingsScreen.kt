@@ -79,6 +79,7 @@ fun SettingsScreen(
     onNavigateToNews: () -> Unit = {},
     onNavigateToBackupRestore: () -> Unit,
     onNavigateToToolShortcuts: () -> Unit = {},
+    onNavigateToAppSkin: () -> Unit = {},
     onResetOnboarding: () -> Unit,
     newsViewModel: com.frerox.toolz.ui.screens.news.NewsViewModel = androidx.hilt.navigation.compose.hiltViewModel()
 ) {
@@ -563,7 +564,7 @@ fun SettingsScreen(
                         }
                     }
 
-                    // 2b. Section: APP SKIN (icon presets + Toolz Skins)
+                    // 2b. Section: APP SKIN (dedicated screens)
                     StaggeredEntrance(index = 1) {
                         SettingsExpandableSection(
                             title = "APP SKIN",
@@ -571,12 +572,42 @@ fun SettingsScreen(
                             isExpanded = expandedSection == "APPSKIN" || searchQuery.isNotEmpty(),
                             onExpandToggle = { expandedSection = if (expandedSection == "APPSKIN") null else "APPSKIN" }
                         ) {
-                            AppSkinSection(
-                                viewModel = viewModel,
-                                searchQuery = searchQuery,
-                                themeMode = themeMode,
-                                dynamicColor = dynamicColor,
-                            )
+                            if (matches(searchQuery, "skin", "app skin", "icon", "icons", "catalog", "appearance", "theme pack", "preset", "look")) {
+                                SettingsItem(
+                                    title = "App Skin & icons",
+                                    subtitle = "Presets, Icon Catalog and community skins",
+                                    icon = Icons.Rounded.Palette,
+                                    onClick = {
+                                        vibrationManager?.vibrateClick()
+                                        onNavigateToAppSkin()
+                                    }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    ) {
+                                        com.frerox.toolz.ui.components.ToolzMark(
+                                            presetId = "grape-haze",
+                                            modifier = Modifier.size(52.dp),
+                                        )
+                                        com.frerox.toolz.ui.components.ToolzMark(
+                                            presetId = "midnight",
+                                            modifier = Modifier.size(52.dp),
+                                        )
+                                        com.frerox.toolz.ui.components.ToolzMark(
+                                            presetId = "lagoon",
+                                            modifier = Modifier.size(52.dp),
+                                        )
+                                        Spacer(Modifier.weight(1f))
+                                        Icon(
+                                            Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
 

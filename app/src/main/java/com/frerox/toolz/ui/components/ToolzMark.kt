@@ -5,88 +5,36 @@
 
 package com.frerox.toolz.ui.components
 
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.Canvas
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.BlendMode
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ColorFilter
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
-import com.frerox.toolz.R
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import com.frerox.toolz.data.skin.IconCatalog
-import com.frerox.toolz.data.skin.IconSpec
+import com.frerox.toolz.data.skin.IconShape
+import kotlin.math.abs
+import kotlin.math.min
 
 /**
- * Dynamic Toolz mark renderer.
- * Layers: toolz_base (hexagon) -> toolz_second_layer (coat) ->
- *         toolz_circle (foreground) -> toolz_pill (carve for swoosh).
- * Resolution: overrides > followDynamic+dynamicColor > adaptToTheme > preset.
+ * Toolz mark renderer.
+ *
+ * Pure vector drawing from [MarkGeometry]; no bitmaps, no tint modes. A preset renders
+ * exactly like the reference icon at any size. Shadow/elevation is the caller's business.
+ *
+ * Frames: OCTAGON is the native silhouette. CIRCLE and PILL swap the octagon for a rounded
+ * container (same rim width) and keep the glyph centred.
  */
-object ToolzMarkColors {
-    data class Resolved(
-        val background: Color,
-        val stroke: Color,
-        val foreground: Color,
-        val carve: Color,
-    )
-
-    fun resolve(
-        spec: IconSpec,
-        isDark: Boolean,
-        dynamicColor: Boolean,
-        followDynamic: Boolean,
-        adaptToTheme: Boolean,
-        schemePrimary: Color,
-        schemeSecondary: Color,
-        bgOverride: Int?,
-        fgOverride: Int?,
-        strokeOverride: Int?,
-    ): Resolved {
-        bgOverride?.let {
-            val bg = Color(it)
-            return Resolved(
-                background = bg,
-                stroke = strokeOverride?.let { Color(it) } ?: Color(spec.stroke.toInt()),
-                foreground = fgOverride?.let { Color(it) } ?: Color(spec.foreground.toInt()),
-                carve = bg,
-            )
-        }
-        if (followDynamic && dynamicColor) {
-            val container = if (isDark) Color(0xFF1B1B1F) else Color.White
-            return Resolved(
-                background = container,
-                stroke = schemePrimary,
-                foreground = schemePrimary,
-                carve = container,
-            )
-        }
-        val bgBase = Color(spec.background.toInt())
-        val bg = if (adaptToTheme && isDark) bgBase.darker(0.82f) else bgBase
-        val carveBase = Color(spec.carveResolved.toInt())
-        val carve = if (adaptToTheme && isDark) bg.darker(1f) else carveBase
-        return Resolved(
-            background = if (adaptToTheme && isDark) bg else bgBase,
-            stroke = strokeOverride?.let { Color(it) } ?: Color(spec.stroke.toInt()),
-            foreground = fgOverride?.let { Color(it) } ?: Color(spec.foreground.toInt()),
-            carve = strokeOverride?.let { Color(it) }?.let { bg } ?: carve.let { bg },
-        )
-    }
-
-    private fun Color.darker(f: Float): Color = Color(red * f, green * f, blue * f, alpha)
-}
-
 @Composable
 fun ToolzMark(
     presetId: String,
@@ -101,14 +49,11 @@ fun ToolzMark(
     contentDescription: String? = null,
 ) {
     val scheme = MaterialTheme.colorScheme
-    val isDark = isSystemInDarkTheme()
-    // Dynamic flag unknown here; assume on so followDynamic previews live.
     ToolzMarkThemed(
         presetId = presetId,
-        isDark = isDark,
+        scheme = scheme,
+        isDark = scheme.background.luminance() < 0.5f, // follows the skin, not the system
         dynamicColor = true,
-        schemePrimary = scheme.primary,
-        schemeSecondary = scheme.secondary,
         modifier = modifier,
         shape = shape,
         adaptToTheme = adaptToTheme,
@@ -124,10 +69,9 @@ fun ToolzMark(
 @Composable
 fun ToolzMarkThemed(
     presetId: String,
+    scheme: ColorScheme,
     isDark: Boolean,
     dynamicColor: Boolean,
-    schemePrimary: Color,
-    schemeSecondary: Color,
     modifier: Modifier = Modifier,
     shape: String = "HEXAGON",
     adaptToTheme: Boolean = true,
@@ -136,47 +80,104 @@ fun ToolzMarkThemed(
     fgOverride: Int? = null,
     strokeOverride: Int? = null,
     showBackground: Boolean = true,
-    corner: Dp = 28.dp,
     contentDescription: String? = null,
 ) {
-    val spec = IconCatalog.find(presetId)
-    val resolved = ToolzMarkColors.resolve(
-        spec = spec,
-        isDark = isDark,
-        dynamicColor = dynamicColor,
-        followDynamic = followDynamic,
-        adaptToTheme = adaptToTheme,
-        schemePrimary = schemePrimary,
-        schemeSecondary = schemeSecondary,
-        bgOverride = bgOverride,
-        fgOverride = fgOverride,
-        strokeOverride = strokeOverride,
-    )
-    val clipShape = when (shape.uppercase()) {
-        "CIRCLE" -> CircleShape
-        "PILL" -> RoundedCornerShape(50.dp)
-        else -> RoundedCornerShape(corner)
-    }
-    Box(
-        modifier = modifier.clip(clipShape).background(resolved.background),
-        contentAlignment = Alignment.Center,
+    val palette = remember(
+        presetId, scheme, isDark, dynamicColor, adaptToTheme, followDynamic,
+        bgOverride, fgOverride, strokeOverride,
     ) {
-        if (showBackground) {
-            MarkLayer(resId = R.drawable.toolz_base, tint = resolved.background)
-        }
-        MarkLayer(resId = R.drawable.toolz_second_layer, tint = resolved.stroke)
-        MarkLayer(resId = R.drawable.toolz_circle, tint = resolved.foreground)
-        MarkLayer(resId = R.drawable.toolz_pill, tint = resolved.carve)
+        MarkPalettes.resolve(
+            spec = IconCatalog.find(presetId),
+            scheme = scheme,
+            isDark = isDark,
+            dynamicColor = dynamicColor,
+            followDynamic = followDynamic,
+            adaptToTheme = adaptToTheme,
+            bgOverride = bgOverride,
+            fgOverride = fgOverride,
+            strokeOverride = strokeOverride,
+        )
     }
+    ToolzMarkCanvas(
+        palette = palette,
+        modifier = modifier,
+        frame = IconShape.parse(shape) ?: IconShape.OCTAGON,
+        showBackground = showBackground,
+        contentDescription = contentDescription,
+    )
 }
 
+/** Palette-driven entry point: icon pickers, previews, anything that already has a [MarkPalette]. */
 @Composable
-private fun MarkLayer(resId: Int, tint: Color) {
-    Image(
-        painter = painterResource(id = resId),
-        contentDescription = null,
-        modifier = Modifier.fillMaxSize(),
-        contentScale = ContentScale.Fit,
-        colorFilter = ColorFilter.tint(tint, BlendMode.SrcIn),
-    )
+fun ToolzMarkCanvas(
+    palette: MarkPalette,
+    modifier: Modifier = Modifier,
+    frame: IconShape = IconShape.OCTAGON,
+    showBackground: Boolean = true,
+    contentDescription: String? = null,
+) {
+    val a11y = if (contentDescription != null) {
+        Modifier.semantics {
+            this.contentDescription = contentDescription
+            role = Role.Image
+        }
+    } else {
+        Modifier
+    }
+    Canvas(modifier.then(a11y)) { drawToolzMark(palette, frame, showBackground) }
+}
+
+/**
+ * Draws into the largest centred square of the current scope (PILL uses the full bounds).
+ * [showBackground] = false draws only the swoosh, with real transparency where the capsule is.
+ */
+fun DrawScope.drawToolzMark(
+    palette: MarkPalette,
+    frame: IconShape = IconShape.OCTAGON,
+    showBackground: Boolean = true,
+) {
+    val side = min(size.width, size.height)
+    if (side <= 0f) return
+    val scale = side / MarkGeometry.SPAN
+    val c = MarkGeometry.CENTER
+
+    withTransform({
+        translate(size.width / 2f, size.height / 2f)
+        scale(scale, scale, Offset.Zero)
+        translate(-c, -c)
+    }) {
+        if (!showBackground) {
+            drawPath(MarkGeometry.swoosh, palette.disc)
+            return@withTransform
+        }
+
+        if (frame == IconShape.OCTAGON) {
+            drawPath(MarkGeometry.rim, palette.rim)
+            drawPath(MarkGeometry.body, palette.octagonBody)
+        } else {
+            val hw = if (frame == IconShape.CIRCLE) MarkGeometry.SPAN / 2f else size.width / (2f * scale)
+            val hh = if (frame == IconShape.CIRCLE) MarkGeometry.SPAN / 2f else size.height / (2f * scale)
+            drawRoundRect(
+                color = palette.rim,
+                topLeft = Offset(c - hw, c - hh),
+                size = Size(2f * hw, 2f * hh),
+                cornerRadius = CornerRadius(min(hw, hh)),
+            )
+            val bw = hw - MarkGeometry.RIM_WIDTH
+            val bh = hh - MarkGeometry.RIM_WIDTH
+            val r = min(bw, bh)
+            val axis = MarkGeometry.gradientAxis
+            // Support function of a rounded rect along the gradient axis.
+            val half = abs(axis.x) * (bw - r) + abs(axis.y) * (bh - r) + r
+            val centre = Offset(c, c)
+            drawRoundRect(
+                brush = MarkGradient.brush(palette.bodyStart, palette.bodyEnd, centre - axis * half, centre + axis * half),
+                topLeft = Offset(c - bw, c - bh),
+                size = Size(2f * bw, 2f * bh),
+                cornerRadius = CornerRadius(r),
+            )
+        }
+        drawPath(MarkGeometry.disc, palette.disc)
+        drawPath(MarkGeometry.capsule, palette.carve)
+    }
 }

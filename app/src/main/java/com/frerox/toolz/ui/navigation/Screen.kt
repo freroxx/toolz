@@ -21,6 +21,9 @@ sealed class Screen(val route: String) {
     object Loading : Screen("loading")
     object Dashboard : Screen("dashboard")
     object Settings : Screen("settings")
+    object AppSkin : Screen("app_skin")
+    object IconCatalog : Screen("icon_catalog")
+    object SkinsCatalog : Screen("skins_catalog")
     object Update : Screen("update")
     object ToolzNews : Screen("toolz_news")
     object BackupRestore : Screen("backup_restore?initialUri={initialUri}") {

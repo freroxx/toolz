@@ -9,71 +9,87 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
- * App Skin + App Icon engine.
+ * App Skin + App Icon catalog.
  *
- * Icon composition (from Toolz Icon PNGs, copied to drawable-nodpi):
- *  base         -> outer hexagon fill (background)
- *  second_layer -> inner hexagon coat / stroke
- *  circle       -> foreground disc (the white swoosh body)
- *  pill         -> carve shape (same color as background, creates swoosh cut)
+ * An icon preset is four colours (see ToolzMarkPalette.kt for how they are drawn):
+ *   rim        outer octagon ring, flat
+ *   bodyStart  inner octagon gradient start; also the capsule fill
+ *   bodyEnd    gradient end, null = flat body
+ *   disc       the swoosh body
  *
- * Rendering uses SrcIn tint so every layer is recolorable at runtime.
- * Launcher keeps a static default build; in-app surfaces are fully dynamic.
+ * Presets render exactly as listed. Only specs flagged [IconSpec.adaptToTheme] or
+ * [IconSpec.followsScheme] are ever recoloured at runtime.
+ * The launcher icon is a static vector built from DEFAULT_ID (res/drawable/ic_launcher_*.xml).
  */
 
-enum class IconShape { HEXAGON, CIRCLE, PILL }
+enum class IconShape {
+    OCTAGON, CIRCLE, PILL;
+
+    companion object {
+        /** "HEXAGON" is the legacy wire name for OCTAGON; skins on the server still use it. */
+        fun parse(raw: String?): IconShape? = when (raw?.uppercase()) {
+            "OCTAGON", "HEXAGON" -> OCTAGON
+            "CIRCLE" -> CIRCLE
+            "PILL" -> PILL
+            else -> null
+        }
+    }
+}
 
 @Serializable
 data class IconSpec(
     @SerialName("id") val id: String,
     @SerialName("name") val name: String,
-    @SerialName("shape") val shape: String = "HEXAGON", // HEXAGON | CIRCLE | PILL
-    @SerialName("background") val background: Long,     // ARGB as Long (0xFF...), fixed preset
-    @SerialName("backgroundEnd") val backgroundEnd: Long? = null, // gradient end, null = solid
-    @SerialName("stroke") val stroke: Long,             // second_layer color
-    @SerialName("foreground") val foreground: Long,    // circle color
-    @SerialName("carve") val carve: Long? = null,      // pill color, null = = background
-    @SerialName("adaptToTheme") val adaptToTheme: Boolean = false,
-    @SerialName("tag") val tag: String = "Vivid",      // grouping for catalog filters
+    @SerialName("tag") val tag: String = "Vivid",          // catalog filter group
+    @SerialName("rim") val rim: Long,                      // ARGB 0xFF......
+    @SerialName("bodyStart") val bodyStart: Long,
+    @SerialName("bodyEnd") val bodyEnd: Long? = null,      // null = flat body
+    @SerialName("disc") val disc: Long,
+    @SerialName("carve") val carve: Long? = null,          // null = bodyStart (matches source art)
+    @SerialName("adaptToTheme") val adaptToTheme: Boolean = false, // dim body in dark theme
+    @SerialName("followsScheme") val followsScheme: Boolean = false, // palette from Material scheme
 ) {
-    val carveResolved: Long get() = carve ?: background
+    @Deprecated("Renamed", ReplaceWith("bodyStart")) val background: Long get() = bodyStart
+    @Deprecated("Renamed", ReplaceWith("bodyEnd")) val backgroundEnd: Long? get() = bodyEnd
+    @Deprecated("Renamed", ReplaceWith("rim")) val stroke: Long get() = rim
+    @Deprecated("Renamed", ReplaceWith("disc")) val foreground: Long get() = disc
 }
-
-private fun argb(hex: Long) = hex
 
 object IconCatalog {
     const val DEFAULT_ID = "grape-haze"
 
     val BUILT_IN: List<IconSpec> = listOf(
-        // --- From your 5 example renders ---
-        IconSpec("midnight", "Midnight", background = 0xFF000000, stroke = 0xFF4A4A4A, foreground = 0xFFFFFFFF, tag = "Mono"),
-        IconSpec("mono-grey", "Mono Grey", background = 0xFF4A4A4A, stroke = 0xFFC9C9C9, foreground = 0xFFFFFFFF, tag = "Mono"),
-        IconSpec("grape-haze", "Grape Haze", background = 0xFF7B2FBE, stroke = 0xFFD9B8FF, foreground = 0xFFFFFFFF, backgroundEnd = 0xFFB07FE8, tag = "Vivid"),
-        IconSpec("grape-deep", "Grape Deep", background = 0xFF2B0052, stroke = 0xFFA88FBE, foreground = 0xFFD9D9D9, backgroundEnd = 0xFF12002B, tag = "Dark"),
-        IconSpec("lagoon", "Lagoon", background = 0xFF0B3B3B, stroke = 0xFF5FBFB4, foreground = 0xFF7FDBD2, backgroundEnd = 0xFF083030, tag = "Dark"),
-        // --- Legacy / brand riffs so the list is never empty ---
-        IconSpec("legacy-citrus", "Legacy Citrus", background = 0xFFCC5A17, stroke = 0xFFFFDCC6, foreground = 0xFFFFFFFF, tag = "Legacy"),
-        IconSpec("legacy-ocean", "Legacy Ocean", background = 0xFF0C7E78, stroke = 0xFFB7F1EA, foreground = 0xFFFFFFFF, tag = "Legacy"),
-        IconSpec("legacy-night", "Legacy Night", background = 0xFF100D0B, stroke = 0xFFFFB785, foreground = 0xFFFFB785, tag = "Legacy"),
-        IconSpec("paper-light", "Paper Light", background = 0xFFFCF9F6, stroke = 0xFFCC5A17, foreground = 0xFFCC5A17, tag = "Light"),
-        IconSpec("paper-dark", "Paper Dark", background = 0xFF1B1B1F, stroke = 0xFFFBF8FF, foreground = 0xFFFBF8FF, tag = "Dark"),
-        IconSpec("citrus-pop", "Citrus Pop", background = 0xFFFF6D00, stroke = 0xFFFFDCC6, foreground = 0xFFFFFFFF, backgroundEnd = 0xFFCC5A17, tag = "Vivid"),
-        IconSpec("ocean-pop", "Ocean Pop", background = 0xFF00BFA5, stroke = 0xFF00201D, foreground = 0xFF00201D, backgroundEnd = 0xFF0C7E78, tag = "Vivid"),
-        IconSpec("royal", "Royal", background = 0xFF2968C8, stroke = 0xFFD8E7FF, foreground = 0xFFFFFFFF, backgroundEnd = 0xFF001B3F, tag = "Vivid"),
-        IconSpec("rose", "Rose", background = 0xFFC81E5B, stroke = 0xFFFFD9E2, foreground = 0xFFFFFFFF, backgroundEnd = 0xFF7A0F36, tag = "Vivid"),
-        IconSpec("mint", "Mint", background = 0xFF0F5132, stroke = 0xFFB7F1EA, foreground = 0xFFB7F1EA, tag = "Dark"),
-        IconSpec("sand", "Sand", background = 0xFFE8DCC8, stroke = 0xFF5C4A32, foreground = 0xFF5C4A32, tag = "Light"),
-        IconSpec("slate", "Slate", background = 0xFF2B2F36, stroke = 0xFF9AA3B2, foreground = 0xFFEDF0F4, tag = "Dark"),
-        IconSpec("snow", "Snow", background = 0xFFFFFFFF, stroke = 0xFF1B1B1F, foreground = 0xFF1B1B1F, tag = "Light"),
-        IconSpec("carbon", "Carbon", background = 0xFF101014, stroke = 0xFF3A3A42, foreground = 0xFFEDEDF2, tag = "Mono"),
-        IconSpec("cobalt", "Cobalt", background = 0xFF1A2340, stroke = 0xFF7F9CFF, foreground = 0xFFFFFFFF, backgroundEnd = 0xFF0B1030, tag = "Dark"),
-        IconSpec("sunset", "Sunset", background = 0xFFFF8A3D, stroke = 0xFF7A1E3C, foreground = 0xFFFFFFFF, backgroundEnd = 0xFFC81E5B, tag = "Vivid"),
-        IconSpec("forest", "Forest", background = 0xFF1B4332, stroke = 0xFF95D5B2, foreground = 0xFFD8F3DC, tag = "Dark"),
-        IconSpec("lavender", "Lavender", background = 0xFFE6DEF7, stroke = 0xFF7B2FBE, foreground = 0xFF7B2FBE, tag = "Light"),
-        IconSpec("peach", "Peach", background = 0xFFFFDCC6, stroke = 0xFFCC5A17, foreground = 0xFFCC5A17, tag = "Light"),
-        // --- Adaptive (follow theme/dynamic at render time) ---
-        IconSpec("system-auto", "System Auto", background = 0xFF7B2FBE, stroke = 0xFFD9B8FF, foreground = 0xFFFFFFFF, adaptToTheme = true, tag = "Adaptive"),
-        IconSpec("dynamic-glow", "Dynamic Glow", background = 0xFF2962FF, stroke = 0xFFFFFFFF, foreground = 0xFFFFFFFF, adaptToTheme = true, tag = "Adaptive"),
+        // --- Reference icons: colours sampled from the original renders ---
+        IconSpec("grape-haze", "Grape Haze", tag = "Vivid", rim = 0xFFDFBCFF, bodyStart = 0xFF8534CE, bodyEnd = 0xFFD5B9EE, disc = 0xFFFFFFFF),
+        IconSpec("grape-deep", "Grape Deep", tag = "Dark", rim = 0xFF9D8AAE, bodyStart = 0xFF370068, bodyEnd = 0xFF130024, disc = 0xFFBEBEBE),
+        IconSpec("lagoon", "Lagoon", tag = "Dark", rim = 0xFF4CB3AE, bodyStart = 0xFF00393F, bodyEnd = 0xFF002925, disc = 0xFF74DFD5),
+        IconSpec("mono-grey", "Mono Grey", tag = "Mono", rim = 0xFFBEBEBE, bodyStart = 0xFF444444, disc = 0xFFFFFFFF),
+        // --- Brand riffs ---
+        IconSpec("midnight", "Midnight", tag = "Mono", rim = 0xFF4A4A4A, bodyStart = 0xFF000000, disc = 0xFFFFFFFF),
+        IconSpec("legacy-citrus", "Legacy Citrus", tag = "Legacy", rim = 0xFFFFDCC6, bodyStart = 0xFFCC5A17, disc = 0xFFFFFFFF),
+        IconSpec("legacy-ocean", "Legacy Ocean", tag = "Legacy", rim = 0xFFB7F1EA, bodyStart = 0xFF0C7E78, disc = 0xFFFFFFFF),
+        IconSpec("legacy-night", "Legacy Night", tag = "Legacy", rim = 0xFFFFB785, bodyStart = 0xFF100D0B, disc = 0xFFFFB785),
+        IconSpec("paper-light", "Paper Light", tag = "Light", rim = 0xFFCC5A17, bodyStart = 0xFFFCF9F6, disc = 0xFFCC5A17),
+        IconSpec("paper-dark", "Paper Dark", tag = "Dark", rim = 0xFFFBF8FF, bodyStart = 0xFF1B1B1F, disc = 0xFFFBF8FF),
+        IconSpec("citrus-pop", "Citrus Pop", tag = "Vivid", rim = 0xFFFFDCC6, bodyStart = 0xFFFF6D00, bodyEnd = 0xFFCC5A17, disc = 0xFFFFFFFF),
+        IconSpec("ocean-pop", "Ocean Pop", tag = "Vivid", rim = 0xFF00201D, bodyStart = 0xFF00BFA5, bodyEnd = 0xFF0C7E78, disc = 0xFF00201D),
+        IconSpec("royal", "Royal", tag = "Vivid", rim = 0xFFD8E7FF, bodyStart = 0xFF2968C8, bodyEnd = 0xFF001B3F, disc = 0xFFFFFFFF),
+        IconSpec("rose", "Rose", tag = "Vivid", rim = 0xFFFFD9E2, bodyStart = 0xFFC81E5B, bodyEnd = 0xFF7A0F36, disc = 0xFFFFFFFF),
+        IconSpec("mint", "Mint", tag = "Dark", rim = 0xFFB7F1EA, bodyStart = 0xFF0F5132, disc = 0xFFB7F1EA),
+        IconSpec("sand", "Sand", tag = "Light", rim = 0xFF5C4A32, bodyStart = 0xFFE8DCC8, disc = 0xFF5C4A32),
+        IconSpec("slate", "Slate", tag = "Dark", rim = 0xFF9AA3B2, bodyStart = 0xFF2B2F36, disc = 0xFFEDF0F4),
+        IconSpec("snow", "Snow", tag = "Light", rim = 0xFF1B1B1F, bodyStart = 0xFFFFFFFF, disc = 0xFF1B1B1F),
+        IconSpec("carbon", "Carbon", tag = "Mono", rim = 0xFF3A3A42, bodyStart = 0xFF101014, disc = 0xFFEDEDF2),
+        IconSpec("cobalt", "Cobalt", tag = "Dark", rim = 0xFF7F9CFF, bodyStart = 0xFF1A2340, bodyEnd = 0xFF0B1030, disc = 0xFFFFFFFF),
+        IconSpec("sunset", "Sunset", tag = "Vivid", rim = 0xFF7A1E3C, bodyStart = 0xFFFF8A3D, bodyEnd = 0xFFC81E5B, disc = 0xFFFFFFFF),
+        IconSpec("forest", "Forest", tag = "Dark", rim = 0xFF95D5B2, bodyStart = 0xFF1B4332, disc = 0xFFD8F3DC),
+        IconSpec("lavender", "Lavender", tag = "Light", rim = 0xFF7B2FBE, bodyStart = 0xFFE6DEF7, disc = 0xFF7B2FBE),
+        IconSpec("peach", "Peach", tag = "Light", rim = 0xFFCC5A17, bodyStart = 0xFFFFDCC6, disc = 0xFFCC5A17),
+        // --- Adaptive ---
+        // system-auto: Grape Haze, body dimmed in dark theme.
+        IconSpec("system-auto", "System Auto", tag = "Adaptive", rim = 0xFFDFBCFF, bodyStart = 0xFF8534CE, bodyEnd = 0xFFD5B9EE, disc = 0xFFFFFFFF, adaptToTheme = true),
+        // dynamic-glow: palette derived from the Material scheme; blue fallback without dynamic color.
+        IconSpec("dynamic-glow", "Dynamic Glow", tag = "Adaptive", rim = 0xFFD8E2FF, bodyStart = 0xFF2962FF, bodyEnd = 0xFF1B3FA8, disc = 0xFFFFFFFF, adaptToTheme = true, followsScheme = true),
     )
 
     fun find(id: String?): IconSpec =
@@ -111,8 +127,7 @@ data class SkinDto(
         if (name.trim().length < 3) return "Name too short"
         if (name.trim().length > 32) return "Name too long"
         if (themeMode !in setOf("SYSTEM", "LIGHT", "DARK")) return "Bad themeMode"
-        val shape = iconShape.uppercase()
-        if (shape !in setOf("HEXAGON", "CIRCLE", "PILL")) return "Bad iconShape"
+        if (IconShape.parse(iconShape) == null) return "Bad iconShape"
         if (IconCatalog.BUILT_IN.none { it.id == iconPresetId } && iconPresetId != "custom") return "Unknown icon"
         return null
     }
@@ -138,3 +153,11 @@ object LegacySkins {
         SkinDto(id = "legacy-carbon", name = "Carbon", author = "Toolz", description = "AMOLED dark, no gradient.", themeMode = "DARK", dynamicColor = false, primary = 0xFFEDEDF2, secondary = 0xFF9AA3B2, gradient = false, iconPresetId = "carbon"),
     )
 }
+
+/** A look the user shared from the app. Stored locally to track review status. */
+@Serializable
+data class MySubmission(
+    @SerialName("id") val id: String,
+    @SerialName("name") val name: String,
+    @SerialName("ts") val ts: Long = 0L,
+)

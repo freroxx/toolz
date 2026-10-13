@@ -445,9 +445,13 @@ object NotificationHelper {
     }
 
     private fun buildToolzLargeIcon(context: Context): android.graphics.Bitmap? = try {
-        val raw = android.graphics.BitmapFactory.decodeResource(context.resources, R.drawable.toolz_base)
-            ?: android.graphics.BitmapFactory.decodeResource(context.resources, R.drawable.ic_launcher_foreground)
+        // Foreground is a vector: rasterize via Drawable, not BitmapFactory.
+        val drawable = androidx.appcompat.content.res.AppCompatResources.getDrawable(context, R.drawable.ic_launcher_foreground)
             ?: return null
+        val side = 192.coerceAtLeast(1)
+        drawable.setBounds(0, 0, side, side)
+        val raw = android.graphics.Bitmap.createBitmap(side, side, android.graphics.Bitmap.Config.ARGB_8888)
+        drawable.draw(android.graphics.Canvas(raw))
         val cacheKey = "${raw.width}x${raw.height}"
         if (cacheKey == largeIconKey && largeIconCache != null) return largeIconCache
         val size = minOf(raw.width, raw.height).coerceAtLeast(1)

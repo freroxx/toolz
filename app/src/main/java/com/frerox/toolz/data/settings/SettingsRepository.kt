@@ -50,6 +50,7 @@ class SettingsRepository @Inject constructor(
     private val SKINS_CACHE_JSON = stringPreferencesKey("skins_cache_json")
     private val SKINS_LAST_SYNC = longPreferencesKey("skins_last_sync")
     private val SKINS_FEED_VERSION = intPreferencesKey("skins_feed_version")
+    private val MY_SKIN_SUBMISSIONS = stringPreferencesKey("my_skin_submissions")
     private val SHUTTER_SOUND_ENABLED = booleanPreferencesKey("shutter_sound_enabled")
     private val SHUTTER_SOUND_URI = stringPreferencesKey("shutter_sound_uri")
     private val WORLD_CLOCK_ZONES = stringSetPreferencesKey("world_clock_zones")
@@ -725,6 +726,7 @@ class SettingsRepository @Inject constructor(
     val skinsCacheJson: Flow<String?> = dataStore.data.map { it[SKINS_CACHE_JSON] }
     val skinsLastSync: Flow<Long> = dataStore.data.map { it[SKINS_LAST_SYNC] ?: 0L }
     val skinsFeedVersion: Flow<Int> = dataStore.data.map { it[SKINS_FEED_VERSION] ?: -1 }
+    val mySkinSubmissionsJson: Flow<String?> = dataStore.data.map { it[MY_SKIN_SUBMISSIONS] }
     val shutterSoundEnabled: Flow<Boolean> = dataStore.data.map { it[SHUTTER_SOUND_ENABLED] ?: true }
     val shutterSoundUri: Flow<String?> = dataStore.data.map { it[SHUTTER_SOUND_URI] ?: defaultShutterUri }
     val worldClockZones: Flow<Set<String>> = dataStore.data.map { it[WORLD_CLOCK_ZONES] ?: setOf("UTC", "America/New_York", "Europe/London", "Asia/Tokyo") }
@@ -1198,6 +1200,7 @@ class SettingsRepository @Inject constructor(
     suspend fun setSkinsCacheJson(json: String) { dataStore.edit { it[SKINS_CACHE_JSON] = json.take(200_000) } }
     suspend fun setSkinsLastSync(ts: Long) { dataStore.edit { it[SKINS_LAST_SYNC] = ts } }
     suspend fun setSkinsFeedVersion(v: Int) { dataStore.edit { it[SKINS_FEED_VERSION] = v } }
+    suspend fun setMySkinSubmissionsJson(json: String) { dataStore.edit { it[MY_SKIN_SUBMISSIONS] = json.take(20_000) } }
     /** Atomic skin apply: theme + colors + icon in one edit. */
     suspend fun applySkin(
         themeMode: String,

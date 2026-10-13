@@ -7,6 +7,7 @@ package com.frerox.toolz.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -37,6 +38,8 @@ import com.frerox.toolz.ui.components.ExtraLargeExpressiveShape
 import com.frerox.toolz.ui.components.StaggeredEntrance
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.components.ToolzMarkThemed
+import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.components.horizontalFadingEdges
 
 /**
  * Onboarding App Skin step: pick an icon preset + optional skin.
@@ -60,7 +63,7 @@ fun StyleStep(
         else -> androidx.compose.foundation.isSystemInDarkTheme()
     }
     Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp).verticalScroll(scroll),
+        modifier = Modifier.fillMaxSize().padding(24.dp).verticalScroll(scroll).fadingEdges(top = 12.dp, bottom = 12.dp),
         verticalArrangement = Arrangement.Center,
     ) {
         StaggeredEntrance(index = 0) {
@@ -81,7 +84,11 @@ fun StyleStep(
             ExpressiveCard(onClick = {}, modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     CardEyebrow("App icon")
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        contentPadding = PaddingValues(horizontal = 4.dp),
+                        modifier = Modifier.fillMaxWidth().horizontalFadingEdges(left = 10.dp, right = 10.dp),
+                    ) {
                         items(IconCatalog.BUILT_IN.take(12)) { spec ->
                             val sel = spec.id == state.iconPresetId
                             Surface(
@@ -96,8 +103,7 @@ fun StyleStep(
                                         presetId = spec.id,
                                         isDark = isDark,
                                         dynamicColor = state.dynamicColor,
-                                        schemePrimary = scheme.primary,
-                                        schemeSecondary = scheme.secondary,
+                                        scheme = scheme,
                                         shape = state.iconShape,
                                         adaptToTheme = state.iconAdaptTheme,
                                         followDynamic = state.iconFollowDynamic,
@@ -158,8 +164,7 @@ fun StyleStep(
                                     presetId = skin.iconPresetId,
                                     isDark = isDark,
                                     dynamicColor = skin.dynamicColor,
-                                    schemePrimary = scheme.primary,
-                                    schemeSecondary = scheme.secondary,
+                                    scheme = scheme,
                                     shape = skin.iconShape,
                                     adaptToTheme = skin.iconAdaptTheme,
                                     followDynamic = skin.iconFollowDynamic,
@@ -167,6 +172,12 @@ fun StyleStep(
                                 )
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(skin.name, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleSmall)
+                                    Text(
+                                        "made by ${skin.author?.takeIf { it.isNotBlank() } ?: "Toolz"}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
+                                    )
                                     Text(skin.description ?: "", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                                 }
                             }

@@ -1028,11 +1028,35 @@ fun ToolzNavHost(
                 onNavigateToNews = { navController.navigate(Screen.ToolzNews.route) },
                 onNavigateToBackupRestore = { navController.navigate(Screen.BackupRestore.route) },
                 onNavigateToToolShortcuts = { navController.navigate(Screen.ToolShortcuts.route) },
+                onNavigateToAppSkin = { navController.navigate(Screen.AppSkin.route) },
                 onResetOnboarding = {
                     navController.navigate("onboarding") {
                         popUpTo(Screen.Dashboard.route) { inclusive = true }
                     }
                 }
+            )
+        }
+
+        composable(Screen.AppSkin.route) {
+            com.frerox.toolz.ui.screens.settings.AppSkinScreen(
+                viewModel = hiltViewModel(),
+                onBack = { toolOnBack() },
+                onOpenCatalog = { navController.navigate(Screen.IconCatalog.route) },
+                onOpenSkins = { navController.navigate(Screen.SkinsCatalog.route) },
+            )
+        }
+
+        composable(Screen.SkinsCatalog.route) {
+            com.frerox.toolz.ui.screens.settings.SkinsCatalogScreen(
+                viewModel = hiltViewModel(),
+                onBack = { toolOnBack() },
+            )
+        }
+
+        composable(Screen.IconCatalog.route) {
+            com.frerox.toolz.ui.screens.settings.IconCatalogScreen(
+                viewModel = hiltViewModel(),
+                onBack = { toolOnBack() },
             )
         }
 

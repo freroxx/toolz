@@ -42,6 +42,43 @@ class SkinRepository @Inject constructor(
     private val _syncing = MutableStateFlow(false)
     val syncing: StateFlow<Boolean> = _syncing.asStateFlow()
 
+    private val _mySubmissions = MutableStateFlow<List<MySubmission>>(emptyList())
+    val mySubmissions: StateFlow<List<MySubmission>> = _mySubmissions.asStateFlow()
+
+    /** Server status per my submission id: published | archived | removed. Absent = pending review. */
+    private val _submissionStatuses = MutableStateFlow<Map<String, String>>(emptyMap())
+    val submissionStatuses: StateFlow<Map<String, String>> = _submissionStatuses.asStateFlow()
+
+    suspend fun refreshMySubmissions() {
+        try {
+            val raw = settingsRepository.mySkinSubmissionsJson.first()
+            _mySubmissions.value = if (raw.isNullOrBlank()) emptyList()
+            else json.decodeFromString(ListSerializer(MySubmission.serializer()), raw).take(50)
+        } catch (_: Exception) { }
+    }
+
+    private suspend fun persistMySubmissions(list: List<MySubmission>) {
+        _mySubmissions.value = list.take(50)
+        try {
+            settingsRepository.setMySkinSubmissionsJson(
+                json.encodeToString(ListSerializer(MySubmission.serializer()), list.take(50))
+            )
+        } catch (_: Exception) { }
+    }
+
+    /** Ask the server for the review status of my submissions. Fail-open (keeps old). */
+    suspend fun refreshSubmissionStatuses() {
+        val ids = _mySubmissions.value.map { it.id }.filter { it.isNotBlank() }.take(50)
+        if (ids.isEmpty()) return
+        try {
+            val feed = skinApi.getSkinStatuses(ids.joinToString(","))
+            val map = _submissionStatuses.value.toMutableMap()
+            feed.statuses.forEach { map[it.id] = it.status }
+            feed.removed.forEach { map[it] = "removed" }
+            _submissionStatuses.value = map
+        } catch (_: Exception) { }
+    }
+
     fun currentVersion(): String = try {
         @Suppress("DEPRECATION")
         context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "0.0.0"
@@ -107,22 +144,26 @@ class SkinRepository @Inject constructor(
         }
     }
 
-    suspend fun submit(name: String, skin: SkinDto): Result<String> {
+    suspend fun submit(name: String, author: String, skin: SkinDto): Result<String> {
         val clean = name.trim().take(32)
         if (clean.length < 3) return Result.failure(IllegalArgumentException("Name too short"))
-        val payload = skin.copy(id = "", name = clean, status = "draft")
+        val cleanAuthor = author.trim().take(32).ifBlank { null }
+        val payload = skin.copy(id = "", name = clean, author = cleanAuthor, status = "draft")
         payload.validate()?.let { return Result.failure(IllegalArgumentException(it)) }
         return try {
             val res = skinApi.submitSkin(SkinSubmitRequest(name = clean, skin = payload))
-            if (res.ok && !res.id.isNullOrBlank()) Result.success(res.id)
-            else Result.failure(IllegalStateException(res.error ?: "Submit failed"))
+            if (res.ok && !res.id.isNullOrBlank()) {
+                val id = res.id
+                persistMySubmissions((listOf(MySubmission(id = id, name = clean, ts = System.currentTimeMillis())) + _mySubmissions.value).distinctBy { it.id })
+                Result.success(id)
+            } else Result.failure(IllegalStateException(res.error ?: "Submit failed"))
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
 
     /** Build a SkinDto snapshot from current local appearance settings. */
-    suspend fun snapshotCurrent(name: String): SkinDto {
+    suspend fun snapshotCurrent(name: String, author: String): SkinDto {
         val theme = try { settingsRepository.themeMode.first() } catch (_: Exception) { "SYSTEM" }
         val dyn = try { settingsRepository.dynamicColor.first() } catch (_: Exception) { true }
         val pri = try { settingsRepository.customPrimaryColor.first()?.toLong()?.and(0xFFFFFFFFL) } catch (_: Exception) { null }
@@ -135,6 +176,7 @@ class SkinRepository @Inject constructor(
         return SkinDto(
             id = "",
             name = name.trim().take(32),
+            author = author.trim().take(32).ifBlank { null },
             themeMode = theme,
             dynamicColor = dyn,
             primary = pri,
