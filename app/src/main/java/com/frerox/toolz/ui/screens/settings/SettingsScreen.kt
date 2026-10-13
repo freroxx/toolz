@@ -563,6 +563,23 @@ fun SettingsScreen(
                         }
                     }
 
+                    // 2b. Section: APP SKIN (icon presets + Toolz Skins)
+                    StaggeredEntrance(index = 1) {
+                        SettingsExpandableSection(
+                            title = "APP SKIN",
+                            icon = Icons.Rounded.Palette,
+                            isExpanded = expandedSection == "APPSKIN" || searchQuery.isNotEmpty(),
+                            onExpandToggle = { expandedSection = if (expandedSection == "APPSKIN") null else "APPSKIN" }
+                        ) {
+                            AppSkinSection(
+                                viewModel = viewModel,
+                                searchQuery = searchQuery,
+                                themeMode = themeMode,
+                                dynamicColor = dynamicColor,
+                            )
+                        }
+                    }
+
                     // 3. Section: INTELLIGENCE & AI
                     StaggeredEntrance(index = 2) {
                         SettingsExpandableSection(
@@ -1760,7 +1777,7 @@ private fun parseHexSafe(hex: String, fallback: Color): Color {
     }
 }
 
-private fun matches(query: String, vararg keywords: String): Boolean {
+internal fun matches(query: String, vararg keywords: String): Boolean {
     if (query.isEmpty()) return true
     return keywords.any { it.contains(query, ignoreCase = true) }
 }
@@ -1898,11 +1915,9 @@ fun AboutSection(onCheckUpdate: () -> Unit, onNewsClick: () -> Unit = {}) {
                 shadowElevation = 12.dp
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Image(
-                        painter = painterResource(id = R.drawable.app_logo),
-                        contentDescription = stringResource(R.string.app_name),
+                    com.frerox.toolz.ui.components.ToolzMark(
+                        presetId = "grape-haze",
                         modifier = Modifier.size(72.dp).clip(RoundedCornerShape(20.dp)),
-                        contentScale = ContentScale.Crop
                     )
                 }
             }

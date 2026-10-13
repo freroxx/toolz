@@ -44,6 +44,7 @@ class SettingsViewModel @Inject constructor(
     private val deviceSpecsRepository: DeviceSpecsRepository,
     val vibrationManager: VibrationManager,
     private val widgetUpdateManager: com.frerox.toolz.widget.WidgetUpdateManager,
+    private val skinRepository: com.frerox.toolz.data.skin.SkinRepository,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -302,6 +303,54 @@ class SettingsViewModel @Inject constructor(
         repository.setUserName("")
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             database.clearAllTables()
+        }
+    }
+
+    // ---- App Skin (icon + skins) ----
+    val appIconPresetId = repository.appIconPresetId
+    val appIconShape = repository.appIconShape
+    val appIconAdaptTheme = repository.appIconAdaptTheme
+    val appIconFollowDynamic = repository.appIconFollowDynamic
+    val appIconBgOverride = repository.appIconBgOverride
+    val appIconFgOverride = repository.appIconFgOverride
+    val appIconStrokeOverride = repository.appIconStrokeOverride
+    val appIconGradientEnabled = repository.appIconGradientEnabled
+    val activeSkinId = repository.activeSkinId
+    val skins = skinRepository.skins
+    val skinsSyncing = skinRepository.syncing
+
+    fun setAppIconPresetId(id: String) = viewModelScope.launch {
+        repository.setAppIconPresetId(id)
+        repository.setActiveSkinId(null)
+    }
+    fun setAppIconShape(shape: String) = viewModelScope.launch {
+        repository.setAppIconShape(shape)
+        repository.setActiveSkinId(null)
+    }
+    fun setAppIconAdaptTheme(enabled: Boolean) = viewModelScope.launch { repository.setAppIconAdaptTheme(enabled) }
+    fun setAppIconFollowDynamic(enabled: Boolean) = viewModelScope.launch { repository.setAppIconFollowDynamic(enabled) }
+    fun setAppIconBgOverride(color: Int?) = viewModelScope.launch { repository.setAppIconBgOverride(color) }
+    fun setAppIconFgOverride(color: Int?) = viewModelScope.launch { repository.setAppIconFgOverride(color) }
+    fun setAppIconStrokeOverride(color: Int?) = viewModelScope.launch { repository.setAppIconStrokeOverride(color) }
+    fun setAppIconGradientEnabled(enabled: Boolean) = viewModelScope.launch { repository.setAppIconGradientEnabled(enabled) }
+    fun clearIconOverrides() = viewModelScope.launch {
+        repository.setAppIconBgOverride(null)
+        repository.setAppIconFgOverride(null)
+        repository.setAppIconStrokeOverride(null)
+    }
+    fun refreshSkins(force: Boolean = false) = viewModelScope.launch {
+        try { skinRepository.syncIfStale(force) } catch (_: Exception) { }
+    }
+    fun applySkin(skin: com.frerox.toolz.data.skin.SkinDto) = viewModelScope.launch {
+        try { skinRepository.apply(skin) } catch (_: Exception) { }
+    }
+    fun submitCurrentAsSkin(name: String, onResult: (Result<String>) -> Unit) = viewModelScope.launch {
+        try {
+            val snap = skinRepository.snapshotCurrent(name)
+            val r = skinRepository.submit(name, snap)
+            onResult(r)
+        } catch (e: Exception) {
+            onResult(Result.failure(e))
         }
     }
 
