@@ -20,338 +20,290 @@ package com.frerox.toolz.ui.screens.livingframes
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.livingframes.LivingFrame
 import com.frerox.toolz.data.livingframes.LivingFrameFit
+import com.frerox.toolz.data.livingframes.LivingFrameFps
+import com.frerox.toolz.data.livingframes.LivingFrameImportResult
+import com.frerox.toolz.data.livingframes.LivingFrameImporter
 import com.frerox.toolz.data.livingframes.LivingFrameLoopMode
 import com.frerox.toolz.data.livingframes.LivingFrameTapAction
-import com.frerox.toolz.data.livingframes.LivingFrameType
-import com.frerox.toolz.data.livingframes.LivingFrameEngine
-import com.frerox.toolz.data.livingframes.LivingFrameImporter
 import com.frerox.toolz.data.livingframes.LivingFramesRepository
-import com.frerox.toolz.data.livingframes.LivingWidgetsPower
-import com.frerox.toolz.data.livingframes.ShizukuState
+import com.frerox.toolz.widget.livingframes.LivingFramesSlideshow
 import com.frerox.toolz.widget.livingframes.LivingFramesWidgetHelper
+import com.frerox.toolz.worker.LivingFramesWatchdogWorker
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import javax.inject.Inject
+import kotlin.math.roundToInt
+
+data class ImportState(val label: String, val progress: Float?)
+
+data class PendingVideo(val uri: Uri, val durationMs: Long)
+
+/** One home-screen instance of the selected set, plus how it was last rendered. */
+data class PlacedWidget(
+    val widgetId: Int,
+    val cells: String,
+    val info: LivingFramesWidgetHelper.WidgetInfo?,
+    val nextSlideIn: String?
+)
 
 data class LivingFramesUiState(
     val frames: List<LivingFrame> = emptyList(),
     val selectedId: String? = null,
-    val isImporting: Boolean = false,
-    val importError: String? = null,
-    val importSuccess: String? = null,
-    val widgetsSupported: Boolean = true
-)
+    val loaded: Boolean = false,
+    val import: ImportState? = null,
+    val pendingVideo: PendingVideo? = null
+) {
+    val selected: LivingFrame? get() = frames.firstOrNull { it.id == selectedId } ?: frames.firstOrNull()
+}
 
 @HiltViewModel
 class LivingFramesViewModel @Inject constructor(
     private val repo: LivingFramesRepository,
     private val importer: LivingFrameImporter,
-    private val power: LivingWidgetsPower,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
     private val _ui = MutableStateFlow(LivingFramesUiState())
     val ui: StateFlow<LivingFramesUiState> = _ui.asStateFlow()
-    val frames = repo.frames
 
-    private val _status = MutableStateFlow(LivingFramesWidgetHelper.PlaybackStatus(false, 0))
-    val status: StateFlow<LivingFramesWidgetHelper.PlaybackStatus> = _status.asStateFlow()
+    private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 8)
+    val messages: SharedFlow<String> = _messages.asSharedFlow()
 
-    private val _diag = MutableStateFlow<Map<Int, String>>(emptyMap())
-    val diagnostics: StateFlow<Map<Int, String>> = _diag.asStateFlow()
-
-    private val _saverOn = MutableStateFlow(false)
-    val saverOn: StateFlow<Boolean> = _saverOn.asStateFlow()
-
-    private val _shizuku = MutableStateFlow(ShizukuState(false, false))
-    val shizuku: StateFlow<ShizukuState> = _shizuku.asStateFlow()
-
-    private val _busyMessage = MutableStateFlow<String?>(null)
-    val busyMessage: StateFlow<String?> = _busyMessage.asStateFlow()
+    private var importJob: Job? = null
+    private val refreshJobs = HashMap<String, Job>()
 
     init {
         viewModelScope.launch {
-            try { repo.load() } catch (_: Exception) {}
+            repo.ensureLoaded()
             repo.frames.collect { list ->
                 _ui.update {
                     it.copy(
                         frames = list,
+                        loaded = true,
                         selectedId = it.selectedId?.takeIf { id -> list.any { f -> f.id == id } }
                             ?: list.firstOrNull()?.id
                     )
                 }
             }
         }
-        // Opening the tool resumes playback (foreground start is allowed here;
-        // background starts are denied on Android 12+ — see helper docs).
-        startPlayback()
-        com.frerox.toolz.worker.LivingFramesWatchdogWorker.schedule(context)
-        viewModelScope.launch {
-            while (true) {
-                try {
-                    _status.value = LivingFramesWidgetHelper.readStatus(context)
-                    _diag.value = LivingFramesWidgetHelper.readDiag(context)
-                    _saverOn.value = power.isSaverOn()
-                } catch (_: Exception) {}
-                delay(2000L)
-            }
-        }
-        refreshShizuku()
+        LivingFramesWatchdogWorker.schedule(context)
     }
 
-    fun refreshShizuku() = viewModelScope.launch {
-        try {
-            _shizuku.value = power.shizukuState()
-        } catch (_: Exception) {}
-    }
+    /** Widgets of the selected set currently on the home screen, polled lightly while the tool is visible. */
+    val placed: StateFlow<List<PlacedWidget>> = combine(
+        _ui.map { it.selected?.id }.distinctUntilChanged(),
+        flow { while (true) { emit(Unit); delay(2_000L) } }
+    ) { id, _ -> id }
+        .map { id -> if (id == null) emptyList() else readPlaced(id) }
+        .flowOn(Dispatchers.IO)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
 
-    fun requestShizukuAuth() {
-        try {
-            com.frerox.toolz.util.shizuku.ShizukuHelper.requestAuthorization { refreshShizuku() }
-        } catch (_: Exception) {}
-    }
-
-    /** Turn Battery Saver off via Shizuku shell. Null message = success. */
-    fun disableSaver(onDone: (String?) -> Unit = {}) = viewModelScope.launch {
-        _busyMessage.value = "Turning Battery Saver off…"
-        try {
-            val err = power.disableSaver()
-            _saverOn.value = power.isSaverOn()
-            if (err == null) startPlayback()
-            onDone(err)
-        } catch (e: Exception) {
-            onDone(e.message ?: "Failed")
-        } finally {
-            _busyMessage.value = null
+    private fun readPlaced(frameId: String): List<PlacedWidget> {
+        val live = LivingFramesWidgetHelper.allWidgetIds(context).toSet()
+        val frame = repo.get(frameId)
+        return repo.boundWidgetIds(frameId).filter { it in live }.sorted().map { id ->
+            PlacedWidget(
+                widgetId = id,
+                cells = LivingFramesWidgetHelper.cellLabel(context, id),
+                info = LivingFramesWidgetHelper.readInfo(context, id),
+                nextSlideIn = if (frame?.isSlideshow == true) LivingFramesSlideshow.nextLabel(context, id) else null
+            )
         }
     }
 
-    /** (Re)start animation. Must only be called from foreground UI. */
-    fun startPlayback() {
-        try {
-            LivingFramesWidgetHelper.startPlaybackFromForeground(context)
-        } catch (_: Exception) {}
-    }
+    // -- selection ----------------------------------------------------------------
 
-    fun selected(): LivingFrame? =
-        _ui.value.frames.firstOrNull { it.id == _ui.value.selectedId }
-            ?: _ui.value.frames.firstOrNull()
+    fun select(id: String) = _ui.update { it.copy(selectedId = id) }
 
-    fun select(id: String) {
-        _ui.update { it.copy(selectedId = id, importError = null, importSuccess = null) }
-    }
+    fun coverFile(id: String): File = repo.coverFile(id)
 
-    fun clearMessages() {
-        _ui.update { it.copy(importError = null, importSuccess = null) }
-    }
+    // -- import -----------------------------------------------------------------------
 
-    fun importGif(uri: Uri, fps: Int) = runImport("GIF Loop") { importer.importGif(uri, fps) }
-
-    fun importVideo(uri: Uri, fps: Int) = runImport("Video Loop") { importer.importVideo(uri, fps) }
-
-    fun importPhoto(uri: Uri) = viewModelScope.launch {
-        _ui.update { it.copy(isImporting = true, importError = null, importSuccess = null) }
-        try {
-            val res = importer.importPhoto(uri, "Photo Frame")
-            _ui.update {
-                it.copy(isImporting = false, selectedId = res.frame.id,
-                    importSuccess = "Photo frame ready — pin it to your home screen.")
-            }
-        } catch (e: Exception) {
-            _ui.update { it.copy(isImporting = false, importError = e.message ?: "Import failed") }
-        }
-    }
-
-    fun importSlideshow(uris: List<Uri>) = viewModelScope.launch {
-        _ui.update { it.copy(isImporting = true, importError = null, importSuccess = null) }
-        try {
-            val res = importer.importSlideshow(uris, "Slideshow")
-            _ui.update {
-                it.copy(isImporting = false, selectedId = res.frame.id,
-                    importSuccess = "${res.frame.frameCount} photos — pin it to your home screen.")
-            }
-        } catch (e: Exception) {
-            _ui.update { it.copy(isImporting = false, importError = e.message ?: "Import failed") }
-        }
-    }
-
-    private fun runImport(defaultName: String, block: suspend () -> com.frerox.toolz.data.livingframes.LivingFrameImportResult) =
-        viewModelScope.launch {
-            _ui.update { it.copy(isImporting = true, importError = null, importSuccess = null) }
+    private fun runImport(label: String, block: suspend ((Float) -> Unit) -> LivingFrameImportResult) {
+        if (_ui.value.import != null) return
+        importJob = viewModelScope.launch {
+            _ui.update { it.copy(import = ImportState(label, 0f)) }
             try {
-                val res = block()
-                val extra = if (res.droppedFrames > 0) " (${res.droppedFrames} frames trimmed for size)" else ""
-                _ui.update {
-                    it.copy(
-                        isImporting = false, selectedId = res.frame.id,
-                        importSuccess = "$defaultName ready — ${res.frame.frameCount} frames$extra. Pin it!"
-                    )
+                val res = block { p ->
+                    _ui.update { s -> s.copy(import = s.import?.copy(progress = p.coerceIn(0f, 1f))) }
                 }
+                _ui.update { it.copy(selectedId = res.frame.id) }
+                _messages.emit(res.note ?: "“${res.frame.name}” is ready. Add it to your home screen.")
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _ui.update { it.copy(isImporting = false, importError = e.message ?: "Import failed") }
+                _messages.emit(e.message ?: "Import failed")
+            } finally {
+                _ui.update { it.copy(import = null) }
             }
         }
-
-    fun setFps(id: String, fps: Int) = viewModelScope.launch {
-        repo.update(id) { it.copy(fps = LivingFrameEngine.clampFps(fps)) }
-        startPlayback()
     }
 
-    fun setLoopMode(id: String, mode: LivingFrameLoopMode) = viewModelScope.launch {
-        repo.update(id) { it.copy(loopMode = mode) }
+    fun cancelImport() { importJob?.cancel() }
+
+    fun importGif(uri: Uri) = runImport("Reading GIF") { p -> importer.importGif(uri, p) }
+    fun importPhoto(uri: Uri) = runImport("Adding photo") { p -> importer.importPhoto(uri, p) }
+    fun importSlideshow(uris: List<Uri>) = runImport("Adding photos") { p -> importer.importSlideshow(uris, p) }
+
+    fun onVideoPicked(uri: Uri) {
+        viewModelScope.launch {
+            val probe = importer.probeVideo(uri)
+            if (probe == null || probe.durationMs <= 0L) {
+                _messages.emit("Couldn't read that video.")
+            } else {
+                _ui.update { it.copy(pendingVideo = PendingVideo(uri, probe.durationMs)) }
+            }
+        }
     }
 
-    fun setFit(id: String, fit: LivingFrameFit) = viewModelScope.launch {
-        repo.update(id) { it.copy(fit = fit) }
+    fun cancelVideo() = _ui.update { it.copy(pendingVideo = null) }
+
+    fun confirmVideo(startMs: Long, lengthMs: Long) {
+        val pv = _ui.value.pendingVideo ?: return
+        _ui.update { it.copy(pendingVideo = null) }
+        runImport("Decoding video") { p -> importer.importVideo(pv.uri, startMs, lengthMs, p) }
     }
 
-    fun setTapAction(id: String, action: LivingFrameTapAction) = viewModelScope.launch {
-        repo.update(id) { it.copy(tapAction = action) }
-        refreshWidgets()
+    suspend fun videoThumb(uri: Uri, atMs: Long): ImageBitmap? =
+        importer.videoThumbnail(uri, atMs)?.asImageBitmap()
+
+    // -- editing (instant in memory, debounced to disk and to the widgets) -----------------------
+
+    private fun edit(id: String, pushToWidgets: Boolean = true, transform: (LivingFrame) -> LivingFrame) {
+        repo.update(id, transform)
+        if (pushToWidgets) scheduleWidgetRefresh(id)
     }
 
-    fun setOpacity(id: String, opacity: Float) = viewModelScope.launch {
-        repo.update(id) { it.copy(opacity = opacity.coerceIn(0.4f, 1f)) }
-        refreshWidgets()
+    private fun scheduleWidgetRefresh(id: String) {
+        refreshJobs.remove(id)?.cancel()
+        refreshJobs[id] = viewModelScope.launch {
+            delay(600L)
+            LivingFramesWidgetHelper.refreshFrame(context, repo, id)
+        }
     }
 
-    fun setCorner(id: String, dp: Int) = viewModelScope.launch {
-        repo.update(id) { it.copy(cornerRadiusDp = dp.coerceIn(0, 32)) }
+    fun setFps(id: String, fps: Int) = edit(id) { it.copy(fps = LivingFrameFps.snap(fps)) }
+    fun setLoopMode(id: String, mode: LivingFrameLoopMode) = edit(id) { it.copy(loopMode = mode) }
+    fun setFit(id: String, fit: LivingFrameFit) = edit(id) { it.copy(fit = fit) }
+    fun setTapAction(id: String, action: LivingFrameTapAction) = edit(id) { it.copy(tapAction = action) }
+    fun setOpacity(id: String, opacity: Float) = edit(id) { it.copy(opacity = opacity.coerceIn(0.4f, 1f)) }
+    fun setCorner(id: String, dp: Int) = edit(id) { it.copy(cornerRadiusDp = dp.coerceIn(0, 40)) }
+    fun setShowCaption(id: String, show: Boolean) = edit(id) { it.copy(showCaption = show) }
+    fun setShuffle(id: String, shuffle: Boolean) = edit(id, pushToWidgets = false) { it.copy(shuffle = shuffle) }
+
+    fun setName(id: String, name: String) {
+        val clean = name.trim().take(40)
+        if (clean.isEmpty()) return
+        edit(id, pushToWidgets = repo.get(id)?.showCaption == true) { it.copy(name = clean) }
     }
 
-    fun setShuffle(id: String, shuffle: Boolean) = viewModelScope.launch {
-        repo.update(id) { it.copy(shuffle = shuffle) }
-    }
-
-    fun setShowCaption(id: String, show: Boolean) = viewModelScope.launch {
-        repo.update(id) { it.copy(showCaption = show) }
-        refreshWidgets()
-    }
-
-    fun setSlideshowInterval(id: String, mins: Int) = viewModelScope.launch {
+    fun setSlideshowInterval(id: String, mins: Int) {
         val clamped = mins.coerceIn(1, 1440)
-        repo.update(id) { it.copy(slideshowIntervalMin = clamped) }
-        // Reschedule every widget bound to this slideshow.
-        try {
-            repo.boundWidgetIds(id).forEach { wid ->
-                LivingFramesWidgetHelper.scheduleSlideshow(context, wid, clamped)
-            }
-        } catch (_: Exception) {}
+        edit(id, pushToWidgets = false) { it.copy(slideshowIntervalMin = clamped) }
+        repo.boundWidgetIds(id).forEach { LivingFramesSlideshow.schedule(context, it, clamped) }
     }
 
-    fun setName(id: String, name: String) = viewModelScope.launch {
-        repo.update(id) { it.copy(name = name.take(40)) }
-    }
-
-    fun delete(id: String) = viewModelScope.launch {
-        try {
-            val bound = repo.boundWidgetIds(id)
-            // Leave a removal hint on the home screen: apps cannot remove
-            // their own widgets, only the user can (long-press → Remove).
-            bound.forEach { wid ->
-                try {
-                    LivingFramesWidgetHelper.pushFull(
-                        context, wid,
-                        LivingFramesWidgetHelper.placeholderViews(
-                            context, "Widget deleted — long-press to remove"
-                        )
-                    )
-                } catch (_: Exception) {}
-                LivingFramesWidgetHelper.cancelSlideshow(context, wid)
-                LivingFramesWidgetHelper.clearDiag(context, wid)
-            }
-        } catch (_: Exception) {}
-        repo.delete(id)
-        startPlayback()
-    }
+    // -- widget actions --------------------------------------------------------------------------------
 
     fun pinToHome(frame: LivingFrame): Boolean {
         LivingFramesWidgetHelper.setPendingPinFrame(context, frame.id)
-        val ok = LivingFramesWidgetHelper.requestPin(context, frame)
-        startPlayback()
-        return ok
+        return LivingFramesWidgetHelper.requestPin(context, frame)
+    }
+
+    fun refreshWidget(widgetId: Int) {
+        viewModelScope.launch {
+            val ok = LivingFramesWidgetHelper.refresh(context, repo, widgetId)
+            _messages.emit(if (ok) "Widget updated" else "That widget couldn't be updated. See the note under it.")
+        }
+    }
+
+    fun skipSlide(frameId: String) {
+        viewModelScope.launch {
+            val ids = repo.boundWidgetIds(frameId)
+            if (ids.isEmpty()) {
+                _messages.emit("Add the slideshow to your home screen first.")
+                return@launch
+            }
+            ids.forEach { LivingFramesWidgetHelper.advanceSlideshow(context, repo, it) }
+        }
+    }
+
+    fun delete(id: String) {
+        viewModelScope.launch {
+            refreshJobs.remove(id)?.cancel()
+            repo.boundWidgetIds(id).forEach { wid ->
+                LivingFramesWidgetHelper.pushPlaceholder(context, wid, "This widget was deleted. Long-press to remove it.")
+                LivingFramesSlideshow.cancel(context, wid)
+                LivingFramesWidgetHelper.clearInfo(context, wid)
+            }
+            synchronized(previewCache) { previewCache.keys.removeAll { it.startsWith("$id:") } }
+            repo.delete(id)
+            _messages.emit("Widget deleted")
+        }
+    }
+
+    // -- in-app preview ------------------------------------------------------------------------------------
+
+    private val previewCache = object : LinkedHashMap<String, List<ImageBitmap>>(4, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<ImageBitmap>>?) = size > 2
     }
 
     /**
-     * Push the current frame to bound widgets on demand and report the raw
-     * outcome — separates "IPC path broken" from "loop broken".
+     * Frames for the preview. Corners, fit and opacity are applied by Compose at
+     * draw time, so sliders respond instantly and no decode happens per tick.
      */
-    fun testPush(frameId: String, onDone: (String) -> Unit = {}) = viewModelScope.launch {
-        try {
-            val frame = repo.get(frameId)
-            if (frame == null) {
-                onDone("Widget set not found")
-                return@launch
-            }
-            val ids = repo.boundWidgetIds(frameId)
-            if (ids.isEmpty()) {
-                onDone("No home-screen widgets bound — pin one first")
-                return@launch
-            }
-            val bmp = withContext(Dispatchers.IO) {
-                try { repo.decodeWidgetFrame(frame, 0) } catch (_: Exception) { null }
-            }
-            if (bmp == null) {
-                onDone("Couldn't decode frame — re-import this widget")
-                return@launch
-            }
-            try {
-                var ok = 0
-                ids.forEach { wid ->
-                    if (LivingFramesWidgetHelper.pushFrame(context, wid, frame, bmp)) ok++
-                }
-                onDone(if (ok == ids.size) "Test frame sent to $ok widget${if (ok == 1) "" else "s"}"
-                else "Sent to $ok of ${ids.size} — launcher blocked the rest")
-            } finally {
-                try { bmp.recycle() } catch (_: Exception) {}
-            }
-        } catch (e: Exception) {
-            onDone("Push failed: ${e.message ?: "unknown error"}")
-        }
-    }
-
-    /** Preload frames into memory for the stutter-free vsync preview. */
-    suspend fun decodePreviewFrames(id: String, maxSide: Int = 448): List<Bitmap> =
-        withContext(Dispatchers.IO) {
-            val frame = repo.get(id) ?: return@withContext emptyList()
-            val count = frame.frameCount.coerceIn(1, 32)
+    suspend fun previewFrames(frame: LivingFrame): List<ImageBitmap> {
+        val key = "${frame.id}:${frame.createdAt}"
+        synchronized(previewCache) { previewCache[key] }?.let { return it }
+        val list = withContext(Dispatchers.IO) {
+            val count = if (frame.isSlideshow) minOf(frame.frameCount, 8) else frame.frameCount
             (0 until count).mapNotNull { i ->
-                try { repo.decodeFrame(id, i, maxSide) } catch (_: Exception) { null }
+                repo.decodeAtLeast(frame.id, i, PREVIEW_SIDE)?.let { bmp -> capSide(bmp, PREVIEW_SIDE + 40).asImageBitmap() }
             }
         }
-
-    fun boundWidgetCount(frameId: String): Int = try {
-        repo.boundWidgetIds(frameId).size
-    } catch (_: Exception) { 0 }
-
-    /** "Next photo in 12m" for the first bound slideshow widget, if any. */
-    fun slideNextLabel(frameId: String): String? = try {
-        repo.boundWidgetIds(frameId)
-            .mapNotNull { LivingFramesWidgetHelper.slideNextInLabel(context, it) }
-            .firstOrNull()
-    } catch (_: Exception) { null }
-
-    fun refreshWidgets() {
-        startPlayback()
+        if (list.isNotEmpty()) synchronized(previewCache) { previewCache[key] = list }
+        return list
     }
 
-    /** True-color type label for the segmented picker. */
-    fun typeLabel(type: LivingFrameType): String = when (type) {
-        LivingFrameType.GIF -> "GIF"
-        LivingFrameType.VIDEO -> "Video"
-        LivingFrameType.PHOTO -> "Photo"
-        LivingFrameType.SLIDESHOW -> "Slideshow"
+    private fun capSide(bmp: Bitmap, side: Int): Bitmap {
+        val longest = maxOf(bmp.width, bmp.height)
+        if (longest <= side) return bmp
+        val s = side / longest.toFloat()
+        val scaled = Bitmap.createScaledBitmap(
+            bmp, (bmp.width * s).roundToInt().coerceAtLeast(1), (bmp.height * s).roundToInt().coerceAtLeast(1), true
+        )
+        if (scaled !== bmp) bmp.recycle()
+        return scaled
+    }
+
+    private companion object {
+        const val PREVIEW_SIDE = 480
     }
 }

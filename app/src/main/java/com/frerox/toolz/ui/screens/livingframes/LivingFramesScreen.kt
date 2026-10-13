@@ -17,22 +17,36 @@
 
 package com.frerox.toolz.ui.screens.livingframes
 
-import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -46,26 +60,23 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AddToHomeScreen
-import androidx.compose.material.icons.rounded.AutoAwesome
-import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.Delete
-import androidx.compose.material.icons.rounded.Image
-import androidx.compose.material.icons.rounded.Info
-import androidx.compose.material.icons.rounded.Movie
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Gif
 import androidx.compose.material.icons.rounded.Pause
-import androidx.compose.material.icons.rounded.PhotoLibrary
+import androidx.compose.material.icons.rounded.Photo
 import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.Slideshow
+import androidx.compose.material.icons.rounded.Videocam
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
@@ -75,6 +86,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -82,8 +94,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -92,25 +106,21 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil3.compose.AsyncImage
 import com.frerox.toolz.data.livingframes.LivingFrame
+import com.frerox.toolz.data.livingframes.LivingFrameEngine
 import com.frerox.toolz.data.livingframes.LivingFrameFit
 import com.frerox.toolz.data.livingframes.LivingFrameFps
-import com.frerox.toolz.data.livingframes.LivingFrameLagLevel
-import com.frerox.toolz.data.livingframes.LivingFrameLagMeter
-import com.frerox.toolz.data.livingframes.LivingFrameLoopMode
-import com.frerox.toolz.data.livingframes.LivingFrameTapAction
 import com.frerox.toolz.data.livingframes.LivingFrameType
-import com.frerox.toolz.widget.livingframes.LivingFramesWidgetHelper
+import com.frerox.toolz.data.livingframes.LivingFramesRepository
 import com.frerox.toolz.ui.components.ExpressiveCard
 import com.frerox.toolz.ui.components.ExpressiveLoadingIndicator
 import com.frerox.toolz.ui.components.ExpressiveTopAppBar
@@ -120,17 +130,30 @@ import com.frerox.toolz.ui.components.SquircleShape
 import com.frerox.toolz.ui.components.StaggeredEntrance
 import com.frerox.toolz.ui.components.ToolzConnectedButtonGroup
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
-import com.frerox.toolz.ui.components.ToolzOutlinedExpressiveButton
 import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.components.horizontalFadingEdges
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.ui.theme.toolzBackground
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.io.File
+import kotlin.math.roundToInt
 
-private val CardShape = SquircleShape
-private const val PREVIEW_MAX_FRAMES = 32
+private enum class Source(val type: LivingFrameType, val title: String, val hint: String, val icon: ImageVector) {
+    GIF(LivingFrameType.GIF, "GIF", "Loop any animated image", Icons.Rounded.Gif),
+    VIDEO(LivingFrameType.VIDEO, "Video", "Pick a moment, up to 4 s", Icons.Rounded.Videocam),
+    PHOTO(LivingFrameType.PHOTO, "Photo", "A still with your corners", Icons.Rounded.Photo),
+    SLIDESHOW(LivingFrameType.SLIDESHOW, "Slideshow", "Rotates up to 30 photos", Icons.Rounded.Slideshow)
+}
+
+/** Nominal dp widths of a launcher cell block, so corner radius previews at true proportion. */
+private enum class Aspect(val label: String, val ratio: Float, val nominalWidthDp: Float) {
+    SQUARE("2×2", 1f, 156f),
+    WIDE("4×2", 2f, 320f),
+    TALL("2×4", 0.5f, 156f)
+}
+
+private val CLIP_LENGTHS_MS = listOf(2_000L, 3_000L, 4_000L)
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -138,84 +161,123 @@ fun LivingWidgetsScreen(
     onBack: () -> Unit,
     viewModel: LivingFramesViewModel = hiltViewModel()
 ) {
-    val context = LocalContext.current
-    val vibrationManager = LocalVibrationManager.current
+    val vib = LocalVibrationManager.current
     val performanceMode = LocalPerformanceMode.current
     val ui by viewModel.ui.collectAsState()
-    val status by viewModel.status.collectAsState()
-    val diag by viewModel.diagnostics.collectAsState()
-    val saverOn by viewModel.saverOn.collectAsState()
-    val shizuku by viewModel.shizuku.collectAsState()
-    val busyMessage by viewModel.busyMessage.collectAsState()
+    val placed by viewModel.placed.collectAsState()
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
+    val selected = ui.selected
 
-    var previewPlaying by remember { mutableStateOf(true) }
+    var showSources by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
-    val openBatterySettings = rememberOpenBatterySettings()
-    val selected = viewModel.selected()
+    var renaming by remember { mutableStateOf(false) }
+    var playing by remember { mutableStateOf(true) }
+    var aspect by rememberSaveable { mutableStateOf(Aspect.SQUARE) }
 
-    LaunchedEffect(ui.importError) {
-        ui.importError?.let { snackbar.showSnackbar(it) }
-    }
-    LaunchedEffect(ui.importSuccess) {
-        ui.importSuccess?.let { snackbar.showSnackbar(it) }
-    }
+    LaunchedEffect(Unit) { viewModel.messages.collect { snackbar.showSnackbar(it) } }
 
-    val importFps = selected?.fps ?: LivingFrameFps.DEFAULT
-    val gifPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri != null) viewModel.importGif(uri, importFps)
-    }
-    val videoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri != null) viewModel.importVideo(uri, importFps)
-    }
-    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri != null) viewModel.importPhoto(uri)
-    }
-    val slideshowPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { uris ->
-        if (uris.isNotEmpty()) viewModel.importSlideshow(uris)
-    }
+    val gifPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { it?.let(viewModel::importGif) }
+    val videoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { it?.let(viewModel::onVideoPicked) }
+    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { it?.let(viewModel::importPhoto) }
+    val slidesPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickMultipleVisualMedia(LivingFramesRepository.MAX_SLIDES)
+    ) { if (it.isNotEmpty()) viewModel.importSlideshow(it) }
 
-    fun pick(mode: LivingFrameType) {
-        vibrationManager?.vibrateClick()
-        viewModel.clearMessages()
-        when (mode) {
-            LivingFrameType.GIF -> gifPicker.launch(
-                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-            )
-            LivingFrameType.VIDEO -> videoPicker.launch(
-                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
-            )
-            LivingFrameType.PHOTO -> photoPicker.launch(
-                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-            )
-            LivingFrameType.SLIDESHOW -> slideshowPicker.launch(
-                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-            )
+    fun pick(source: Source) {
+        vib?.vibrateClick()
+        showSources = false
+        when (source) {
+            Source.GIF -> gifPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+            Source.VIDEO -> videoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
+            Source.PHOTO -> photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+            Source.SLIDESHOW -> slidesPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
         }
+    }
+
+    fun pin(frame: LivingFrame) {
+        vib?.vibrateLongClick()
+        if (!viewModel.pinToHome(frame)) {
+            scope.launch {
+                snackbar.showSnackbar("Your launcher blocked pinning. Long-press the home screen, open Widgets, and add Toolz Living Widget.")
+            }
+        }
+    }
+
+    // ── Dialogs & sheets ─────────────────────────────────────────────────
+
+    ui.import?.let { imp ->
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text(imp.label) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        ExpressiveLoadingIndicator()
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            "${((imp.progress ?: 0f) * 100).roundToInt()}%",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                    }
+                    LinearProgressIndicator(progress = { imp.progress ?: 0f }, modifier = Modifier.fillMaxWidth())
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = viewModel::cancelImport) { Text("Cancel") } }
+        )
     }
 
     if (confirmDelete && selected != null) {
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
-            title = { Text("Delete this widget?", fontWeight = FontWeight.Black) },
-            text = { Text("“${selected.name}” and its ${selected.frameCount} frames will be removed. Home-screen widgets using it go back to a placeholder.") },
+            title = { Text("Delete “${selected.name}”?") },
+            text = { Text("Its ${selected.frameCount} frame${if (selected.frameCount == 1) "" else "s"} are removed. Widgets already on your home screen turn into a placeholder you can long-press to remove.") },
             confirmButton = {
                 TextButton(
-                    onClick = {
-                        confirmDelete = false
-                        vibrationManager?.vibrateLongClick()
-                        viewModel.delete(selected.id)
-                        scope.launch { snackbar.showSnackbar("Widget deleted") }
-                    },
+                    onClick = { confirmDelete = false; vib?.vibrateLongClick(); viewModel.delete(selected.id) },
                     colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                ) { Text("Delete", fontWeight = FontWeight.Bold) }
+                ) { Text("Delete") }
             },
-            dismissButton = {
-                TextButton(onClick = { confirmDelete = false }) { Text("Keep") }
-            }
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Keep") } }
         )
     }
+
+    if (renaming && selected != null) {
+        var text by remember(selected.id) { mutableStateOf(selected.name) }
+        AlertDialog(
+            onDismissRequest = { renaming = false },
+            title = { Text("Rename") },
+            text = {
+                OutlinedTextField(
+                    value = text, onValueChange = { text = it.take(40) },
+                    singleLine = true, modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.setName(selected.id, text); renaming = false }) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { renaming = false }) { Text("Cancel") } }
+        )
+    }
+
+    if (showSources) {
+        ModalBottomSheet(onDismissRequest = { showSources = false }) {
+            Column(
+                Modifier.padding(horizontal = 20.dp).padding(bottom = 24.dp).navigationBarsPadding(),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text("New widget", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                SourceGrid(onPick = ::pick)
+            }
+        }
+    }
+
+    ui.pendingVideo?.let { pv ->
+        ClipSheet(pv, viewModel, onCancel = viewModel::cancelVideo, onConfirm = viewModel::confirmVideo)
+    }
+
+    // ── Screen ─────────────────────────────────────────────────────────────
 
     Scaffold(
         topBar = {
@@ -224,7 +286,7 @@ fun LivingWidgetsScreen(
                 subtitle = "GIFs, video and photos on your home screen",
                 navigationIcon = {
                     IconButton(
-                        onClick = { vibrationManager?.vibrateClick(); onBack() },
+                        onClick = { vib?.vibrateClick(); onBack() },
                         modifier = Modifier
                             .padding(8.dp)
                             .clip(SmallExpressiveShape)
@@ -235,6 +297,18 @@ fun LivingWidgetsScreen(
             )
         },
         snackbarHost = { SnackbarHost(snackbar) },
+        floatingActionButton = {
+            if (selected != null) {
+                ExtendedFloatingActionButton(
+                    onClick = { pin(selected) },
+                    icon = { Icon(Icons.Rounded.AddToHomeScreen, null) },
+                    text = { Text("Add to home screen", fontWeight = FontWeight.SemiBold) },
+                    shape = LargeExpressiveShape,
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                )
+            }
+        },
         containerColor = Color.Transparent
     ) { padding ->
         LazyColumn(
@@ -243,1109 +317,457 @@ fun LivingWidgetsScreen(
                 .toolzBackground()
                 .then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 12.dp, bottom = 24.dp))
                 .padding(top = padding.calculateTopPadding()),
-            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 120.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 140.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            if (saverOn) {
-                item {
+            when {
+                !ui.loaded -> item {
+                    Box(Modifier.fillMaxWidth().height(240.dp), contentAlignment = Alignment.Center) {
+                        ExpressiveLoadingIndicator()
+                    }
+                }
+
+                selected == null -> item {
                     StaggeredEntrance(index = 0) {
-                        SaverBanner(
-                            shizukuRunning = shizuku.running,
-                            shizukuAuthorized = shizuku.authorized,
-                            busyMessage = busyMessage,
-                            onEnableShizuku = { viewModel.requestShizukuAuth() },
-                            onDisableSaver = {
-                                viewModel.disableSaver { err ->
-                                    scope.launch {
-                                        snackbar.showSnackbar(
-                                            err ?: "Battery Saver is off — widgets resuming"
-                                        )
-                                    }
-                                }
-                            },
-                            onOpenSettings = { openBatterySettings() }
-                        )
-                    }
-                }
-            }
-            item {
-                StaggeredEntrance(index = 0) {
-                    PlaybackStatusRow(
-                        status = status,
-                        diag = diag,
-                        onResume = {
-                            vibrationManager?.vibrateClick()
-                            viewModel.startPlayback()
-                        }
-                    )
-                }
-            }
-
-            if (selected != null) {
-                item {
-                    StaggeredEntrance(index = 1) {
-                        PreviewCard(
-                            frame = selected,
-                            playing = previewPlaying,
-                            onPlayingChange = { previewPlaying = it },
-                            onRename = { viewModel.setName(selected.id, it) }
-                        )
-                    }
-                }
-                item {
-                    StaggeredEntrance(index = 2) {
-                        WidgetsStrip(
-                            frames = ui.frames,
-                            selectedId = selected.id,
-                            onSelect = {
-                                vibrationManager?.vibrateTick()
-                                viewModel.select(it)
-                                previewPlaying = true
+                        Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    "Make your home screen move",
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    "Pick something to start. It's cut to your widget's exact size, and the launcher plays it. Nothing runs in the background.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
-                        )
+                            SourceGrid(onPick = ::pick)
+                        }
                     }
                 }
-                item {
-                    StaggeredEntrance(index = 3) {
-                        if (selected.type == LivingFrameType.SLIDESHOW) {
-                            SlideshowCard(
+
+                else -> {
+                    item(key = "stage") {
+                        StaggeredEntrance(index = 0) {
+                            StageSection(
                                 frame = selected,
-                                nextLabel = viewModel.slideNextLabel(selected.id),
-                                onInterval = { viewModel.setSlideshowInterval(selected.id, it) },
-                                onShuffle = { viewModel.setShuffle(selected.id, it) }
+                                viewModel = viewModel,
+                                aspect = aspect,
+                                playing = playing,
+                                onAspect = { vib?.vibrateTick(); aspect = it },
+                                onTogglePlay = { vib?.vibrateClick(); playing = !playing },
+                                onRename = { renaming = true }
                             )
-                        } else {
-                            SpeedCard(
+                        }
+                    }
+                    item(key = "library") {
+                        StaggeredEntrance(index = 1) {
+                            Library(
+                                frames = ui.frames,
+                                selectedId = selected.id,
+                                coverOf = viewModel::coverFile,
+                                onSelect = { vib?.vibrateTick(); viewModel.select(it); playing = true },
+                                onNew = { vib?.vibrateClick(); showSources = true }
+                            )
+                        }
+                    }
+                    item(key = "settings") {
+                        StaggeredEntrance(index = 2) {
+                            SettingsSection(
                                 frame = selected,
-                                onFpsChange = { viewModel.setFps(selected.id, it) }
+                                viewModel = viewModel,
+                                placed = placed,
+                                onPin = { pin(selected) },
+                                onDelete = { confirmDelete = true }
                             )
                         }
                     }
                 }
-                item {
-                    StaggeredEntrance(index = 4) {
-                        WidgetSettingsCard(
-                            frame = selected,
-                            onLoop = { viewModel.setLoopMode(selected.id, it) },
-                            onFit = { viewModel.setFit(selected.id, it) },
-                            onTap = { viewModel.setTapAction(selected.id, it) },
-                            onOpacity = { viewModel.setOpacity(selected.id, it) },
-                            onCorner = { viewModel.setCorner(selected.id, it) },
-                            onCaption = { viewModel.setShowCaption(selected.id, it) }
-                        )
-                    }
-                }
-                item {
-                    StaggeredEntrance(index = 5) {
-                        PinAndDeleteRow(
-                            frame = selected,
-                            boundCount = viewModel.boundWidgetCount(selected.id),
-                            onPin = {
-                                vibrationManager?.vibrateLongClick()
-                                val ok = viewModel.pinToHome(selected)
-                                if (!ok) {
-                                    Toast.makeText(
-                                        context,
-                                        "Your launcher blocked pinning — long-press the home screen, tap Widgets, then add Toolz Living Widget.",
-                                        Toast.LENGTH_LONG
-                                    ).show()
-                                }
-                            },
-                            onDelete = { confirmDelete = true },
-                            onTestPush = {
-                                vibrationManager?.vibrateClick()
-                                viewModel.testPush(selected.id) { msg ->
-                                    scope.launch { snackbar.showSnackbar(msg) }
-                                }
-                            }
-                        )
-                    }
-                }
-            } else if (!ui.isImporting) {
-                item {
-                    StaggeredEntrance(index = 1) {
-                        EmptyCard()
-                    }
-                }
-            }
-
-            item {
-                StaggeredEntrance(index = 6) {
-                    ImportGrid(
-                        importing = ui.isImporting,
-                        onPick = ::pick
-                    )
-                }
-            }
-
-            item {
-                Footnote()
             }
         }
     }
 }
 
-@Composable
-private fun rememberOpenBatterySettings(): () -> Unit {
-    val context = LocalContext.current
-    return remember {
-        {
-            try {
-                val intent = try {
-                    android.content.Intent(android.provider.Settings.ACTION_BATTERY_SAVER_SETTINGS)
-                } catch (_: Exception) {
-                    android.content.Intent(android.provider.Settings.ACTION_SETTINGS)
-                }
-                intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(intent)
-            } catch (_: Exception) {
-                try {
-                    Toast.makeText(context, "Open Settings → Battery → Battery Saver", Toast.LENGTH_LONG).show()
-                } catch (_: Exception) {}
-            }
-        }
-    }
-}
-
-// ── Saver banner ─────────────────────────────────────────────────────────
+// ── Stage (live preview) ────────────────────────────────────────────────────────────
 
 @Composable
-private fun SaverBanner(
-    shizukuRunning: Boolean,
-    shizukuAuthorized: Boolean,
-    busyMessage: String?,
-    onEnableShizuku: () -> Unit,
-    onDisableSaver: () -> Unit,
-    onOpenSettings: () -> Unit
-) {
-    Surface(
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.errorContainer,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.4f))
-    ) {
-        Column(Modifier.padding(16.dp)) {
-            Text(
-                "Battery Saver is pausing your widgets",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Black,
-                color = MaterialTheme.colorScheme.onErrorContainer
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "Animation and slideshows stay frozen while it is on. Turn it off to resume.",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f)
-            )
-            Spacer(Modifier.height(12.dp))
-            if (busyMessage != null) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    ExpressiveLoadingIndicator()
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        busyMessage,
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onErrorContainer
-                    )
-                }
-            } else if (shizukuAuthorized) {
-                ToolzExpressiveButton(
-                    onClick = onDisableSaver,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.error,
-                        contentColor = MaterialTheme.colorScheme.onError
-                    )
-                ) {
-                    Text("Turn Battery Saver off", fontWeight = FontWeight.Black)
-                }
-                Spacer(Modifier.height(8.dp))
-                ToolzOutlinedExpressiveButton(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) {
-                    Text("Open battery settings instead")
-                }
-            } else {
-                ToolzExpressiveButton(
-                    onClick = if (shizukuRunning) onEnableShizuku else onOpenSettings,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.error,
-                        contentColor = MaterialTheme.colorScheme.onError
-                    )
-                ) {
-                    Text(
-                        if (shizukuRunning) "Authorize Shizuku to turn it off" else "Open battery settings",
-                        fontWeight = FontWeight.Black
-                    )
-                }
-                if (shizukuRunning) {
-                    Spacer(Modifier.height(8.dp))
-                    ToolzOutlinedExpressiveButton(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) {
-                        Text("Open settings manually")
-                    }
-                } else {
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "Tip: with Shizuku running, Toolz can turn it off for you.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f)
-                    )
-                }
-            }
-        }
-    }
-}
-
-// ── Status ───────────────────────────────────────────────────────────────
-
-@Composable
-private fun PlaybackStatusRow(
-    status: LivingFramesWidgetHelper.PlaybackStatus,
-    diag: Map<Int, String>,
-    onResume: () -> Unit
-) {
-    val animating = status.animating
-    val widgetCount = status.widgetCount
-    val dot = when {
-        widgetCount == 0 -> MaterialTheme.colorScheme.outline
-        animating -> Color(0xFF43A047)
-        else -> Color(0xFFFFA000)
-    }
-    val text = when {
-        widgetCount == 0 -> "No widgets pinned yet"
-        animating -> "Animating · $widgetCount widget${if (widgetCount == 1) "" else "s"}"
-        status.pausedReason == "SAVER" -> "Paused · Battery saver is ON"
-        status.pausedReason == "SCREEN_OFF" -> "Paused · screen is off"
-        else -> "Paused · $widgetCount widget${if (widgetCount == 1) "" else "s"} — tap resume"
-    }
-    Surface(
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.55f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
-    ) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(10.dp).clip(CircleShape).background(dot))
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    text,
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f)
-                )
-                if (widgetCount > 0 && !animating) {
-                    TextButton(onClick = onResume) {
-                        Icon(Icons.Rounded.Refresh, null, Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Resume", fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-            if (diag.isNotEmpty()) {
-                Spacer(Modifier.height(6.dp))
-                diag.entries.sortedBy { it.key }.take(3).forEach { (id, info) ->
-                    Text(
-                        "Widget $id → frame $info",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-        }
-    }
-}
-
-// ── Preview (vsync-driven, preloaded — no disk reads per tick) ───────────
-
-@Composable
-private fun PreviewCard(
+private fun StageSection(
     frame: LivingFrame,
+    viewModel: LivingFramesViewModel,
+    aspect: Aspect,
     playing: Boolean,
-    onPlayingChange: (Boolean) -> Unit,
-    onRename: (String) -> Unit,
-    viewModel: LivingFramesViewModel = hiltViewModel()
+    onAspect: (Aspect) -> Unit,
+    onTogglePlay: () -> Unit,
+    onRename: () -> Unit
 ) {
-    var measuredFps by remember { mutableFloatStateOf(-1f) }
-    var measuredDropped by remember { mutableIntStateOf(0) }
-    var browse by remember(frame.id) { mutableIntStateOf(-1) }
-    var showRename by remember(frame.id) { mutableStateOf(false) }
-    val multi = frame.frameCount > 1
-    val isSlideshow = frame.type == LivingFrameType.SLIDESHOW
-
-    if (showRename) {
-        var draft by remember(frame.id) { mutableStateOf(frame.name) }
-        AlertDialog(
-            onDismissRequest = { showRename = false },
-            title = { Text("Rename widget", fontWeight = FontWeight.Black) },
-            text = {
-                OutlinedTextField(
-                    value = draft,
-                    onValueChange = { draft = it.take(40) },
-                    singleLine = true,
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier.fillMaxWidth()
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    showRename = false
-                    if (draft.isNotBlank()) onRename(draft.trim())
-                }) { Text("Save", fontWeight = FontWeight.Bold) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showRename = false }) { Text("Cancel") }
-            }
-        )
+    val frames by produceState<List<ImageBitmap>>(emptyList(), frame.id, frame.createdAt) {
+        value = emptyList()
+        value = viewModel.previewFrames(frame)
     }
-
-    ExpressiveCard(
-        onClick = {},
-        shape = CardShape,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.55f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)),
-        enabled = false
-    ) {
-        Column(Modifier.padding(20.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
                 Text(
                     frame.name,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Black,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
+                    overflow = TextOverflow.Ellipsis
                 )
-                TextButton(onClick = { showRename = true }) {
-                    Text("Rename", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge)
-                }
-                if (multi && !isSlideshow) {
-                    IconButton(onClick = { onPlayingChange(!playing) }) {
-                        Icon(
-                            if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                            contentDescription = if (playing) "Pause preview" else "Play preview"
-                        )
-                    }
-                } else if (isSlideshow && multi) {
-                    Row {
-                        TextButton(onClick = {
-                            browse = if (browse < 0) frame.frameCount - 1
-                            else (browse - 1 + frame.frameCount) % frame.frameCount
-                        }) { Text("Prev", fontWeight = FontWeight.Bold) }
-                        TextButton(onClick = {
-                            browse = if (browse < 0) 1 % frame.frameCount
-                            else (browse + 1) % frame.frameCount
-                        }) { Text("Next", fontWeight = FontWeight.Bold) }
-                    }
-                }
-            }
-            Spacer(Modifier.height(4.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TypePill(frame.type)
-                Spacer(Modifier.width(8.dp))
                 Text(
-                    when {
-                        !multi -> "Static · ${frame.width}×${frame.height}px"
-                        isSlideshow && browse >= 0 -> "Photo ${browse + 1}/${frame.frameCount}"
-                        isSlideshow -> "Slideshow · ${frame.frameCount} photos"
-                        !playing -> "Paused · ${frame.frameCount} frames"
-                        measuredFps < 0 -> "Measuring…"
-                        else -> "%.1f fps · %d dropped".format(measuredFps, measuredDropped)
-                    },
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontWeight = FontWeight.Bold
+                    describe(frame),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Spacer(Modifier.height(12.dp))
-            FramePlayer(
-                frame = frame,
-                playing = playing && browse < 0,
-                forcedIndex = browse.takeIf { it >= 0 },
-                onStats = { fps, dropped ->
-                    measuredFps = fps
-                    measuredDropped = dropped
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(220.dp)
-                    .clip(RoundedCornerShape(frame.cornerRadiusDp.dp))
-            )
+            IconButton(onClick = onRename) { Icon(Icons.Rounded.Edit, "Rename") }
         }
-    }
-}
 
-@Composable
-private fun TypePill(type: LivingFrameType) {
-    Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer) {
-        Text(
-            when (type) {
-                LivingFrameType.GIF -> "GIF"
-                LivingFrameType.VIDEO -> "Video"
-                LivingFrameType.PHOTO -> "Photo"
-                LivingFrameType.SLIDESHOW -> "Slideshow"
-            },
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onPrimaryContainer
+        Surface(
+            shape = RoundedCornerShape(32.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.55f),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
+        ) {
+            Column {
+                BoxWithConstraints(
+                    Modifier.fillMaxWidth().height(300.dp).padding(start = 20.dp, end = 20.dp, top = 20.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    val w = minOf(maxWidth, maxHeight * aspect.ratio)
+                    val h = w / aspect.ratio
+                    val animW by animateDpAsState(w, spring(Spring.DampingRatioLowBouncy, Spring.StiffnessMediumLow), label = "pw")
+                    val animH by animateDpAsState(h, spring(Spring.DampingRatioLowBouncy, Spring.StiffnessMediumLow), label = "ph")
+                    val corner = (frame.cornerRadiusDp * (animW.value / aspect.nominalWidthDp)).dp
+                    Box(Modifier.size(animW, animH), contentAlignment = Alignment.Center) {
+                        if (frames.isEmpty()) ExpressiveLoadingIndicator()
+                        else LivePreview(frame, frames, playing, corner, Modifier.fillMaxSize())
+                    }
+                }
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "Preview as a ${aspect.label} widget",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (frame.isAnimated || frame.isSlideshow) PlayToggle(playing, onTogglePlay)
+                }
+            }
+        }
+        ToolzConnectedButtonGroup(
+            selectedIndex = Aspect.entries.indexOf(aspect),
+            options = Aspect.entries.map { it.label },
+            onOptionSelected = { onAspect(Aspect.entries[it]) },
+            modifier = Modifier.fillMaxWidth()
         )
     }
 }
 
-@Composable
-private fun FramePlayer(
-    frame: LivingFrame,
-    playing: Boolean,
-    onStats: (Float, Int) -> Unit,
-    modifier: Modifier = Modifier,
-    forcedIndex: Int? = null,
-    viewModel: LivingFramesViewModel = hiltViewModel()
-) {
-    var bitmaps by remember { mutableStateOf<List<ImageBitmap>>(emptyList()) }
-    var failed by remember { mutableStateOf(false) }
-    var reloadKey by remember { mutableIntStateOf(0) }
-
-    LaunchedEffect(frame.id, reloadKey) {
-        bitmaps = emptyList()
-        failed = false
-        val loaded = try {
-            viewModel.decodePreviewFrames(frame.id)
-                .take(PREVIEW_MAX_FRAMES)
-                .map { it.asImageBitmap() }
-        } catch (_: Exception) { emptyList() }
-        if (loaded.isEmpty()) failed = true else bitmaps = loaded
+private fun describe(frame: LivingFrame): String = when {
+    frame.isSlideshow -> "Slideshow · ${frame.frameCount} photos"
+    frame.isAnimated -> {
+        val s = LivingFrameEngine.loopDurationMs(frame.frameCount, frame.fps, frame.loopMode) / 1000f
+        "${if (frame.type == LivingFrameType.GIF) "GIF" else "Video"} · %.1f s loop · ${frame.frameCount} frames".format(s)
     }
+    else -> "Photo · ${frame.width}×${frame.height}"
+}
 
-    Box(
-        modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-        contentAlignment = Alignment.Center
+/** Circle when paused, squircle when playing — the shape change is the state change. */
+@Composable
+private fun PlayToggle(playing: Boolean, onClick: () -> Unit) {
+    val corner by animateDpAsState(if (playing) 16.dp else 28.dp, spring(Spring.DampingRatioMediumBouncy), label = "playShape")
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(corner),
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        modifier = Modifier.size(56.dp)
     ) {
-        when {
-            failed -> {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Couldn't load preview", fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(8.dp))
-                    TextButton(onClick = { reloadKey++ }) { Text("Retry") }
-                }
-            }
-            bitmaps.isEmpty() -> ExpressiveLoadingIndicator()
-            forcedIndex != null -> {
-                Image(
-                    bitmap = bitmaps[forcedIndex % bitmaps.size],
-                    contentDescription = frame.name,
-                    modifier = Modifier.fillMaxSize().alpha(frame.opacity),
-                    contentScale = if (frame.fit == LivingFrameFit.FILL) ContentScale.Crop else ContentScale.Fit
-                )
-            }
-            bitmaps.size == 1 || !playing -> {
-                Image(
-                    bitmap = bitmaps[0],
-                    contentDescription = frame.name,
-                    modifier = Modifier.fillMaxSize().alpha(frame.opacity),
-                    contentScale = if (frame.fit == LivingFrameFit.FILL) ContentScale.Crop else ContentScale.Fit
-                )
-                if (playing) {
-                    // Static single frame: report nominal rate once.
-                    LaunchedEffect(frame.id) { onStats(frame.fps.toFloat(), 0) }
-                }
-            }
-            else -> VsyncImage(
-                bitmaps = bitmaps,
-                fps = frame.fps,
-                fit = frame.fit,
-                opacity = frame.opacity,
-                contentDescription = frame.name,
-                onStats = onStats,
-                modifier = Modifier.fillMaxSize()
-            )
+        Box(contentAlignment = Alignment.Center) {
+            Icon(if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (playing) "Pause" else "Play")
         }
     }
 }
 
 /**
- * Advances preloaded bitmaps on the display vsync clock and reports the real
- * measured rate once per second. Only this composable recomposes per tick.
+ * Same playback rules as the widget: the loop order comes from
+ * LivingFrameEngine and the rate from the frame's fps. Corners, fit and
+ * opacity are applied at draw time so sliders respond instantly.
  */
 @Composable
-private fun VsyncImage(
-    bitmaps: List<ImageBitmap>,
-    fps: Int,
-    fit: LivingFrameFit,
-    opacity: Float,
-    contentDescription: String?,
-    onStats: (Float, Int) -> Unit,
+private fun LivePreview(
+    frame: LivingFrame,
+    frames: List<ImageBitmap>,
+    playing: Boolean,
+    corner: Dp,
     modifier: Modifier = Modifier
 ) {
-    var tick by remember { mutableIntStateOf(0) }
-    LaunchedEffect(bitmaps, fps) {
-        val intervalNs = 1_000_000_000L / fps.coerceAtLeast(1)
-        var last = withFrameNanos { it }
+    var tick by remember(frames) { mutableIntStateOf(0) }
+    LaunchedEffect(frames, frame.fps, frame.loopMode, frame.type, playing) {
+        if (!playing || frames.size < 2) return@LaunchedEffect
+        val slides = frame.isSlideshow
+        val order = if (slides) frames.indices.toList() else LivingFrameEngine.playbackOrder(frames.size, frame.loopMode)
+        val intervalNs = if (slides) 2_400_000_000L else 1_000_000_000L / LivingFrameFps.snap(frame.fps)
+        var pos = order.indexOf(tick).coerceAtLeast(0)
         var acc = 0L
-        var shown = 0
-        var dropped = 0
-        var windowStart = last
+        var last = withFrameNanos { it }
         while (true) {
-            val t = withFrameNanos { it }
-            val dt = (t - last).coerceAtLeast(0L)
-            last = t
-            acc += dt
+            val now = withFrameNanos { it }
+            acc += now - last
+            last = now
             if (acc >= intervalNs) {
-                val steps = (acc / intervalNs).toInt()
-                if (steps > 1) dropped += steps - 1
-                tick = (tick + 1) % bitmaps.size
+                pos = (pos + (acc / intervalNs).toInt()) % order.size
                 acc %= intervalNs
-                shown++
-            }
-            if (t - windowStart >= 1_000_000_000L) {
-                onStats(shown.toFloat(), dropped)
-                shown = 0
-                dropped = 0
-                windowStart = t
+                tick = order[pos]
             }
         }
     }
-    Image(
-        bitmap = bitmaps[tick % bitmaps.size],
-        contentDescription = contentDescription,
-        modifier = modifier.alpha(opacity),
-        contentScale = if (fit == LivingFrameFit.FILL) ContentScale.Crop else ContentScale.Fit
-    )
+    val shape = RoundedCornerShape(corner)
+    val index = tick.coerceIn(0, frames.lastIndex)
+    if (frame.isSlideshow) {
+        Crossfade(targetState = index, animationSpec = tween(500), modifier = modifier, label = "slide") { i ->
+            PreviewImage(frames[i.coerceIn(0, frames.lastIndex)], frame, shape)
+        }
+    } else {
+        Box(modifier) { PreviewImage(frames[index], frame, shape) }
+    }
 }
 
-// ── Frames strip ─────────────────────────────────────────────────────────
+@Composable
+private fun PreviewImage(bitmap: ImageBitmap, frame: LivingFrame, shape: Shape) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        if (frame.fit == LivingFrameFit.FILL) {
+            Image(
+                bitmap = bitmap, contentDescription = frame.name, contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().clip(shape).alpha(frame.opacity)
+            )
+        } else {
+            Image(
+                bitmap = bitmap, contentDescription = frame.name, contentScale = ContentScale.FillBounds,
+                modifier = Modifier.aspectRatio(bitmap.width / bitmap.height.toFloat()).clip(shape).alpha(frame.opacity)
+            )
+        }
+    }
+}
+
+// ── Library ───────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun WidgetsStrip(
+private fun Library(
     frames: List<LivingFrame>,
     selectedId: String,
-    onSelect: (String) -> Unit
+    coverOf: (String) -> java.io.File,
+    onSelect: (String) -> Unit,
+    onNew: () -> Unit
 ) {
-    Column {
-        Text(
-            "MY WIDGETS · ${frames.size}",
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Black,
-            color = MaterialTheme.colorScheme.primary,
-            letterSpacing = 2.sp
-        )
-        Spacer(Modifier.height(10.dp))
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("Library", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         LazyRow(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalFadingEdges(left = 24.dp, right = 24.dp),
+            Modifier.fillMaxWidth().horizontalFadingEdges(left = 16.dp, right = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding = PaddingValues(horizontal = 4.dp)
+            contentPadding = PaddingValues(horizontal = 2.dp, vertical = 4.dp)
         ) {
-            items(frames, key = { it.id }) { frame ->
-                WidgetThumb(
-                    frame = frame,
-                    selected = frame.id == selectedId,
-                    onClick = { onSelect(frame.id) }
-                )
+            items(frames, key = { it.id }) { f ->
+                LibraryTile(f, f.id == selectedId, coverOf(f.id)) { onSelect(f.id) }
             }
-        }
-    }
-}
-
-@Composable
-private fun WidgetThumb(
-    frame: LivingFrame,
-    selected: Boolean,
-    onClick: () -> Unit
-) {
-    val context = LocalContext.current
-    val cover = remember(frame.id) {
-        File(File(context.filesDir, "living_frames/${frame.id}"), "cover.webp")
-    }
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(20.dp),
-        color = if (selected) MaterialTheme.colorScheme.primaryContainer
-        else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
-        border = if (selected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
-        else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)),
-        modifier = Modifier.size(132.dp, 148.dp)
-    ) {
-        Column {
-            Box(Modifier.weight(1f)) {
-                AsyncImage(
-                    model = cover,
-                    contentDescription = frame.name,
-                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)),
-                    contentScale = ContentScale.Crop
-                )
-                if (selected) {
-                    Box(
-                        Modifier.align(Alignment.TopEnd).padding(6.dp)
-                            .size(24.dp).clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.primary),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(Icons.Rounded.Check, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(14.dp))
-                    }
+            item(key = "new") {
+                Surface(
+                    onClick = onNew,
+                    shape = RoundedCornerShape(24.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier.size(92.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Add, "New widget") }
                 }
             }
-            Text(
-                frame.name,
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-            )
-            Text(
-                "${frame.frameCount}f · ${frame.fps}fps",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 10.dp).padding(bottom = 8.dp)
-            )
         }
     }
 }
 
 @Composable
-private fun EmptyCard() {
-    ExpressiveCard(
-        onClick = {},
-        shape = CardShape,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.4f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)),
-        enabled = false
+private fun LibraryTile(frame: LivingFrame, selected: Boolean, cover: java.io.File, onClick: () -> Unit) {
+    val corner by animateDpAsState(if (selected) 32.dp else 22.dp, spring(Spring.DampingRatioMediumBouncy), label = "tileShape")
+    val shape = RoundedCornerShape(corner)
+    val icon = when (frame.type) {
+        LivingFrameType.GIF -> Icons.Rounded.Gif
+        LivingFrameType.VIDEO -> Icons.Rounded.Videocam
+        LivingFrameType.PHOTO -> Icons.Rounded.Photo
+        LivingFrameType.SLIDESHOW -> Icons.Rounded.Slideshow
+    }
+    Box(
+        Modifier
+            .size(92.dp)
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+            .then(if (selected) Modifier.border(3.dp, MaterialTheme.colorScheme.primary, shape) else Modifier)
+            .clickable(onClick = onClick)
     ) {
-        Column(Modifier.fillMaxWidth().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(Icons.Rounded.Add, null, Modifier.size(36.dp), tint = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.height(12.dp))
-            Text("No widgets yet", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-            Text(
-                "Pick a type below to create your first home-screen widget.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+        AsyncImage(model = cover, contentDescription = frame.name, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        Box(
+            Modifier
+                .align(Alignment.BottomStart)
+                .padding(8.dp)
+                .size(22.dp)
+                .clip(CircleShape)
+                .background(Color.Black.copy(alpha = 0.55f)),
+            contentAlignment = Alignment.Center
+        ) { Icon(icon, null, Modifier.size(14.dp), tint = Color.White) }
+    }
+}
+
+// ── Settings ─────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun SettingsSection(
+    frame: LivingFrame,
+    viewModel: LivingFramesViewModel,
+    placed: List<PlacedWidget>,
+    onPin: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val vib = LocalVibrationManager.current
+    val tabs = when {
+        frame.isSlideshow -> listOf("Timing", "Look", "Widget")
+        frame.isAnimated -> listOf("Motion", "Look", "Widget")
+        else -> listOf("Look", "Widget")
+    }
+    var tab by rememberSaveable(frame.id) { mutableIntStateOf(0) }
+    val current = tabs[tab.coerceIn(0, tabs.lastIndex)]
+
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        ToolzConnectedButtonGroup(
+            selectedIndex = tabs.indexOf(current),
+            options = tabs,
+            onOptionSelected = { vib?.vibrateTick(); tab = it },
+            modifier = Modifier.fillMaxWidth()
+        )
+        AnimatedContent(
+            targetState = current,
+            transitionSpec = {
+                (fadeIn(tween(220, delayMillis = 60)) + slideInVertically(tween(260)) { it / 14 }) togetherWith fadeOut(tween(100))
+            },
+            label = "settingsTab"
+        ) { name ->
+            when (name) {
+                "Motion" -> MotionPanel(frame, viewModel)
+                "Timing" -> TimingPanel(frame, placed.firstNotNullOfOrNull { it.nextSlideIn }, viewModel)
+                "Look" -> LookPanel(frame, viewModel)
+                else -> WidgetPanel(frame, placed, onPin, viewModel::refreshWidget, onDelete)
+            }
         }
     }
 }
 
-// ── Import grid ──────────────────────────────────────────────────────────
-
-private data class ImportMode(
-    val type: LivingFrameType,
-    val icon: ImageVector,
-    val label: String,
-    val sub: String
-)
+// ── Sources ──────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun ImportGrid(importing: Boolean, onPick: (LivingFrameType) -> Unit) {
-    val modes = remember {
-        listOf(
-            ImportMode(LivingFrameType.GIF, Icons.Rounded.AutoAwesome, "GIF", "Loop a GIF"),
-            ImportMode(LivingFrameType.VIDEO, Icons.Rounded.Movie, "Video", "Silent loop ≤10s"),
-            ImportMode(LivingFrameType.PHOTO, Icons.Rounded.Image, "Photo", "Single frame"),
-            ImportMode(LivingFrameType.SLIDESHOW, Icons.Rounded.PhotoLibrary, "Slideshow", "Up to 20 photos")
-        )
-    }
-    Column {
-        Text(
-            "CREATE",
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Black,
-            color = MaterialTheme.colorScheme.primary,
-            letterSpacing = 2.sp
-        )
-        Spacer(Modifier.height(10.dp))
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            modes.chunked(2).forEach { row ->
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    row.forEach { mode ->
-                        ExpressiveCard(
-                            onClick = { if (!importing) onPick(mode.type) },
-                            shape = RoundedCornerShape(24.dp),
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.55f),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)),
-                            enabled = !importing,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Column(
-                                Modifier.fillMaxWidth().padding(vertical = 18.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                Icon(mode.icon, null, Modifier.size(28.dp), tint = MaterialTheme.colorScheme.primary)
-                                Spacer(Modifier.height(8.dp))
-                                Text(mode.label, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleSmall)
-                                Text(
-                                    mode.sub,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+private fun SourceGrid(onPick: (Source) -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    val containers = listOf(colors.primaryContainer, colors.secondaryContainer, colors.tertiaryContainer, colors.surfaceContainerHighest)
+    val onContainers = listOf(colors.onPrimaryContainer, colors.onSecondaryContainer, colors.onTertiaryContainer, colors.onSurface)
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Source.entries.chunked(2).forEachIndexed { row, pair ->
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                pair.forEachIndexed { col, source ->
+                    val i = row * 2 + col
+                    ExpressiveCard(
+                        onClick = { onPick(source) },
+                        shape = RoundedCornerShape(28.dp),
+                        containerColor = containers[i],
+                        border = BorderStroke(1.dp, colors.outlineVariant.copy(alpha = 0.25f)),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            Icon(source.icon, null, Modifier.size(32.dp), tint = onContainers[i])
+                            Column {
+                                Text(source.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = onContainers[i])
+                                Text(source.hint, style = MaterialTheme.typography.bodySmall, color = onContainers[i].copy(alpha = 0.75f))
                             }
                         }
                     }
-                    if (row.size == 1) Spacer(Modifier.weight(1f))
                 }
             }
-        }
-        if (importing) {
-            Spacer(Modifier.height(12.dp))
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                ExpressiveLoadingIndicator()
-                Spacer(Modifier.width(12.dp))
-                Text("Decoding frames…", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge)
-            }
-        } else {
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "Everything stays on your device. Clips become silent frame loops — Android widgets can't play sound.",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
-            )
         }
     }
 }
 
-// ── Speed ────────────────────────────────────────────────────────────────
+// ── Video clip picker ──────────────────────────────────────────────────────────────────────
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SlideshowCard(
-    frame: LivingFrame,
-    nextLabel: String?,
-    onInterval: (Int) -> Unit,
-    onShuffle: (Boolean) -> Unit
+private fun ClipSheet(
+    pending: PendingVideo,
+    viewModel: LivingFramesViewModel,
+    onCancel: () -> Unit,
+    onConfirm: (startMs: Long, lengthMs: Long) -> Unit
 ) {
-    ExpressiveCard(
-        onClick = {},
-        shape = CardShape,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.55f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)),
-        enabled = false
-    ) {
-        Column(Modifier.padding(20.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Rounded.PhotoLibrary, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    "SLIDESHOW · ${frame.frameCount} PHOTOS",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Black,
-                    color = MaterialTheme.colorScheme.primary,
-                    letterSpacing = 2.sp
-                )
-            }
-            Spacer(Modifier.height(12.dp))
-            Text("Change photo every", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(6.dp))
-            ToolzConnectedButtonGroup(
-                selectedIndex = LivingFramesWidgetHelper.SLIDESHOW_INTERVALS_MIN
-                    .indexOf(frame.slideshowIntervalMin).takeIf { it >= 0 } ?: 2,
-                options = LivingFramesWidgetHelper.SLIDESHOW_INTERVALS_MIN
-                    .map { LivingFramesWidgetHelper.slideshowIntervalLabel(it) },
-                onOptionSelected = { onInterval(LivingFramesWidgetHelper.SLIDESHOW_INTERVALS_MIN[it]) },
-                modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(Modifier.height(10.dp))
-            CustomIntervalStepper(
-                currentMins = frame.slideshowIntervalMin,
-                onInterval = onInterval
-            )
-            Spacer(Modifier.height(10.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                FilterChip(
-                    selected = frame.shuffle,
-                    onClick = { onShuffle(!frame.shuffle) },
-                    label = { Text("Shuffle", fontWeight = FontWeight.Bold) },
-                    leadingIcon = if (frame.shuffle) {
-                        { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
-                    } else null,
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = MaterialTheme.colorScheme.primary,
-                        selectedLabelColor = MaterialTheme.colorScheme.onPrimary
-                    )
-                )
-                Spacer(Modifier.width(12.dp))
-                Text(
-                    if (nextLabel != null) "Next photo $nextLabel" else "Pin the widget to start the rotation",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "Runs on timed alarms — no battery drain between changes. May arrive late in deep sleep.",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
-            )
-        }
-    }
-}
+    var lengthIdx by remember { mutableIntStateOf(1) }
+    var start by remember { mutableFloatStateOf(0f) }
+    val lengthMs = CLIP_LENGTHS_MS[lengthIdx]
+    val maxStart = (pending.durationMs - lengthMs).coerceAtLeast(0L).toFloat()
+    val startMs = start.coerceIn(0f, maxStart).toLong()
+    val fps = LivingFrameFps.snap(minOf(15f, LivingFramesRepository.MAX_FRAMES * 1000f / lengthMs))
+    val frameCount = (lengthMs / 1000f * fps).roundToInt().coerceIn(2, LivingFramesRepository.MAX_FRAMES)
 
-@Composable
-private fun CustomIntervalStepper(currentMins: Int, onInterval: (Int) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        TextButton(onClick = { onInterval((currentMins - 5).coerceAtLeast(5)) }) {
-            Text("− 5m", fontWeight = FontWeight.Black)
-        }
-        Text(
-            "Every ${LivingFramesWidgetHelper.slideshowIntervalLabel(currentMins)}",
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.Black,
-            modifier = Modifier.weight(1f),
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-        )
-        TextButton(onClick = { onInterval((currentMins + 5).coerceAtMost(1440)) }) {
-            Text("+ 5m", fontWeight = FontWeight.Black)
-        }
+    val thumb by produceState<ImageBitmap?>(null, pending.uri, startMs / 250L) {
+        delay(120L)
+        viewModel.videoThumb(pending.uri, startMs)?.let { value = it }
     }
-}
 
-@Composable
-private fun SpeedCard(frame: LivingFrame, onFpsChange: (Int) -> Unit) {
-    val estimate = remember(frame.fps, frame.avgFrameBytes) {
-        LivingFrameLagMeter.estimate(frame.fps, frame.avgFrameBytes.coerceAtLeast(20_000L))
-    }
-    ExpressiveCard(
-        onClick = {},
-        shape = CardShape,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.55f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)),
-        enabled = false
+    ModalBottomSheet(
+        onDismissRequest = onCancel,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ) {
-        Column(Modifier.padding(20.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Rounded.Speed, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    "SPEED · ${frame.fps} FPS",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Black,
-                    color = MaterialTheme.colorScheme.primary,
-                    letterSpacing = 2.sp
-                )
-            }
-            Spacer(Modifier.height(12.dp))
-            ToolzConnectedButtonGroup(
-                selectedIndex = LivingFrameFps.PRESETS.indexOf(frame.fps),
-                options = LivingFrameFps.PRESETS.map { "$it" },
-                onOptionSelected = { onFpsChange(LivingFrameFps.PRESETS[it]) },
-                modifier = Modifier.fillMaxWidth()
-            )
-            Slider(
-                value = frame.fps.toFloat(),
-                onValueChange = { onFpsChange(it.toInt().coerceIn(LivingFrameFps.MIN, LivingFrameFps.MAX)) },
-                valueRange = LivingFrameFps.MIN.toFloat()..LivingFrameFps.MAX.toFloat(),
-                steps = LivingFrameFps.MAX - LivingFrameFps.MIN - 1,
-                modifier = Modifier.fillMaxWidth(),
-                colors = SliderDefaults.colors(
-                    thumbColor = MaterialTheme.colorScheme.primary,
-                    activeTrackColor = MaterialTheme.colorScheme.primary
-                )
-            )
-            if (frame.fps > LivingFrameFps.EXPERIMENTAL_THRESHOLD) {
-                Text(
-                    "Above 15 fps is experimental — most launchers throttle it.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.error,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(Modifier.height(8.dp))
-            }
-            val dot = when (estimate.level) {
-                LivingFrameLagLevel.FINE -> Color(0xFF43A047)
-                LivingFrameLagLevel.MAY_LAG -> Color(0xFFFFA000)
-                LivingFrameLagLevel.LIKELY_LAG -> MaterialTheme.colorScheme.error
-            }
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = dot.copy(alpha = 0.12f),
-                border = BorderStroke(1.dp, dot.copy(alpha = 0.35f))
+        Column(
+            Modifier.padding(horizontal = 20.dp).padding(bottom = 24.dp).navigationBarsPadding(),
+            verticalArrangement = Arrangement.spacedBy(18.dp)
+        ) {
+            Text("Choose your loop", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(16f / 9f)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                contentAlignment = Alignment.Center
             ) {
-                Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(10.dp).clip(CircleShape).background(dot))
-                    Spacer(Modifier.width(10.dp))
-                    Column {
-                        Text(
-                            "${estimate.headline} · ~${estimate.kilobytesPerSecond}KB/s",
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Black
-                        )
-                        Text(
-                            estimate.detail,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
+                val t = thumb
+                if (t == null) ExpressiveLoadingIndicator()
+                else Image(t, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             }
-        }
-    }
-}
-
-// ── Settings ─────────────────────────────────────────────────────────────
-
-@Composable
-private fun WidgetSettingsCard(
-    frame: LivingFrame,
-    onLoop: (LivingFrameLoopMode) -> Unit,
-    onFit: (LivingFrameFit) -> Unit,
-    onTap: (LivingFrameTapAction) -> Unit,
-    onOpacity: (Float) -> Unit,
-    onCorner: (Int) -> Unit,
-    onCaption: (Boolean) -> Unit
-) {
-    ExpressiveCard(
-        onClick = {},
-        shape = CardShape,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.55f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)),
-        enabled = false
-    ) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Text(
-                "WIDGET SETTINGS",
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Black,
-                color = MaterialTheme.colorScheme.primary,
-                letterSpacing = 2.sp
-            )
-            if (frame.frameCount > 1 && frame.type != LivingFrameType.SLIDESHOW) {
-                SettingGroup("Loop") {
-                    ToolzConnectedButtonGroup(
-                        selectedIndex = frame.loopMode.ordinal,
-                        options = listOf("Loop", "Boomerang", "Once"),
-                        onOptionSelected = { onLoop(LivingFrameLoopMode.entries[it]) },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            }
-            SettingGroup("Fill") {
-                ToolzConnectedButtonGroup(
-                    selectedIndex = if (frame.fit == LivingFrameFit.FILL) 0 else 1,
-                    options = listOf("Fill", "Fit"),
-                    onOptionSelected = { onFit(if (it == 0) LivingFrameFit.FILL else LivingFrameFit.FIT) },
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-            SettingGroup("Tap opens") {
-                ToolzConnectedButtonGroup(
-                    selectedIndex = frame.tapAction.ordinal,
-                    options = listOf("App", "Next", "Off"),
-                    onOptionSelected = { onTap(LivingFrameTapAction.entries[it]) },
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-            SettingGroup("Name tag") {
-                FilterChip(
-                    selected = frame.showCaption,
-                    onClick = { onCaption(!frame.showCaption) },
-                    label = {
-                        Text(
-                            if (frame.showCaption) "Shown on widget" else "Hidden",
-                            fontWeight = FontWeight.Bold,
-                            style = MaterialTheme.typography.labelSmall
-                        )
-                    },
-                    leadingIcon = if (frame.showCaption) {
-                        { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
-                    } else null
-                )
-            }
-            SettingGroup("Opacity · ${(frame.opacity * 100).toInt()}%") {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                SettingHeader("Starts at", clock(startMs))
                 Slider(
-                    value = frame.opacity,
-                    onValueChange = onOpacity,
-                    valueRange = 0.4f..1f,
+                    value = start.coerceIn(0f, maxStart),
+                    onValueChange = { start = it },
+                    valueRange = 0f..maxStart.coerceAtLeast(1f),
+                    enabled = maxStart > 0f,
                     colors = SliderDefaults.colors(
                         thumbColor = MaterialTheme.colorScheme.primary,
                         activeTrackColor = MaterialTheme.colorScheme.primary
                     )
                 )
             }
-            SettingGroup("Corners · ${frame.cornerRadiusDp}dp") {
-                Slider(
-                    value = frame.cornerRadiusDp.toFloat(),
-                    onValueChange = { onCorner(it.toInt()) },
-                    valueRange = 0f..32f,
-                    steps = 31,
-                    colors = SliderDefaults.colors(
-                        thumbColor = MaterialTheme.colorScheme.primary,
-                        activeTrackColor = MaterialTheme.colorScheme.primary
-                    )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                SettingHeader("Length", "$frameCount frames · $fps fps")
+                ToolzConnectedButtonGroup(
+                    selectedIndex = lengthIdx,
+                    options = CLIP_LENGTHS_MS.map { "${it / 1000} s" },
+                    onOptionSelected = { lengthIdx = it },
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
+            ToolzExpressiveButton(
+                onClick = { onConfirm(startMs, lengthMs) },
+                modifier = Modifier.fillMaxWidth().height(56.dp)
+            ) { Text("Create loop", fontWeight = FontWeight.SemiBold) }
         }
     }
 }
 
-@Composable
-private fun SettingGroup(title: String, content: @Composable () -> Unit) {
-    Column {
-        Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(6.dp))
-        content()
-    }
-}
-
-@Composable
-private fun PinAndDeleteRow(
-    frame: LivingFrame,
-    boundCount: Int,
-    onPin: () -> Unit,
-    onDelete: () -> Unit,
-    onTestPush: () -> Unit
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        ToolzExpressiveButton(
-            onClick = onPin,
-            modifier = Modifier.fillMaxWidth().height(64.dp),
-            shape = LargeExpressiveShape
-        ) {
-            Icon(Icons.Rounded.AddToHomeScreen, null, Modifier.size(22.dp))
-            Spacer(Modifier.width(10.dp))
-            Text(
-                if (boundCount > 0) "Add another · $boundCount placed" else "Add to home screen",
-                fontWeight = FontWeight.Black
-            )
-        }
-        ToolzOutlinedExpressiveButton(
-            onClick = onDelete,
-            modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
-        ) {
-            Icon(Icons.Rounded.Delete, null, Modifier.size(18.dp))
-            Spacer(Modifier.width(8.dp))
-            Text("Delete widget", fontWeight = FontWeight.Bold)
-        }
-        if (boundCount > 0) {
-            ToolzOutlinedExpressiveButton(
-                onClick = onTestPush,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(Icons.Rounded.PlayArrow, null, Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("Send test frame", fontWeight = FontWeight.Bold)
-            }
-        }
-    }
-}
-
-@Composable
-private fun Footnote() {
-    Surface(
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.7f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
-    ) {
-        Row(Modifier.padding(16.dp)) {
-            Icon(Icons.Rounded.Info, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-            Spacer(Modifier.width(10.dp))
-            Text(
-                "Home widgets can't play video or sound — clips become silent frame loops. 10–15 fps runs best; animation pauses when the screen is off.",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-}
+private fun clock(ms: Long): String = "%d:%02d.%d".format(ms / 60_000, (ms / 1000) % 60, (ms % 1000) / 100)
