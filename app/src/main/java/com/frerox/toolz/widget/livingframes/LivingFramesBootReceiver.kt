@@ -20,76 +20,49 @@ package com.frerox.toolz.widget.livingframes
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import com.frerox.toolz.data.livingframes.LivingFrameType
+import com.frerox.toolz.worker.LivingFramesWatchdogWorker
 import dagger.hilt.android.EntryPointAccessors
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-/** Rebind covers + restart animation + reschedule slideshows after reboot / update. */
+/**
+ * Alarms don't survive a reboot, so slideshow timers are re-armed here.
+ * Everything else needs nothing: the launcher re-requests widget updates
+ * itself and the receiver renders them.
+ */
 class LivingFramesBootReceiver : BroadcastReceiver() {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun onReceive(context: Context, intent: Intent?) {
-        val a = intent?.action ?: return
-        if (a == Intent.ACTION_BOOT_COMPLETED ||
-            a == Intent.ACTION_LOCKED_BOOT_COMPLETED ||
-            a == Intent.ACTION_MY_PACKAGE_REPLACED ||
-            a == Intent.ACTION_USER_PRESENT
-        ) {
-            val result = goAsync()
-            scope.launch {
-                try {
-                    val ids = LivingFramesWidgetHelper.allWidgetIds(context)
-                    if (ids.isEmpty()) return@launch
-                    try {
-                        val repo = EntryPointAccessors.fromApplication(
-                            context.applicationContext,
-                            LivingFramesEntryPoint::class.java
-                        ).livingFramesRepository()
-                        try { repo.load() } catch (_: Exception) {}
-                        // Slideshow alarms don't survive reboot — reschedule them.
-                        ids.forEach { id ->
-                            try {
-                                val frame = repo.boundFrame(id)?.let { repo.get(it) }
-                                if (frame != null && frame.type == LivingFrameType.SLIDESHOW) {
-                                    LivingFramesWidgetHelper.scheduleSlideshow(
-                                        context, id, frame.slideshowIntervalMin
-                                    )
-                                }
-                            } catch (_: Exception) {}
-                        }
-                    } catch (_: Exception) {}
-                    try {
-                        context.sendBroadcast(
-                            Intent(AppWidgetRefresh.ACTION).setClass(context, AppWidgetRefresh::class.java)
-                        )
-                    } catch (_: Exception) {}
-                    LivingFramesPlaybackService.ensureRunning(context)
-                } finally {
-                    try { result.finish() } catch (_: Exception) {}
-                }
-            }
+        when (intent?.action) {
+            Intent.ACTION_BOOT_COMPLETED,
+            Intent.ACTION_MY_PACKAGE_REPLACED,
+            "android.intent.action.QUICKBOOT_POWERON" -> Unit
+            else -> return
         }
-    }
-
-    /** Trampoline to refresh covers without a direct repo dependency. */
-    class AppWidgetRefresh : BroadcastReceiver() {
-        companion object {
-            const val ACTION = "com.frerox.toolz.LIVING_FRAMES_REBIND"
-        }
-
-        override fun onReceive(context: Context, intent: Intent?) {
+        val result = goAsync()
+        scope.launch {
             try {
-                val mgr = android.appwidget.AppWidgetManager.getInstance(context)
                 val ids = LivingFramesWidgetHelper.allWidgetIds(context)
-                if (ids.isNotEmpty()) {
-                    mgr.notifyAppWidgetViewDataChanged(ids, android.R.id.content)
+                if (ids.isEmpty()) return@launch
+                val repo = EntryPointAccessors.fromApplication(
+                    context.applicationContext, LivingFramesEntryPoint::class.java
+                ).livingFramesRepository()
+                repo.ensureLoaded()
+                ids.forEach { id ->
+                    val frame = repo.boundFrame(id)?.let { repo.get(it) }
+                    if (frame != null && frame.isSlideshow) {
+                        LivingFramesSlideshow.schedule(context, id, frame.slideshowIntervalMin)
+                    }
                 }
-                LivingFramesPlaybackService.ensureRunning(context)
-            } catch (_: Exception) {}
+                LivingFramesWatchdogWorker.schedule(context)
+            } catch (_: Exception) {
+            } finally {
+                runCatching { result.finish() }
+            }
         }
     }
 }
