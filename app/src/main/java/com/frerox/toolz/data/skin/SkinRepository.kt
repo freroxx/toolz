@@ -158,21 +158,39 @@ class SkinRepository @Inject constructor(
                 Result.success(id)
             } else Result.failure(IllegalStateException(res.error ?: "Submit failed"))
         } catch (e: Exception) {
-            Result.failure(e)
+            Result.failure(IllegalStateException(serverMessage(e), e))
+        }
+    }
+
+    /** Prefer the server's JSON error over a bare "HTTP 400". */
+    private fun serverMessage(e: Exception): String {
+        val http = e as? retrofit2.HttpException
+            ?: return e.message ?: "Something went wrong. Check your connection and try again."
+        return try {
+            val raw = http.response()?.errorBody()?.string()
+            val msg = org.json.JSONObject(raw ?: "").optString("error").ifBlank { null }
+                ?: org.json.JSONObject(raw ?: "").optString("message").ifBlank { null }
+            (msg ?: "Server error (${http.code()})").take(200)
+        } catch (_: Exception) {
+            if (http.code() == 404) "Server route not found (404). Update Toolz and try again."
+            else "Server error (${http.code()})"
         }
     }
 
     /** Build a SkinDto snapshot from current local appearance settings. */
     suspend fun snapshotCurrent(name: String, author: String): SkinDto {
-        val theme = try { settingsRepository.themeMode.first() } catch (_: Exception) { "SYSTEM" }
+        val rawTheme = try { settingsRepository.themeMode.first() } catch (_: Exception) { "SYSTEM" }
+        val theme = rawTheme.uppercase().take(16).let { if (it in setOf("SYSTEM", "LIGHT", "DARK")) it else "SYSTEM" }
         val dyn = try { settingsRepository.dynamicColor.first() } catch (_: Exception) { true }
         val pri = try { settingsRepository.customPrimaryColor.first()?.toLong()?.and(0xFFFFFFFFL) } catch (_: Exception) { null }
         val sec = try { settingsRepository.customSecondaryColor.first()?.toLong()?.and(0xFFFFFFFFL) } catch (_: Exception) { null }
         val grad = try { settingsRepository.backgroundGradientEnabled.first() } catch (_: Exception) { true }
-        val iconId = try { settingsRepository.appIconPresetId.first() } catch (_: Exception) { IconCatalog.DEFAULT_ID }
+        val rawIcon = try { settingsRepository.appIconPresetId.first() } catch (_: Exception) { IconCatalog.DEFAULT_ID }
+        val iconId = IconCatalog.find(rawIcon).id
         val adapt = try { settingsRepository.appIconAdaptTheme.first() } catch (_: Exception) { true }
         val follow = try { settingsRepository.appIconFollowDynamic.first() } catch (_: Exception) { true }
-        val shape = try { settingsRepository.appIconShape.first() } catch (_: Exception) { "HEXAGON" }
+        val rawShape = try { settingsRepository.appIconShape.first() } catch (_: Exception) { "HEXAGON" }
+        val shape = rawShape.uppercase().take(16).let { if (it in setOf("HEXAGON", "OCTAGON", "CIRCLE", "PILL")) it else "HEXAGON" }
         return SkinDto(
             id = "",
             name = name.trim().take(32),
