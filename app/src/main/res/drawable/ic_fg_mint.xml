@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Generated preset mint: rim/body/disc from IconCatalog. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="1620"
+    android:viewportHeight="1620">
+    <group android:translateX="270" android:translateY="270">
+        <path
+            android:fillColor="#FFB7F1EA"
+            android:pathData="M1015.52,499.73A105.23,105.23,0,0,1,1015.52,580.27L904.72,847.77A105.23,105.23,0,0,1,847.77,904.72L580.27,1015.52A105.23,105.23,0,0,1,499.73,1015.52L232.23,904.72A105.23,105.23,0,0,1,175.28,847.77L64.48,580.27A105.23,105.23,0,0,1,64.48,499.73L175.28,232.23A105.23,105.23,0,0,1,232.23,175.28L499.73,64.48A105.23,105.23,0,0,1,580.27,64.48L847.77,175.28A105.23,105.23,0,0,1,904.72,232.23Z" />
+        <path android:fillColor="#FF0F5132" android:pathData="M982.04,510.49A77.12,77.12,0,0,1,982.04,569.51L873.44,831.7A77.12,77.12,0,0,1,831.7,873.44L569.51,982.04A77.12,77.12,0,0,1,510.49,982.04L248.3,873.44A77.12,77.12,0,0,1,206.56,831.7L97.96,569.51A77.12,77.12,0,0,1,97.96,510.49L206.56,248.3A77.12,77.12,0,0,1,248.3,206.56L510.49,97.96A77.12,77.12,0,0,1,569.51,97.96L831.7,206.56A77.12,77.12,0,0,1,873.44,248.3Z" />
+        <path
+            android:fillColor="#FFB7F1EA"
+            android:pathData="M212,540A328,328,0,1,1,868,540A328,328,0,1,1,212,540Z" />
+        <path
+            android:fillColor="#FF0F5132"
+            android:pathData="M299.73,336.49L405.93,573.29A131.7,131.7,0,0,0,646.27,465.51L540.07,228.71A131.7,131.7,0,0,0,299.73,336.49Z" />
+    </group>
+</vector>

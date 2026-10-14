@@ -23,14 +23,15 @@ import kotlinx.serialization.Serializable
  */
 
 enum class IconShape {
-    OCTAGON, CIRCLE, PILL;
+    OCTAGON, CIRCLE;
 
     companion object {
         /** "HEXAGON" is the legacy wire name for OCTAGON; skins on the server still use it. */
         fun parse(raw: String?): IconShape? = when (raw?.uppercase()) {
             "OCTAGON", "HEXAGON" -> OCTAGON
-            "CIRCLE" -> CIRCLE
-            "PILL" -> PILL
+            // PILL was visually identical to CIRCLE in every square container, so it was
+            // removed. Old settings and server skins using it render as CIRCLE.
+            "CIRCLE", "PILL" -> CIRCLE
             else -> null
         }
     }
@@ -60,31 +61,39 @@ object IconCatalog {
 
     val BUILT_IN: List<IconSpec> = listOf(
         // --- Reference icons: colours sampled from the original renders ---
+        // Every preset carries a bodyEnd so the in-app gradient toggle works on all of them.
         IconSpec("grape-haze", "Grape Haze", tag = "Vivid", rim = 0xFFDFBCFF, bodyStart = 0xFF8534CE, bodyEnd = 0xFFD5B9EE, disc = 0xFFFFFFFF),
         IconSpec("grape-deep", "Grape Deep", tag = "Dark", rim = 0xFF9D8AAE, bodyStart = 0xFF370068, bodyEnd = 0xFF130024, disc = 0xFFBEBEBE),
         IconSpec("lagoon", "Lagoon", tag = "Dark", rim = 0xFF4CB3AE, bodyStart = 0xFF00393F, bodyEnd = 0xFF002925, disc = 0xFF74DFD5),
-        IconSpec("mono-grey", "Mono Grey", tag = "Mono", rim = 0xFFBEBEBE, bodyStart = 0xFF444444, disc = 0xFFFFFFFF),
+        IconSpec("mono-grey", "Mono Grey", tag = "Mono", rim = 0xFFBEBEBE, bodyStart = 0xFF444444, bodyEnd = 0xFF232323, disc = 0xFFFFFFFF),
         // --- Brand riffs ---
-        IconSpec("midnight", "Midnight", tag = "Mono", rim = 0xFF4A4A4A, bodyStart = 0xFF000000, disc = 0xFFFFFFFF),
-        IconSpec("legacy-citrus", "Legacy Citrus", tag = "Legacy", rim = 0xFFFFDCC6, bodyStart = 0xFFCC5A17, disc = 0xFFFFFFFF),
-        IconSpec("legacy-ocean", "Legacy Ocean", tag = "Legacy", rim = 0xFFB7F1EA, bodyStart = 0xFF0C7E78, disc = 0xFFFFFFFF),
-        IconSpec("legacy-night", "Legacy Night", tag = "Legacy", rim = 0xFFFFB785, bodyStart = 0xFF100D0B, disc = 0xFFFFB785),
-        IconSpec("paper-light", "Paper Light", tag = "Light", rim = 0xFFCC5A17, bodyStart = 0xFFFCF9F6, disc = 0xFFCC5A17),
-        IconSpec("paper-dark", "Paper Dark", tag = "Dark", rim = 0xFFFBF8FF, bodyStart = 0xFF1B1B1F, disc = 0xFFFBF8FF),
+        IconSpec("midnight", "Midnight", tag = "Mono", rim = 0xFF4A4A4A, bodyStart = 0xFF000000, bodyEnd = 0xFF3A3A42, disc = 0xFFFFFFFF),
+        IconSpec("legacy-citrus", "Legacy Citrus", tag = "Legacy", rim = 0xFFFFDCC6, bodyStart = 0xFFCC5A17, bodyEnd = 0xFF7A3408, disc = 0xFFFFFFFF),
+        IconSpec("legacy-ocean", "Legacy Ocean", tag = "Legacy", rim = 0xFFB7F1EA, bodyStart = 0xFF0C7E78, bodyEnd = 0xFF06403D, disc = 0xFFFFFFFF),
+        IconSpec("legacy-night", "Legacy Night", tag = "Legacy", rim = 0xFFFFB785, bodyStart = 0xFF100D0B, bodyEnd = 0xFF3A2415, disc = 0xFFFFB785),
+        IconSpec("paper-light", "Paper Light", tag = "Light", rim = 0xFFCC5A17, bodyStart = 0xFFFCF9F6, bodyEnd = 0xFFE3D2BE, disc = 0xFFCC5A17),
+        IconSpec("paper-dark", "Paper Dark", tag = "Dark", rim = 0xFFFBF8FF, bodyStart = 0xFF1B1B1F, bodyEnd = 0xFF000000, disc = 0xFFFBF8FF),
         IconSpec("citrus-pop", "Citrus Pop", tag = "Vivid", rim = 0xFFFFDCC6, bodyStart = 0xFFFF6D00, bodyEnd = 0xFFCC5A17, disc = 0xFFFFFFFF),
         IconSpec("ocean-pop", "Ocean Pop", tag = "Vivid", rim = 0xFF00201D, bodyStart = 0xFF00BFA5, bodyEnd = 0xFF0C7E78, disc = 0xFF00201D),
         IconSpec("royal", "Royal", tag = "Vivid", rim = 0xFFD8E7FF, bodyStart = 0xFF2968C8, bodyEnd = 0xFF001B3F, disc = 0xFFFFFFFF),
         IconSpec("rose", "Rose", tag = "Vivid", rim = 0xFFFFD9E2, bodyStart = 0xFFC81E5B, bodyEnd = 0xFF7A0F36, disc = 0xFFFFFFFF),
-        IconSpec("mint", "Mint", tag = "Dark", rim = 0xFFB7F1EA, bodyStart = 0xFF0F5132, disc = 0xFFB7F1EA),
-        IconSpec("sand", "Sand", tag = "Light", rim = 0xFF5C4A32, bodyStart = 0xFFE8DCC8, disc = 0xFF5C4A32),
-        IconSpec("slate", "Slate", tag = "Dark", rim = 0xFF9AA3B2, bodyStart = 0xFF2B2F36, disc = 0xFFEDF0F4),
-        IconSpec("snow", "Snow", tag = "Light", rim = 0xFF1B1B1F, bodyStart = 0xFFFFFFFF, disc = 0xFF1B1B1F),
-        IconSpec("carbon", "Carbon", tag = "Mono", rim = 0xFF3A3A42, bodyStart = 0xFF101014, disc = 0xFFEDEDF2),
+        IconSpec("mint", "Mint", tag = "Dark", rim = 0xFFB7F1EA, bodyStart = 0xFF0F5132, bodyEnd = 0xFF07271A, disc = 0xFFB7F1EA),
+        IconSpec("sand", "Sand", tag = "Light", rim = 0xFF5C4A32, bodyStart = 0xFFE8DCC8, bodyEnd = 0xFFC2AF8E, disc = 0xFF5C4A32),
+        IconSpec("slate", "Slate", tag = "Dark", rim = 0xFF9AA3B2, bodyStart = 0xFF2B2F36, bodyEnd = 0xFF121419, disc = 0xFFEDF0F4),
+        IconSpec("snow", "Snow", tag = "Light", rim = 0xFF1B1B1F, bodyStart = 0xFFFFFFFF, bodyEnd = 0xFFD7DCE4, disc = 0xFF1B1B1F),
+        IconSpec("carbon", "Carbon", tag = "Mono", rim = 0xFF3A3A42, bodyStart = 0xFF101014, bodyEnd = 0xFF33333E, disc = 0xFFEDEDF2),
         IconSpec("cobalt", "Cobalt", tag = "Dark", rim = 0xFF7F9CFF, bodyStart = 0xFF1A2340, bodyEnd = 0xFF0B1030, disc = 0xFFFFFFFF),
         IconSpec("sunset", "Sunset", tag = "Vivid", rim = 0xFF7A1E3C, bodyStart = 0xFFFF8A3D, bodyEnd = 0xFFC81E5B, disc = 0xFFFFFFFF),
-        IconSpec("forest", "Forest", tag = "Dark", rim = 0xFF95D5B2, bodyStart = 0xFF1B4332, disc = 0xFFD8F3DC),
-        IconSpec("lavender", "Lavender", tag = "Light", rim = 0xFF7B2FBE, bodyStart = 0xFFE6DEF7, disc = 0xFF7B2FBE),
-        IconSpec("peach", "Peach", tag = "Light", rim = 0xFFCC5A17, bodyStart = 0xFFFFDCC6, disc = 0xFFCC5A17),
+        IconSpec("forest", "Forest", tag = "Dark", rim = 0xFF95D5B2, bodyStart = 0xFF1B4332, bodyEnd = 0xFF0A1F16, disc = 0xFFD8F3DC),
+        IconSpec("lavender", "Lavender", tag = "Light", rim = 0xFF7B2FBE, bodyStart = 0xFFE6DEF7, bodyEnd = 0xFFBFA8E6, disc = 0xFF7B2FBE),
+        IconSpec("peach", "Peach", tag = "Light", rim = 0xFFCC5A17, bodyStart = 0xFFFFDCC6, bodyEnd = 0xFFF0A878, disc = 0xFFCC5A17),
+        // --- New riffs (baked launcher art generated alongside) ---
+        IconSpec("crimson", "Crimson", tag = "Vivid", rim = 0xFFFFD9DE, bodyStart = 0xFFB42346, bodyEnd = 0xFF5F1023, disc = 0xFFFFFFFF),
+        IconSpec("ember", "Ember", tag = "Vivid", rim = 0xFFFFE3C2, bodyStart = 0xFFE8590C, bodyEnd = 0xFF7A2E0E, disc = 0xFFFFFFFF),
+        IconSpec("arctic", "Arctic", tag = "Light", rim = 0xFF0B3B4F, bodyStart = 0xFFE8F4F8, bodyEnd = 0xFFA9CBD9, disc = 0xFF0B3B4F),
+        IconSpec("dusk", "Dusk", tag = "Dark", rim = 0xFFA78BFA, bodyStart = 0xFF2E1A5E, bodyEnd = 0xFF100826, disc = 0xFFEDE9FE),
+        IconSpec("moss", "Moss", tag = "Dark", rim = 0xFFA8D5BA, bodyStart = 0xFF1E4D3B, bodyEnd = 0xFF0A241C, disc = 0xFFC7F0D8),
+        IconSpec("amber", "Amber", tag = "Vivid", rim = 0xFF7A4A00, bodyStart = 0xFFFFB703, bodyEnd = 0xFFFB8500, disc = 0xFF402E00),
         // --- Adaptive ---
         // system-auto: Grape Haze, body dimmed in dark theme.
         IconSpec("system-auto", "System Auto", tag = "Adaptive", rim = 0xFFDFBCFF, bodyStart = 0xFF8534CE, bodyEnd = 0xFFD5B9EE, disc = 0xFFFFFFFF, adaptToTheme = true),
