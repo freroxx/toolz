@@ -559,8 +559,7 @@ fun WelcomeStep(onNext: () -> Unit) {
                     color = MaterialTheme.colorScheme.primaryContainer,
                     tonalElevation = 3.dp
                 ) {
-                    com.frerox.toolz.ui.components.ToolzMark(
-                        presetId = "grape-haze",
+                    com.frerox.toolz.ui.components.CurrentToolzMark(
                         modifier = Modifier.fillMaxSize().clip(SquircleShape)
                     )
                 }
@@ -1589,12 +1588,9 @@ fun LanguageStep(
                         val isSelected = selected == code
                         Surface(
                             onClick = {
+                                // Store only — the locale is applied once onboarding finishes,
+                                // so the activity isn't recreated mid-flow (which reset the pager).
                                 onLanguageChange(code)
-                                try {
-                                    androidx.appcompat.app.AppCompatDelegate.setApplicationLocales(
-                                        androidx.core.os.LocaleListCompat.forLanguageTags(code)
-                                    )
-                                } catch (_: Exception) { }
                             },
                             shape = MediumExpressiveShape,
                             color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,

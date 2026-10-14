@@ -40,7 +40,8 @@ class OnboardingViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val settingsRepository: SettingsRepository,
     private val aiSettingsManager: AiSettingsManager,
-    private val updateRepository: UpdateRepository
+    private val updateRepository: UpdateRepository,
+    private val launcherIconManager: com.frerox.toolz.data.skin.LauncherIconManager
 ) : ViewModel() {
 
     data class OnboardingState(
@@ -182,14 +183,23 @@ class OnboardingViewModel @Inject constructor(
             settingsRepository.setShowToolzPill(s.showToolzPill)
             settingsRepository.setNewsEnabled(s.newsEnabled)
             settingsRepository.setNewsNotificationsEnabled(s.newsNotifications)
-            // Language step
+            // Language step — applied here (not on tap) so switching language
+            // mid-onboarding can't recreate the activity and lose pager progress.
             settingsRepository.setAppLanguage(s.appLanguage)
+            try {
+                androidx.appcompat.app.AppCompatDelegate.setApplicationLocales(
+                    androidx.core.os.LocaleListCompat.forLanguageTags(s.appLanguage)
+                )
+            } catch (_: Exception) { }
             // App Skin step
             settingsRepository.setAppIconPresetId(s.iconPresetId)
             settingsRepository.setAppIconShape(s.iconShape)
             settingsRepository.setAppIconAdaptTheme(s.iconAdaptTheme)
             settingsRepository.setAppIconFollowDynamic(s.iconFollowDynamic)
             settingsRepository.setActiveSkinId(s.activeSkinId)
+            // The launcher tile follows the picked icon — previously onboarding
+            // saved the preset but never switched the alias, so the icon "did nothing".
+            try { launcherIconManager.apply(s.iconPresetId) } catch (_: Exception) { }
             
             if (s.groqApiKey.isNotBlank()) {
                 aiSettingsManager.setApiKey(s.groqApiKey, "Groq")

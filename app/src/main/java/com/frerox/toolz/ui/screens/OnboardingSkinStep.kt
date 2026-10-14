@@ -89,7 +89,7 @@ fun StyleStep(
                         contentPadding = PaddingValues(horizontal = 4.dp),
                         modifier = Modifier.fillMaxWidth().horizontalFadingEdges(left = 10.dp, right = 10.dp),
                     ) {
-                        items(IconCatalog.BUILT_IN.take(12)) { spec ->
+                        items(IconCatalog.BUILT_IN) { spec ->
                             val sel = spec.id == state.iconPresetId
                             Surface(
                                 onClick = { onIconPresetChange(spec.id) },
@@ -114,8 +114,8 @@ fun StyleStep(
                         }
                     }
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("HEXAGON", "CIRCLE", "PILL").forEach { s ->
-                            val sel = state.iconShape == s
+                        listOf("OCTAGON", "CIRCLE").forEach { s ->
+                            val sel = com.frerox.toolz.data.skin.IconShape.parse(state.iconShape) == com.frerox.toolz.data.skin.IconShape.parse(s)
                             Surface(
                                 onClick = { onIconShapeChange(s) },
                                 shape = RoundedCornerShape(12.dp),
