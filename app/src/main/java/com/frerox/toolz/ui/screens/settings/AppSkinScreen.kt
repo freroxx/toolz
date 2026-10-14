@@ -31,18 +31,26 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.ColorLens
+import androidx.compose.material.icons.rounded.Crop
 import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.RestartAlt
+import androidx.compose.material.icons.rounded.Style
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -56,9 +64,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.frerox.toolz.R
 import com.frerox.toolz.data.skin.IconCatalog
 import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
@@ -95,7 +107,10 @@ fun AppSkinScreen(
     val fgOv by viewModel.appIconFgOverride.collectAsState(initial = null)
     val strokeOv by viewModel.appIconStrokeOverride.collectAsState(initial = null)
     val iconGradient by viewModel.appIconGradientEnabled.collectAsState(initial = true)
+    val customPrimaryInt by viewModel.customPrimaryColor.collectAsState(initial = null)
+    val customSecondaryInt by viewModel.customSecondaryColor.collectAsState(initial = null)
     val activeSkinId by viewModel.activeSkinId.collectAsState(initial = null)
+    val recentIds by viewModel.recentSkinIds.collectAsState(initial = emptyList())
     val skins by viewModel.skins.collectAsState(initial = emptyList())
     val syncing by viewModel.skinsSyncing.collectAsState(initial = false)
     val userName by viewModel.userName.collectAsState(initial = "")
@@ -104,6 +119,8 @@ fun AppSkinScreen(
 
     var showShare by remember { mutableStateOf(false) }
     var shareResult by remember { mutableStateOf<Result<String>?>(null) }
+    var showAdvancedThemeDialog by remember { mutableStateOf(false) }
+    var showGraySuggestion by remember { mutableStateOf(false) }
 
     val isDark = when (themeMode) {
         "DARK" -> true
@@ -112,8 +129,58 @@ fun AppSkinScreen(
     }
     val scheme = MaterialTheme.colorScheme
     val current = IconCatalog.find(presetId)
+    // Recently used skins first (max 3); fresh installs fall back to the bundled looks.
+    val recentSkins = remember(skins, recentIds) {
+        val byId = skins.associateBy { it.id }
+        recentIds.mapNotNull { byId[it] }.take(3).ifEmpty { skins.take(3) }
+    }
 
     LaunchedEffect(Unit) { viewModel.refreshSkins(false) }
+
+    if (showGraySuggestion) {
+        AlertDialog(
+            onDismissRequest = { showGraySuggestion = false },
+            title = { Text(stringResource(R.string.st_SettingsScreen_a1b2), fontWeight = FontWeight.Black) },
+            text = { Text(stringResource(R.string.st_SettingsScreen_c3d4)) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        vibrationManager?.vibrateSuccess()
+                        viewModel.setCustomPrimaryColor(0xFF1A1C1E.toInt())
+                        showGraySuggestion = false
+                    },
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    @Suppress("DEPRECATION")
+                    Text(stringResource(R.string.st_SettingsScreen_e5f6), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    vibrationManager?.vibrateClick()
+                    showGraySuggestion = false
+                }) {
+                    @Suppress("DEPRECATION")
+                    Text(stringResource(R.string.st_SettingsScreen_g7h8), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
+                }
+            },
+            shape = RoundedCornerShape(28.dp),
+            containerColor = MaterialTheme.colorScheme.surface
+        )
+    }
+
+    if (showAdvancedThemeDialog) {
+        AdvancedThemeDialog(
+            currentPrimary = customPrimaryInt ?: Color(0xFF2962FF).toArgb(),
+            currentSecondary = customSecondaryInt ?: Color(0xFF00BFA5).toArgb(),
+            onDismiss = { showAdvancedThemeDialog = false },
+            onSave = { primary, secondary ->
+                viewModel.setCustomPrimaryColor(primary)
+                viewModel.setCustomSecondaryColor(secondary)
+                showAdvancedThemeDialog = false
+            }
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -174,12 +241,13 @@ fun AppSkinScreen(
                             bgOverride = bgOv,
                             fgOverride = fgOv,
                             strokeOverride = strokeOv,
+                            iconGradient = iconGradient,
                             modifier = Modifier.size(112.dp),
                         )
                         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(current.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
                             Text(
-                                "${shape.lowercase()} · ${current.tag.lowercase()} · ${activeSkinId ?: "custom look"}",
+                                "${(com.frerox.toolz.data.skin.IconShape.parse(shape)?.name ?: shape).lowercase()} · ${current.tag.lowercase()} · ${activeSkinId ?: "custom look"}",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -199,11 +267,13 @@ fun AppSkinScreen(
                     }
                 }
 
+                AppSkinSectionHeader("App icon")
+
                 // Icon presets strip
                 SettingsItem(
                     title = "Icon style",
                     subtitle = "${IconCatalog.BUILT_IN.size} presets — tap to apply instantly",
-                    icon = Icons.Rounded.Palette,
+                    icon = Icons.Rounded.GridView,
                 ) {
                     LazyRow(
                         modifier = Modifier.fillMaxWidth().padding(top = 12.dp).horizontalFadingEdges(left = 12.dp, right = 12.dp),
@@ -235,6 +305,7 @@ fun AppSkinScreen(
                                             shape = shape,
                                             adaptToTheme = adaptTheme,
                                             followDynamic = followDynamic,
+                                            iconGradient = iconGradient,
                                             modifier = Modifier.size(50.dp),
                                         )
                                     }
@@ -251,31 +322,15 @@ fun AppSkinScreen(
                     }
                 }
 
-                // Appearance behavior
-                SettingsToggleItem(
-                    title = "Adapt to theme",
-                    subtitle = "Icon shades shift for dark / light mode",
-                    icon = Icons.Rounded.Palette,
-                    checked = adaptTheme,
-                    onCheckedChange = { viewModel.setAppIconAdaptTheme(it) },
-                )
-                SettingsToggleItem(
-                    title = "Follow dynamic colors",
-                    subtitle = if (dynamicColor) "Accents follow your wallpaper (Material You)"
-                    else "Needs Dynamic color (Visuals & theme) — otherwise the icon uses theme + your primary / secondary",
-                    icon = Icons.Rounded.Palette,
-                    checked = followDynamic,
-                    onCheckedChange = { viewModel.setAppIconFollowDynamic(it) },
-                    enabled = dynamicColor,
-                )
+                // Icon container
                 SettingsItem(
                     title = "Icon shape",
-                    subtitle = "Container for the mark",
-                    icon = Icons.Rounded.GridView,
+                    subtitle = "Octagon is the classic mark · Circle is softer",
+                    icon = Icons.Rounded.Crop,
                 ) {
                     Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("HEXAGON", "CIRCLE", "PILL").forEach { s ->
-                            val sel = shape == s
+                        listOf("OCTAGON", "CIRCLE").forEach { s ->
+                            val sel = com.frerox.toolz.data.skin.IconShape.parse(shape) == com.frerox.toolz.data.skin.IconShape.parse(s)
                             Surface(
                                 onClick = {
                                     vibrationManager?.vibrateClick()
@@ -292,30 +347,157 @@ fun AppSkinScreen(
                         }
                     }
                 }
-                SettingsToggleItem(
-                    title = "Icon gradient",
-                    subtitle = "Depth shading on supporting presets",
-                    icon = Icons.Rounded.Palette,
-                    checked = iconGradient,
-                    onCheckedChange = { viewModel.setAppIconGradientEnabled(it) },
-                )
-                if (bgOv != null || fgOv != null || strokeOv != null) {
-                    SettingsItem(
-                        title = "Custom icon colors",
-                        subtitle = "Tap to return to the preset",
-                        icon = Icons.Rounded.RestartAlt,
-                        onClick = {
-                            vibrationManager?.vibrateClick()
-                            viewModel.clearIconOverrides()
-                        },
-                    )
+
+                AppSkinSectionHeader("Icon colors")
+
+                // Merged color behavior: dynamic palette + custom colors + adapt + follow + gradient.
+                // Adapt / follow only switch on for icons that support them; the rest render as designed.
+                SettingsItem(
+                    title = "Icon colors",
+                    subtitle = "What repaints “${current.name}”",
+                    icon = Icons.Rounded.ColorLens,
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth().padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        SkinMiniSwitch(
+                            title = "Dynamic colors",
+                            desc = if (dynamicColor) "Accents follow your wallpaper (Material You)" else "Match your wallpaper palette when available",
+                            checked = dynamicColor,
+                            onCheckedChange = {
+                                vibrationManager?.vibrateClick()
+                                viewModel.setDynamicColor(it)
+                            },
+                        )
+                        if (!dynamicColor) {
+                            Column(verticalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.padding(vertical = 10.dp)) {
+                                Column {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                                        @Suppress("DEPRECATION")
+                                        Text(stringResource(R.string.st_SettingsScreen_y1z2), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.5.sp)
+                                        IconButton(onClick = {
+                                            vibrationManager?.vibrateClick()
+                                            viewModel.setCustomPrimaryColor(null)
+                                        }, modifier = Modifier.size(32.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))) {
+                                            Icon(Icons.Rounded.RestartAlt, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                                        }
+                                    }
+                                    Spacer(Modifier.height(8.dp))
+                                    ColorPickerRow(
+                                        selectedColor = customPrimaryInt ?: Color(0xFF2962FF).toArgb(),
+                                        onColorSelected = {
+                                            vibrationManager?.vibrateClick()
+                                            if (isDark && Color(it).appSkinLuminance() < 0.2f) {
+                                                showGraySuggestion = true
+                                            }
+                                            viewModel.setCustomPrimaryColor(it)
+                                        }
+                                    )
+                                }
+                                Column {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                                        @Suppress("DEPRECATION")
+                                        Text(stringResource(R.string.st_SettingsScreen_a3b5), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.secondary, letterSpacing = 1.5.sp)
+                                        IconButton(onClick = {
+                                            vibrationManager?.vibrateClick()
+                                            viewModel.setCustomSecondaryColor(null)
+                                        }, modifier = Modifier.size(32.dp).clip(CircleShape).background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f))) {
+                                            Icon(Icons.Rounded.RestartAlt, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(16.dp))
+                                        }
+                                    }
+                                    Spacer(Modifier.height(8.dp))
+                                    ColorPickerRow(
+                                        selectedColor = customSecondaryInt ?: Color(0xFF00BFA5).toArgb(),
+                                        onColorSelected = {
+                                            vibrationManager?.vibrateClick()
+                                            viewModel.setCustomSecondaryColor(it)
+                                        }
+                                    )
+                                }
+                                androidx.compose.material3.Button(
+                                    onClick = {
+                                        vibrationManager?.vibrateClick()
+                                        showAdvancedThemeDialog = true
+                                    },
+                                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                                        contentColor = MaterialTheme.colorScheme.primary
+                                    )
+                                ) {
+                                    @Suppress("DEPRECATION")
+                                    Text(stringResource(R.string.st_SettingsScreen_c5d7), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                        }
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
+                        if (current.adaptToTheme) {
+                            SkinMiniSwitch(
+                                title = "Adapt to theme",
+                                desc = "“${current.name}” dims its body in dark mode",
+                                checked = adaptTheme,
+                                onCheckedChange = {
+                                    vibrationManager?.vibrateClick()
+                                    viewModel.setAppIconAdaptTheme(it)
+                                },
+                            )
+                        } else {
+                            SkinMiniNote(
+                                title = "Adapt to theme",
+                                desc = "“${current.name}” is hand-tuned and renders exactly as designed — try System Auto for a theme-aware icon",
+                            )
+                        }
+                        if (current.followsScheme) {
+                            SkinMiniSwitch(
+                                title = "Follow dynamic colors",
+                                desc = if (dynamicColor) "Icon matches your wallpaper" else "Turn on Dynamic colors above first",
+                                checked = followDynamic,
+                                enabled = dynamicColor,
+                                onCheckedChange = {
+                                    vibrationManager?.vibrateClick()
+                                    viewModel.setAppIconFollowDynamic(it)
+                                },
+                            )
+                        } else {
+                            SkinMiniNote(
+                                title = "Follow dynamic colors",
+                                desc = "“${current.name}” keeps its own palette — try Dynamic Glow for a wallpaper-matched icon",
+                            )
+                        }
+                        SkinMiniSwitch(
+                            title = "Icon gradient",
+                            desc = "Depth shading on the body — in-app; the home-screen tile keeps its baked artwork",
+                            checked = iconGradient,
+                            onCheckedChange = {
+                                vibrationManager?.vibrateClick()
+                                viewModel.setAppIconGradientEnabled(it)
+                            },
+                        )
+                        if (bgOv != null || fgOv != null || strokeOv != null) {
+                            SkinMiniAction(
+                                title = "Custom icon colors",
+                                desc = "Overrides active — tap to return to the preset",
+                                onClick = {
+                                    vibrationManager?.vibrateClick()
+                                    viewModel.clearIconOverrides()
+                                },
+                            )
+                        }
+                    }
                 }
 
-                // Skins
+                AppSkinSectionHeader("Theme & display")
+
+                // Theme & colors (migrated from Settings Visuals & theme)
+                AppSkinThemeSection(viewModel = viewModel)
+
+                AppSkinSectionHeader("Community skins")
+
+                // Skins — the 3 most recently used looks (bundled presets until you apply some).
                 SettingsItem(
                     title = "Toolz Skins",
-                    subtitle = "${skins.size} looks ${if (syncing) "· syncing…" else ""}",
-                    icon = Icons.Rounded.Palette,
+                    subtitle = if (recentIds.isEmpty()) "Starter looks · ${skins.size} in catalog${if (syncing) " · syncing…" else ""}"
+                    else "Recently used · ${skins.size} in catalog${if (syncing) " · syncing…" else ""}",
+                    icon = Icons.Rounded.Style,
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 12.dp)) {
                         // My shared looks with review status.
@@ -347,7 +529,7 @@ fun AppSkinScreen(
                                 }
                             }
                         }
-                        skins.take(4).forEach { skin ->
+                        recentSkins.forEach { skin ->
                             SkinRowCard(
                                 skin = skin,
                                 selected = skin.id == activeSkinId,
@@ -355,6 +537,7 @@ fun AppSkinScreen(
                                 dynamicColor = dynamicColor,
                                 schemePrimary = scheme.primary,
                                 schemeSecondary = scheme.secondary,
+                                iconGradient = iconGradient,
                                 onApply = {
                                     vibrationManager?.vibrateClick()
                                     viewModel.applySkin(skin)
@@ -487,4 +670,76 @@ fun AppSkinScreen(
             }
         }
     }
+}
+
+/** Small-caps section label used to group the App Skin screen. */
+@Composable
+private fun AppSkinSectionHeader(text: String) {
+    @Suppress("DEPRECATION")
+    Text(
+        text.uppercase(),
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.Black,
+        color = MaterialTheme.colorScheme.primary,
+        letterSpacing = 1.5.sp,
+        modifier = Modifier.padding(top = 4.dp),
+    )
+}
+
+/** Compact switch row for inside the merged Icon colors card. */
+@Composable
+private fun SkinMiniSwitch(
+    title: String,
+    desc: String,
+    checked: Boolean,
+    enabled: Boolean = true,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+            Text(desc, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f), fontWeight = FontWeight.Medium)
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
+    }
+}
+
+/** Read-only explainer for toggles that don't apply to the current icon. */
+@Composable
+private fun SkinMiniNote(title: String, desc: String) {
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+        Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+        Text(desc, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f), fontWeight = FontWeight.Medium)
+    }
+}
+
+/** Compact action row for inside the merged Icon colors card. */
+@Composable
+private fun SkinMiniAction(title: String, desc: String, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Text(desc, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
+            }
+            Icon(Icons.Rounded.RestartAlt, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+        }
+    }
+}
+
+private fun Color.appSkinLuminance(): Float {
+    return 0.299f * red + 0.587f * green + 0.114f * blue
 }

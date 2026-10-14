@@ -82,6 +82,7 @@ fun IconCatalogScreen(
     val shape by viewModel.appIconShape.collectAsState(initial = "HEXAGON")
     val adaptTheme by viewModel.appIconAdaptTheme.collectAsState(initial = true)
     val followDynamic by viewModel.appIconFollowDynamic.collectAsState(initial = true)
+    val iconGradient by viewModel.appIconGradientEnabled.collectAsState(initial = true)
 
     var query by remember { mutableStateOf("") }
     var tag by remember { mutableStateOf("All") }
@@ -129,6 +130,11 @@ fun IconCatalogScreen(
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             // Live preview of current selection
+            Text(
+                "Tapping a preset switches the home-screen icon too — launchers can take a few seconds to refresh it.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            )
             Surface(
                 shape = RoundedCornerShape(28.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.18f),
@@ -143,13 +149,14 @@ fun IconCatalogScreen(
                         shape = shape,
                         adaptToTheme = adaptTheme,
                         followDynamic = followDynamic,
+                        iconGradient = iconGradient,
                         modifier = Modifier.size(76.dp),
                     )
                     Spacer(Modifier.width(14.dp))
                     Column {
                         Text(current.name, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "${shape.lowercase()} · ${current.tag.lowercase()}",
+                            "${(com.frerox.toolz.data.skin.IconShape.parse(shape)?.name ?: shape).lowercase()} · ${current.tag.lowercase()}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -240,6 +247,7 @@ fun IconCatalogScreen(
                                     shape = shape,
                                     adaptToTheme = adaptTheme,
                                     followDynamic = followDynamic,
+                                    iconGradient = iconGradient,
                                     modifier = Modifier.size(78.dp),
                                 )
                             }

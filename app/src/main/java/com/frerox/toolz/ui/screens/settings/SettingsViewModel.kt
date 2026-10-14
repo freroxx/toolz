@@ -45,6 +45,7 @@ class SettingsViewModel @Inject constructor(
     val vibrationManager: VibrationManager,
     private val widgetUpdateManager: com.frerox.toolz.widget.WidgetUpdateManager,
     private val skinRepository: com.frerox.toolz.data.skin.SkinRepository,
+    private val launcherIconManager: com.frerox.toolz.data.skin.LauncherIconManager,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -316,6 +317,7 @@ class SettingsViewModel @Inject constructor(
     val appIconStrokeOverride = repository.appIconStrokeOverride
     val appIconGradientEnabled = repository.appIconGradientEnabled
     val activeSkinId = repository.activeSkinId
+    val recentSkinIds = repository.recentSkinIds
     val skins = skinRepository.skins
     val skinsSyncing = skinRepository.syncing
     val mySubmissions = skinRepository.mySubmissions
@@ -324,6 +326,7 @@ class SettingsViewModel @Inject constructor(
     fun setAppIconPresetId(id: String) = viewModelScope.launch {
         repository.setAppIconPresetId(id)
         repository.setActiveSkinId(null)
+        try { launcherIconManager.apply(id) } catch (_: Exception) { }
     }
     fun setAppIconShape(shape: String) = viewModelScope.launch {
         repository.setAppIconShape(shape)
@@ -348,7 +351,10 @@ class SettingsViewModel @Inject constructor(
         } catch (_: Exception) { }
     }
     fun applySkin(skin: com.frerox.toolz.data.skin.SkinDto) = viewModelScope.launch {
-        try { skinRepository.apply(skin) } catch (_: Exception) { }
+        try {
+            skinRepository.apply(skin)
+            launcherIconManager.apply(skin.iconPresetId)
+        } catch (_: Exception) { }
     }
     fun submitCurrentAsSkin(name: String, author: String, onResult: (Result<String>) -> Unit) = viewModelScope.launch {
         try {

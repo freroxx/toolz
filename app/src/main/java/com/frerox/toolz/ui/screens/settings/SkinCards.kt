@@ -65,6 +65,7 @@ fun SkinRowCard(
     schemeSecondary: Color,
     reviewStatus: String? = null,
     showStatus: Boolean = false,
+    iconGradient: Boolean = true,
     onApply: () -> Unit,
 ) {
     Surface(
@@ -87,6 +88,7 @@ fun SkinRowCard(
                     shape = skin.iconShape,
                     adaptToTheme = skin.iconAdaptTheme,
                     followDynamic = skin.iconFollowDynamic,
+                    iconGradient = iconGradient,
                     modifier = Modifier.size(54.dp),
                 )
                 Column(modifier = Modifier.weight(1f)) {
