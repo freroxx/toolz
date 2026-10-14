@@ -87,11 +87,6 @@ fun SettingsScreen(
     val context = LocalContext.current
 
     val stepGoal by viewModel.stepGoal.collectAsState(initial = 10000)
-    val themeMode by viewModel.themeMode.collectAsState(initial = "SYSTEM")
-    val dynamicColor by viewModel.dynamicColor.collectAsState(initial = true)
-    val customPrimaryInt by viewModel.customPrimaryColor.collectAsState(initial = null)
-    val customSecondaryInt by viewModel.customSecondaryColor.collectAsState(initial = null)
-    val backgroundGradientEnabled by viewModel.backgroundGradientEnabled.collectAsState(initial = true)
     val pdfAiToolsEnabled by viewModel.pdfAiToolsEnabled.collectAsState(initial = true)
     val notepadAiToolsEnabled by viewModel.notepadAiToolsEnabled.collectAsState(initial = true)
 
@@ -135,7 +130,6 @@ fun SettingsScreen(
 
     val hapticFeedback by viewModel.hapticFeedback.collectAsState(initial = true)
     val hapticIntensity by viewModel.hapticIntensity.collectAsState(initial = 0.5f)
-    val showTopAppBarDescriptions by viewModel.showTopAppBarDescriptions.collectAsState(initial = false)
     val stepCounterEnabled by viewModel.stepCounterEnabled.collectAsState(initial = true)
     val showToolzPill by viewModel.showToolzPill.collectAsState(initial = true)
     val fillThePillEnabled by viewModel.fillThePillEnabled.collectAsState(initial = true)
@@ -175,45 +169,6 @@ fun SettingsScreen(
         }
     }
 
-    var showGraySuggestion by remember { mutableStateOf(false) }
-    val isSystemInDarkTheme = isSystemInDarkTheme()
-    val isDarkTheme = when (themeMode) {
-        "DARK" -> true
-        "LIGHT" -> false
-        else -> isSystemInDarkTheme
-    }
-
-    if (showGraySuggestion) {
-        AlertDialog(
-            onDismissRequest = { showGraySuggestion = false },
-            title = { Text(stringResource(R.string.st_SettingsScreen_a1b2), fontWeight = FontWeight.Black) },
-            text = { Text(stringResource(R.string.st_SettingsScreen_c3d4)) },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        vibrationManager?.vibrateSuccess()
-                        viewModel.setCustomPrimaryColor(0xFF1A1C1E.toInt())
-                        showGraySuggestion = false
-                    },
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    @Suppress("DEPRECATION")
-                    Text(stringResource(R.string.st_SettingsScreen_e5f6), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    vibrationManager?.vibrateClick()
-                    showGraySuggestion = false
-                }) {
-                    @Suppress("DEPRECATION")
-                    Text(stringResource(R.string.st_SettingsScreen_g7h8), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
-                }
-            },
-            shape = RoundedCornerShape(32.dp),
-            containerColor = MaterialTheme.colorScheme.surface
-        )
-    }
 
     val autoUpdateEnabled by viewModel.autoUpdateEnabled.collectAsState(initial = false)
     val aiSearchEnabled by viewModel.aiSearchEnabled.collectAsState(initial = false)
@@ -229,12 +184,10 @@ fun SettingsScreen(
     val musicKeepScreenOnLyrics by viewModel.musicKeepScreenOnLyrics.collectAsState(initial = true)
     val karaokeEnabled by viewModel.karaokeEnabled.collectAsState(initial = true)
 
-    val performanceMode by viewModel.performanceMode.collectAsState(initial = false)
 
     val converterCustomPath by viewModel.converterCustomOutputPath.collectAsState(initial = null)
 
     var showResetDialog by remember { mutableStateOf(false) }
-    var showAdvancedThemeDialog by remember { mutableStateOf(false) }
     val searchQuery by viewModel.searchQuery.collectAsState(initial = "")
 
     var expandedSection by remember { mutableStateOf<String?>(null) }
@@ -306,18 +259,6 @@ fun SettingsScreen(
         )
     }
 
-    if (showAdvancedThemeDialog) {
-        AdvancedThemeDialog(
-            currentPrimary = customPrimaryInt ?: Color(0xFF2962FF).toArgb(),
-            currentSecondary = customSecondaryInt ?: Color(0xFF00BFA5).toArgb(),
-            onDismiss = { showAdvancedThemeDialog = false },
-            onSave = { primary, secondary ->
-                viewModel.setCustomPrimaryColor(primary)
-                viewModel.setCustomSecondaryColor(secondary)
-                showAdvancedThemeDialog = false
-            }
-        )
-    }
 
     Scaffold(
         topBar = {
@@ -406,173 +347,17 @@ fun SettingsScreen(
                         }
                     }
 
-                    // 2. Section: VISUALS & THEME
+                    // 2. Visuals & theme now lives in App Skin below — one home for every visual.
+
+                    // 2. Section: APP SKIN (all visuals live here now)
                     StaggeredEntrance(index = 1) {
                         SettingsExpandableSection(
-                            title = stringResource(R.string.st_SettingsScreen_i5j6),
-                            icon = Icons.Rounded.Palette,
-                            isExpanded = expandedSection == "VISUALS" || searchQuery.isNotEmpty(),
-                            onExpandToggle = { expandedSection = if (expandedSection == "VISUALS") null else "VISUALS" }
-                        ) {
-                            if (matches(searchQuery, "performance", "lag", "animations", "blur", "speed", "optimization")) {
-                                SettingsToggleItem(
-                                    title = stringResource(R.string.st_SettingsScreen_k7l8),
-                                    subtitle = stringResource(R.string.st_SettingsScreen_m9n0),
-                                    icon = Icons.Rounded.Speed,
-                                    checked = performanceMode,
-                                    onCheckedChange = { viewModel.setPerformanceMode(it) }
-                                )
-                            }
-
-                            if (matches(searchQuery, "dark", "light", "mode", "appearance", "theme")) {
-                                SettingsItem(
-                                    title = stringResource(R.string.st_SettingsScreen_o1p2),
-                                    subtitle = "Current: ${themeMode.lowercase()}",
-                                    icon = Icons.Rounded.DarkMode
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        listOf("SYSTEM", "LIGHT", "DARK").forEach { mode ->
-                                            val isSelected = themeMode == mode
-                                            Surface(
-                                                onClick = {
-                                                    vibrationManager?.vibrateClick()
-                                                    viewModel.setThemeMode(mode)
-                                                },
-                                                modifier = Modifier.weight(1f).height(48.dp).bouncyClick {},
-                                                shape = RoundedCornerShape(16.dp),
-                                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                                                border = if (!isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null
-                                            ) {
-                                                Box(contentAlignment = Alignment.Center) {
-                                                    @Suppress("DEPRECATION")
-                                                    Text(mode, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            if (matches(searchQuery, "dynamic", "color", "material", "wallpaper", "advanced", "palette", "accent")) {
-                                SettingsToggleItem(
-                                    title = stringResource(R.string.st_SettingsScreen_q3r4),
-                                    subtitle = stringResource(R.string.st_SettingsScreen_s5t6),
-                                    icon = Icons.Rounded.ColorLens,
-                                    checked = dynamicColor,
-                                    onCheckedChange = { viewModel.setDynamicColor(it) }
-                                )
-
-                                if (!dynamicColor) {
-                                    SettingsItem(
-                                        title = stringResource(R.string.st_SettingsScreen_u7v8),
-                                        subtitle = stringResource(R.string.st_SettingsScreen_w9x0),
-                                        icon = Icons.Rounded.FormatColorFill
-                                    ) {
-                                        Column(verticalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.padding(top = 12.dp)) {
-                                            Column {
-                                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                                                    @Suppress("DEPRECATION")
-                                                    Text(stringResource(R.string.st_SettingsScreen_y1z2), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.5.sp)
-                                                    IconButton(onClick = {
-                                                        vibrationManager?.vibrateClick()
-                                                        viewModel.setCustomPrimaryColor(null)
-                                                    }, modifier = Modifier.size(32.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))) {
-                                                        Icon(Icons.Rounded.RestartAlt, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
-                                                    }
-                                                }
-                                                Spacer(Modifier.height(8.dp))
-                                                ColorPickerRow(
-                                                    selectedColor = customPrimaryInt ?: Color(0xFF2962FF).toArgb(),
-                                                    onColorSelected = {
-                                                        vibrationManager?.vibrateClick()
-                                                        val color = Color(it)
-                                                        if (isDarkTheme && color.luminance() < 0.2f) {
-                                                            showGraySuggestion = true
-                                                        }
-                                                        viewModel.setCustomPrimaryColor(it)
-                                                    }
-                                                )
-                                            }
-
-                                            Column {
-                                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                                                    @Suppress("DEPRECATION")
-                                                    Text(stringResource(R.string.st_SettingsScreen_a3b5), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.secondary, letterSpacing = 1.5.sp)
-                                                    IconButton(onClick = {
-                                                        vibrationManager?.vibrateClick()
-                                                        viewModel.setCustomSecondaryColor(null)
-                                                    }, modifier = Modifier.size(32.dp).clip(CircleShape).background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f))) {
-                                                        Icon(Icons.Rounded.RestartAlt, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(16.dp))
-                                                    }
-                                                }
-                                                Spacer(Modifier.height(8.dp))
-                                                ColorPickerRow(
-                                                    selectedColor = customSecondaryInt ?: Color(0xFF00BFA5).toArgb(),
-                                                    onColorSelected = {
-                                                        vibrationManager?.vibrateClick()
-                                                        viewModel.setCustomSecondaryColor(it)
-                                                    }
-                                                )
-                                            }
-
-                                            Button(
-                                                onClick = {
-                                                    vibrationManager?.vibrateClick()
-                                                    showAdvancedThemeDialog = true
-                                                },
-                                                modifier = Modifier.fillMaxWidth().height(48.dp),
-                                                shape = RoundedCornerShape(16.dp),
-                                                colors = ButtonDefaults.buttonColors(
-                                                    containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                                                    contentColor = MaterialTheme.colorScheme.primary
-                                                )
-                                            ) {
-                                                Icon(Icons.Rounded.AutoFixHigh, null, modifier = Modifier.size(18.dp))
-                                                Spacer(Modifier.width(8.dp))
-                                                @Suppress("DEPRECATION")
-                                                Text(stringResource(R.string.st_SettingsScreen_c5d7), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            if (matches(searchQuery, "gradient", "background", "effect", "visual")) {
-                                SettingsToggleItem(
-                                    title = stringResource(R.string.st_SettingsScreen_e7f9),
-                                    subtitle = stringResource(R.string.st_SettingsScreen_g9h1),
-                                    icon = Icons.Rounded.Gradient,
-                                    checked = backgroundGradientEnabled,
-                                    onCheckedChange = { viewModel.setBackgroundGradientEnabled(it) }
-                                )
-                            }
-
-                            if (matches(searchQuery, "top bar", "app bar", "description", "subtitle", "expressive", "hud", "appearance")) {
-                                SettingsToggleItem(
-                                    title = stringResource(R.string.st_SettingsScreen_top_bar_desc_title),
-                                    subtitle = stringResource(R.string.st_SettingsScreen_top_bar_desc_subtitle),
-                                    icon = Icons.Rounded.Subtitles,
-                                    checked = showTopAppBarDescriptions,
-                                    onCheckedChange = { viewModel.setShowTopAppBarDescriptions(it) }
-                                )
-                            }
-
-                            // Dashboard layout lives under Home & HUD now — see INTERACTION section.
-                        }
-                    }
-
-                    // 2b. Section: APP SKIN (dedicated screens)
-                    StaggeredEntrance(index = 1) {
-                        SettingsExpandableSection(
-                            title = "APP SKIN",
+                            title = "App Skin",
                             icon = Icons.Rounded.Palette,
                             isExpanded = expandedSection == "APPSKIN" || searchQuery.isNotEmpty(),
                             onExpandToggle = { expandedSection = if (expandedSection == "APPSKIN") null else "APPSKIN" }
                         ) {
-                            if (matches(searchQuery, "skin", "app skin", "icon", "icons", "catalog", "appearance", "theme pack", "preset", "look")) {
+                            if (matches(searchQuery, "skin", "app skin", "icon", "icons", "catalog", "appearance", "theme pack", "preset", "look", "visual", "visuals", "theme", "dark", "light", "mode", "dynamic", "color", "material", "wallpaper", "palette", "accent", "gradient", "background", "performance", "animations", "blur", "top bar", "description")) {
                                 SettingsItem(
                                     title = "App Skin & icons",
                                     subtitle = "Presets, Icon Catalog and community skins",
@@ -1946,8 +1731,7 @@ fun AboutSection(onCheckUpdate: () -> Unit, onNewsClick: () -> Unit = {}) {
                 shadowElevation = 12.dp
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    com.frerox.toolz.ui.components.ToolzMark(
-                        presetId = "grape-haze",
+                    com.frerox.toolz.ui.components.CurrentToolzMark(
                         modifier = Modifier.size(72.dp).clip(RoundedCornerShape(20.dp)),
                     )
                 }

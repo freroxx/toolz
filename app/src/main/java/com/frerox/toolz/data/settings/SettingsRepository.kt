@@ -39,7 +39,7 @@ class SettingsRepository @Inject constructor(
     private val BACKGROUND_GRADIENT_ENABLED = booleanPreferencesKey("background_gradient_enabled")
     // App Skin — icon + skin appearance (additive, never rename existing theme keys)
     private val APP_ICON_PRESET_ID = stringPreferencesKey("app_icon_preset_id")
-    private val APP_ICON_SHAPE = stringPreferencesKey("app_icon_shape") // HEXAGON | CIRCLE | PILL
+    private val APP_ICON_SHAPE = stringPreferencesKey("app_icon_shape") // OCTAGON | CIRCLE (legacy HEXAGON/PILL map in)
     private val APP_ICON_ADAPT_THEME = booleanPreferencesKey("app_icon_adapt_theme")
     private val APP_ICON_FOLLOW_DYNAMIC = booleanPreferencesKey("app_icon_follow_dynamic")
     private val APP_ICON_BG_OVERRIDE = intPreferencesKey("app_icon_bg_override")
@@ -47,6 +47,7 @@ class SettingsRepository @Inject constructor(
     private val APP_ICON_STROKE_OVERRIDE = intPreferencesKey("app_icon_stroke_override")
     private val APP_ICON_GRADIENT_ENABLED = booleanPreferencesKey("app_icon_gradient_enabled")
     private val ACTIVE_SKIN_ID = stringPreferencesKey("active_skin_id")
+    private val RECENT_SKIN_IDS = stringPreferencesKey("recent_skin_ids") // CSV, most-recent-first, max 3
     private val SKINS_CACHE_JSON = stringPreferencesKey("skins_cache_json")
     private val SKINS_LAST_SYNC = longPreferencesKey("skins_last_sync")
     private val SKINS_FEED_VERSION = intPreferencesKey("skins_feed_version")
@@ -1197,6 +1198,17 @@ class SettingsRepository @Inject constructor(
     suspend fun setAppIconStrokeOverride(color: Int?) { dataStore.edit { if (color == null) it.remove(APP_ICON_STROKE_OVERRIDE) else it[APP_ICON_STROKE_OVERRIDE] = color } }
     suspend fun setAppIconGradientEnabled(enabled: Boolean) { dataStore.edit { it[APP_ICON_GRADIENT_ENABLED] = enabled } }
     suspend fun setActiveSkinId(id: String?) { dataStore.edit { if (id == null) it.remove(ACTIVE_SKIN_ID) else it[ACTIVE_SKIN_ID] = id.take(64) } }
+    val recentSkinIds: Flow<List<String>> = dataStore.data.map {
+        (it[RECENT_SKIN_IDS] ?: "").split(",").map { s -> s.trim() }.filter { s -> s.isNotEmpty() }.take(3)
+    }
+    suspend fun pushRecentSkinId(id: String) {
+        val clean = id.trim().take(64)
+        if (clean.isEmpty()) return
+        dataStore.edit { p ->
+            val cur = ((p[RECENT_SKIN_IDS] ?: "").split(",").map { s -> s.trim() }.filter { s -> s.isNotEmpty() } - clean)
+            p[RECENT_SKIN_IDS] = (listOf(clean) + cur).take(3).joinToString(",")
+        }
+    }
     suspend fun setSkinsCacheJson(json: String) { dataStore.edit { it[SKINS_CACHE_JSON] = json.take(200_000) } }
     suspend fun setSkinsLastSync(ts: Long) { dataStore.edit { it[SKINS_LAST_SYNC] = ts } }
     suspend fun setSkinsFeedVersion(v: Int) { dataStore.edit { it[SKINS_FEED_VERSION] = v } }
@@ -1223,7 +1235,8 @@ class SettingsRepository @Inject constructor(
             p[APP_ICON_PRESET_ID] = iconPresetId.take(64)
             p[APP_ICON_ADAPT_THEME] = iconAdaptTheme
             p[APP_ICON_FOLLOW_DYNAMIC] = iconFollowDynamic
-            p[APP_ICON_SHAPE] = iconShape.uppercase().take(16)
+            // Canonical OCTAGON | CIRCLE; legacy HEXAGON/PILL map in via IconShape.parse.
+            p[APP_ICON_SHAPE] = (com.frerox.toolz.data.skin.IconShape.parse(iconShape)?.name ?: "OCTAGON")
             if (activeSkinId == null) p.remove(ACTIVE_SKIN_ID) else p[ACTIVE_SKIN_ID] = activeSkinId.take(64)
         }
     }

@@ -180,7 +180,9 @@ class SkinRepository @Inject constructor(
     /** Build a SkinDto snapshot from current local appearance settings. */
     suspend fun snapshotCurrent(name: String, author: String): SkinDto {
         val rawTheme = try { settingsRepository.themeMode.first() } catch (_: Exception) { "SYSTEM" }
-        val theme = rawTheme.uppercase().take(16).let { if (it in setOf("SYSTEM", "LIGHT", "DARK")) it else "SYSTEM" }
+        // SYSTEM is a first-class themeMode: uppercased + whitelisted so share never
+        // fails validation just because the theme follows the system.
+        val theme = rawTheme.uppercase().trim().take(16).let { if (it in setOf("SYSTEM", "LIGHT", "DARK")) it else "SYSTEM" }
         val dyn = try { settingsRepository.dynamicColor.first() } catch (_: Exception) { true }
         val pri = try { settingsRepository.customPrimaryColor.first()?.toLong()?.and(0xFFFFFFFFL) } catch (_: Exception) { null }
         val sec = try { settingsRepository.customSecondaryColor.first()?.toLong()?.and(0xFFFFFFFFL) } catch (_: Exception) { null }
@@ -190,7 +192,8 @@ class SkinRepository @Inject constructor(
         val adapt = try { settingsRepository.appIconAdaptTheme.first() } catch (_: Exception) { true }
         val follow = try { settingsRepository.appIconFollowDynamic.first() } catch (_: Exception) { true }
         val rawShape = try { settingsRepository.appIconShape.first() } catch (_: Exception) { "HEXAGON" }
-        val shape = rawShape.uppercase().take(16).let { if (it in setOf("HEXAGON", "OCTAGON", "CIRCLE", "PILL")) it else "HEXAGON" }
+        // Canonical OCTAGON | CIRCLE; legacy HEXAGON/PILL parse in (PILL was removed).
+        val shape = IconShape.parse(rawShape)?.name ?: "OCTAGON"
         return SkinDto(
             id = "",
             name = name.trim().take(32),
@@ -209,17 +212,21 @@ class SkinRepository @Inject constructor(
 
     /** Apply a skin atomically to SettingsRepository. */
     suspend fun apply(skin: SkinDto) {
+        // Normalize wire values so legacy server skins (HEXAGON/PILL) land canonical.
+        val shape = IconShape.parse(skin.iconShape)?.name ?: "OCTAGON"
+        val theme = skin.themeMode.uppercase().take(16).let { if (it in setOf("SYSTEM", "LIGHT", "DARK")) it else "SYSTEM" }
         settingsRepository.applySkin(
-            themeMode = skin.themeMode,
+            themeMode = theme,
             dynamicColor = skin.dynamicColor,
             primary = skin.primary?.toInt(),
-            secondary = skin.secondary?.toLong()?.toInt() ?: skin.secondary?.toInt(),
+            secondary = skin.secondary?.toInt(),
             gradient = skin.gradient,
-            iconPresetId = skin.iconPresetId,
+            iconPresetId = IconCatalog.find(skin.iconPresetId).id,
             iconAdaptTheme = skin.iconAdaptTheme,
             iconFollowDynamic = skin.iconFollowDynamic,
-            iconShape = skin.iconShape,
+            iconShape = shape,
             activeSkinId = skin.id,
         )
+        try { settingsRepository.pushRecentSkinId(skin.id) } catch (_: Exception) { }
     }
 }
