@@ -85,8 +85,7 @@ fun LoadingOverlay(
                     border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        ToolzMark(
-                            presetId = "grape-haze",
+                        CurrentToolzMark(
                             modifier = Modifier.size(120.dp).clip(ExtraLargeExpressiveShape),
                         )
                     }

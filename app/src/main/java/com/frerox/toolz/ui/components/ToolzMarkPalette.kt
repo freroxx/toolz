@@ -111,12 +111,14 @@ object MarkPalettes {
         bgOverride: Int?,
         fgOverride: Int?,
         strokeOverride: Int?,
+        iconGradient: Boolean = true,
     ): MarkPalette {
         var p = when {
             spec.followsScheme && followDynamic && dynamicColor -> fromScheme(scheme, isDark)
             spec.adaptToTheme && adaptToTheme && isDark -> of(spec).dimmed(0.82f)
             else -> of(spec)
         }
+        if (!iconGradient) p = p.copy(bodyEnd = p.bodyStart)
         bgOverride?.let { val c = Color(it); p = p.copy(bodyStart = c, bodyEnd = c, carve = c) }
         fgOverride?.let { p = p.copy(disc = Color(it)) }
         strokeOverride?.let { p = p.copy(rim = Color(it)) }

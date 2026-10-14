@@ -72,6 +72,9 @@ class ToolzApplication : Application(), Configuration.Provider {
     @Inject
     lateinit var aiCatalogRepository: com.frerox.toolz.data.ai.AiCatalogRepository
 
+    @Inject
+    lateinit var launcherIconManager: com.frerox.toolz.data.skin.LauncherIconManager
+
     private val appScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
 
     override fun onCreate() {
@@ -103,6 +106,14 @@ class ToolzApplication : Application(), Configuration.Provider {
         scheduleWhisperDelivery()
         schedulePurgeShotReschedule()
         com.frerox.toolz.worker.ClipboardCleanupWorker.schedule(this)
+        // Re-assert the persisted launcher icon (survives reboot + app update,
+        // which reset component enabled states).
+        appScope.launch {
+            try {
+                val preset = settingsRepository.appIconPresetId.first()
+                launcherIconManager.ensureApplied(preset)
+            } catch (_: Exception) { }
+        }
         // Widget generated previews (API 35+, rate-limited, non-fatal).
         // App-level publish covers cold starts where MainActivity never runs
         // before the user opens the widget picker (reboot, update, restore).

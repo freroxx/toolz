@@ -670,8 +670,7 @@ fun UpdateOverlayContent(
                         .background(MaterialTheme.colorScheme.primaryContainer),
                     contentAlignment = Alignment.Center
                 ) {
-                    com.frerox.toolz.ui.components.ToolzMark(
-                        presetId = "grape-haze",
+                    com.frerox.toolz.ui.components.CurrentToolzMark(
                         modifier = Modifier.size(140.dp).clip(RoundedCornerShape(40.dp)),
                     )
                 }

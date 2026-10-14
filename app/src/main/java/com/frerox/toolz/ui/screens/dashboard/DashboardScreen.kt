@@ -2266,8 +2266,7 @@ fun UpdateBanner(version: String, onUpdate: () -> Unit, onDismiss: () -> Unit) {
             ) {
                 Surface(Modifier.size(48.dp), SmallExpressiveShape, color = MaterialTheme.colorScheme.primary) {
                     Box(contentAlignment = Alignment.Center) {
-                        com.frerox.toolz.ui.components.ToolzMark(
-                            presetId = "grape-haze",
+                        com.frerox.toolz.ui.components.CurrentToolzMark(
                             modifier = Modifier.size(48.dp).clip(SmallExpressiveShape),
                         )
                     }

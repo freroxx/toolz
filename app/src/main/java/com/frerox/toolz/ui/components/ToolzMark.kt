@@ -32,8 +32,8 @@ import kotlin.math.min
  * Pure vector drawing from [MarkGeometry]; no bitmaps, no tint modes. A preset renders
  * exactly like the reference icon at any size. Shadow/elevation is the caller's business.
  *
- * Frames: OCTAGON is the native silhouette. CIRCLE and PILL swap the octagon for a rounded
- * container (same rim width) and keep the glyph centred.
+ * Frames: OCTAGON is the native silhouette. CIRCLE swaps the octagon for a rounded
+ * container (same rim width) and keeps the glyph centred.
  */
 @Composable
 fun ToolzMark(
@@ -46,6 +46,7 @@ fun ToolzMark(
     fgOverride: Int? = null,
     strokeOverride: Int? = null,
     showBackground: Boolean = true,
+    iconGradient: Boolean = true,
     contentDescription: String? = null,
 ) {
     val scheme = MaterialTheme.colorScheme
@@ -62,6 +63,7 @@ fun ToolzMark(
         fgOverride = fgOverride,
         strokeOverride = strokeOverride,
         showBackground = showBackground,
+        iconGradient = iconGradient,
         contentDescription = contentDescription,
     )
 }
@@ -80,11 +82,12 @@ fun ToolzMarkThemed(
     fgOverride: Int? = null,
     strokeOverride: Int? = null,
     showBackground: Boolean = true,
+    iconGradient: Boolean = true,
     contentDescription: String? = null,
 ) {
     val palette = remember(
         presetId, scheme, isDark, dynamicColor, adaptToTheme, followDynamic,
-        bgOverride, fgOverride, strokeOverride,
+        bgOverride, fgOverride, strokeOverride, iconGradient,
     ) {
         MarkPalettes.resolve(
             spec = IconCatalog.find(presetId),
@@ -96,6 +99,7 @@ fun ToolzMarkThemed(
             bgOverride = bgOverride,
             fgOverride = fgOverride,
             strokeOverride = strokeOverride,
+            iconGradient = iconGradient,
         )
     }
     ToolzMarkCanvas(
@@ -128,7 +132,7 @@ fun ToolzMarkCanvas(
 }
 
 /**
- * Draws into the largest centred square of the current scope (PILL uses the full bounds).
+ * Draws into the largest centred square of the current scope.
  * [showBackground] = false draws only the swoosh, with real transparency where the capsule is.
  */
 fun DrawScope.drawToolzMark(
@@ -155,8 +159,9 @@ fun DrawScope.drawToolzMark(
             drawPath(MarkGeometry.rim, palette.rim)
             drawPath(MarkGeometry.body, palette.octagonBody)
         } else {
-            val hw = if (frame == IconShape.CIRCLE) MarkGeometry.SPAN / 2f else size.width / (2f * scale)
-            val hh = if (frame == IconShape.CIRCLE) MarkGeometry.SPAN / 2f else size.height / (2f * scale)
+            // CIRCLE frame: same rim width as the octagon, glyph stays centred.
+            val hw = MarkGeometry.SPAN / 2f
+            val hh = MarkGeometry.SPAN / 2f
             drawRoundRect(
                 color = palette.rim,
                 topLeft = Offset(c - hw, c - hh),
