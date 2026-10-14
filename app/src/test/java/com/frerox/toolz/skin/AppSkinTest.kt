@@ -7,7 +7,7 @@ import org.junit.Test
 class AppSkinTest {
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
     @Test fun catalogHasManyPresets() {
-        assertTrue(IconCatalog.BUILT_IN.size >= 20)
+        assertTrue(IconCatalog.BUILT_IN.size >= 30)
         assertNotNull(IconCatalog.BUILT_IN.firstOrNull { it.id == IconCatalog.DEFAULT_ID })
     }
 
@@ -28,6 +28,25 @@ class AppSkinTest {
         assertNotNull(ok.copy(themeMode = "BLUE").validate())
         assertNotNull(ok.copy(iconPresetId = "unknown-icon").validate())
         assertNotNull(ok.copy(iconShape = "TRIANGLE").validate())
+    }
+
+    @Test fun systemThemeValidates() {
+        // Sharing a look must never fail just because the theme follows the system.
+        val ok = SkinDto(id = "", name = "Midnight Grape", themeMode = "SYSTEM", dynamicColor = true, iconPresetId = "grape-haze")
+        assertNull(ok.validate())
+    }
+
+    @Test fun pillMapsToCircle() {
+        // PILL was removed (identical to CIRCLE); old values keep parsing.
+        assertEquals(IconShape.CIRCLE, IconShape.parse("PILL"))
+        assertEquals(IconShape.CIRCLE, IconShape.parse("circle"))
+        assertEquals(IconShape.OCTAGON, IconShape.parse("HEXAGON"))
+        assertNull(IconShape.parse("TRIANGLE"))
+    }
+
+    @Test fun everyPresetHasGradient() {
+        // The in-app gradient toggle works on all presets, so none may be flat-only.
+        IconCatalog.BUILT_IN.forEach { assertNotNull("no bodyEnd: ${it.id}", it.bodyEnd) }
     }
 
     @Test fun legacyNonEmpty() {
