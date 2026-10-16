@@ -223,6 +223,31 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
         scheduleNewsCheck()
         scheduleFocusUsageSnapshot()
 
+        // Developer Mode version guard: auto-disable master + all spoofs on
+        // version bump so stale local fakes can never leak into a new build.
+        // Also honors crash-on-next-launch test flag from the crash lab.
+        lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val pi = packageManager.getPackageInfo(packageName, 0)
+                @Suppress("DEPRECATION")
+                val code = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                    pi.longVersionCode
+                } else {
+                    pi.versionCode.toLong()
+                }
+                settingsRepository.ensureDeveloperModeVersion(code)
+                val crashNext = try {
+                    settingsRepository.devCrashOnNextLaunch.first()
+                } catch (_: Exception) { false }
+                if (crashNext) {
+                    try { settingsRepository.setDevCrashOnNextLaunch(false) } catch (_: Exception) { }
+                    throw RuntimeException("[SPOOF TEST] crash-on-next-launch flag was set")
+                }
+            } catch (e: RuntimeException) {
+                throw e
+            } catch (_: Exception) { }
+        }
+
         // Permissions are now deferred to feature sheets (PurgeShot / Whisper) and onboarding.
         // No auto-request on launch — prevents system dialogs before onboarding.
         setContent {
@@ -363,17 +388,45 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
                             val navController = rememberNavController()
                             val pdfViewModel: PdfViewModel = hiltViewModel()
 
-                            ToolzNavHost(
+                            // Dev console shake-to-open: zero sensor cost unless master + toggle are both ON.
+                            val shakeDetector = remember {
+                                com.frerox.toolz.data.developer.ShakeDetector(applicationContext)
+                            }
+                            val devModeOn by settingsRepository.developerModeEnabled.collectAsState(initial = false)
+                            val shakeOn by settingsRepository.devShakeToOpen.collectAsState(initial = false)
+                            DisposableEffect(devModeOn, shakeOn) {
+                                if (devModeOn && shakeOn) {
+                                    shakeDetector.start {
+                                        try {
+                                            navController.navigate(com.frerox.toolz.ui.navigation.Screen.DeveloperMode.route)
+                                        } catch (_: Exception) { }
+                                    }
+                                } else {
+                                    shakeDetector.stop()
+                                }
+                                onDispose { shakeDetector.stop() }
+                            }
+
+                            com.frerox.toolz.ui.screens.developer.components.SpoofWatermarkOverlay(
                                 navController = navController,
-                                settingsRepository = settingsRepository,
-                                aiSettingsManager = aiSettingsManager,
-                                pdfViewModel = pdfViewModel,
-                                performanceMode = performanceMode,
-                                backgroundGradientEnabled = backgroundGradientEnabled,
-                                incomingIntent = incomingIntent,
-                                incomingIntentVersion = incomingIntentVersion,
-                                onboardingCompleted = onboardingCompleted
-                            )
+                                onOpenControls = {
+                                    try {
+                                        navController.navigate(com.frerox.toolz.ui.navigation.Screen.DeveloperMode.route)
+                                    } catch (_: Exception) { }
+                                },
+                            ) {
+                                ToolzNavHost(
+                                    navController = navController,
+                                    settingsRepository = settingsRepository,
+                                    aiSettingsManager = aiSettingsManager,
+                                    pdfViewModel = pdfViewModel,
+                                    performanceMode = performanceMode,
+                                    backgroundGradientEnabled = backgroundGradientEnabled,
+                                    incomingIntent = incomingIntent,
+                                    incomingIntentVersion = incomingIntentVersion,
+                                    onboardingCompleted = onboardingCompleted
+                                )
+                            }
 
                             UpdateOverlay(settingsRepository, updateManager)
                         }
@@ -1041,11 +1094,21 @@ fun ToolzNavHost(
                 onNavigateToBackupRestore = { navController.navigate(Screen.BackupRestore.route) },
                 onNavigateToToolShortcuts = { navController.navigate(Screen.ToolShortcuts.route) },
                 onNavigateToAppSkin = { navController.navigate(Screen.AppSkin.route) },
+                onNavigateToDeveloperMode = { navController.navigate(Screen.DeveloperMode.route) },
                 onResetOnboarding = {
                     navController.navigate("onboarding") {
                         popUpTo(Screen.Dashboard.route) { inclusive = true }
                     }
                 }
+            )
+        }
+
+        composable(Screen.DeveloperMode.route) {
+            com.frerox.toolz.ui.screens.developer.DeveloperModeScreen(
+                onBack = { toolOnBack() },
+                onOpenRoute = { route ->
+                    try { navController.navigate(route) } catch (_: Exception) { }
+                },
             )
         }
 
