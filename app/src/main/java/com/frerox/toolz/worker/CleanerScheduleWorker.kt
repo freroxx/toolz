@@ -31,6 +31,7 @@ class CleanerScheduleWorker @AssistedInject constructor(
                 android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
             val n = androidx.core.app.NotificationCompat.Builder(applicationContext, "cleaner_reminder")
                 .setSmallIcon(android.R.drawable.ic_menu_delete)
+                .setLargeIcon(com.frerox.toolz.util.NotificationHelper.toolzLargeIcon(applicationContext))
                 .setContentTitle("Time for a cleanup?")
                 .setContentText("Run File Cleaner to reclaim space. Nothing is deleted automatically.")
                 .setContentIntent(pi).setAutoCancel(true).build()

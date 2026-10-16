@@ -290,6 +290,7 @@ object PurgeShotHandler {
                 .setContentTitle(title)
                 .setContentText(text)
                 .setSmallIcon(R.drawable.ic_stat_toolz)
+                .setLargeIcon(com.frerox.toolz.util.NotificationHelper.toolzLargeIcon(context))
                 .setAutoCancel(true)
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)
                 .setContentIntent(pi)

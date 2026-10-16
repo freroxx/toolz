@@ -1269,6 +1269,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             )
             val notification = NotificationCompat.Builder(this, FGS_CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_music_note)
+                .setLargeIcon(com.frerox.toolz.util.NotificationHelper.toolzLargeIcon(this))
                 .setContentTitle(getString(R.string.app_name))
                 .setContentText("Preparing music…")
                 .setContentIntent(contentIntent)

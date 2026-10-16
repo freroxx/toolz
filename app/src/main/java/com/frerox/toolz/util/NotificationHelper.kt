@@ -434,25 +434,39 @@ object NotificationHelper {
     @Volatile private var largeIconCache: android.graphics.Bitmap? = null
     @Volatile private var largeIconKey: String? = null
 
+    /** Prefs mirror of the picked icon preset — written by [LauncherIconManager]. */
+    const val ICON_PREFS = "toolz_icon"
+    const val ICON_PRESET_KEY = "preset_id"
+    const val DEFAULT_PRESET_ID = "grape-haze"
+
+    fun currentPresetId(context: Context): String = try {
+        context.getSharedPreferences(ICON_PREFS, Context.MODE_PRIVATE)
+            .getString(ICON_PRESET_KEY, DEFAULT_PRESET_ID) ?: DEFAULT_PRESET_ID
+    } catch (_: Exception) { DEFAULT_PRESET_ID }
+
     fun toolzLargeIcon(context: Context): android.graphics.Bitmap? {
-        // Cache-first: the launcher mark never changes at runtime, so return the
-        // cached bitmap without re-decoding. Decoding on every notification build
-        // (pause/start posts run on the caller thread) caused visible pause lag.
-        largeIconCache?.let { return it }
+        // Keyed by preset id: picking a new icon in the catalog invalidates the
+        // cache, so notifications follow the icon change.
+        val key = currentPresetId(context)
+        if (key == largeIconKey) largeIconCache?.let { return it }
         return try {
-            buildToolzLargeIcon(context)
+            buildToolzLargeIcon(context, key)
         } catch (_: Exception) { null }
     }
 
-    private fun buildToolzLargeIcon(context: Context): android.graphics.Bitmap? = try {
+    private fun buildToolzLargeIcon(context: Context, presetId: String): android.graphics.Bitmap? = try {
+        // Per-preset foreground vector; falls back to the default launcher art.
+        val san = presetId.replace('-', '_')
+        var resId = context.resources.getIdentifier("ic_fg_$san", "drawable", context.packageName)
+        if (resId == 0) resId = R.drawable.ic_launcher_foreground
         // Foreground is a vector: rasterize via Drawable, not BitmapFactory.
-        val drawable = androidx.appcompat.content.res.AppCompatResources.getDrawable(context, R.drawable.ic_launcher_foreground)
+        val drawable = androidx.appcompat.content.res.AppCompatResources.getDrawable(context, resId)
             ?: return null
         val side = 192.coerceAtLeast(1)
         drawable.setBounds(0, 0, side, side)
         val raw = android.graphics.Bitmap.createBitmap(side, side, android.graphics.Bitmap.Config.ARGB_8888)
         drawable.draw(android.graphics.Canvas(raw))
-        val cacheKey = "${raw.width}x${raw.height}"
+        val cacheKey = presetId
         if (cacheKey == largeIconKey && largeIconCache != null) return largeIconCache
         val size = minOf(raw.width, raw.height).coerceAtLeast(1)
         // Rounded-rectangle app mark (~28% radius) so the tray/shade shows

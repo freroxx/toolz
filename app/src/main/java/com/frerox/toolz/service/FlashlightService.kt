@@ -525,6 +525,7 @@ class FlashlightService : Service() {
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_flashlight)
+            .setLargeIcon(com.frerox.toolz.util.NotificationHelper.toolzLargeIcon(this))
             .setContentTitle(modeLabel())
             .setContentText("$brightPct% intensity \u00B7 tap to open")
             .setCustomContentView(compact)

@@ -42,6 +42,13 @@ class LauncherIconManager @Inject constructor(
 
     /** Enable the alias for [presetId], disable every other icon alias. */
     suspend fun apply(presetId: String) = withContext(Dispatchers.IO) {
+        // Mirror the pick to SharedPreferences so NotificationHelper (which can't
+        // touch DataStore synchronously) renders notification art for this preset.
+        try {
+            context.getSharedPreferences("toolz_icon", Context.MODE_PRIVATE).edit()
+                .putString("preset_id", IconCatalog.find(presetId).id)
+                .apply()
+        } catch (_: Exception) { }
         val target = aliasName(presetId)
         try {
             val pm = context.packageManager
