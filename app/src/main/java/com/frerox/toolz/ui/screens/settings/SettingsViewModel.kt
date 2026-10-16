@@ -47,6 +47,7 @@ class SettingsViewModel @Inject constructor(
     private val widgetUpdateManager: com.frerox.toolz.widget.WidgetUpdateManager,
     private val skinRepository: com.frerox.toolz.data.skin.SkinRepository,
     private val launcherIconManager: com.frerox.toolz.data.skin.LauncherIconManager,
+    private val customIconManager: com.frerox.toolz.data.skin.CustomIconManager,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -170,6 +171,27 @@ class SettingsViewModel @Inject constructor(
     val converterCustomOutputPath = repository.converterCustomOutputPath
     val pdfAiToolsEnabled = repository.pdfAiToolsEnabled
     val notepadAiToolsEnabled = repository.notepadAiToolsEnabled
+
+    // ---- Developer Mode (master + controlled spoofs) ----
+    val developerModeEnabled = repository.developerModeEnabled
+    val allSpoofFlags = repository.allSpoofFlags
+    val devVerboseLogging = repository.devVerboseLogging
+    val devMockDelayMs = repository.devMockDelayMs
+    val devPerfHud = repository.devPerfHud
+    val devForceOffline = repository.devForceOffline
+    val devShakeToOpen = repository.devShakeToOpen
+
+    fun setDeveloperModeEnabled(enabled: Boolean) = viewModelScope.launch { repository.setDeveloperModeEnabled(enabled) }
+    fun setSpoofFlag(prefKey: String, enabled: Boolean) = viewModelScope.launch { repository.setSpoofFlag(prefKey, enabled) }
+    fun clearAllSpoofs() = viewModelScope.launch { repository.clearAllSpoofs() }
+    fun resetDeveloperMode() = viewModelScope.launch { repository.resetDeveloperMode() }
+    fun setDevVerboseLogging(enabled: Boolean) = viewModelScope.launch { repository.setDevVerboseLogging(enabled) }
+    fun setDevMockDelayMs(ms: Int) = viewModelScope.launch { repository.setDevMockDelayMs(ms) }
+    fun setDevPerfHud(enabled: Boolean) = viewModelScope.launch { repository.setDevPerfHud(enabled) }
+    fun setDevForceOffline(enabled: Boolean) = viewModelScope.launch { repository.setDevForceOffline(enabled) }
+    fun ensureDeveloperModeVersion(code: Long, onReset: () -> Unit = {}) = viewModelScope.launch {
+        if (repository.ensureDeveloperModeVersion(code)) onReset()
+    }
 
     fun setStepGoal(goal: Int) = viewModelScope.launch { repository.setStepGoal(goal) }
     fun setThemeMode(mode: String) = viewModelScope.launch { repository.setThemeMode(mode) }
@@ -317,6 +339,7 @@ class SettingsViewModel @Inject constructor(
     // ---- App Skin (icon + skins) ----
     val appIconPresetId = repository.appIconPresetId
     val appIconShape = repository.appIconShape
+    val appIconCustomPath = repository.appIconCustomPath
     val appIconAdaptTheme = repository.appIconAdaptTheme
     val appIconFollowDynamic = repository.appIconFollowDynamic
     val appIconBgOverride = repository.appIconBgOverride
@@ -335,7 +358,14 @@ class SettingsViewModel @Inject constructor(
         repository.setActiveSkinId(null)
         try {
             val shape = try { repository.appIconShape.first() } catch (_: Exception) { null }
-            launcherIconManager.apply(id, shape)
+            if (id == com.frerox.toolz.data.skin.IconCatalog.CUSTOM_ID) {
+                if (!launcherIconManager.applyCustomPhoto(shape)) {
+                    repository.setAppIconPresetId(com.frerox.toolz.data.skin.IconCatalog.DEFAULT_ID)
+                    launcherIconManager.apply(com.frerox.toolz.data.skin.IconCatalog.DEFAULT_ID, shape)
+                }
+            } else {
+                launcherIconManager.apply(id, shape)
+            }
         } catch (_: Exception) { }
     }
     fun setAppIconShape(shape: String) = viewModelScope.launch {
@@ -343,8 +373,31 @@ class SettingsViewModel @Inject constructor(
         repository.setActiveSkinId(null)
         try {
             val preset = try { repository.appIconPresetId.first() } catch (_: Exception) { null }
-            launcherIconManager.apply(preset ?: "grape-haze", shape)
+            if (preset == com.frerox.toolz.data.skin.IconCatalog.CUSTOM_ID) {
+                launcherIconManager.applyCustomPhoto(shape)
+            } else {
+                launcherIconManager.apply(preset ?: "grape-haze", shape)
+            }
         } catch (_: Exception) { }
+    }
+    /** Saves a device photo as the custom icon and applies it everywhere. Returns false on failure. */
+    fun applyCustomPhoto(uri: android.net.Uri, onDone: (Boolean) -> Unit = {}) = viewModelScope.launch {
+        try {
+            val path = customIconManager.saveFromUri(uri)
+            if (path == null) { onDone(false); return@launch }
+            repository.setAppIconCustomPath(path)
+            repository.setAppIconPresetId(com.frerox.toolz.data.skin.IconCatalog.CUSTOM_ID)
+            repository.setActiveSkinId(null)
+            val shape = try { repository.appIconShape.first() } catch (_: Exception) { null }
+            launcherIconManager.applyCustomPhoto(shape)
+            refreshWidgets()
+            onDone(true)
+        } catch (_: Exception) { onDone(false) }
+    }
+    fun clearCustomPhoto() = viewModelScope.launch {
+        try { customIconManager.clear() } catch (_: Exception) { }
+        repository.setAppIconCustomPath(null)
+        setAppIconPresetId(com.frerox.toolz.data.skin.IconCatalog.DEFAULT_ID)
     }
     fun setAppIconAdaptTheme(enabled: Boolean) = viewModelScope.launch { repository.setAppIconAdaptTheme(enabled) }
     fun setAppIconFollowDynamic(enabled: Boolean) = viewModelScope.launch { repository.setAppIconFollowDynamic(enabled) }

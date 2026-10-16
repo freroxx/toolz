@@ -21,6 +21,7 @@ sealed class Screen(val route: String) {
     object Loading : Screen("loading")
     object Dashboard : Screen("dashboard")
     object Settings : Screen("settings")
+    object DeveloperMode : Screen("developer_mode")
     object AppSkin : Screen("app_skin")
     object IconCatalog : Screen("icon_catalog")
     object SkinsCatalog : Screen("skins_catalog")

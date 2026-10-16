@@ -22,6 +22,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -45,6 +46,9 @@ class SettingsRepository @Inject constructor(
     private val APP_ICON_BG_OVERRIDE = intPreferencesKey("app_icon_bg_override")
     private val APP_ICON_FG_OVERRIDE = intPreferencesKey("app_icon_fg_override")
     private val APP_ICON_STROKE_OVERRIDE = intPreferencesKey("app_icon_stroke_override")
+    // Custom photo icon: absolute path of the cropped 512px PNG in app files.
+    // Empty/missing file falls back to the nearest built-in preset everywhere.
+    private val APP_ICON_CUSTOM_PATH = stringPreferencesKey("app_icon_custom_path")
     private val APP_ICON_GRADIENT_ENABLED = booleanPreferencesKey("app_icon_gradient_enabled")
     private val ACTIVE_SKIN_ID = stringPreferencesKey("active_skin_id")
     private val RECENT_SKIN_IDS = stringPreferencesKey("recent_skin_ids") // CSV, most-recent-first, max 3
@@ -676,6 +680,38 @@ class SettingsRepository @Inject constructor(
     private val FLIP_COIN_HEADS_IMAGE_URI = stringPreferencesKey("flip_coin_heads_image_uri")
     private val FLIP_COIN_TAILS_IMAGE_URI = stringPreferencesKey("flip_coin_tails_image_uri")
 
+    // Developer Mode — master toggle + controlled spoofs (additive, never rename).
+    // Spoofs are LOCAL-ONLY fixtures: tool ViewModels must consult
+    // DeveloperSpoofController instead of reading these flags directly.
+    // Master OFF forces every tool back to real data.
+    private val DEVELOPER_MODE_ENABLED = booleanPreferencesKey("developer_mode_enabled")
+    private val LAST_SEEN_VERSION_CODE = longPreferencesKey("last_seen_version_code")
+    private val DEV_VERBOSE_LOGGING = booleanPreferencesKey("dev_verbose_logging")
+    private val DEV_MOCK_DELAY_MS = intPreferencesKey("dev_mock_delay_ms")
+    private val DEV_PERF_HUD = booleanPreferencesKey("dev_perf_hud")
+    private val DEV_FORCE_OFFLINE = booleanPreferencesKey("dev_force_offline")
+    private val DEV_CRASH_ON_NEXT_LAUNCH = booleanPreferencesKey("dev_crash_on_next_launch")
+    private val DEV_SHAKE_TO_OPEN = booleanPreferencesKey("dev_shake_to_open")
+    private val SPOOF_PARAMS_JSON = stringPreferencesKey("spoof_params_json")
+    private val SPOOF_BATTERY = booleanPreferencesKey("spoof_battery")
+    private val SPOOF_DEVICE = booleanPreferencesKey("spoof_device")
+    private val SPOOF_NETWORK = booleanPreferencesKey("spoof_network")
+    private val SPOOF_STEPS = booleanPreferencesKey("spoof_steps")
+    private val SPOOF_SENSORS = booleanPreferencesKey("spoof_sensors")
+    private val SPOOF_MUSIC = booleanPreferencesKey("spoof_music")
+    private val SPOOF_DOWNLOADER = booleanPreferencesKey("spoof_downloader")
+    private val SPOOF_CLEANER = booleanPreferencesKey("spoof_cleaner")
+    private val SPOOF_NOTIFICATIONS = booleanPreferencesKey("spoof_notifications")
+    private val SPOOF_CLIPBOARD = booleanPreferencesKey("spoof_clipboard")
+    private val SPOOF_TASKS = booleanPreferencesKey("spoof_tasks")
+    private val SPOOF_QR = booleanPreferencesKey("spoof_qr")
+    private val SPOOF_TIMERS = booleanPreferencesKey("spoof_timers")
+    private val SPOOF_UPDATE_NEWS = booleanPreferencesKey("spoof_update_news")
+    private val SPOOF_WHISPER = booleanPreferencesKey("spoof_whisper")
+    private val SPOOF_SEARCH = booleanPreferencesKey("spoof_search")
+    private val SPOOF_FILES = booleanPreferencesKey("spoof_files")
+    private val SPOOF_SYSTEM = booleanPreferencesKey("spoof_system")
+
     private val defaultAlarmUri: String by lazy {
         RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)?.toString() ?: ""
     }
@@ -722,6 +758,7 @@ class SettingsRepository @Inject constructor(
     val appIconBgOverride: Flow<Int?> = dataStore.data.map { it[APP_ICON_BG_OVERRIDE] }
     val appIconFgOverride: Flow<Int?> = dataStore.data.map { it[APP_ICON_FG_OVERRIDE] }
     val appIconStrokeOverride: Flow<Int?> = dataStore.data.map { it[APP_ICON_STROKE_OVERRIDE] }
+    val appIconCustomPath: Flow<String?> = dataStore.data.map { it[APP_ICON_CUSTOM_PATH] }
     val appIconGradientEnabled: Flow<Boolean> = dataStore.data.map { it[APP_ICON_GRADIENT_ENABLED] ?: true }
     val activeSkinId: Flow<String?> = dataStore.data.map { it[ACTIVE_SKIN_ID] }
     val skinsCacheJson: Flow<String?> = dataStore.data.map { it[SKINS_CACHE_JSON] }
@@ -1197,6 +1234,7 @@ class SettingsRepository @Inject constructor(
     suspend fun setAppIconFgOverride(color: Int?) { dataStore.edit { if (color == null) it.remove(APP_ICON_FG_OVERRIDE) else it[APP_ICON_FG_OVERRIDE] = color } }
     suspend fun setAppIconStrokeOverride(color: Int?) { dataStore.edit { if (color == null) it.remove(APP_ICON_STROKE_OVERRIDE) else it[APP_ICON_STROKE_OVERRIDE] = color } }
     suspend fun setAppIconGradientEnabled(enabled: Boolean) { dataStore.edit { it[APP_ICON_GRADIENT_ENABLED] = enabled } }
+    suspend fun setAppIconCustomPath(path: String?) { dataStore.edit { if (path == null) it.remove(APP_ICON_CUSTOM_PATH) else it[APP_ICON_CUSTOM_PATH] = path.take(512) } }
     suspend fun setActiveSkinId(id: String?) { dataStore.edit { if (id == null) it.remove(ACTIVE_SKIN_ID) else it[ACTIVE_SKIN_ID] = id.take(64) } }
     val recentSkinIds: Flow<List<String>> = dataStore.data.map {
         (it[RECENT_SKIN_IDS] ?: "").split(",").map { s -> s.trim() }.filter { s -> s.isNotEmpty() }.take(3)
@@ -1900,6 +1938,198 @@ class SettingsRepository @Inject constructor(
     suspend fun setFlipCoinTailsImageUri(uri: String?) {
         dataStore.edit {
             if (uri == null) it.remove(FLIP_COIN_TAILS_IMAGE_URI) else it[FLIP_COIN_TAILS_IMAGE_URI] = uri
+        }
+    }
+
+    // ---- Developer Mode flows (controlled spoofs, local-only) ----
+    val developerModeEnabled: Flow<Boolean> = dataStore.data.map { it[DEVELOPER_MODE_ENABLED] ?: false }
+    val lastSeenVersionCode: Flow<Long> = dataStore.data.map { it[LAST_SEEN_VERSION_CODE] ?: 0L }
+    val devVerboseLogging: Flow<Boolean> = dataStore.data.map { it[DEV_VERBOSE_LOGGING] ?: false }
+    val devMockDelayMs: Flow<Int> = dataStore.data.map { it[DEV_MOCK_DELAY_MS] ?: 0 }
+    val devPerfHud: Flow<Boolean> = dataStore.data.map { it[DEV_PERF_HUD] ?: false }
+    val devForceOffline: Flow<Boolean> = dataStore.data.map { it[DEV_FORCE_OFFLINE] ?: false }
+    val devCrashOnNextLaunch: Flow<Boolean> = dataStore.data.map { it[DEV_CRASH_ON_NEXT_LAUNCH] ?: false }
+    val devShakeToOpen: Flow<Boolean> = dataStore.data.map { it[DEV_SHAKE_TO_OPEN] ?: false }
+    val spoofParamsJson: Flow<String> = dataStore.data.map { it[SPOOF_PARAMS_JSON] ?: "{}" }
+
+    private fun spoofKeyFor(prefKey: String) = when (prefKey) {
+        "spoof_battery" -> SPOOF_BATTERY
+        "spoof_device" -> SPOOF_DEVICE
+        "spoof_network" -> SPOOF_NETWORK
+        "spoof_steps" -> SPOOF_STEPS
+        "spoof_sensors" -> SPOOF_SENSORS
+        "spoof_music" -> SPOOF_MUSIC
+        "spoof_downloader" -> SPOOF_DOWNLOADER
+        "spoof_cleaner" -> SPOOF_CLEANER
+        "spoof_notifications" -> SPOOF_NOTIFICATIONS
+        "spoof_clipboard" -> SPOOF_CLIPBOARD
+        "spoof_tasks" -> SPOOF_TASKS
+        "spoof_qr" -> SPOOF_QR
+        "spoof_timers" -> SPOOF_TIMERS
+        "spoof_update_news" -> SPOOF_UPDATE_NEWS
+        "spoof_whisper" -> SPOOF_WHISPER
+        "spoof_search" -> SPOOF_SEARCH
+        "spoof_files" -> SPOOF_FILES
+        "spoof_system" -> SPOOF_SYSTEM
+        else -> SPOOF_SYSTEM
+    }
+
+    fun spoofFlag(prefKey: String): Flow<Boolean> {
+        val key = spoofKeyFor(prefKey)
+        return dataStore.data.map { it[key] ?: false }
+    }
+
+    val allSpoofFlags: Flow<Map<String, Boolean>> = dataStore.data.map { prefs ->
+        mapOf(
+            "spoof_battery" to (prefs[SPOOF_BATTERY] ?: false),
+            "spoof_device" to (prefs[SPOOF_DEVICE] ?: false),
+            "spoof_network" to (prefs[SPOOF_NETWORK] ?: false),
+            "spoof_steps" to (prefs[SPOOF_STEPS] ?: false),
+            "spoof_sensors" to (prefs[SPOOF_SENSORS] ?: false),
+            "spoof_music" to (prefs[SPOOF_MUSIC] ?: false),
+            "spoof_downloader" to (prefs[SPOOF_DOWNLOADER] ?: false),
+            "spoof_cleaner" to (prefs[SPOOF_CLEANER] ?: false),
+            "spoof_notifications" to (prefs[SPOOF_NOTIFICATIONS] ?: false),
+            "spoof_clipboard" to (prefs[SPOOF_CLIPBOARD] ?: false),
+            "spoof_tasks" to (prefs[SPOOF_TASKS] ?: false),
+            "spoof_qr" to (prefs[SPOOF_QR] ?: false),
+            "spoof_timers" to (prefs[SPOOF_TIMERS] ?: false),
+            "spoof_update_news" to (prefs[SPOOF_UPDATE_NEWS] ?: false),
+            "spoof_whisper" to (prefs[SPOOF_WHISPER] ?: false),
+            "spoof_search" to (prefs[SPOOF_SEARCH] ?: false),
+            "spoof_files" to (prefs[SPOOF_FILES] ?: false),
+            "spoof_system" to (prefs[SPOOF_SYSTEM] ?: false),
+        )
+    }
+
+    suspend fun isSandboxNow(prefKey: String): Boolean {
+        var master = false
+        var flag = false
+        dataStore.data.map { it[DEVELOPER_MODE_ENABLED] ?: false }.let {
+            master = try { it.first() } catch (_: Exception) { false }
+        }
+        if (!master) return false
+        dataStore.data.map { it[spoofKeyFor(prefKey)] ?: false }.let {
+            flag = try { it.first() } catch (_: Exception) { false }
+        }
+        return flag
+    }
+
+    suspend fun setDeveloperModeEnabled(enabled: Boolean) {
+        dataStore.edit { it[DEVELOPER_MODE_ENABLED] = enabled }
+    }
+
+    suspend fun setLastSeenVersionCode(code: Long) {
+        dataStore.edit { it[LAST_SEEN_VERSION_CODE] = code }
+    }
+
+    suspend fun setDevVerboseLogging(enabled: Boolean) { dataStore.edit { it[DEV_VERBOSE_LOGGING] = enabled } }
+    suspend fun setDevMockDelayMs(ms: Int) { dataStore.edit { it[DEV_MOCK_DELAY_MS] = ms.coerceIn(0, 10000) } }
+    suspend fun setDevPerfHud(enabled: Boolean) { dataStore.edit { it[DEV_PERF_HUD] = enabled } }
+    suspend fun setDevForceOffline(enabled: Boolean) { dataStore.edit { it[DEV_FORCE_OFFLINE] = enabled } }
+    suspend fun setDevCrashOnNextLaunch(enabled: Boolean) { dataStore.edit { it[DEV_CRASH_ON_NEXT_LAUNCH] = enabled } }
+    suspend fun setDevShakeToOpen(enabled: Boolean) { dataStore.edit { it[DEV_SHAKE_TO_OPEN] = enabled } }
+    suspend fun setSpoofParamsJson(json: String) { dataStore.edit { it[SPOOF_PARAMS_JSON] = json.take(20000) } }
+
+    suspend fun setSpoofFlag(prefKey: String, enabled: Boolean) {
+        dataStore.edit { it[spoofKeyFor(prefKey)] = enabled }
+    }
+
+    suspend fun clearAllSpoofs() {
+        dataStore.edit {
+            it[SPOOF_BATTERY] = false
+            it[SPOOF_DEVICE] = false
+            it[SPOOF_NETWORK] = false
+            it[SPOOF_STEPS] = false
+            it[SPOOF_SENSORS] = false
+            it[SPOOF_MUSIC] = false
+            it[SPOOF_DOWNLOADER] = false
+            it[SPOOF_CLEANER] = false
+            it[SPOOF_NOTIFICATIONS] = false
+            it[SPOOF_CLIPBOARD] = false
+            it[SPOOF_TASKS] = false
+            it[SPOOF_QR] = false
+            it[SPOOF_TIMERS] = false
+            it[SPOOF_UPDATE_NEWS] = false
+            it[SPOOF_WHISPER] = false
+            it[SPOOF_SEARCH] = false
+            it[SPOOF_FILES] = false
+            it[SPOOF_SYSTEM] = false
+        }
+    }
+
+    /**
+     * Version-change guard: if [currentVersionCode] differs from stored,
+     * disable master + all spoofs to avoid stale fakes after update.
+     * Returns true when a reset happened.
+     */
+    suspend fun ensureDeveloperModeVersion(currentVersionCode: Long): Boolean {
+        var stored = 0L
+        try {
+            stored = dataStore.data.map { it[LAST_SEEN_VERSION_CODE] ?: 0L }.first()
+        } catch (_: Exception) { }
+        if (stored == 0L) {
+            dataStore.edit { it[LAST_SEEN_VERSION_CODE] = currentVersionCode }
+            return false
+        }
+        if (stored == currentVersionCode) return false
+        dataStore.edit {
+            it[LAST_SEEN_VERSION_CODE] = currentVersionCode
+            it[DEVELOPER_MODE_ENABLED] = false
+            it[DEV_CRASH_ON_NEXT_LAUNCH] = false
+            it[DEV_FORCE_OFFLINE] = false
+            it[SPOOF_BATTERY] = false
+            it[SPOOF_DEVICE] = false
+            it[SPOOF_NETWORK] = false
+            it[SPOOF_STEPS] = false
+            it[SPOOF_SENSORS] = false
+            it[SPOOF_MUSIC] = false
+            it[SPOOF_DOWNLOADER] = false
+            it[SPOOF_CLEANER] = false
+            it[SPOOF_NOTIFICATIONS] = false
+            it[SPOOF_CLIPBOARD] = false
+            it[SPOOF_TASKS] = false
+            it[SPOOF_QR] = false
+            it[SPOOF_TIMERS] = false
+            it[SPOOF_UPDATE_NEWS] = false
+            it[SPOOF_WHISPER] = false
+            it[SPOOF_SEARCH] = false
+            it[SPOOF_FILES] = false
+            it[SPOOF_SYSTEM] = false
+        }
+        return true
+    }
+
+    suspend fun resetDeveloperMode() {
+        dataStore.edit {
+            it[DEVELOPER_MODE_ENABLED] = false
+            it[DEV_CRASH_ON_NEXT_LAUNCH] = false
+            it[DEV_FORCE_OFFLINE] = false
+        }
+        clearAllSpoofs()
+    }
+
+    /**
+     * Dev-console DataStore inspector snapshot. Values for sensitive keys
+     * (password/token/secret/auth/key/supabase/whisper) are redacted —
+     * the export bundle must never leak credentials.
+     */
+    suspend fun snapshotPrefs(): Map<String, String> {
+        return try {
+            val prefs = dataStore.data.first()
+            prefs.asMap().entries
+                .map { (k, v) -> k.name to v.toString() }
+                .sortedBy { it.first }
+                .associate { (name, value) ->
+                    val lower = name.lowercase()
+                    val sensitive = listOf(
+                        "password", "token", "secret", "auth", "supabase",
+                        "whisper", "crypt", "biometric", "keystore", "private",
+                    ).any { lower.contains(it) }
+                    name to if (sensitive) "••• redacted •••" else value.take(300)
+                }
+        } catch (_: Exception) {
+            emptyMap()
         }
     }
 

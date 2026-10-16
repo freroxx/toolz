@@ -80,6 +80,7 @@ fun SettingsScreen(
     onNavigateToBackupRestore: () -> Unit,
     onNavigateToToolShortcuts: () -> Unit = {},
     onNavigateToAppSkin: () -> Unit = {},
+    onNavigateToDeveloperMode: () -> Unit = {},
     onResetOnboarding: () -> Unit,
     newsViewModel: com.frerox.toolz.ui.screens.news.NewsViewModel = androidx.hilt.navigation.compose.hiltViewModel()
 ) {
@@ -87,6 +88,7 @@ fun SettingsScreen(
     val context = LocalContext.current
 
     val stepGoal by viewModel.stepGoal.collectAsState(initial = 10000)
+    val skinPresetId by viewModel.appIconPresetId.collectAsState(initial = "grape-haze")
     val pdfAiToolsEnabled by viewModel.pdfAiToolsEnabled.collectAsState(initial = true)
     val notepadAiToolsEnabled by viewModel.notepadAiToolsEnabled.collectAsState(initial = true)
 
@@ -190,6 +192,11 @@ fun SettingsScreen(
     var showResetDialog by remember { mutableStateOf(false) }
     val searchQuery by viewModel.searchQuery.collectAsState(initial = "")
 
+    val developerModeEnabled by viewModel.developerModeEnabled.collectAsState(initial = false)
+    val allSpoofFlags by viewModel.allSpoofFlags.collectAsState(initial = emptyMap())
+    var showDevWarningDialog by remember { mutableStateOf(false) }
+    val devActiveSpoofs = allSpoofFlags.values.count { it }
+
     var expandedSection by remember { mutableStateOf<String?>(null) }
 
     val folderLauncher = rememberLauncherForActivityResult(
@@ -256,6 +263,45 @@ fun SettingsScreen(
         PillTweaksPopup(
             viewModel = viewModel,
             onDismiss = { showPillTweaksPopup = false }
+        )
+    }
+
+    if (showDevWarningDialog) {
+        AlertDialog(
+            onDismissRequest = { showDevWarningDialog = false },
+            title = { Text("Enable Developer Mode?", fontWeight = FontWeight.Black, letterSpacing = 1.sp) },
+            text = {
+                Text(
+                    "• Shows internal diagnostics and test tools.\n" +
+                        "• Spoof toggles show LOCAL FAKE DATA ONLY — e.g. fake Whisper chats never touch the server, fake downloads never use network.\n" +
+                        "• Can spam notifications, crash the app, or wipe test tables.\n" +
+                        "• Auto-disables after every app update."
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        vibrationManager?.vibrateLongClick()
+                        viewModel.setDeveloperModeEnabled(true)
+                        showDevWarningDialog = false
+                        onNavigateToDeveloperMode()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Text("ENABLE", fontWeight = FontWeight.Black)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    vibrationManager?.vibrateClick()
+                    showDevWarningDialog = false
+                }) {
+                    Text("CANCEL", fontWeight = FontWeight.Bold)
+                }
+            },
+            shape = RoundedCornerShape(40.dp),
+            containerColor = MaterialTheme.colorScheme.surface
         )
     }
 
@@ -352,38 +398,58 @@ fun SettingsScreen(
                     // 2. Section: APP SKIN (all visuals live here now)
                     StaggeredEntrance(index = 1) {
                         SettingsExpandableSection(
-                            title = "App Skin",
+                            title = stringResource(R.string.st_AppSkin_section_title),
                             icon = Icons.Rounded.Palette,
                             isExpanded = expandedSection == "APPSKIN" || searchQuery.isNotEmpty(),
                             onExpandToggle = { expandedSection = if (expandedSection == "APPSKIN") null else "APPSKIN" }
                         ) {
                             if (matches(searchQuery, "skin", "app skin", "icon", "icons", "catalog", "appearance", "theme pack", "preset", "look", "visual", "visuals", "theme", "dark", "light", "mode", "dynamic", "color", "material", "wallpaper", "palette", "accent", "gradient", "background", "performance", "animations", "blur", "top bar", "description")) {
                                 SettingsItem(
-                                    title = "App Skin & icons",
-                                    subtitle = "Presets, Icon Catalog and community skins",
+                                    title = stringResource(R.string.st_AppSkin_open_title),
+                                    subtitle = stringResource(R.string.st_AppSkin_open_subtitle),
                                     icon = Icons.Rounded.Palette,
                                     onClick = {
                                         vibrationManager?.vibrateClick()
                                         onNavigateToAppSkin()
                                     }
                                 ) {
+                                    // Live strip: the active icon first, then a peek at the catalog.
+                                    val active = com.frerox.toolz.data.skin.IconCatalog.find(skinPresetId)
+                                    val peek = remember(skinPresetId) {
+                                        listOf(active) +
+                                            com.frerox.toolz.data.skin.IconCatalog.BUILT_IN.filter { it.id != active.id }.take(4)
+                                    }
                                     Row(
-                                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
+                                            .horizontalFadingEdges(left = 8.dp, right = 8.dp),
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                                     ) {
-                                        com.frerox.toolz.ui.components.ToolzMark(
-                                            presetId = "grape-haze",
-                                            modifier = Modifier.size(52.dp),
-                                        )
-                                        com.frerox.toolz.ui.components.ToolzMark(
-                                            presetId = "midnight",
-                                            modifier = Modifier.size(52.dp),
-                                        )
-                                        com.frerox.toolz.ui.components.ToolzMark(
-                                            presetId = "lagoon",
-                                            modifier = Modifier.size(52.dp),
-                                        )
+                                        peek.forEachIndexed { index, spec ->
+                                            key(spec.id) {
+                                                Surface(
+                                                    shape = RoundedCornerShape(if (index == 0) 18.dp else 14.dp),
+                                                    color = if (index == 0) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                                                    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                                                    border = BorderStroke(
+                                                        if (index == 0) 2.dp else 1.dp,
+                                                        if (index == 0) MaterialTheme.colorScheme.primary
+                                                        else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                                                    ),
+                                                    modifier = Modifier.size(if (index == 0) 56.dp else 44.dp),
+                                                ) {
+                                                    Box(
+                                                        contentAlignment = Alignment.Center,
+                                                        modifier = Modifier.padding(if (index == 0) 7.dp else 6.dp),
+                                                    ) {
+                                                        com.frerox.toolz.ui.components.ToolzMark(
+                                                            presetId = spec.id,
+                                                            modifier = Modifier.fillMaxSize(),
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
                                         Spacer(Modifier.weight(1f))
                                         Icon(
                                             Icons.AutoMirrored.Rounded.KeyboardArrowRight,
@@ -1428,8 +1494,44 @@ fun SettingsScreen(
                         )
                     }
 
-                    // 11. Section: ABOUT
+                    // 11. Section: DEVELOPER MODE (visible toggle + warning popup + own screen)
                     StaggeredEntrance(index = 11) {
+                        SettingsExpandableSection(
+                            title = "DEVELOPER",
+                            icon = Icons.Rounded.BugReport,
+                            isExpanded = expandedSection == "DEVELOPER" || searchQuery.isNotEmpty(),
+                            onExpandToggle = { expandedSection = if (expandedSection == "DEVELOPER") null else "DEVELOPER" }
+                        ) {
+                            if (matches(searchQuery, "developer", "dev", "debug", "spoof", "fake", "test", "sandbox", "console")) {
+                                SettingsToggleItem(
+                                    title = "Developer Mode",
+                                    subtitle = if (developerModeEnabled) "ON • $devActiveSpoofs spoof${if (devActiveSpoofs == 1) "" else "s"} active • Tap row to open console" else "Internal tools, diagnostics & local test data",
+                                    icon = Icons.Rounded.BugReport,
+                                    checked = developerModeEnabled,
+                                    onCheckedChange = { enabled ->
+                                        if (enabled) {
+                                            showDevWarningDialog = true
+                                        } else {
+                                            vibrationManager?.vibrateClick()
+                                            viewModel.setDeveloperModeEnabled(false)
+                                        }
+                                    }
+                                )
+                                SettingsItem(
+                                    title = "Developer console",
+                                    subtitle = "Crashes, spoofs, logs, deep links — local only",
+                                    icon = Icons.Rounded.Terminal,
+                                    onClick = {
+                                        vibrationManager?.vibrateClick()
+                                        onNavigateToDeveloperMode()
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    // 12. Section: ABOUT
+                    StaggeredEntrance(index = 12) {
                         AboutSection(onCheckUpdate = onNavigateToUpdate, onNewsClick = onNavigateToNews)
                     }
 
