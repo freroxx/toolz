@@ -7,7 +7,7 @@ import org.junit.Test
 class AppSkinTest {
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
     @Test fun catalogHasManyPresets() {
-        assertTrue(IconCatalog.BUILT_IN.size >= 30)
+        assertTrue(IconCatalog.BUILT_IN.size >= 40)
         assertNotNull(IconCatalog.BUILT_IN.firstOrNull { it.id == IconCatalog.DEFAULT_ID })
     }
 
@@ -47,6 +47,25 @@ class AppSkinTest {
     @Test fun everyPresetHasGradient() {
         // The in-app gradient toggle works on all presets, so none may be flat-only.
         IconCatalog.BUILT_IN.forEach { assertNotNull("no bodyEnd: ${it.id}", it.bodyEnd) }
+    }
+
+    @Test fun fingerprintIgnoresIdentity() {
+        val a = SkinDto(id = "1", name = "One", author = "x", themeMode = "DARK", dynamicColor = false, iconPresetId = "lagoon")
+        val b = a.copy(id = "2", name = "Two", author = "y", createdAt = "t")
+        assertEquals(a.fingerprint(), b.fingerprint())
+        assertNotEquals(a.fingerprint(), b.copy(iconPresetId = "midnight").fingerprint())
+        assertNotEquals(a.fingerprint(), b.copy(themeMode = "LIGHT").fingerprint())
+        assertNotEquals(a.fingerprint(), b.copy(iconGradient = false).fingerprint())
+        assertNotEquals(a.fingerprint(), b.copy(iconBg = 0xFF112233).fingerprint())
+    }
+
+    @Test fun skinV2FieldsRoundTrip() {
+        val skin = SkinDto(id = "", name = "Full Look", themeMode = "SYSTEM", dynamicColor = true, iconPresetId = "dusk", iconGradient = false, iconBg = 0xFF112233, iconFg = 0xFF445566, iconStroke = 0xFF778899)
+        assertNull(skin.validate())
+        val raw = json.encodeToString(SkinDto.serializer(), skin)
+        val back = json.decodeFromString(SkinDto.serializer(), raw)
+        assertEquals(skin, back)
+        assertEquals(skin.fingerprint(), back.fingerprint())
     }
 
     @Test fun legacyNonEmpty() {

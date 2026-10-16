@@ -339,13 +339,15 @@ fun SkinsCatalogScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
+                    val dupe = r.exceptionOrNull() as? com.frerox.toolz.data.skin.DuplicateSkinException
                     Text(
-                        if (r.isSuccess) "Look shared!" else "Share failed",
+                        if (r.isSuccess) "Look shared!" else if (dupe != null) "Already exists" else "Share failed",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Black,
                     )
                     Text(
                         if (r.isSuccess) "It's pending review — watch its status in My shared looks."
+                        else if (dupe != null) "This exact look is already published as “${dupe.existingName}”. Tweak it first, then share again."
                         else (r.exceptionOrNull()?.message ?: "Something went wrong. Check your connection and try again."),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,

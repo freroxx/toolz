@@ -150,6 +150,12 @@ class SkinRepository @Inject constructor(
         val cleanAuthor = author.trim().take(32).ifBlank { null }
         val payload = skin.copy(id = "", name = clean, author = cleanAuthor, status = "draft")
         payload.validate()?.let { return Result.failure(IllegalArgumentException(it)) }
+        // No identical looks: if this exact config already exists in the feed,
+        // tell the user which one instead of queueing another draft.
+        try {
+            val dupe = _skins.value.firstOrNull { it.fingerprint() == payload.fingerprint() }
+            if (dupe != null) return Result.failure(DuplicateSkinException(dupe.name))
+        } catch (_: Exception) { }
         return try {
             val res = skinApi.submitSkin(SkinSubmitRequest(name = clean, skin = payload))
             if (res.ok && !res.id.isNullOrBlank()) {
@@ -158,6 +164,16 @@ class SkinRepository @Inject constructor(
                 Result.success(id)
             } else Result.failure(IllegalStateException(res.error ?: "Submit failed"))
         } catch (e: Exception) {
+            // Server-side duplicate guard (reinstalls / other devices): 409 carries the original name.
+            try {
+                val http = e as? retrofit2.HttpException
+                if (http?.code() == 409) {
+                    val raw = http.response()?.errorBody()?.string()
+                    val existing = org.json.JSONObject(raw ?: "").optString("existingName").ifBlank { null }
+                        ?: org.json.JSONObject(raw ?: "").optString("error").ifBlank { null }
+                    if (existing != null) return Result.failure(DuplicateSkinException(existing))
+                }
+            } catch (_: Exception) { }
             Result.failure(IllegalStateException(serverMessage(e), e))
         }
     }
@@ -194,6 +210,10 @@ class SkinRepository @Inject constructor(
         val rawShape = try { settingsRepository.appIconShape.first() } catch (_: Exception) { "HEXAGON" }
         // Canonical OCTAGON | CIRCLE; legacy HEXAGON/PILL parse in (PILL was removed).
         val shape = IconShape.parse(rawShape)?.name ?: "OCTAGON"
+        val iconGrad = try { settingsRepository.appIconGradientEnabled.first() } catch (_: Exception) { true }
+        val bgOv = try { settingsRepository.appIconBgOverride.first()?.toLong()?.and(0xFFFFFFFFL) } catch (_: Exception) { null }
+        val fgOv = try { settingsRepository.appIconFgOverride.first()?.toLong()?.and(0xFFFFFFFFL) } catch (_: Exception) { null }
+        val strokeOv = try { settingsRepository.appIconStrokeOverride.first()?.toLong()?.and(0xFFFFFFFFL) } catch (_: Exception) { null }
         return SkinDto(
             id = "",
             name = name.trim().take(32),
@@ -207,6 +227,10 @@ class SkinRepository @Inject constructor(
             iconAdaptTheme = adapt,
             iconFollowDynamic = follow,
             iconShape = shape,
+            iconGradient = iconGrad,
+            iconBg = bgOv,
+            iconFg = fgOv,
+            iconStroke = strokeOv,
         )
     }
 
@@ -226,6 +250,10 @@ class SkinRepository @Inject constructor(
             iconFollowDynamic = skin.iconFollowDynamic,
             iconShape = shape,
             activeSkinId = skin.id,
+            iconGradient = skin.iconGradient,
+            iconBg = skin.iconBg?.toInt(),
+            iconFg = skin.iconFg?.toInt(),
+            iconStroke = skin.iconStroke?.toInt(),
         )
         try { settingsRepository.pushRecentSkinId(skin.id) } catch (_: Exception) { }
     }

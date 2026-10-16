@@ -322,7 +322,8 @@ fun AppSkinScreen(
                     }
                 }
 
-                // Icon container
+                // Icon container — in-app frames. The home-screen tile shape is masked
+                // by your launcher, but its colors always follow the preset below.
                 SettingsItem(
                     title = "Icon shape",
                     subtitle = "Octagon is the classic mark · Circle is softer",
@@ -598,8 +599,41 @@ fun AppSkinScreen(
             Surface(shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surface) {
                 Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Share your look", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                    // Live preview of exactly what gets packaged.
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
+                        ToolzMarkThemed(
+                            presetId = presetId,
+                            isDark = isDark,
+                            dynamicColor = dynamicColor,
+                            scheme = scheme,
+                            shape = shape,
+                            adaptToTheme = adaptTheme,
+                            followDynamic = followDynamic,
+                            bgOverride = bgOv,
+                            fgOverride = fgOv,
+                            strokeOverride = strokeOv,
+                            iconGradient = iconGradient,
+                            modifier = Modifier.size(64.dp),
+                        )
+                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                "${themeMode.lowercase()} · ${if (dynamicColor) "dynamic" else "custom colors"}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                "${current.name.lowercase()} · ${(com.frerox.toolz.data.skin.IconShape.parse(shape)?.name ?: shape).lowercase()}${if (iconGradient) " · gradient" else ""}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                     Text(
-                        "Packages your theme + colors + icon as a community skin for review.",
+                        "Packages your theme + colors + icon (including gradient and overrides) as a community skin for review. Identical looks can't be shared twice.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -650,13 +684,15 @@ fun AppSkinScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     val ok = r.isSuccess
+                    val dupe = r.exceptionOrNull() as? com.frerox.toolz.data.skin.DuplicateSkinException
                     Text(
-                        if (ok) "Look shared!" else "Share failed",
+                        if (ok) "Look shared!" else if (dupe != null) "Already exists" else "Share failed",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Black,
                     )
                     Text(
                         if (ok) "It's pending review — you'll see Pending review, then Live or Not approved, right here in My shared looks."
+                        else if (dupe != null) "This exact look is already published as “${dupe.existingName}”. Tweak the theme, colors or icon to make it yours, then share again."
                         else (r.exceptionOrNull()?.message ?: "Something went wrong. Check your connection and try again."),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,

@@ -1225,6 +1225,10 @@ class SettingsRepository @Inject constructor(
         iconFollowDynamic: Boolean,
         iconShape: String,
         activeSkinId: String?,
+        iconGradient: Boolean = true,
+        iconBg: Int? = null,
+        iconFg: Int? = null,
+        iconStroke: Int? = null,
     ) {
         dataStore.edit { p ->
             p[THEME_MODE] = themeMode.take(16)
@@ -1237,6 +1241,10 @@ class SettingsRepository @Inject constructor(
             p[APP_ICON_FOLLOW_DYNAMIC] = iconFollowDynamic
             // Canonical OCTAGON | CIRCLE; legacy HEXAGON/PILL map in via IconShape.parse.
             p[APP_ICON_SHAPE] = (com.frerox.toolz.data.skin.IconShape.parse(iconShape)?.name ?: "OCTAGON")
+            p[APP_ICON_GRADIENT_ENABLED] = iconGradient
+            if (iconBg == null) p.remove(APP_ICON_BG_OVERRIDE) else p[APP_ICON_BG_OVERRIDE] = iconBg
+            if (iconFg == null) p.remove(APP_ICON_FG_OVERRIDE) else p[APP_ICON_FG_OVERRIDE] = iconFg
+            if (iconStroke == null) p.remove(APP_ICON_STROKE_OVERRIDE) else p[APP_ICON_STROKE_OVERRIDE] = iconStroke
             if (activeSkinId == null) p.remove(ACTIVE_SKIN_ID) else p[ACTIVE_SKIN_ID] = activeSkinId.take(64)
         }
     }
