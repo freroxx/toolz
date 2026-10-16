@@ -104,7 +104,12 @@ class OnboardingViewModel @Inject constructor(
 
     fun updateName(name: String) = _uiState.update { it.copy(name = name) }
     fun updateTheme(mode: String) = _uiState.update { it.copy(themeMode = mode) }
-    fun updateDynamicColor(enabled: Boolean) = _uiState.update { it.copy(dynamicColor = enabled) }
+    fun updateDynamicColor(enabled: Boolean) = _uiState.update {
+        // Mirror the settings default: leaving Dynamic colors turns Adapt on,
+        // so the picked icon's tuned theme applies unless the user opts out.
+        if (enabled) it.copy(dynamicColor = true)
+        else it.copy(dynamicColor = false, iconAdaptTheme = true)
+    }
     fun updateGradient(enabled: Boolean) = _uiState.update { it.copy(backgroundGradient = enabled) }
     fun updatePerformanceMode(enabled: Boolean) = _uiState.update { it.copy(performanceMode = enabled) }
     fun updateGroqKey(key: String) = _uiState.update { it.copy(groqApiKey = key) }

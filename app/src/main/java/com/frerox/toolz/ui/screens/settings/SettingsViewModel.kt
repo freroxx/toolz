@@ -173,7 +173,13 @@ class SettingsViewModel @Inject constructor(
 
     fun setStepGoal(goal: Int) = viewModelScope.launch { repository.setStepGoal(goal) }
     fun setThemeMode(mode: String) = viewModelScope.launch { repository.setThemeMode(mode) }
-    fun setDynamicColor(enabled: Boolean) = viewModelScope.launch { repository.setDynamicColor(enabled) }
+    fun setDynamicColor(enabled: Boolean) = viewModelScope.launch {
+        repository.setDynamicColor(enabled)
+        // Adapt to theme defaults on when leaving Dynamic colors, so the icon's
+        // tuned light/dark theme takes over accents immediately. The user can
+        // still switch Adapt off afterwards; that choice is respected.
+        if (!enabled) repository.setAppIconAdaptTheme(true)
+    }
     fun setCustomPrimaryColor(color: Int?) = viewModelScope.launch { repository.setCustomPrimaryColor(color) }
     fun setCustomSecondaryColor(color: Int?) = viewModelScope.launch { repository.setCustomSecondaryColor(color) }
     fun setBackgroundGradientEnabled(enabled: Boolean) = viewModelScope.launch { repository.setBackgroundGradientEnabled(enabled) }
