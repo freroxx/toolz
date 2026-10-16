@@ -71,7 +71,8 @@ class NetworkViewModel @Inject constructor(
     private val speedTestEngine: SpeedTestEngine,
     private val privilegedNetworkManager: PrivilegedNetworkManager,
     private val settingsRepository: SettingsRepository,
-    private val healthEngine: NetworkHealthEngine
+    private val healthEngine: NetworkHealthEngine,
+    private val gate: com.frerox.toolz.data.developer.SpoofGate,
 ) : ViewModel() {
 
     private val performanceMode = settingsRepository.performanceMode.stateIn(
@@ -104,6 +105,12 @@ class NetworkViewModel @Inject constructor(
     private var deviceScanJob: Job? = null
 
     init {
+        // DEV-SPOOF: live switch — sandbox freezes all monitors, fixture takes over.
+        viewModelScope.launch {
+            gate.active(com.frerox.toolz.data.developer.DevToolId.NETWORK).collect { spoofed ->
+                if (spoofed) emitSpoofNet()
+            }
+        }
         observeWifi()
         startPrivilegedStateMonitor()
         startPingMonitor()
@@ -111,9 +118,50 @@ class NetworkViewModel @Inject constructor(
         refreshSuite()
     }
 
+    /** True when the call must NOT run: logs + returns true. */
+    private fun blockedBySpoof(what: String): Boolean {
+        if (!gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.NETWORK)) return false
+        appendLog("[SPOOF] blocked $what — sandbox active (local only)")
+        return true
+    }
+
+    private fun emitSpoofNet() {
+        // DEV-SPOOF fixture: terrible hotel wifi. RAM-only, zero packets sent.
+        val p = gate.params.value
+        val now = System.currentTimeMillis()
+        updateState {
+            copy(
+                wifiState = com.frerox.toolz.data.network.WifiInfoState(
+                    rssi = -110,
+                    linkSpeed = 12,
+                    gateway = "192.0.2.1",
+                    ssid = p.networkSsid,
+                    bssid = "02:00:00:00:00:00",
+                    frequency = 2462,
+                    ipAddress = "192.0.2.44",
+                    wifiStandard = "Wi-Fi 4 (SPOOF)",
+                    band = "2.4 GHz",
+                    channel = 6,
+                    signalLevel = 1,
+                    rssiHistory = (wifiState.rssiHistory + -110).takeLast(60),
+                    isConnected = true,
+                ),
+                pingSamples = (pingSamples + com.frerox.toolz.data.network.PingSample(now, p.networkPingMs.toLong())).takeLast(60),
+                vpnStatus = com.frerox.toolz.data.network.VpnStatus.CONNECTED,
+                networkHealthScore = 4,
+                isRefreshingDns = false,
+                isRefreshingPublicIp = false,
+                isScanningDevices = false,
+                isScanningPorts = false,
+            )
+        }
+        android.util.Log.w("DevSpoof", "Network sandbox active — monitors frozen, ssid=${p.networkSsid}")
+    }
+
     fun dnsProviders(): List<DnsProvider> = dnsEngine.providerLibrary()
 
     fun refreshSuite() {
+        if (blockedBySpoof("refreshSuite")) { emitSpoofNet(); return }
         refreshDns()
         fetchPublicIp()
         viewModelScope.launch { refreshPrivilegedSnapshot(forceRebind = true) }
@@ -121,6 +169,7 @@ class NetworkViewModel @Inject constructor(
     }
 
     fun refreshDns(includeCustom: DnsProvider? = null) {
+        if (blockedBySpoof("dns benchmark")) return
         dnsJob?.cancel()
         dnsJob = viewModelScope.launch {
             updateState { copy(isRefreshingDns = true) }
@@ -147,6 +196,7 @@ class NetworkViewModel @Inject constructor(
         secondaryAddress: String?,
         hostname: String?
     ) {
+        if (blockedBySpoof("benchmark")) return
         val customProvider = dnsEngine.customProvider(
             label = label.ifBlank { "Custom DNS" },
             addresses = listOfNotNull(primaryAddress, secondaryAddress),
@@ -156,6 +206,7 @@ class NetworkViewModel @Inject constructor(
     }
 
     fun applyDnsProvider(provider: DnsProvider) {
+        if (blockedBySpoof("apply private DNS")) return
         viewModelScope.launch {
             if (!ensurePrivilegedAccess("Shizuku access is required to apply Private DNS.")) {
                 return@launch
@@ -180,6 +231,7 @@ class NetworkViewModel @Inject constructor(
     }
 
     fun applyCustomPrivateDns(hostname: String) {
+        if (blockedBySpoof("apply custom private DNS")) return
         viewModelScope.launch {
             if (!ensurePrivilegedAccess("Shizuku access is required to apply a custom Private DNS hostname.")) {
                 return@launch
@@ -204,6 +256,7 @@ class NetworkViewModel @Inject constructor(
     }
 
     fun resetPrivateDns() {
+        if (blockedBySpoof("reset private DNS")) return
         viewModelScope.launch {
             if (!ensurePrivilegedAccess("Shizuku access is required to reset Private DNS.")) {
                 return@launch
@@ -217,6 +270,7 @@ class NetworkViewModel @Inject constructor(
     }
 
     fun flushDnsCache() {
+        if (blockedBySpoof("flush DNS cache")) return
         viewModelScope.launch {
             if (!ensurePrivilegedAccess("Shizuku access is required to flush the system DNS cache.")) {
                 return@launch
@@ -230,6 +284,7 @@ class NetworkViewModel @Inject constructor(
     }
 
     fun fetchPublicIp() {
+        if (blockedBySpoof("public-ip fetch")) return
         viewModelScope.launch {
             updateState { copy(isRefreshingPublicIp = true) }
             // P4 fix: public IP was “not working” — now 4 fallbacks, text fallback, timeout 5s, robust parsing
@@ -269,6 +324,7 @@ class NetworkViewModel @Inject constructor(
     private var previouslySeenMacs: Set<String> = emptySet()
 
     fun scanSubnet() {
+        if (blockedBySpoof("subnet scan")) return
         deviceScanJob?.cancel()
         deviceScanJob = viewModelScope.launch {
             val gateway = uiState.value.wifiState.gateway
@@ -332,6 +388,7 @@ class NetworkViewModel @Inject constructor(
     }
 
     fun scanGatewayPorts() {
+        if (blockedBySpoof("gateway port scan")) return
         viewModelScope.launch {
             val gateway = uiState.value.wifiState.gateway
             if (gateway == "0.0.0.0") {
@@ -352,6 +409,7 @@ class NetworkViewModel @Inject constructor(
     val hostPortScanning: kotlinx.coroutines.flow.StateFlow<Set<String>> = _hostPortScanning.asStateFlow()
 
     fun scanPortsForHost(ip: String) {
+        if (blockedBySpoof("port scan")) return
         if (_hostPortScanning.value.contains(ip)) return
         viewModelScope.launch {
             _hostPortScanning.update { it + ip }
@@ -366,6 +424,7 @@ class NetworkViewModel @Inject constructor(
 
     /** P9 WoL — fire magic packet, surface result */
     fun wakeHost(mac: String, ip: String) {
+        if (blockedBySpoof("wake-on-lan")) return
         viewModelScope.launch {
             if (mac == "Unknown") { emitEvent("No MAC — scan again to learn address."); return@launch }
             appendLog("> WoL $mac → $ip:9")
@@ -376,6 +435,7 @@ class NetworkViewModel @Inject constructor(
     }
 
     fun runSpeedTest() {
+        if (blockedBySpoof("speed test")) return
         viewModelScope.launch {
             updateState {
                 copy(
@@ -422,6 +482,7 @@ class NetworkViewModel @Inject constructor(
     }
 
     fun toggleMobileData(enabled: Boolean) {
+        if (blockedBySpoof("toggle mobile data")) return
         viewModelScope.launch {
             if (!ensurePrivilegedAccess("Shizuku access is required to toggle mobile data.")) {
                 return@launch
@@ -436,6 +497,7 @@ class NetworkViewModel @Inject constructor(
 
     private var traceJob: Job? = null
     fun runTraceRoute(target: String = "1.1.1.1") {
+        if (blockedBySpoof("traceroute")) return
         val safeTarget = target.trim().takeIf { Regex("^[0-9A-Za-z._-]+$").matches(it) } ?: "1.1.1.1"
         traceJob?.cancel()
         traceJob = viewModelScope.launch {
@@ -470,6 +532,8 @@ class NetworkViewModel @Inject constructor(
     private fun observeWifi() {
         viewModelScope.launch {
             networkMonitor.observeWifiInfo().collect { wifi ->
+                // DEV-SPOOF: real wifi must not overwrite the fixture.
+                if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.NETWORK)) return@collect
                 val history = (_uiState.value.wifiState.rssiHistory + wifi.rssi).takeLast(60)
                 updateState {
                     copy(
@@ -533,6 +597,14 @@ class NetworkViewModel @Inject constructor(
         viewModelScope.launch {
             while (isActive) {
                 if (!screenActive) { delay(4_000); continue }
+                // DEV-SPOOF: no ICMP while sandboxed — append the slider fixture.
+                if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.NETWORK)) {
+                    val p = gate.params.value
+                    val history = (uiState.value.pingSamples + com.frerox.toolz.data.network.PingSample(System.currentTimeMillis(), p.networkPingMs.toLong())).takeLast(60)
+                    updateState { copy(pingSamples = history, stabilityInfo = buildStability(history)) }
+                    delay(1_000)
+                    continue
+                }
                 val gateway = uiState.value.wifiState.gateway
                 if (gateway != "0.0.0.0") {
                     val latency = measurePing(gateway)

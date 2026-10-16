@@ -60,6 +60,7 @@ import javax.inject.Inject
 class DeviceInfoViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val specsRepository: DeviceSpecsRepository,
+    private val gate: com.frerox.toolz.data.developer.SpoofGate,
 ) : ViewModel() {
 
     // 1. Smart Query Builder — produces the optimal query for our GSMArena server engine.
@@ -173,8 +174,51 @@ class DeviceInfoViewModel @Inject constructor(
     val uiState = _uiState.asStateFlow()
 
     init {
+        // DEV-SPOOF: live switch — sandbox replaces local + remote specs with fixtures.
+        viewModelScope.launch {
+            gate.active(com.frerox.toolz.data.developer.DevToolId.DEVICE).collect { spoofed ->
+                if (spoofed) emitSpoof()
+            }
+        }
         // Initial silent retrieval utilizing server edge cache signatures
-        refresh(refreshLocal = false, query = defaultModelQuery)
+        if (!gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.DEVICE)) {
+            refresh(refreshLocal = false, query = defaultModelQuery)
+        } else {
+            emitSpoof()
+        }
+    }
+
+    private fun emitSpoof() {
+        // DEV-SPOOF fixture: flagship-that-is-almost-full. RAM-only, zero network.
+        val p = gate.params.value
+        val base = try { _uiState.value.localDevice } catch (_: Exception) { null }
+        val fake = base?.copy(
+            brand = "Google (SPOOF)",
+            model = p.deviceModel,
+            device = "spoof_panther",
+            hardware = "spoof_qcom",
+            soc = "Snapdragon 8 Gen 4 (SPOOF)",
+            totalRam = 16L * 1024 * 1024 * 1024,
+            availRam = 214L * 1024 * 1024,
+            totalInternal = 512L * 1024 * 1024 * 1024,
+            availInternal = 512L * 1024 * 1024 * 1024 * (100 - p.storageFullPct) / 100,
+            wifiIp = "192.0.2.44",
+            isRooted = true,
+            batteryLevel = p.batteryLevel,
+        )
+        _uiState.update {
+            it.copy(
+                localDevice = fake ?: it.localDevice,
+                queryModel = p.deviceModel,
+                remoteSpec = null,
+                isRemoteLoading = false,
+                isRefreshing = false,
+                remoteError = null,
+                lastUpdatedMillis = System.currentTimeMillis(),
+                isFromCache = false,
+            )
+        }
+        android.util.Log.w("DevSpoof", "Device sandbox active — spec API skipped, model=${p.deviceModel}")
     }
 
     fun refresh() {
@@ -200,6 +244,11 @@ class DeviceInfoViewModel @Inject constructor(
 
     // 4. Cleaned baseline refresh scheduler
     private fun refresh(refreshLocal: Boolean, query: String) {
+        // DEV-SPOOF: never touch disk-heavy scan or network while sandboxed.
+        if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.DEVICE)) {
+            emitSpoof()
+            return
+        }
         viewModelScope.launch {
             val targetQuery = query
 
@@ -223,6 +272,11 @@ class DeviceInfoViewModel @Inject constructor(
 
     // 5. Single-Flight Server Search (Vercel serverless layer handles internal fallbacks)
     private suspend fun executeSearch(query: String, forceRefresh: Boolean = false) {
+        // DEV-SPOOF: spec API never fires while sandboxed.
+        if (gate.isActive(com.frerox.toolz.data.developer.DevToolId.DEVICE)) {
+            android.util.Log.w("DevSpoof", "Blocked device spec fetch (sandbox)")
+            return
+        }
         try {
             val result = withContext(Dispatchers.IO) {
                 specsRepository.getDeviceSpecs(query, forceRefresh = forceRefresh)

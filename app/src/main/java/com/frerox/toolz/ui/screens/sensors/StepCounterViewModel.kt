@@ -90,7 +90,8 @@ class StepCounterViewModel @Inject constructor(
     private val chatRepository: ChatRepository,
     private val aiSettingsManager: AiSettingsManager,
     private val offlineManager: OfflineManager,
-    private val aiDao: com.frerox.toolz.data.ai.AiDao
+    private val aiDao: com.frerox.toolz.data.ai.AiDao,
+    private val gate: com.frerox.toolz.data.developer.SpoofGate,
 ) : ViewModel() {
 
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
@@ -180,7 +181,7 @@ class StepCounterViewModel @Inject constructor(
         stepRepository.getStepsForLastNDays(days)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val uiState: StateFlow<StepState> = combine(
+    private val realUiState: StateFlow<StepState> = combine(
         stepRepository.currentSteps,
         settingsRepository.stepGoal,
         settingsRepository.stepCounterEnabled,
@@ -301,6 +302,29 @@ class StepCounterViewModel @Inject constructor(
             motionStatus = motionStatus
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), StepState())
+
+    /** Public state: sandbox overrides step count + derived stats with slider fixtures. */
+    val uiState: StateFlow<StepState> = realUiState
+        .map { s ->
+            if (!gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.STEPS)) return@map s
+            val p = gate.params.value
+            val distKm = StepTrackerUtils.calculateDistanceKm(p.stepsToday, s.stepLength)
+            val isMetric = s.measurementSystem == "Metric"
+            android.util.Log.w("DevSpoof", "Steps sandbox active — faking ${p.stepsToday} steps")
+            s.copy(
+                steps = p.stepsToday,
+                isSensorPresent = true,
+                distanceDisplay = if (isMetric) distKm else StepTrackerUtils.kmToMiles(distKm),
+                calories = StepTrackerUtils.calculateCalories(p.stepsToday, s.caloriesPer1k),
+                moveMinutes = StepTrackerUtils.calculateMoveMinutes(p.stepsToday),
+                bestDaySteps = maxOf(s.bestDaySteps, p.stepsToday),
+                averageSteps = p.stepsToday / 7,
+                streak = 7,
+                motionStatus = "SPOOF",
+                debugLogs = listOf("SPOOF sandbox: fake ${p.stepsToday} steps (local only)"),
+            )
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), StepState())
 
     val trendRange: StateFlow<String> = _trendRange
 
