@@ -110,6 +110,10 @@ class WhisperRepository @Inject constructor(
     internal val groupDao: WhisperGroupDao,
     // V6-R7 AVATARS: encrypted-avatar resolver (memory+disk cache) for wipe hooks.
     internal val avatarLoader: com.frerox.toolz.data.whisper.WhisperAvatarLoader,
+    // DEV-SPOOF: controlled local-only sandbox. When spoof_whisper is active
+    // (master ON), every network entry point below aborts before touching
+    // Supabase — sandbox threads are RAM fixtures in FakeWhisperSandbox.
+    private val settingsRepository: com.frerox.toolz.data.settings.SettingsRepository,
 ) {
     internal companion object {
         const val MAX_MESSAGE_CHARS = 8_192
@@ -1377,6 +1381,13 @@ class WhisperRepository @Inject constructor(
         content: String,
         replyToId: String? = null
     ): Result<WhisperMessage> = runCatching {
+        // DEV-SPOOF gate: sandboxed Whisper never reaches the server.
+        try {
+            if (settingsRepository.isSandboxNow("spoof_whisper")) {
+                android.util.Log.w("DevSpoof", "Blocked Whisper sendMessage — sandbox active (local only)")
+                throw com.frerox.toolz.data.developer.SpoofSandboxException(com.frerox.toolz.data.developer.DevToolId.WHISPER)
+            }
+        } catch (e: com.frerox.toolz.data.developer.SpoofSandboxException) { throw e } catch (_: Exception) { }
         val currentId = myId
         // V6-R6: every send-failure exit names itself in diagnostics — field exports
         // previously showed only "IllegalStateException" with zero attribution.
@@ -1574,6 +1585,13 @@ class WhisperRepository @Inject constructor(
         expiresAfterSeconds: Long? = null,
         replyToId: String? = null,
     ): Result<WhisperMessage> = runCatching {
+        // DEV-SPOOF gate: sandboxed Whisper never uploads ciphertext.
+        try {
+            if (settingsRepository.isSandboxNow("spoof_whisper")) {
+                android.util.Log.w("DevSpoof", "Blocked Whisper sendEncryptedImage — sandbox active (local only)")
+                throw com.frerox.toolz.data.developer.SpoofSandboxException(com.frerox.toolz.data.developer.DevToolId.WHISPER)
+            }
+        } catch (e: com.frerox.toolz.data.developer.SpoofSandboxException) { throw e } catch (_: Exception) { }
         require(mimeType in SUPPORTED_IMAGE_TYPES) { "Whisper supports JPEG, PNG, and WebP images." }
         require(expiresAfterSeconds == null || expiresAfterSeconds in MIN_IMAGE_EXPIRY_SECONDS..MAX_IMAGE_EXPIRY_SECONDS) {
             "Disappearing images must expire between 1 minute and 180 days."
@@ -2924,6 +2942,10 @@ class WhisperRepository @Inject constructor(
     }
 
     suspend fun sendTypingStatus(targetUserId: String, isTyping: Boolean) {
+        // DEV-SPOOF gate: no typing signals leave the device in sandbox.
+        try {
+            if (settingsRepository.isSandboxNow("spoof_whisper")) return
+        } catch (_: Exception) { }
         // V4-FIX (field report): typing died when the plaintext R-M1 emissions were
         // removed. Restored with an ENCRYPTED payload — the boolean is sealed with the
         // pairwise attachment cipher (bound AAD), so eavesdroppers on the public
