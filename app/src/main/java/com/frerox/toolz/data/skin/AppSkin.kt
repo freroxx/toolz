@@ -94,6 +94,19 @@ object IconCatalog {
         IconSpec("dusk", "Dusk", tag = "Dark", rim = 0xFFA78BFA, bodyStart = 0xFF2E1A5E, bodyEnd = 0xFF100826, disc = 0xFFEDE9FE),
         IconSpec("moss", "Moss", tag = "Dark", rim = 0xFFA8D5BA, bodyStart = 0xFF1E4D3B, bodyEnd = 0xFF0A241C, disc = 0xFFC7F0D8),
         IconSpec("amber", "Amber", tag = "Vivid", rim = 0xFF7A4A00, bodyStart = 0xFFFFB703, bodyEnd = 0xFFFB8500, disc = 0xFF402E00),
+        // --- Second wave ---
+        IconSpec("bubblegum", "Bubblegum", tag = "Vivid", rim = 0xFFFFE3EE, bodyStart = 0xFFF06292, bodyEnd = 0xFFAD1457, disc = 0xFFFFFFFF),
+        IconSpec("tangerine", "Tangerine", tag = "Vivid", rim = 0xFF5D3A00, bodyStart = 0xFFFFA726, bodyEnd = 0xFFFB8C00, disc = 0xFF402600),
+        IconSpec("lime", "Lime", tag = "Vivid", rim = 0xFF2E4400, bodyStart = 0xFF9BC53D, bodyEnd = 0xFF4C6A00, disc = 0xFFFFFFFF),
+        IconSpec("teal-pop", "Teal Pop", tag = "Vivid", rim = 0xFF00332E, bodyStart = 0xFF2DD4BF, bodyEnd = 0xFF0F766E, disc = 0xFF00332E),
+        IconSpec("sky", "Sky", tag = "Light", rim = 0xFF0C4A6E, bodyStart = 0xFFE0F2FE, bodyEnd = 0xFF7DD3FC, disc = 0xFF0C4A6E),
+        IconSpec("indigo-pop", "Indigo Pop", tag = "Vivid", rim = 0xFFE0E7FF, bodyStart = 0xFF6366F1, bodyEnd = 0xFF3730A3, disc = 0xFFFFFFFF),
+        IconSpec("violet-haze", "Violet Haze", tag = "Light", rim = 0xFF4C1D95, bodyStart = 0xFFF3E8FF, bodyEnd = 0xFFC4B5FD, disc = 0xFF4C1D95),
+        IconSpec("mocha", "Mocha", tag = "Dark", rim = 0xFFD7CCC8, bodyStart = 0xFF4E342E, bodyEnd = 0xFF211512, disc = 0xFFEFDCD2),
+        IconSpec("olive", "Olive", tag = "Dark", rim = 0xFFA8BD6E, bodyStart = 0xFF556B2F, bodyEnd = 0xFF2A3500, disc = 0xFFF1F5D6),
+        IconSpec("rose-gold", "Rose Gold", tag = "Light", rim = 0xFF7A4A2E, bodyStart = 0xFFF7D8C4, bodyEnd = 0xFFE8A87C, disc = 0xFF7A4A2E),
+        IconSpec("storm", "Storm", tag = "Mono", rim = 0xFF616161, bodyStart = 0xFF757575, bodyEnd = 0xFF212121, disc = 0xFFFFFFFF),
+        IconSpec("crimson-deep", "Crimson Deep", tag = "Dark", rim = 0xFFFF8A80, bodyStart = 0xFF7F1D1D, bodyEnd = 0xFF2A0808, disc = 0xFFFFD9DE),
         // --- Adaptive ---
         // system-auto: Grape Haze, body dimmed in dark theme.
         IconSpec("system-auto", "System Auto", tag = "Adaptive", rim = 0xFFDFBCFF, bodyStart = 0xFF8534CE, bodyEnd = 0xFFD5B9EE, disc = 0xFFFFFFFF, adaptToTheme = true),
@@ -127,6 +140,10 @@ data class SkinDto(
     @SerialName("iconAdaptTheme") val iconAdaptTheme: Boolean = true,
     @SerialName("iconFollowDynamic") val iconFollowDynamic: Boolean = true,
     @SerialName("iconShape") val iconShape: String = "HEXAGON",
+    @SerialName("iconGradient") val iconGradient: Boolean = true,
+    @SerialName("iconBg") val iconBg: Long? = null,       // ARGB Long overrides, null = preset
+    @SerialName("iconFg") val iconFg: Long? = null,
+    @SerialName("iconStroke") val iconStroke: Long? = null,
     @SerialName("featured") val featured: Boolean = false,
     @SerialName("status") val status: String = "published",
     @SerialName("createdAt") val createdAt: String = "",
@@ -140,7 +157,32 @@ data class SkinDto(
         if (IconCatalog.BUILT_IN.none { it.id == iconPresetId } && iconPresetId != "custom") return "Unknown icon"
         return null
     }
+
+    /**
+     * Canonical identity of a look: every field [SkinRepository.apply] writes,
+     * nothing it doesn't (no id/name/author/timestamps). Two skins with equal
+     * fingerprints look identical on device.
+     */
+    fun fingerprint(): String = listOf(
+        themeMode.uppercase(),
+        dynamicColor.toString(),
+        (primary ?: -1L).toString(),
+        (secondary ?: -1L).toString(),
+        gradient.toString(),
+        IconCatalog.find(iconPresetId).id,
+        iconAdaptTheme.toString(),
+        iconFollowDynamic.toString(),
+        (IconShape.parse(iconShape)?.name ?: "OCTAGON"),
+        iconGradient.toString(),
+        (iconBg ?: -1L).toString(),
+        (iconFg ?: -1L).toString(),
+        (iconStroke ?: -1L).toString(),
+    ).joinToString("|")
 }
+
+/** Thrown by [SkinRepository.submit] when the exact look already exists. */
+class DuplicateSkinException(val existingName: String) :
+    IllegalStateException("This look already exists as “$existingName”")
 
 @Serializable
 data class SkinFeedDto(
