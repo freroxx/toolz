@@ -18,22 +18,20 @@
 package com.frerox.toolz.worker
 
 import android.app.DownloadManager
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import androidx.core.app.NotificationCompat
-import com.frerox.toolz.R
+import android.content.pm.PackageInstaller
+import android.util.Log
 import com.frerox.toolz.data.settings.SettingsRepository
+import com.frerox.toolz.data.update.PendingUpdate
+import com.frerox.toolz.data.update.UpdateInstaller
+import com.frerox.toolz.data.update.UpdateManager
+import com.frerox.toolz.data.update.UpdateNotifications
 import com.frerox.toolz.ui.screens.utils.InstallHelper
-import com.frerox.toolz.util.NotificationHelper
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import java.io.File
 import javax.inject.Inject
 
@@ -43,52 +41,145 @@ class UpdateReceiver : BroadcastReceiver() {
     @Inject
     lateinit var settingsRepository: SettingsRepository
 
+    @Inject
+    lateinit var updateManager: UpdateManager
+
+    @Inject
+    lateinit var installer: UpdateInstaller
+
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action == DownloadManager.ACTION_DOWNLOAD_COMPLETE) {
-            val downloadId = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1)
-            if (downloadId == -1L) return
-
-            val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-            val query = DownloadManager.Query().setFilterById(downloadId)
-            val cursor = downloadManager.query(query)
-
-            if (cursor.moveToFirst()) {
-                val statusIndex = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
-                if (cursor.getInt(statusIndex) == DownloadManager.STATUS_SUCCESSFUL) {
-                    // Ownership check: only Toolz update APKs trigger the ready
-                    // notification. Without this any successful system download
-                    // with an existing file would post a phantom update row.
-                    val tracked = context.getSharedPreferences("toolz_update_dl", Context.MODE_PRIVATE)
-                        .getLong("update_download_id", -1L)
-                    val uriIdx = cursor.getColumnIndex(DownloadManager.COLUMN_URI)
-                    val titleIdx = cursor.getColumnIndex(DownloadManager.COLUMN_TITLE)
-                    val src = runCatching { cursor.getString(uriIdx) }.getOrNull().orEmpty()
-                    val title = runCatching { cursor.getString(titleIdx) }.getOrNull().orEmpty()
-                    val localUriIndex = cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI)
-                    val localUri = cursor.getString(localUriIndex)
-                    val apkFile = File(android.net.Uri.parse(localUri).path ?: "")
-
-                    val looksLikeToolzUpdate = downloadId == tracked ||
-                        src.contains("toolz", ignoreCase = true) ||
-                        title.contains("Toolz", ignoreCase = true) ||
-                        apkFile.name.startsWith("toolz_update_")
-                    if (apkFile.exists() && looksLikeToolzUpdate) {
-                        showReadyToInstallNotification(context, apkFile)
+        when (intent.action) {
+            DownloadManager.ACTION_DOWNLOAD_COMPLETE -> handleDownloadComplete(context, intent)
+            UpdateNotifications.ACTION_INSTALL_UPDATE,
+            "com.frerox.toolz.INSTALL_UPDATE" -> {
+                val apkPath = intent.getStringExtra("apk_path") ?: return
+                val apkFile = File(apkPath)
+                if (apkFile.exists()) {
+                    // Prefer session install; falls back to FileProvider VIEW.
+                    try {
+                        when (installer.install(apkFile)) {
+                            is com.frerox.toolz.data.update.InstallLaunch.NeedsPermission ->
+                                InstallHelper.installApk(context, apkFile)
+                            else -> Unit
+                        }
+                    } catch (_: Exception) {
+                        try { InstallHelper.installApk(context, apkFile) } catch (_: Exception) {}
                     }
                 }
             }
-            cursor.close()
-        } else if (intent.action == "com.frerox.toolz.INSTALL_UPDATE") {
-            val apkPath = intent.getStringExtra("apk_path") ?: return
-            val apkFile = File(apkPath)
-            if (apkFile.exists()) {
-                InstallHelper.installApk(context, apkFile)
+            UpdateNotifications.ACTION_DOWNLOAD_UPDATE,
+            "com.frerox.toolz.DOWNLOAD_UPDATE" -> {
+                val url = intent.getStringExtra("url") ?: return
+                val version = intent.getStringExtra("version") ?: "New"
+                val pending = updateManager.currentPendingOrNull()
+                if (pending != null && pending.downloadUrl == url) {
+                    updateManager.download(pending, autoInstall = true)
+                } else {
+                    // Notification arrived without live manager state (process restart):
+                    // fall back to system DownloadManager so the tap never dead-ends.
+                    downloadApk(context, version, url)
+                }
             }
-        } else if (intent.action == "com.frerox.toolz.DOWNLOAD_UPDATE") {
-            val url = intent.getStringExtra("url") ?: return
-            val version = intent.getStringExtra("version") ?: "New"
-            downloadApk(context, version, url)
+            UpdateNotifications.ACTION_CANCEL_UPDATE -> {
+                try { updateManager.cancelDownload() } catch (_: Exception) {}
+                try {
+                    val nm = context.getSystemService(Context.NOTIFICATION_SERVICE)
+                        as android.app.NotificationManager
+                    nm.cancel(UpdateNotifications.ID_UPDATE_DOWNLOAD)
+                } catch (_: Exception) {}
+            }
+            UpdateInstaller.ACTION_INSTALL_STATUS -> handleInstallStatus(context, intent)
         }
+    }
+
+    private fun handleInstallStatus(context: Context, intent: Intent) {
+        val status = try { installer.statusFromIntent(intent) } catch (_: Exception) { return }
+        val version = updateManager.currentPendingOrNull()?.version
+            ?: runBlocking {
+                try { settingsRepository.updateAvailableVersion.first() } catch (_: Exception) { null }
+            } ?: "new version"
+        when (status) {
+            is com.frerox.toolz.data.update.InstallStatus.Success ->
+                updateManager.onInstallSuccess(version)
+            is com.frerox.toolz.data.update.InstallStatus.Aborted -> {
+                // User cancelled the system installer — back to ready, no error noise.
+                Log.i(TAG, "install aborted by user")
+            }
+            is com.frerox.toolz.data.update.InstallStatus.Blocked ->
+                updateManager.onInstallFailure(status.msg)
+            is com.frerox.toolz.data.update.InstallStatus.Failed ->
+                updateManager.onInstallFailure(status.msg)
+        }
+        // Extra: PackageInstaller also sends MY_PACKAGE_REPLACED on success;
+        // state cleanup already handled above.
+        Unit.also { context } // keep context referenced for future use
+    }
+
+    private fun handleDownloadComplete(context: Context, intent: Intent) {
+        val downloadId = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1)
+        if (downloadId == -1L) return
+        val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        val cursor = downloadManager.query(DownloadManager.Query().setFilterById(downloadId))
+        try {
+            if (!cursor.moveToFirst()) return
+            val statusIdx = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
+            if (cursor.getInt(statusIdx) != DownloadManager.STATUS_SUCCESSFUL) return
+            val tracked = context.getSharedPreferences("toolz_update_dl", Context.MODE_PRIVATE)
+                .getLong("update_download_id", -1L)
+            val uriIdx = cursor.getColumnIndex(DownloadManager.COLUMN_URI)
+            val titleIdx = cursor.getColumnIndex(DownloadManager.COLUMN_TITLE)
+            val src = runCatching { cursor.getString(uriIdx) }.getOrNull().orEmpty()
+            val title = runCatching { cursor.getString(titleIdx) }.getOrNull().orEmpty()
+            val localUriIdx = cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI)
+            val localUri = runCatching { cursor.getString(localUriIdx) }.getOrNull() ?: return
+            val apkFile = File(android.net.Uri.parse(localUri).path ?: return)
+            val looksLikeToolzUpdate = downloadId == tracked ||
+                src.contains("toolz", ignoreCase = true) ||
+                title.contains("Toolz", ignoreCase = true) ||
+                apkFile.name.startsWith("toolz_update_")
+            if (!apkFile.exists() || !looksLikeToolzUpdate) return
+
+            val autoUpdate = runBlocking {
+                try { settingsRepository.autoUpdateEnabled.first() } catch (_: Exception) { false }
+            }
+            // Auto-install when allowed: the "way better updater" promise —
+            // download finishes → system installer opens without another tap.
+            if (autoUpdate || installer.canInstall()) {
+                try {
+                    val pending = updateManager.currentPendingOrNull()
+                    if (pending != null) {
+                        // Hand the file to the manager so UI shows Installing.
+                        updateManager.onLegacyDownloadReady(pending, apkFile)
+                    } else {
+                        installer.install(apkFile)
+                    }
+                    return
+                } catch (_: Exception) {
+                    // Fall through to the ready notification.
+                }
+            }
+            val fallback = updateManager.currentPendingOrNull()
+                ?: PendingUpdate(
+                    version = guessVersion(apkFile.name),
+                    versionCode = 0,
+                    changelog = "",
+                    downloadUrl = src.ifBlank { localUri },
+                    sizeBytes = apkFile.length().takeIf { it > 0 },
+                    sha256 = null,
+                    isCritical = false,
+                    abi = "",
+                    source = "download-manager"
+                )
+            UpdateNotifications.showReady(context, fallback, apkFile)
+        } finally {
+            cursor.close()
+        }
+    }
+
+    private fun guessVersion(fileName: String): String {
+        // toolz_update_1.2.3.apk or toolz_update_v1.2.3.apk
+        val core = fileName.removePrefix("toolz_update_").removeSuffix(".apk").removePrefix("v")
+        return core.ifBlank { "new version" }
     }
 
     private fun downloadApk(context: Context, version: String, url: String) {
@@ -100,35 +191,14 @@ class UpdateReceiver : BroadcastReceiver() {
             .setDestinationInExternalFilesDir(context, android.os.Environment.DIRECTORY_DOWNLOADS, "toolz_update_$version.apk")
             .setAllowedOverMetered(true)
             .setAllowedOverRoaming(true)
-
         val id = downloadManager.enqueue(request)
         context.getSharedPreferences("toolz_update_dl", Context.MODE_PRIVATE)
             .edit().putLong("update_download_id", id).apply()
     }
 
-    private fun showReadyToInstallNotification(context: Context, apkFile: File) {
-        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        NotificationHelper.createAllChannels(context)
-
-        val installIntent = Intent(context, UpdateReceiver::class.java).apply {
-            action = "com.frerox.toolz.INSTALL_UPDATE"
-            putExtra("apk_path", apkFile.absolutePath)
-        }
-        val installPendingIntent = PendingIntent.getBroadcast(context, 0, installIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-
-        val notification = NotificationHelper.baseBuilder(context, NotificationHelper.CHANNEL_APP_UPDATES)
-            .setSmallIcon(R.drawable.ic_stat_toolz)
-            .setContentTitle("Update Ready to Install")
-            .setContentText("Tap to complete the update process.")
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_SYSTEM)
-            .setAutoCancel(true)
-            .addAction(android.R.drawable.ic_menu_upload, "Install Now", installPendingIntent)
-            .build()
-
-        notificationManager.notify(NotificationHelper.ID_UPDATE_READY, notification)
-        // Collapse the "update available" row: keeping 8001 next to 8002 reads
-        // as a duplicate. The ready-to-install row supersedes it.
-        try { notificationManager.cancel(NotificationHelper.ID_APP_UPDATE) } catch (_: Exception) {}
+    companion object {
+        private const val TAG = "UpdateReceiver"
+        // Re-export for callers that reference the legacy constant.
+        const val EXTRA_STATUS = PackageInstaller.EXTRA_STATUS
     }
 }

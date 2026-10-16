@@ -1857,6 +1857,9 @@
             <intent-filter>
                 <action android:name="android.intent.action.DOWNLOAD_COMPLETE" />
                 <action android:name="com.frerox.toolz.INSTALL_UPDATE" />
+                <action android:name="com.frerox.toolz.DOWNLOAD_UPDATE" />
+                <action android:name="com.frerox.toolz.CANCEL_UPDATE" />
+                <action android:name="com.frerox.toolz.INSTALL_STATUS" />
             </intent-filter>
         </receiver>
 
