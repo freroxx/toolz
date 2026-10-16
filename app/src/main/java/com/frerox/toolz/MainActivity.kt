@@ -38,6 +38,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Update
@@ -185,6 +186,9 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
 
     @Inject
     lateinit var whisperAvatarLoader: com.frerox.toolz.data.whisper.WhisperAvatarLoader
+
+    @Inject
+    lateinit var updateManager: com.frerox.toolz.data.update.UpdateManager
 
     private val currentIntentState = mutableStateOf<Intent?>(null)
     private val currentIntentVersion = mutableStateOf(0L)
@@ -371,7 +375,7 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
                                 onboardingCompleted = onboardingCompleted
                             )
 
-                            UpdateOverlay(settingsRepository)
+                            UpdateOverlay(settingsRepository, updateManager)
                         }
                     }
 
@@ -611,42 +615,84 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
 }
 
 @Composable
-fun UpdateOverlay(settingsRepository: SettingsRepository) {
+fun UpdateOverlay(
+    settingsRepository: SettingsRepository,
+    updateManager: com.frerox.toolz.data.update.UpdateManager
+) {
     val availableVersion by settingsRepository.updateAvailableVersion.collectAsState(initial = null)
     val changelog by settingsRepository.updateChangelog.collectAsState(initial = null)
-    val apkUrl by settingsRepository.updateApkUrl.collectAsState(initial = null)
-
-    var showDialog by remember { mutableStateOf(false) }
-    val context = LocalContext.current
+    val managerState by updateManager.state.collectAsState()
     val scope = rememberCoroutineScope()
 
+    // Show the sheet when prefs hold an update and manager isn't terminal.
+    // Dismissing sets showSheet=false for this session; prefs clearing (Later/
+    // Skip via manager) keeps it gone across restarts.
+    var showSheet by remember { mutableStateOf(false) }
     LaunchedEffect(availableVersion) {
-        if (availableVersion != null) {
-            showDialog = true
-        }
+        if (availableVersion != null) showSheet = true
     }
-
-    if (showDialog && availableVersion != null) {
-        UpdateOverlayContent(
+    // Hide the promo sheet while actively downloading/installing — the
+    // Updater screen + notifications carry progress instead.
+    val busy = managerState is com.frerox.toolz.data.update.UpdateManagerState.Downloading ||
+        managerState is com.frerox.toolz.data.update.UpdateManagerState.Installing
+    if (showSheet && availableVersion != null && !busy) {
+        UpdateSheetContent(
             availableVersion = availableVersion ?: "",
             changelog = changelog ?: "",
-            apkUrl = apkUrl ?: "",
-            onDismiss = { showDialog = false },
-            onStartDownload = { url ->
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                context.startActivity(intent)
-            },
-            onIgnore = {
-                showDialog = false
+            downloadState = managerState,
+            onDismiss = { showSheet = false },
+            onDownload = {
+                showSheet = false
                 scope.launch {
-                    settingsRepository.setAvailableUpdate(null, null, null)
+                    val pending = updateManager.check(showNotification = false, force = true)
+                        ?: updateManager.currentPendingOrNull()
+                    if (pending != null) updateManager.download(pending, autoInstall = true)
                 }
+            },
+            onLater = {
+                showSheet = false
+                scope.launch { settingsRepository.setAvailableUpdate(null, null, null) }
+            },
+            onSkip = {
+                showSheet = false
+                updateManager.skipVersion(availableVersion ?: "")
+                scope.launch { settingsRepository.setAvailableUpdate(null, null, null) }
             }
         )
     }
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun UpdateSheetContent(
+    availableVersion: String,
+    changelog: String,
+    downloadState: com.frerox.toolz.data.update.UpdateManagerState,
+    onDismiss: () -> Unit,
+    onDownload: () -> Unit,
+    onLater: () -> Unit,
+    onSkip: () -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        shape = MaterialTheme.shapes.extraLarge,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+    ) {
+        UpdateOverlayContent(
+            availableVersion = availableVersion,
+            changelog = changelog,
+            apkUrl = "",
+            onDismiss = onDismiss,
+            onStartDownload = { onDownload() },
+            onIgnore = onLater,
+            downloadState = downloadState,
+            onSkip = onSkip
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun UpdateOverlayContent(
     availableVersion: String,
@@ -654,128 +700,106 @@ fun UpdateOverlayContent(
     apkUrl: String,
     onDismiss: () -> Unit,
     onStartDownload: (String) -> Unit,
-    onIgnore: () -> Unit
+    onIgnore: () -> Unit,
+    downloadState: com.frerox.toolz.data.update.UpdateManagerState? = null,
+    onSkip: (() -> Unit)? = null
 ) {
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+    val vibrationManager = com.frerox.toolz.ui.theme.LocalVibrationManager.current
+    val downloading = downloadState as? com.frerox.toolz.data.update.UpdateManagerState.Downloading
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp)
+            .padding(bottom = 40.dp)
+            .verticalScroll(rememberScrollState()),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            color = MaterialTheme.colorScheme.surface
+        Box(
+            modifier = Modifier
+                .size(96.dp)
+                .clip(RoundedCornerShape(28.dp))
+                .background(MaterialTheme.colorScheme.primaryContainer),
+            contentAlignment = Alignment.Center
         ) {
-            val vibrationManager = com.frerox.toolz.ui.theme.LocalVibrationManager.current
-            
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .toolzBackground()
-                    .padding(horizontal = 32.dp)
-                    .verticalScroll(rememberScrollState()),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Spacer(Modifier.statusBarsPadding().height(48.dp))
-
-                Box(
-                    modifier = Modifier
-                        .size(140.dp)
-                        .clip(RoundedCornerShape(40.dp))
-                        .background(MaterialTheme.colorScheme.primaryContainer),
-                    contentAlignment = Alignment.Center
-                ) {
-                    com.frerox.toolz.ui.components.CurrentToolzMark(
-                        modifier = Modifier.size(140.dp).clip(RoundedCornerShape(40.dp)),
-                    )
+            com.frerox.toolz.ui.components.CurrentToolzMark(
+                modifier = Modifier.size(96.dp).clip(RoundedCornerShape(28.dp)),
+            )
+        }
+        Spacer(Modifier.height(20.dp))
+        Text(
+            text = "NEW VERSION READY",
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Black,
+            color = MaterialTheme.colorScheme.primary,
+            letterSpacing = 4.sp
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = "v$availableVersion",
+            style = MaterialTheme.typography.displaySmall,
+            fontWeight = FontWeight.Black,
+            textAlign = TextAlign.Center
+        )
+        Spacer(Modifier.height(16.dp))
+        Surface(
+            modifier = Modifier.fillMaxWidth().heightIn(max = 220.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+            shape = RoundedCornerShape(24.dp),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+        ) {
+            MarkdownContent(
+                markdown = if (changelog.isBlank()) "No changelog provided for this release." else changelog,
+                modifier = Modifier.padding(20.dp).verticalScroll(rememberScrollState()),
+                baseFontSize = 14.sp,
+                textColor = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Spacer(Modifier.height(20.dp))
+        if (downloading != null) {
+            val pct = downloading.progress.toInt()
+            LinearProgressIndicator(
+                progress = { (pct / 100f).coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(8.dp)),
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Downloading… $pct% • ${com.frerox.toolz.data.update.formatBytes(downloading.bytesDownloaded)}" +
+                    if (downloading.totalBytes > 0) " of ${com.frerox.toolz.data.update.formatBytes(downloading.totalBytes)}" else "",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(8.dp))
+        }
+        ToolzExpressiveButton(
+            onClick = {
+                vibrationManager?.vibrateClick()
+                if (downloading == null) onStartDownload(apkUrl)
+                else onDismiss()
+            },
+            modifier = Modifier.fillMaxWidth().height(64.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+        ) {
+            Icon(if (downloading == null) Icons.Rounded.Download else Icons.Rounded.Close, null, modifier = Modifier.size(22.dp))
+            Spacer(Modifier.width(12.dp))
+            Text(
+                if (downloading == null) "DOWNLOAD & AUTO-INSTALL" else "OPEN UPDATER",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 1.sp
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = { vibrationManager?.vibrateClick(); onIgnore() }, modifier = Modifier.weight(1f).height(52.dp)) {
+                Text("LATER", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.outline)
+            }
+            if (onSkip != null) {
+                TextButton(onClick = { vibrationManager?.vibrateClick(); onSkip() }, modifier = Modifier.weight(1f).height(52.dp)) {
+                    Text("SKIP VERSION", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.outline)
                 }
-
-                Spacer(Modifier.height(40.dp))
-
-                Text(
-                    text = "NEW VERSION READY",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Black,
-                    color = MaterialTheme.colorScheme.primary,
-                    letterSpacing = 4.sp
-                )
-
-                Spacer(Modifier.height(8.dp))
-
-                Text(
-                    text = "v$availableVersion",
-                    style = MaterialTheme.typography.displayMedium,
-                    fontWeight = FontWeight.Black,
-                    textAlign = TextAlign.Center
-                )
-
-                Spacer(Modifier.height(32.dp))
-
-                Text(
-                    "WHAT'S NEW",
-                    modifier = Modifier.fillMaxWidth(),
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Black,
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
-                )
-
-                Spacer(Modifier.height(16.dp))
-
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                    shape = RoundedCornerShape(28.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
-                ) {
-                    MarkdownContent(
-                        markdown = if (changelog.isBlank()) "No changelog provided for this release." else changelog,
-                        modifier = Modifier.padding(24.dp),
-                        baseFontSize = 15.sp,
-                        textColor = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                Spacer(Modifier.height(48.dp))
-
-                ToolzExpressiveButton(
-                    onClick = {
-                        vibrationManager?.vibrateClick()
-                        if (apkUrl.isNotEmpty()) {
-                            onStartDownload(apkUrl)
-                        }
-                        onDismiss()
-                    },
-                    modifier = Modifier.fillMaxWidth().height(72.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                ) {
-                    Icon(Icons.Rounded.Download, null, modifier = Modifier.size(24.dp))
-                    Spacer(Modifier.width(16.dp))
-                    Text(
-                        "UPDATE NOW",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Black,
-                        letterSpacing = 1.sp
-                    )
-                }
-
-                Spacer(Modifier.height(16.dp))
-
-                TextButton(
-                    onClick = {
-                        vibrationManager?.vibrateClick()
-                        onIgnore()
-                    },
-                    modifier = Modifier.fillMaxWidth().height(56.dp)
-                ) {
-                    Text(
-                        "LATER",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.outline
-                    )
-                }
-                
-                Spacer(Modifier.navigationBarsPadding().height(32.dp))
             }
         }
+        Spacer(Modifier.navigationBarsPadding().height(8.dp))
     }
 }
 
@@ -784,32 +808,8 @@ fun UpdateOverlayContent(
 fun UpdateOverlayPreview() {
     ToolzTheme {
         UpdateOverlayContent(
-            availableVersion = "1.1.6",
-            changelog = """
-                # Major Update: Expressive UI
-                
-                This update brings the new **Material 3 Expressive** design to Toolz!
-                
-                ### Key Improvements:
-                - [x] Redesigned update screen
-                - [x] Full **Markdown** support in changelogs
-                - [ ] AI-powered smart suggestions (Coming soon)
-                
-                ### Bug Fixes:
-                * Fixed karaoke mode synchronization
-                * Improved battery efficiency for step counter
-                * Resolved crash on older devices
-                
-                | Module | Status |
-                |---|---|
-                | Core | Stable |
-                | UI | Redesigned |
-                | AI | Beta |
-                
-                > "The best tools are the ones that disappear when you use them."
-                
-                Check out the full list on [GitHub](https://github.com/freroxx/toolz)!
-            """.trimIndent(),
+            availableVersion = "1.1.8",
+            changelog = "### Highlights\n- Faster downloads\n- New installer",
             apkUrl = "https://github.com",
             onDismiss = {},
             onStartDownload = {},

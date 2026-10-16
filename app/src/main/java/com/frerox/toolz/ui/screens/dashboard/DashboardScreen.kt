@@ -2245,53 +2245,81 @@ fun ToolListCard(
 
 @Composable
 fun UpdateBanner(version: String, onUpdate: () -> Unit, onDismiss: () -> Unit) {
+    UpdateBannerRich(version = version, isCritical = false, downloadProgress = null, onUpdate = onUpdate, onDismiss = onDismiss)
+}
+
+@Composable
+fun UpdateBannerRich(
+    version: String,
+    isCritical: Boolean,
+    downloadProgress: Float?,
+    onUpdate: () -> Unit,
+    onDismiss: () -> Unit
+) {
     val vibrationManager = LocalVibrationManager.current
     ExpressiveCard(
         onClick    = { vibrationManager?.vibrateClick(); onUpdate() },
         modifier   = Modifier.fillMaxWidth().padding(bottom = 16.dp),
         shape      = MediumExpressiveShape,
-        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f),
+        containerColor = if (isCritical) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.95f) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f),
         elevation  = 0.dp,
-        border     = null, // Removed border
+        border     = null,
     ) {
-        Row(
-            modifier              = Modifier.padding(18.dp).fillMaxWidth(),
-            verticalAlignment     = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
+        Column(Modifier.padding(18.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment     = Alignment.CenterVertically,
-                modifier              = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Surface(Modifier.size(48.dp), SmallExpressiveShape, color = MaterialTheme.colorScheme.primary) {
-                    Box(contentAlignment = Alignment.Center) {
-                        com.frerox.toolz.ui.components.CurrentToolzMark(
-                            modifier = Modifier.size(48.dp).clip(SmallExpressiveShape),
+                Row(
+                    verticalAlignment     = Alignment.CenterVertically,
+                    modifier              = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    Surface(Modifier.size(48.dp), SmallExpressiveShape, color = if (isCritical) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary) {
+                        Box(contentAlignment = Alignment.Center) {
+                            com.frerox.toolz.ui.components.CurrentToolzMark(
+                                modifier = Modifier.size(48.dp).clip(SmallExpressiveShape),
+                            )
+                        }
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                if (isCritical) "CRITICAL UPDATE" else stringResource(R.string.st_DashboardScreen_q3r4),
+                                style         = MaterialTheme.typography.labelSmall,
+                                fontWeight    = FontWeight.Black,
+                                color         = if (isCritical) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer,
+                                letterSpacing = 1.2.sp
+                            )
+                        }
+                        Text("Upgrade to v$version",
+                            style      = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Bold,
+                            color      = (if (isCritical) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer).copy(alpha = 0.85f))
+                        Text(
+                            if (downloadProgress != null) "Downloading… ${downloadProgress.toInt()}%" else "Tap for changelog • auto-install",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = (if (isCritical) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer).copy(alpha = 0.65f)
                         )
                     }
                 }
-                Column {
-                    Text(stringResource(R.string.st_DashboardScreen_q3r4),
-                        style         = MaterialTheme.typography.labelSmall,
-                        fontWeight    = FontWeight.Black,
-                        color         = MaterialTheme.colorScheme.onPrimaryContainer,
-                        letterSpacing = 1.2.sp)
-                    Text("Upgrade to v$version",
-                        style      = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Bold,
-                        color      = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f))
+                IconButton(
+                    onClick  = { vibrationManager?.vibrateClick(); onDismiss() },
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background((if (isCritical) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer).copy(alpha = 0.08f)),
+                ) {
+                    Icon(Icons.Rounded.Close, null,
+                        tint     = if (isCritical) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(18.dp))
                 }
             }
-            IconButton(
-                onClick  = { vibrationManager?.vibrateClick(); onDismiss() },
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.08f)),
-            ) {
-                Icon(Icons.Rounded.Close, null,
-                    tint     = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.size(18.dp))
+            if (downloadProgress != null) {
+                LinearProgressIndicator(
+                    progress = { (downloadProgress / 100f).coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
+                )
             }
         }
     }
