@@ -23,12 +23,16 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.frerox.toolz.data.developer.DevToolId
+import com.frerox.toolz.data.developer.SpoofGate
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
@@ -52,7 +56,8 @@ enum class LevelMode {
 
 @HiltViewModel
 class BubbleLevelViewModel @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val gate: SpoofGate,
 ) : ViewModel(), SensorEventListener {
 
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
@@ -61,17 +66,43 @@ class BubbleLevelViewModel @Inject constructor(
     private val _bubbleState = MutableStateFlow(BubbleState())
     val bubbleState: StateFlow<BubbleState> = _bubbleState.asStateFlow()
 
-    // Low-pass filter constant
-    private val alpha = 0.15f // Smoother for expressive feel
-    private var currentX = 0f
-    private var currentY = 0f
+    init {
+        // DEV-SPOOF: live switch — entering sandbox freezes real sensor, exiting
+        // resumes real listening on next startListening().
+        viewModelScope.launch {
+            gate.active(DevToolId.SENSORS).collect { spoofed ->
+                if (spoofed) {
+                    sensorManager.unregisterListener(this@BubbleLevelViewModel)
+                    emitSpoof()
+                }
+            }
+        }
+    }
+
+    private fun emitSpoof() {
+        // DEV-SPOOF fixture: stuck 15° tilt, RAM-only, no sensor registered.
+        val p = gate.params.value
+        _bubbleState.update {
+            it.copy(x = 4.5f, y = -3.2f, rawX = 4.5f, rawY = -3.2f, isListening = true)
+        }
+        android.util.Log.w("DevSpoof", "Bubble sandbox active — accelerometer unregistered, tilt=${p.compassDeg}° ref")
+    }
 
     fun startListening() {
+        if (gate.sandboxed(DevToolId.SENSORS)) {
+            emitSpoof()
+            return
+        }
         if (accelerometer != null) {
             sensorManager.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_UI)
             _bubbleState.update { it.copy(isListening = true) }
         }
     }
+
+    // Low-pass filter constant
+    private val alpha = 0.15f // Smoother for expressive feel
+    private var currentX = 0f
+    private var currentY = 0f
 
     fun stopListening() {
         sensorManager.unregisterListener(this)
@@ -105,6 +136,8 @@ class BubbleLevelViewModel @Inject constructor(
     }
 
     override fun onSensorChanged(event: SensorEvent) {
+        // DEV-SPOOF: ignore real hardware while sandboxed.
+        if (gate.sandboxed(DevToolId.SENSORS)) return
         if (event.sensor.type == Sensor.TYPE_ACCELEROMETER && !_bubbleState.value.isHeld) {
             // Apply low-pass filter for smoother bubble movement
             currentX = currentX + alpha * (event.values[0] - currentX)

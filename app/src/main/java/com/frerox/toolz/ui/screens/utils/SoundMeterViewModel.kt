@@ -34,7 +34,9 @@ import javax.inject.Inject
 import kotlin.math.log10
 
 @HiltViewModel
-class SoundMeterViewModel @Inject constructor() : ViewModel() {
+class SoundMeterViewModel @Inject constructor(
+    private val gate: com.frerox.toolz.data.developer.SpoofGate,
+) : ViewModel() {
 
     private val _decibels = MutableStateFlow(0f)
     val decibels: StateFlow<Float> = _decibels.asStateFlow()
@@ -60,6 +62,12 @@ class SoundMeterViewModel @Inject constructor() : ViewModel() {
     @SuppressLint("MissingPermission")
     fun startRecording() {
         if (_isRecording.value) return
+
+        // DEV-SPOOF: never open the mic while sandboxed — fake a loud room.
+        if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.SENSORS)) {
+            startSpoofLoop()
+            return
+        }
 
         try {
             audioRecord = AudioRecord(
@@ -105,6 +113,29 @@ class SoundMeterViewModel @Inject constructor() : ViewModel() {
             e.printStackTrace()
             _isRecording.value = false
         }
+    }
+
+    private fun startSpoofLoop() {
+        // DEV-SPOOF fixture: jitter around the slider dB, RAM-only, mic stays closed.
+        _isRecording.value = true
+        val base = gate.params.value.soundDb.toFloat()
+        if (base > _maxDecibels.value) _maxDecibels.value = base
+        recordingJob = viewModelScope.launch {
+            var t = 0
+            while (_isRecording.value) {
+                val jitter = (kotlin.math.sin(t * 0.7) * 4 + ((t * 37) % 5) - 2).toFloat()
+                val db = (base + jitter).coerceIn(0f, 160f)
+                _decibels.value = db
+                if (db > _maxDecibels.value) _maxDecibels.value = db
+                val h = _decibelHistory.value.toMutableList()
+                h.add(db)
+                if (h.size > 50) h.removeAt(0)
+                _decibelHistory.value = h
+                t++
+                delay(100)
+            }
+        }
+        android.util.Log.w("DevSpoof", "Sound sandbox active — mic closed, faking ${base}dB")
     }
 
     fun resetMax() {

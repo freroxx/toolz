@@ -55,7 +55,8 @@ data class CompassState(
 @HiltViewModel
 class CompassViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    private val gate: com.frerox.toolz.data.developer.SpoofGate,
 ) : ViewModel(), SensorEventListener {
 
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
@@ -75,12 +76,41 @@ class CompassViewModel @Inject constructor(
     private var currentAzimuth = 0f
 
     init {
+        // DEV-SPOOF: live switch — sandbox freezes compass hardware, fixture takes over.
+        viewModelScope.launch {
+            gate.active(com.frerox.toolz.data.developer.DevToolId.SENSORS).collect { spoofed ->
+                if (spoofed) {
+                    sensorManager.unregisterListener(this@CompassViewModel)
+                    emitSpoof()
+                }
+            }
+        }
         viewModelScope.launch {
             settingsRepository.showQibla.collect { show ->
                 _uiState.update { it.copy(showQibla = show) }
                 if (show) updateLocationAndQibla()
             }
         }
+    }
+
+    private fun emitSpoof() {
+        // DEV-SPOOF fixture: fixed NW heading + fake qibla, RAM-only.
+        val p = gate.params.value
+        val deg = p.compassDeg.toFloat()
+        _uiState.update {
+            it.copy(
+                azimuth = deg,
+                displayAzimuth = deg,
+                qiblaAngle = (deg + 118f) % 360f,
+                latitude = 24.7136,
+                longitude = 46.6753,
+                accuracy = 3,
+                isLevel = true,
+                pitch = 0f,
+                roll = 0f,
+            )
+        }
+        android.util.Log.w("DevSpoof", "Compass sandbox active — sensors off, heading=${p.compassDeg}°")
     }
 
     @SuppressLint("MissingPermission")
@@ -141,6 +171,11 @@ class CompassViewModel @Inject constructor(
     }
 
     fun startListening() {
+        // DEV-SPOOF: never register compass hardware while sandboxed.
+        if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.SENSORS)) {
+            emitSpoof()
+            return
+        }
         if (rotationVector != null) {
             sensorManager.registerListener(this, rotationVector, SensorManager.SENSOR_DELAY_UI)
         } else {
@@ -162,6 +197,8 @@ class CompassViewModel @Inject constructor(
     }
 
     override fun onSensorChanged(event: SensorEvent) {
+        // DEV-SPOOF: ignore real hardware while sandboxed.
+        if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.SENSORS)) return
         val rotationMatrix = FloatArray(9)
         val orientation = FloatArray(3)
 

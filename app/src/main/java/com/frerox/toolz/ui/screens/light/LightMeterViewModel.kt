@@ -40,7 +40,8 @@ enum class LightUnit {
 
 @HiltViewModel
 class LightMeterViewModel @Inject constructor(
-    private val lightSensorManager: LightSensorManager
+    private val lightSensorManager: LightSensorManager,
+    private val gate: com.frerox.toolz.data.developer.SpoofGate,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(LightMeterState())
@@ -51,17 +52,21 @@ class LightMeterViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             lightSensorManager.getLightLevel().collect { value ->
+                // DEV-SPOOF: fixture replaces the hardware reading, manager untouched.
+                val v = if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.SENSORS)) {
+                    gate.params.value.lightLux.toFloat()
+                } else value
                 _uiState.update { currentState ->
-                    val newHistory = (currentState.history + value).takeLast(100)
-                    val newMax = maxOf(currentState.maxLux, value)
-                    val newMin = if (value > 0) minOf(currentState.minLux, value) else currentState.minMin(value)
+                    val newHistory = (currentState.history + v).takeLast(100)
+                    val newMax = maxOf(currentState.maxLux, v)
+                    val newMin = if (v > 0) minOf(currentState.minLux, v) else currentState.minMin(v)
                     val newAvg = if (newHistory.isNotEmpty()) newHistory.average().toFloat() else 0f
-                    
+
                     currentState.copy(
-                        luxValue = value,
+                        luxValue = v,
                         history = newHistory,
                         maxLux = newMax,
-                        minLux = if (currentState.minLux == Float.MAX_VALUE) value else minOf(currentState.minLux, value),
+                        minLux = if (currentState.minLux == Float.MAX_VALUE) v else minOf(currentState.minLux, v),
                         avgLux = newAvg
                     )
                 }

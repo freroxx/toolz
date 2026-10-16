@@ -343,6 +343,7 @@ class SpeedometerViewModel @Inject constructor(
     private val gps: GpsSource,
     private val prefs: SpeedometerPrefs,
     private val steps: StepCadenceSource,
+    private val gate: com.frerox.toolz.data.developer.SpoofGate,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SpeedUiState(settings = prefs.load()).withGauge())
@@ -378,6 +379,11 @@ class SpeedometerViewModel @Inject constructor(
 
     /** Starts listening for GPS. Auto-records unless the user manually paused this session. */
     fun startUpdates() {
+        // DEV-SPOOF: never open GPS while sandboxed — drive the gauge from sliders.
+        if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.SENSORS)) {
+            emitSpoofSpeed()
+            return
+        }
         if (updatesJob?.isActive == true) return
 
         if (shouldAutoStart(_state.value.tripState, _state.value.settings.autoRecord, userPaused)) {
@@ -487,7 +493,28 @@ class SpeedometerViewModel @Inject constructor(
 
     // region GPS handling
 
+    private fun emitSpoofSpeed() {
+        // DEV-SPOOF fixture: fixed slider speed + full signal, RAM-only, GPS closed.
+        val p = gate.params.value
+        val mps = p.speedKmh / 3.6f
+        updateState {
+            it.copy(
+                speedMps = mps,
+                maxSpeedMps = maxOf(it.maxSpeedMps, mps),
+                accuracyMeters = 3f,
+                satellitesUsed = 12,
+                satellitesVisible = 16,
+                signal = GpsSignal.GOOD,
+                bearingDegrees = p.compassDeg.toFloat(),
+                speedHistory = (it.speedHistory + mps).takeLast(120),
+            )
+        }
+        android.util.Log.w("DevSpoof", "Speedometer sandbox active — GPS off, ${p.speedKmh} km/h")
+    }
+
     private fun onEvent(event: GpsEvent) {
+        // DEV-SPOOF: drop real GPS while sandboxed.
+        if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.SENSORS)) return
         when (event) {
             is GpsEvent.Fix -> onFix(event.location)
             is GpsEvent.Satellites -> updateState {

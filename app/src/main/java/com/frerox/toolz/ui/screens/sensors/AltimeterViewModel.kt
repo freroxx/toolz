@@ -26,12 +26,14 @@ import android.hardware.SensorManager
 import android.location.LocationListener
 import android.location.LocationManager
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
@@ -78,7 +80,8 @@ data class AltimeterState(
 
 @HiltViewModel
 class AltimeterViewModel @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val gate: com.frerox.toolz.data.developer.SpoofGate,
 ) : ViewModel(), SensorEventListener {
 
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
@@ -88,7 +91,40 @@ class AltimeterViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(AltimeterState())
     val uiState: StateFlow<AltimeterState> = _uiState.asStateFlow()
 
+    init {
+        // DEV-SPOOF: live switch — sandbox freezes barometer+GPS, fixture takes over.
+        viewModelScope.launch {
+            gate.active(com.frerox.toolz.data.developer.DevToolId.SENSORS).collect { spoofed ->
+                if (spoofed) {
+                    sensorManager.unregisterListener(this@AltimeterViewModel)
+                    try { locationManager.removeUpdates(locationListener) } catch (_: Exception) { }
+                    emitSpoof()
+                }
+            }
+        }
+    }
+
+    private fun emitSpoof() {
+        // DEV-SPOOF fixture: Everest base-camp-ish altitude, RAM-only, no GPS/baro.
+        val p = gate.params.value
+        _uiState.update {
+            it.copy(
+                altitudeMeters = p.altitudeM.toDouble(),
+                pressureHpa = 1008.5f,
+                source = "SPOOF",
+                maxAltitudeMeters = p.altitudeM.toDouble(),
+                minAltitudeMeters = p.altitudeM.toDouble(),
+                accuracy = 1f,
+                climbRateMps = 0.0,
+                isTracking = true,
+            )
+        }
+        android.util.Log.w("DevSpoof", "Altimeter sandbox active — GPS+baro off, alt=${p.altitudeM}m")
+    }
+
     private val locationListener = LocationListener { location ->
+        // DEV-SPOOF: ignore GPS while sandboxed.
+        if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.SENSORS)) return@LocationListener
         // Use GPS as a baseline or fallback if barometer is absent or uninitialized
         if (pressureSensor == null || _uiState.value.pressureHpa == 0f) {
             updateAltitude(location.altitude, "GPS", location.accuracy)
@@ -119,6 +155,11 @@ class AltimeterViewModel @Inject constructor(
 
     @SuppressLint("MissingPermission")
     fun startListening() {
+        // DEV-SPOOF: never touch barometer/GPS while sandboxed.
+        if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.SENSORS)) {
+            emitSpoof()
+            return
+        }
         if (pressureSensor != null) {
             sensorManager.registerListener(this, pressureSensor, SensorManager.SENSOR_DELAY_UI)
         }
@@ -166,6 +207,8 @@ class AltimeterViewModel @Inject constructor(
     }
 
     override fun onSensorChanged(event: SensorEvent) {
+        // DEV-SPOOF: ignore barometer while sandboxed.
+        if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.SENSORS)) return
         if (event.sensor.type == Sensor.TYPE_PRESSURE) {
             val pressure = event.values[0]
             // Standard Barometric formula for altitude calculation
