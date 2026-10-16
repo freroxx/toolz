@@ -47,5 +47,10 @@ data class UpdateManifest(
 data class UpdateRelease(
     val abi: String,
     val downloadUrl: String,
-    val size: Long? = null
-)
+    val size: Long? = null,
+    val sizeBytes: Long? = null,
+    val sha256: String? = null
+) {
+    /** Manifest may use `size` or `sizeBytes`; prefer non-null. */
+    val effectiveSizeBytes: Long? get() = sizeBytes ?: size
+}
