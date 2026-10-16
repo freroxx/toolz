@@ -57,9 +57,44 @@ class AppSkinTest {
         assertEquals(IconCatalog.DEFAULT_ID, LauncherIconManager.presetIdForAlias(".Icon_nope"))
     }
 
+    @Test fun everyPresetAdaptsToTheme() {
+        // Adapt to theme is universal — no preset renders "exactly as designed" in dark mode anymore.
+        IconCatalog.BUILT_IN.forEach { assertTrue("no adapt: ${it.id}", it.adaptToTheme) }
+    }
+
     @Test fun everyPresetHasGradient() {
         // The in-app gradient toggle works on all presets, so none may be flat-only.
         IconCatalog.BUILT_IN.forEach { assertNotNull("no bodyEnd: ${it.id}", it.bodyEnd) }
+    }
+
+    @Test fun everyPresetHasPolishedTheme() {
+        // Each icon ships tuned light/dark app accents that stay legible on the
+        // fixed on-primary/on-secondary colors (white in light; deep brown/teal in dark).
+        fun lum(argb: Long): Double {
+            fun ch(v: Int): Double {
+                val x = v / 255.0
+                return if (x <= 0.04045) x / 12.92 else Math.pow((x + 0.055) / 1.055, 2.4)
+            }
+            return 0.2126 * ch((argb shr 16).toInt() and 0xFF) +
+                0.7152 * ch((argb shr 8).toInt() and 0xFF) +
+                0.0722 * ch(argb.toInt() and 0xFF)
+        }
+        fun ratio(fg: Long, bg: Long): Double {
+            val a = lum(fg); val b = lum(bg)
+            return (maxOf(a, b) + 0.05) / (minOf(a, b) + 0.05)
+        }
+        IconCatalog.BUILT_IN.forEach { spec ->
+            assertTrue("light P==S: ${spec.id}", spec.themePrimaryLight != spec.themeSecondaryLight)
+            assertTrue("dark P==S: ${spec.id}", spec.themePrimaryDark != spec.themeSecondaryDark)
+            assertTrue("light primary contrast: ${spec.id}", ratio(spec.themePrimaryLight, 0xFFFFFFFF) >= 4.5)
+            assertTrue("light secondary contrast: ${spec.id}", ratio(spec.themeSecondaryLight, 0xFFFFFFFF) >= 4.5)
+            assertTrue("dark primary contrast: ${spec.id}", ratio(spec.themePrimaryDark, 0xFF512200) >= 4.5)
+            assertTrue("dark secondary contrast: ${spec.id}", ratio(spec.themeSecondaryDark, 0xFF003734) >= 4.5)
+            assertEquals(spec.themePrimaryLight, spec.themePrimary(false))
+            assertEquals(spec.themePrimaryDark, spec.themePrimary(true))
+            assertEquals(spec.themeSecondaryLight, spec.themeSecondary(false))
+            assertEquals(spec.themeSecondaryDark, spec.themeSecondary(true))
+        }
     }
 
     @Test fun fingerprintIgnoresIdentity() {
