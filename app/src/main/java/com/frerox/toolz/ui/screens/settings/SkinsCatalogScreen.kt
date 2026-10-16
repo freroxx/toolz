@@ -53,8 +53,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.frerox.toolz.data.skin.IconCatalog
 import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
+import com.frerox.toolz.ui.components.ToolzMarkThemed
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.components.horizontalFadingEdges
@@ -77,6 +79,14 @@ fun SkinsCatalogScreen(
 
     val themeMode by viewModel.themeMode.collectAsState(initial = "SYSTEM")
     val dynamicColor by viewModel.dynamicColor.collectAsState(initial = true)
+    val presetId by viewModel.appIconPresetId.collectAsState(initial = "grape-haze")
+    val shape by viewModel.appIconShape.collectAsState(initial = "HEXAGON")
+    val adaptTheme by viewModel.appIconAdaptTheme.collectAsState(initial = true)
+    val followDynamic by viewModel.appIconFollowDynamic.collectAsState(initial = true)
+    val bgOv by viewModel.appIconBgOverride.collectAsState(initial = null)
+    val fgOv by viewModel.appIconFgOverride.collectAsState(initial = null)
+    val strokeOv by viewModel.appIconStrokeOverride.collectAsState(initial = null)
+    val iconGradient by viewModel.appIconGradientEnabled.collectAsState(initial = true)
     val activeSkinId by viewModel.activeSkinId.collectAsState(initial = null)
     val skins by viewModel.skins.collectAsState(initial = emptyList())
     val syncing by viewModel.skinsSyncing.collectAsState(initial = false)
@@ -293,6 +303,45 @@ fun SkinsCatalogScreen(
             Surface(shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surface) {
                 Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Share your look", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                    // Live preview of exactly what gets packaged.
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
+                        val current = IconCatalog.find(presetId)
+                        ToolzMarkThemed(
+                            presetId = presetId,
+                            isDark = isDark,
+                            dynamicColor = dynamicColor,
+                            scheme = scheme,
+                            shape = shape,
+                            adaptToTheme = adaptTheme,
+                            followDynamic = followDynamic,
+                            bgOverride = bgOv,
+                            fgOverride = fgOv,
+                            strokeOverride = strokeOv,
+                            iconGradient = iconGradient,
+                            modifier = Modifier.size(64.dp),
+                        )
+                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                "${themeMode.lowercase()} · ${if (dynamicColor) "dynamic" else "custom colors"}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                "${current.name.lowercase()} · ${(com.frerox.toolz.data.skin.IconShape.parse(shape)?.name ?: shape).lowercase()}${if (iconGradient) " · gradient" else ""}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    Text(
+                        "Packages your theme + colors + icon (including gradient and overrides) as a community skin for review. Identical looks can't be shared twice.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     OutlinedTextField(
                         value = name,
                         onValueChange = { name = it.take(32) },

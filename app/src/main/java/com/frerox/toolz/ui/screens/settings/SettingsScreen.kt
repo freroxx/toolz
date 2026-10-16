@@ -1891,7 +1891,7 @@ fun SettingsScreenPreview() {
         Surface(color = Color(0xFF121212)) {
             Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
                 SettingsExpandableSection(
-                    title = "VISUALS & THEME",
+                    title = "App Skin",
                     icon = Icons.Rounded.Palette,
                     isExpanded = true,
                     onExpandToggle = {}
