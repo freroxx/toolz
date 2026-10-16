@@ -60,10 +60,24 @@ enum class QRInputType(val displayName: String, val icon: ImageVector) {
 
 @OptIn(FlowPreview::class)
 @HiltViewModel
-class QRViewModel @Inject constructor() : ViewModel() {
+class QRViewModel @Inject constructor(
+    private val gate: com.frerox.toolz.data.developer.SpoofGate,
+) : ViewModel() {
 
     private val _inputText = MutableStateFlow("")
     val inputText = _inputText.asStateFlow()
+
+    init {
+        // DEV-SPOOF: prefill the fake Wi-Fi payload while sandboxed (offline demo).
+        viewModelScope.launch {
+            gate.active(com.frerox.toolz.data.developer.DevToolId.QR).collect { spoofed ->
+                if (spoofed) {
+                    _inputText.value = gate.params.value.qrPayload
+                    android.util.Log.w("DevSpoof", "QR sandbox active — fake payload prefilled")
+                }
+            }
+        }
+    }
 
     private val _noteText = MutableStateFlow("")
     val noteText = _noteText.asStateFlow()

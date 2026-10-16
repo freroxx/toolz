@@ -80,7 +80,8 @@ data class FlashlightState(
 class FlashlightViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val dataStore: DataStore<Preferences>,
-    private val repository: FlashlightRepository
+    private val repository: FlashlightRepository,
+    private val gate: com.frerox.toolz.data.developer.SpoofGate,
 ) : ViewModel() {
 
     private val cameraManager =
@@ -131,10 +132,27 @@ class FlashlightViewModel @Inject constructor(
         findCameraId()
         cameraManager.registerTorchCallback(torchCallback, null)
         loadSettings()
-        
+
         viewModelScope.launch {
             repository.isOn.collect { isOn ->
-                _uiState.update { it.copy(isOn = isOn) }
+                // DEV-SPOOF: real service state must not override the fake toggle.
+                if (!gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.SYSTEM)) {
+                    _uiState.update { it.copy(isOn = isOn) }
+                }
+            }
+        }
+        viewModelScope.launch {
+            // DEV-SPOOF: entering sandbox kills any real beam, then fakes SOS.
+            gate.active(com.frerox.toolz.data.developer.DevToolId.SYSTEM).collect { spoofed ->
+                if (spoofed) {
+                    try {
+                        context.startService(Intent(context, FlashlightService::class.java).apply {
+                            action = FlashlightService.ACTION_STOP
+                        })
+                    } catch (_: Exception) { }
+                    _uiState.update { it.copy(isOn = false, mode = FlashlightMode.SOS) }
+                    android.util.Log.w("DevSpoof", "Flashlight sandbox active — real torch stopped")
+                }
             }
         }
     }
@@ -229,6 +247,13 @@ class FlashlightViewModel @Inject constructor(
     // ── Public API ─────────────────────────────────────────────────────────
 
     fun toggleFlashlight() {
+        // DEV-SPOOF: fake SOS toggle — no service, no torch hardware.
+        if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.SYSTEM)) {
+            val newOn = !_uiState.value.isOn
+            _uiState.update { it.copy(isOn = newOn, mode = FlashlightMode.SOS) }
+            android.util.Log.w("DevSpoof", "Flashlight sandbox active — fake SOS ${if (newOn) "ON" else "OFF"}, torch untouched")
+            return
+        }
         val newOn = !_uiState.value.isOn
 
         val intent = Intent(context, FlashlightService::class.java).apply {
