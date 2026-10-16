@@ -30,7 +30,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.frerox.toolz.R
 import com.frerox.toolz.data.skin.IconCatalog
 import com.frerox.toolz.data.skin.LegacySkins
 import com.frerox.toolz.ui.components.ExpressiveCard
@@ -67,12 +69,12 @@ fun StyleStep(
         verticalArrangement = Arrangement.Center,
     ) {
         StaggeredEntrance(index = 0) {
-            SectionHeader(eyebrow = "Style", title = "Make Toolz yours")
+            SectionHeader(eyebrow = stringResource(R.string.st_AppSkin_ob_eyebrow), title = stringResource(R.string.st_AppSkin_ob_style_title))
         }
         Spacer(Modifier.height(8.dp))
         StaggeredEntrance(index = 1) {
             Text(
-                "Pick an icon + skin. You can change everything later in Settings → App Skin.",
+                stringResource(R.string.st_AppSkin_ob_style_desc),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -83,7 +85,7 @@ fun StyleStep(
         StaggeredEntrance(index = 2) {
             ExpressiveCard(onClick = {}, modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    CardEyebrow("App icon")
+                    CardEyebrow(stringResource(R.string.st_AppSkin_header_app_icon))
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         contentPadding = PaddingValues(horizontal = 4.dp),
@@ -114,7 +116,10 @@ fun StyleStep(
                         }
                     }
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("OCTAGON", "CIRCLE").forEach { s ->
+                        listOf(
+                            "OCTAGON" to stringResource(R.string.st_AppSkin_shape_octagon),
+                            "CIRCLE" to stringResource(R.string.st_AppSkin_shape_circle),
+                        ).forEach { (s, label) ->
                             val sel = com.frerox.toolz.data.skin.IconShape.parse(state.iconShape) == com.frerox.toolz.data.skin.IconShape.parse(s)
                             Surface(
                                 onClick = { onIconShapeChange(s) },
@@ -123,21 +128,21 @@ fun StyleStep(
                                 modifier = Modifier.weight(1f).height(40.dp),
                             ) {
                                 androidx.compose.foundation.layout.Box(contentAlignment = Alignment.Center) {
-                                    Text(s, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, color = if (sel) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(label, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, color = if (sel) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
                         }
                     }
                     OnboardingToggleExpressive(
-                        title = "Adapt to theme",
-                        desc = "Themed icon + matching app colors",
+                        title = stringResource(R.string.st_AppSkin_adapt),
+                        desc = stringResource(R.string.st_AppSkin_ob_adapt_desc),
                         icon = Icons.Rounded.Palette,
                         checked = state.iconAdaptTheme,
                         onCheckedChange = onIconAdaptChange,
                     )
                     OnboardingToggleExpressive(
-                        title = "Follow dynamic colors",
-                        desc = "Match wallpaper when Dynamic color is on",
+                        title = stringResource(R.string.st_AppSkin_follow),
+                        desc = stringResource(R.string.st_AppSkin_ob_follow_desc),
                         icon = Icons.Rounded.Palette,
                         checked = state.iconFollowDynamic,
                         onCheckedChange = onIconFollowChange,
@@ -149,7 +154,7 @@ fun StyleStep(
         StaggeredEntrance(index = 3) {
             ExpressiveCard(onClick = {}, modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    CardEyebrow("Toolz Skins · ${LegacySkins.ALL.size} included")
+                    CardEyebrow(stringResource(R.string.st_AppSkin_ob_skins_count, LegacySkins.ALL.size))
                     LegacySkins.ALL.take(4).forEach { skin ->
                         val sel = skin.id == state.activeSkinId
                         Surface(
@@ -173,7 +178,10 @@ fun StyleStep(
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(skin.name, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleSmall)
                                     Text(
-                                        "made by ${skin.author?.takeIf { it.isNotBlank() } ?: "Toolz"}",
+                                        stringResource(
+                                            R.string.st_AppSkin_made_by,
+                                            skin.author?.takeIf { it.isNotBlank() } ?: "Toolz",
+                                        ),
                                         style = MaterialTheme.typography.labelSmall,
                                         fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
@@ -189,7 +197,7 @@ fun StyleStep(
         Spacer(Modifier.height(24.dp))
         StaggeredEntrance(index = 4) {
             ToolzExpressiveButton(onClick = onNext, modifier = Modifier.fillMaxWidth().height(60.dp), shape = ExtraLargeExpressiveShape) {
-                Text("Continue", fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.st_Whisper_Onboarding_Next), fontWeight = FontWeight.SemiBold)
             }
         }
     }

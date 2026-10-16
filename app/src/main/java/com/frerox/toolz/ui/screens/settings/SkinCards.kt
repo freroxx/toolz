@@ -29,8 +29,46 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import com.frerox.toolz.data.skin.SkinDto
 import com.frerox.toolz.ui.components.ToolzMarkThemed
+
+/** Localized theme-mode word for skin summaries ("system", "light", "dark"). */
+@Composable
+internal fun themeModeLabel(mode: String): String = when (mode.uppercase()) {
+    "LIGHT" -> stringResource(R.string.st_AppSkin_theme_light)
+    "DARK" -> stringResource(R.string.st_AppSkin_theme_dark)
+    else -> stringResource(R.string.st_AppSkin_theme_system)
+}
+
+/** Localized "dynamic" / "custom" word for skin summaries. */
+@Composable
+internal fun dynamicWord(dynamic: Boolean): String = stringResource(
+    if (dynamic) R.string.st_AppSkin_mode_dynamic else R.string.st_AppSkin_mode_custom
+)
+
+/** Localized icon-frame name ("Octagon" / "Circle"). */
+@Composable
+internal fun iconShapeLabel(shape: String): String = when (
+    com.frerox.toolz.data.skin.IconShape.parse(shape)
+) {
+    com.frerox.toolz.data.skin.IconShape.CIRCLE -> stringResource(R.string.st_AppSkin_shape_circle)
+    else -> stringResource(R.string.st_AppSkin_shape_octagon)
+}
+
+/** Localized icon-catalog tag ("Vivid", "Dark", …). Unknown tags render as-is. */
+@Composable
+internal fun iconTagLabel(tag: String): String = when (tag) {
+    "Adaptive" -> stringResource(R.string.st_AppSkin_tag_adaptive)
+    "Vivid" -> stringResource(R.string.st_AppSkin_tag_vivid)
+    "Dark" -> stringResource(R.string.st_AppSkin_tag_dark)
+    "Light" -> stringResource(R.string.st_AppSkin_tag_light)
+    "Mono" -> stringResource(R.string.st_AppSkin_tag_mono)
+    "Legacy" -> stringResource(R.string.st_AppSkin_tag_legacy)
+    "All" -> stringResource(R.string.st_AppSkin_tag_all)
+    else -> tag
+}
 
 /**
  * Shared skin rows/cards: community banner ("made by …") + optional review status.
@@ -39,14 +77,19 @@ import com.frerox.toolz.ui.components.ToolzMarkThemed
 
 @Composable
 fun SubmissionStatusChip(status: String?) {
-    val (label, container, content) = when (status) {
-        "published" -> Triple("Live", Color(0xFF0C7E78).copy(alpha = 0.15f), Color(0xFF0C7E78))
-        "archived", "removed" -> Triple("Not approved", Color.Gray.copy(alpha = 0.15f), Color.Gray)
-        else -> Triple("Pending review", Color(0xFFFF8A3D).copy(alpha = 0.15f), Color(0xFFCC5A17))
+    val labelRes = when (status) {
+        "published" -> R.string.st_AppSkin_status_live
+        "archived", "removed" -> R.string.st_AppSkin_status_rejected
+        else -> R.string.st_AppSkin_status_pending
+    }
+    val (container, content) = when (status) {
+        "published" -> Color(0xFF0C7E78).copy(alpha = 0.15f) to Color(0xFF0C7E78)
+        "archived", "removed" -> Color.Gray.copy(alpha = 0.15f) to Color.Gray
+        else -> Color(0xFFFF8A3D).copy(alpha = 0.15f) to Color(0xFFCC5A17)
     }
     Surface(shape = RoundedCornerShape(10.dp), color = container) {
         Text(
-            label,
+            stringResource(labelRes),
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Black,
@@ -97,13 +140,13 @@ fun SkinRowCard(
                         if (selected) Icon(Icons.Rounded.Check, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                     }
                     Text(
-                        "${skin.themeMode.lowercase()} · ${if (skin.dynamicColor) "dynamic" else "custom"}",
+                        "${themeModeLabel(skin.themeMode)} · ${dynamicWord(skin.dynamicColor)}",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                     )
                     // Community banner.
                     Text(
-                        "made by ${skin.author?.takeIf { it.isNotBlank() } ?: "Toolz"}",
+                        stringResource(R.string.st_AppSkin_made_by, skin.author?.takeIf { it.isNotBlank() } ?: "Toolz"),
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),

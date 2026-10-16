@@ -190,8 +190,8 @@ fun AppSkinScreen(
     Scaffold(
         topBar = {
             ExpressiveTopAppBar(
-                title = "App Skin",
-                subtitle = "Icons, colors & community skins",
+                title = stringResource(R.string.st_AppSkin_screen_title),
+                subtitle = stringResource(R.string.st_AppSkin_screen_subtitle),
                 navigationIcon = {
                     IconButton(
                         onClick = {
@@ -201,7 +201,7 @@ fun AppSkinScreen(
                         modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp))
                             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.st_SettingsScreen_u1v2))
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
@@ -252,7 +252,7 @@ fun AppSkinScreen(
                         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(current.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
                             Text(
-                                "${(com.frerox.toolz.data.skin.IconShape.parse(shape)?.name ?: shape).lowercase()} · ${current.tag.lowercase()} · ${activeSkinId ?: "custom look"}",
+                                "${iconShapeLabel(shape).lowercase()} · ${iconTagLabel(current.tag).lowercase()} · ${activeSkinId ?: stringResource(R.string.st_AppSkin_custom_look)}",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -266,18 +266,18 @@ fun AppSkinScreen(
                             ) {
                                 Icon(Icons.Rounded.GridView, null, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.width(8.dp))
-                                Text("Icon Catalog", fontWeight = FontWeight.Black)
+                                Text(stringResource(R.string.st_AppSkin_catalog_title), fontWeight = FontWeight.Black)
                             }
                         }
                     }
                 }
 
-                AppSkinSectionHeader("App icon")
+                AppSkinSectionHeader(stringResource(R.string.st_AppSkin_header_app_icon))
 
                 // Icon presets strip
                 SettingsItem(
-                    title = "Icon style",
-                    subtitle = "${IconCatalog.BUILT_IN.size} presets — tap to apply instantly",
+                    title = stringResource(R.string.st_AppSkin_icon_style),
+                    subtitle = stringResource(R.string.st_AppSkin_presets_hint, IconCatalog.BUILT_IN.size),
                     icon = Icons.Rounded.GridView,
                 ) {
                     LazyRow(
@@ -444,26 +444,29 @@ fun AppSkinScreen(
                                 color = if (sel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
-                                    Text(s, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, color = if (sel) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(label, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, color = if (sel) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
                         }
                     }
                 }
 
-                AppSkinSectionHeader("Icon colors")
+                AppSkinSectionHeader(stringResource(R.string.st_AppSkin_colors_title))
 
                 // Merged color behavior: dynamic palette + custom colors + adapt + follow + gradient.
                 // Adapt works on every icon; follow stays exclusive to scheme-driven icons.
                 SettingsItem(
-                    title = "Icon colors",
-                    subtitle = "What repaints “${current.name}”",
+                    title = stringResource(R.string.st_AppSkin_colors_title),
+                    subtitle = stringResource(R.string.st_AppSkin_colors_sub, current.name),
                     icon = Icons.Rounded.ColorLens,
                 ) {
                     Column(modifier = Modifier.fillMaxWidth().padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         SkinMiniSwitch(
-                            title = "Dynamic colors",
-                            desc = if (dynamicColor) "Accents follow your wallpaper (Material You)" else "Match your wallpaper palette when available",
+                            title = stringResource(R.string.st_AppSkin_dynamic),
+                            desc = stringResource(
+                                if (dynamicColor) R.string.st_AppSkin_dynamic_on
+                                else R.string.st_AppSkin_dynamic_off
+                            ),
                             checked = dynamicColor,
                             onCheckedChange = {
                                 vibrationManager?.vibrateClick()
@@ -537,9 +540,12 @@ fun AppSkinScreen(
                         // mode, and (with Dynamic colors off) the app accents follow the
                         // icon's tuned light/dark theme unless custom colors override it.
                         SkinMiniSwitch(
-                            title = "Adapt to theme",
-                            desc = if (dynamicColor) "“${current.name}” dims its body in dark mode"
-                            else "Icon dims in dark mode + app accents follow “${current.name}”",
+                            title = stringResource(R.string.st_AppSkin_adapt),
+                            desc = stringResource(
+                                if (dynamicColor) R.string.st_AppSkin_adapt_dyn
+                                else R.string.st_AppSkin_adapt_full,
+                                current.name,
+                            ),
                             checked = adaptTheme,
                             onCheckedChange = {
                                 vibrationManager?.vibrateClick()
@@ -547,17 +553,21 @@ fun AppSkinScreen(
                             },
                         )
                         if (!dynamicColor && adaptTheme) {
+                            val modeWord = themeModeLabel(themeMode)
                             SkinMiniNote(
-                                title = "Accent source",
+                                title = stringResource(R.string.st_AppSkin_accent_source),
                                 desc = if (customPrimaryInt == null && customSecondaryInt == null)
-                                    "App accents follow “${current.name}” for ${if (isDark) "dark" else "light"} mode — pick colors above to override"
-                                else "Your custom colors override the “${current.name}” theme — reset them above to go back",
+                                    stringResource(R.string.st_AppSkin_accent_icon, current.name, modeWord)
+                                else stringResource(R.string.st_AppSkin_accent_custom, current.name),
                             )
                         }
                         if (current.followsScheme) {
                             SkinMiniSwitch(
-                                title = "Follow dynamic colors",
-                                desc = if (dynamicColor) "Icon matches your wallpaper" else "Turn on Dynamic colors above first",
+                                title = stringResource(R.string.st_AppSkin_follow),
+                                desc = stringResource(
+                                    if (dynamicColor) R.string.st_AppSkin_follow_on
+                                    else R.string.st_AppSkin_follow_off
+                                ),
                                 checked = followDynamic,
                                 enabled = dynamicColor,
                                 onCheckedChange = {
@@ -567,13 +577,13 @@ fun AppSkinScreen(
                             )
                         } else {
                             SkinMiniNote(
-                                title = "Follow dynamic colors",
-                                desc = "“${current.name}” keeps its own palette — try Dynamic Glow for a wallpaper-matched icon",
+                                title = stringResource(R.string.st_AppSkin_follow),
+                                desc = stringResource(R.string.st_AppSkin_follow_note, current.name),
                             )
                         }
                         SkinMiniSwitch(
-                            title = "Icon gradient",
-                            desc = "Depth shading on the body — in-app; the home-screen tile keeps its baked artwork",
+                            title = stringResource(R.string.st_AppSkin_gradient),
+                            desc = stringResource(R.string.st_AppSkin_gradient_desc),
                             checked = iconGradient,
                             onCheckedChange = {
                                 vibrationManager?.vibrateClick()
@@ -582,8 +592,8 @@ fun AppSkinScreen(
                         )
                         if (bgOv != null || fgOv != null || strokeOv != null) {
                             SkinMiniAction(
-                                title = "Custom icon colors",
-                                desc = "Overrides active — tap to return to the preset",
+                                title = stringResource(R.string.st_AppSkin_custom_icon),
+                                desc = stringResource(R.string.st_AppSkin_custom_icon_desc),
                                 onClick = {
                                     vibrationManager?.vibrateClick()
                                     viewModel.clearIconOverrides()
@@ -593,18 +603,21 @@ fun AppSkinScreen(
                     }
                 }
 
-                AppSkinSectionHeader("Theme & display")
+                AppSkinSectionHeader(stringResource(R.string.st_AppSkin_header_theme))
 
                 // Theme & colors (migrated from Settings Visuals & theme)
                 AppSkinThemeSection(viewModel = viewModel)
 
-                AppSkinSectionHeader("Community skins")
+                AppSkinSectionHeader(stringResource(R.string.st_AppSkin_header_skins))
 
                 // Skins — the 3 most recently used looks (bundled presets until you apply some).
                 SettingsItem(
-                    title = "Toolz Skins",
-                    subtitle = if (recentIds.isEmpty()) "Starter looks · ${skins.size} in catalog${if (syncing) " · syncing…" else ""}"
-                    else "Recently used · ${skins.size} in catalog${if (syncing) " · syncing…" else ""}",
+                    title = stringResource(R.string.st_AppSkin_skins_title),
+                    subtitle = stringResource(
+                        if (recentIds.isEmpty()) R.string.st_AppSkin_skins_starter
+                        else R.string.st_AppSkin_skins_recent,
+                        skins.size,
+                    ) + if (syncing) stringResource(R.string.st_AppSkin_syncing) else "",
                     icon = Icons.Rounded.Style,
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 12.dp)) {
@@ -626,7 +639,12 @@ fun AppSkinScreen(
                                         Column(modifier = Modifier.weight(1f)) {
                                             Text(sub.name, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleSmall)
                                             Text(
-                                                "made by ${userName.ifBlank { "you" }}",
+                                                stringResource(
+                                                    R.string.st_AppSkin_made_by,
+                                                    userName.ifBlank {
+                                                        stringResource(R.string.st_AppSkin_made_by_you)
+                                                    },
+                                                ),
                                                 style = MaterialTheme.typography.labelSmall,
                                                 fontWeight = FontWeight.Bold,
                                                 color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
@@ -663,7 +681,7 @@ fun AppSkinScreen(
                                 contentColor = MaterialTheme.colorScheme.primary,
                             ),
                         ) {
-                            Text("Open Skins Catalog", fontWeight = FontWeight.Black)
+                            Text(stringResource(R.string.st_AppSkin_open_catalog), fontWeight = FontWeight.Black)
                         }
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             ToolzExpressiveButton(
@@ -674,7 +692,7 @@ fun AppSkinScreen(
                                     contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                                 ),
                             ) {
-                                Text("Refresh", fontWeight = FontWeight.Black)
+                                Text(stringResource(R.string.st_FocusFlowScreen_7c4d), fontWeight = FontWeight.Black)
                             }
                             ToolzExpressiveButton(
                                 onClick = {
@@ -683,11 +701,11 @@ fun AppSkinScreen(
                                 },
                                 modifier = Modifier.weight(1f).height(48.dp),
                             ) {
-                                Text("Share my look", fontWeight = FontWeight.Black)
+                                Text(stringResource(R.string.st_AppSkin_share), fontWeight = FontWeight.Black)
                             }
                         }
                         Text(
-                            "Skins apply theme + colors + icon together. Shared looks go to review, then appear for everyone.",
+                            stringResource(R.string.st_AppSkin_skins_note),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                         )
@@ -705,7 +723,7 @@ fun AppSkinScreen(
         androidx.compose.ui.window.Dialog(onDismissRequest = { if (!submitting) showShare = false }) {
             Surface(shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surface) {
                 Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Share your look", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                    Text(stringResource(R.string.st_AppSkin_share_title), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
                     // Live preview of exactly what gets packaged.
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -728,26 +746,30 @@ fun AppSkinScreen(
                         )
                         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(
-                                "${themeMode.lowercase()} · ${if (dynamicColor) "dynamic" else "custom colors"}",
+                                "${themeModeLabel(themeMode)} · ${
+                                    if (dynamicColor) stringResource(R.string.st_AppSkin_mode_dynamic)
+                                    else stringResource(R.string.st_AppSkin_mode_custom_colors)
+                                }",
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Bold,
                             )
                             Text(
-                                "${current.name.lowercase()} · ${(com.frerox.toolz.data.skin.IconShape.parse(shape)?.name ?: shape).lowercase()}${if (iconGradient) " · gradient" else ""}",
+                                "${current.name} · ${iconShapeLabel(shape)}" +
+                                    if (iconGradient) " · ${stringResource(R.string.st_AppSkin_gradient_word)}" else "",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     }
                     Text(
-                        "Packages your theme + colors + icon (including gradient and overrides) as a community skin for review. Identical looks can't be shared twice.",
+                        stringResource(R.string.st_AppSkin_share_desc),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     OutlinedTextField(
                         value = name,
                         onValueChange = { name = it.take(32) },
-                        placeholder = { Text("Look name — e.g. Midnight Grape") },
+                        placeholder = { Text(stringResource(R.string.st_AppSkin_share_name_hint)) },
                         singleLine = true,
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier.fillMaxWidth(),
@@ -755,13 +777,13 @@ fun AppSkinScreen(
                     OutlinedTextField(
                         value = author,
                         onValueChange = { author = it.take(32) },
-                        placeholder = { Text("Your name — shown as made by …") },
+                        placeholder = { Text(stringResource(R.string.st_AppSkin_share_author_hint)) },
                         singleLine = true,
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        androidx.compose.material3.TextButton(onClick = { showShare = false }, enabled = !submitting) { Text("Cancel") }
+                        androidx.compose.material3.TextButton(onClick = { showShare = false }, enabled = !submitting) { Text(stringResource(R.string.st_Common_Cancel)) }
                         androidx.compose.material3.Button(
                             onClick = {
                                 if (name.trim().length >= 3 && !submitting) {
@@ -775,7 +797,15 @@ fun AppSkinScreen(
                             },
                             enabled = name.trim().length >= 3 && !submitting,
                             shape = RoundedCornerShape(16.dp),
-                        ) { Text(if (submitting) "Sharing…" else "Submit", fontWeight = FontWeight.Black) }
+                        ) {
+                            Text(
+                                stringResource(
+                                    if (submitting) R.string.st_AppSkin_sharing
+                                    else R.string.st_AppSkin_submit
+                                ),
+                                fontWeight = FontWeight.Black,
+                            )
+                        }
                     }
                 }
             }
@@ -793,14 +823,18 @@ fun AppSkinScreen(
                     val ok = r.isSuccess
                     val dupe = r.exceptionOrNull() as? com.frerox.toolz.data.skin.DuplicateSkinException
                     Text(
-                        if (ok) "Look shared!" else if (dupe != null) "Already exists" else "Share failed",
+                        stringResource(
+                            if (ok) R.string.st_AppSkin_shared_ok
+                            else if (dupe != null) R.string.st_AppSkin_shared_dup
+                            else R.string.st_AppSkin_shared_fail
+                        ),
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Black,
                     )
                     Text(
-                        if (ok) "It's pending review — you'll see Pending review, then Live or Not approved, right here in My shared looks."
-                        else if (dupe != null) "This exact look is already published as “${dupe.existingName}”. Tweak the theme, colors or icon to make it yours, then share again."
-                        else (r.exceptionOrNull()?.message ?: "Something went wrong. Check your connection and try again."),
+                        if (ok) stringResource(R.string.st_AppSkin_shared_pending)
+                        else if (dupe != null) stringResource(R.string.st_AppSkin_shared_dup_msg, dupe.existingName)
+                        else (r.exceptionOrNull()?.message ?: stringResource(R.string.st_AppSkin_shared_err)),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -808,7 +842,7 @@ fun AppSkinScreen(
                         onClick = { shareResult = null },
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier.fillMaxWidth(),
-                    ) { Text("Got it", fontWeight = FontWeight.Black) }
+                    ) { Text(stringResource(R.string.st_AiAssistantScreen_u7v9), fontWeight = FontWeight.Black) }
                 }
             }
         }

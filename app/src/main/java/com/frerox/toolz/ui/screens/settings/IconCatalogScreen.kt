@@ -54,9 +54,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.frerox.toolz.R
 import com.frerox.toolz.data.skin.IconCatalog
 import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.components.ToolzMarkThemed
@@ -103,8 +105,8 @@ fun IconCatalogScreen(
     Scaffold(
         topBar = {
             ExpressiveTopAppBar(
-                title = "Icon Catalog",
-                subtitle = "${IconCatalog.BUILT_IN.size} presets · ${current.name} active",
+                title = stringResource(R.string.st_AppSkin_catalog_title),
+                subtitle = stringResource(R.string.st_AppSkin_catalog_sub, IconCatalog.BUILT_IN.size, current.name),
                 navigationIcon = {
                     IconButton(
                         onClick = {
@@ -114,7 +116,7 @@ fun IconCatalogScreen(
                         modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp))
                             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.st_SettingsScreen_u1v2))
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
@@ -132,7 +134,7 @@ fun IconCatalogScreen(
         ) {
             // Live preview of current selection
             Text(
-                "Tapping a preset switches the home-screen icon too — launchers can take a few seconds to refresh it. Circle also swaps the tile to its round artwork.",
+                stringResource(R.string.st_AppSkin_catalog_note),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             )
@@ -159,7 +161,7 @@ fun IconCatalogScreen(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(current.name, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(
-                            "${(com.frerox.toolz.data.skin.IconShape.parse(shape)?.name ?: shape).lowercase()} · ${current.tag.lowercase()}",
+                            "${iconShapeLabel(shape).lowercase()} · ${iconTagLabel(current.tag).lowercase()}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
@@ -172,7 +174,7 @@ fun IconCatalogScreen(
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
-                placeholder = { Text("Search icons…") },
+                placeholder = { Text(stringResource(R.string.st_AppSkin_search_icons)) },
                 singleLine = true,
                 shape = RoundedCornerShape(16.dp),
                 leadingIcon = { Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp)) },
@@ -209,7 +211,7 @@ fun IconCatalogScreen(
                         modifier = Modifier.bouncyClick {},
                     ) {
                         Text(
-                            t,
+                            iconTagLabel(t),
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Black,
@@ -265,7 +267,7 @@ fun IconCatalogScreen(
                             color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                         )
-                        Text(spec.tag, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), fontSize = 10.sp)
+                        Text(iconTagLabel(spec.tag), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), fontSize = 10.sp)
                     }
                 }
             }

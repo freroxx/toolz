@@ -52,7 +52,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.frerox.toolz.R
 import com.frerox.toolz.data.skin.IconCatalog
 import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
@@ -109,6 +111,14 @@ fun SkinsCatalogScreen(
     LaunchedEffect(Unit) { viewModel.refreshSkins(false) }
 
     val filters = listOf("All", "Toolz", "Community", "Light", "Dark", "Dynamic")
+    val filterLabels = mapOf(
+        "All" to stringResource(R.string.st_AppSkin_tag_all),
+        "Toolz" to stringResource(R.string.st_AppSkin_filter_toolz),
+        "Community" to stringResource(R.string.st_AppSkin_filter_community),
+        "Light" to stringResource(R.string.st_AppSkin_tag_light),
+        "Dark" to stringResource(R.string.st_AppSkin_tag_dark),
+        "Dynamic" to stringResource(R.string.st_AppSkin_mode_dynamic_cap),
+    )
     val filtered = skins.filter { skin ->
         val matchesQuery = query.isBlank() ||
             skin.name.contains(query, true) ||
@@ -127,8 +137,9 @@ fun SkinsCatalogScreen(
     Scaffold(
         topBar = {
             ExpressiveTopAppBar(
-                title = "Skins Catalog",
-                subtitle = "${skins.size} looks ${if (syncing) "· syncing…" else ""}",
+                title = stringResource(R.string.st_AppSkin_catalog_skins_title),
+                subtitle = stringResource(R.string.st_AppSkin_skins_sub, skins.size) +
+                    if (syncing) stringResource(R.string.st_AppSkin_syncing) else "",
                 navigationIcon = {
                     IconButton(
                         onClick = {
@@ -138,7 +149,7 @@ fun SkinsCatalogScreen(
                         modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp))
                             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.st_SettingsScreen_u1v2))
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
@@ -157,7 +168,7 @@ fun SkinsCatalogScreen(
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
-                placeholder = { Text("Search skins or makers…") },
+                placeholder = { Text(stringResource(R.string.st_AppSkin_search_skins)) },
                 singleLine = true,
                 shape = RoundedCornerShape(16.dp),
                 leadingIcon = { Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp)) },
@@ -194,7 +205,7 @@ fun SkinsCatalogScreen(
                         modifier = Modifier.bouncyClick {},
                     ) {
                         Text(
-                            f,
+                            filterLabels[f] ?: f,
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Black,
@@ -211,7 +222,7 @@ fun SkinsCatalogScreen(
                 if (mySubmissions.isNotEmpty()) {
                     item {
                         Text(
-                            "MY SHARED LOOKS",
+                            stringResource(R.string.st_AppSkin_header_mine),
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Black,
                             color = MaterialTheme.colorScheme.primary,
@@ -233,7 +244,12 @@ fun SkinsCatalogScreen(
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(sub.name, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleSmall)
                                     Text(
-                                        "made by ${userName.ifBlank { "you" }}",
+                                        stringResource(
+                                            R.string.st_AppSkin_made_by,
+                                            userName.ifBlank {
+                                                stringResource(R.string.st_AppSkin_made_by_you)
+                                            },
+                                        ),
                                         style = MaterialTheme.typography.labelSmall,
                                         fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
@@ -245,7 +261,7 @@ fun SkinsCatalogScreen(
                     }
                     item {
                         Text(
-                            "COMMUNITY",
+                            stringResource(R.string.st_AppSkin_header_community),
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Black,
                             color = MaterialTheme.colorScheme.primary,
@@ -277,7 +293,7 @@ fun SkinsCatalogScreen(
                                 contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                             ),
                         ) {
-                            Text("Refresh", fontWeight = FontWeight.Black)
+                            Text(stringResource(R.string.st_FocusFlowScreen_7c4d), fontWeight = FontWeight.Black)
                         }
                         ToolzExpressiveButton(
                             onClick = {
@@ -286,7 +302,7 @@ fun SkinsCatalogScreen(
                             },
                             modifier = Modifier.weight(1f).height(48.dp),
                         ) {
-                            Text("Share my look", fontWeight = FontWeight.Black)
+                            Text(stringResource(R.string.st_AppSkin_share), fontWeight = FontWeight.Black)
                         }
                     }
                     Spacer(Modifier.height(8.dp))
@@ -302,7 +318,7 @@ fun SkinsCatalogScreen(
         androidx.compose.ui.window.Dialog(onDismissRequest = { if (!submitting) showShare = false }) {
             Surface(shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surface) {
                 Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Share your look", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                    Text(stringResource(R.string.st_AppSkin_share_title), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
                     // Live preview of exactly what gets packaged.
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -326,26 +342,30 @@ fun SkinsCatalogScreen(
                         )
                         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(
-                                "${themeMode.lowercase()} · ${if (dynamicColor) "dynamic" else "custom colors"}",
+                                "${themeModeLabel(themeMode)} · ${
+                                    if (dynamicColor) stringResource(R.string.st_AppSkin_mode_dynamic)
+                                    else stringResource(R.string.st_AppSkin_mode_custom_colors)
+                                }",
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Bold,
                             )
                             Text(
-                                "${current.name.lowercase()} · ${(com.frerox.toolz.data.skin.IconShape.parse(shape)?.name ?: shape).lowercase()}${if (iconGradient) " · gradient" else ""}",
+                                "${current.name} · ${iconShapeLabel(shape)}" +
+                                    if (iconGradient) " · ${stringResource(R.string.st_AppSkin_gradient_word)}" else "",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     }
                     Text(
-                        "Packages your theme + colors + icon (including gradient and overrides) as a community skin for review. Identical looks can't be shared twice.",
+                        stringResource(R.string.st_AppSkin_share_desc),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     OutlinedTextField(
                         value = name,
                         onValueChange = { name = it.take(32) },
-                        placeholder = { Text("Look name — e.g. Midnight Grape") },
+                        placeholder = { Text(stringResource(R.string.st_AppSkin_share_name_hint)) },
                         singleLine = true,
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier.fillMaxWidth(),
@@ -353,13 +373,13 @@ fun SkinsCatalogScreen(
                     OutlinedTextField(
                         value = author,
                         onValueChange = { author = it.take(32) },
-                        placeholder = { Text("Your name — shown as made by …") },
+                        placeholder = { Text(stringResource(R.string.st_AppSkin_share_author_hint)) },
                         singleLine = true,
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        androidx.compose.material3.TextButton(onClick = { showShare = false }, enabled = !submitting) { Text("Cancel") }
+                        androidx.compose.material3.TextButton(onClick = { showShare = false }, enabled = !submitting) { Text(stringResource(R.string.st_Common_Cancel)) }
                         androidx.compose.material3.Button(
                             onClick = {
                                 if (name.trim().length >= 3 && !submitting) {
@@ -373,7 +393,15 @@ fun SkinsCatalogScreen(
                             },
                             enabled = name.trim().length >= 3 && !submitting,
                             shape = RoundedCornerShape(16.dp),
-                        ) { Text(if (submitting) "Sharing…" else "Submit", fontWeight = FontWeight.Black) }
+                        ) {
+                            Text(
+                                stringResource(
+                                    if (submitting) R.string.st_AppSkin_sharing
+                                    else R.string.st_AppSkin_submit
+                                ),
+                                fontWeight = FontWeight.Black,
+                            )
+                        }
                     }
                 }
             }
@@ -390,14 +418,18 @@ fun SkinsCatalogScreen(
                 ) {
                     val dupe = r.exceptionOrNull() as? com.frerox.toolz.data.skin.DuplicateSkinException
                     Text(
-                        if (r.isSuccess) "Look shared!" else if (dupe != null) "Already exists" else "Share failed",
+                        stringResource(
+                            if (r.isSuccess) R.string.st_AppSkin_shared_ok
+                            else if (dupe != null) R.string.st_AppSkin_shared_dup
+                            else R.string.st_AppSkin_shared_fail
+                        ),
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Black,
                     )
                     Text(
-                        if (r.isSuccess) "It's pending review — watch its status in My shared looks."
-                        else if (dupe != null) "This exact look is already published as “${dupe.existingName}”. Tweak it first, then share again."
-                        else (r.exceptionOrNull()?.message ?: "Something went wrong. Check your connection and try again."),
+                        if (r.isSuccess) stringResource(R.string.st_AppSkin_shared_pending_short)
+                        else if (dupe != null) stringResource(R.string.st_AppSkin_shared_dup_msg, dupe.existingName)
+                        else (r.exceptionOrNull()?.message ?: stringResource(R.string.st_AppSkin_shared_err)),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -405,7 +437,7 @@ fun SkinsCatalogScreen(
                         onClick = { shareResult = null },
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier.fillMaxWidth(),
-                    ) { Text("Got it", fontWeight = FontWeight.Black) }
+                    ) { Text(stringResource(R.string.st_AiAssistantScreen_u7v9), fontWeight = FontWeight.Black) }
                 }
             }
         }
