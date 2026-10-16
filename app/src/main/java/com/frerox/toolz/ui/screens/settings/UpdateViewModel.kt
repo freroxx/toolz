@@ -17,151 +17,88 @@
 
 package com.frerox.toolz.ui.screens.settings
 
-import android.app.DownloadManager
-import android.content.Context
-import android.net.Uri
 import android.os.Build
-import android.os.Environment
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.settings.SettingsRepository
-import com.frerox.toolz.data.update.*
+import com.frerox.toolz.data.update.PendingUpdate
+import com.frerox.toolz.data.update.UpdateManager
+import com.frerox.toolz.data.update.UpdateManagerState
 import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import java.io.File
 import javax.inject.Inject
 
 @HiltViewModel
 class UpdateViewModel @Inject constructor(
-    private val updateService: UpdateService,
-    private val settingsRepository: SettingsRepository,
-    @ApplicationContext private val context: Context
+    private val updateManager: UpdateManager,
+    private val settingsRepository: SettingsRepository
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow<UpdateUiState>(UpdateUiState.Idle)
-    val uiState = _uiState.asStateFlow()
+    val managerState: StateFlow<UpdateManagerState> = updateManager.state
 
-    val preferredAbi = settingsRepository.preferredAbi.stateIn(
+    val preferredAbi: StateFlow<String> = settingsRepository.preferredAbi.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5000), "AUTO"
     )
 
+    val autoUpdateEnabled: StateFlow<Boolean> =
+        settingsRepository.autoUpdateEnabled.stateIn(
+            viewModelScope, SharingStarted.WhileSubscribed(5000), false
+        )
+
+    // Legacy alias kept so existing call sites keep compiling during migration.
+    val uiState: StateFlow<UpdateUiState> = kotlinx.coroutines.flow.MutableStateFlow(UpdateUiState.Idle)
+
     fun setPreferredAbi(abi: String) {
-        viewModelScope.launch {
-            settingsRepository.setPreferredAbi(abi)
-        }
+        viewModelScope.launch { settingsRepository.setPreferredAbi(abi) }
     }
 
-    fun getDeviceAbi(): String {
-        return Build.SUPPORTED_ABIS.firstOrNull() ?: "unknown"
+    fun setAutoUpdateEnabled(enabled: Boolean) {
+        viewModelScope.launch { settingsRepository.setAutoUpdateEnabled(enabled) }
     }
 
-    fun checkForUpdates() {
-        viewModelScope.launch {
-            _uiState.value = UpdateUiState.Checking
-            try {
-                // Fetch latest release from GitHub
-                val response = updateService.getLatestRelease(
-                    UpdateConstants.GITHUB_OWNER,
-                    UpdateConstants.GITHUB_REPO
-                )
-                
-                if (response.isSuccessful) {
-                    val release = response.body()
-                    if (release != null) {
-                        // Filter APKs that match our supported ABIs or are universal
-                        val hasCompatibleApk = release.assets.any { asset ->
-                            val name = asset.name.lowercase()
-                            name.endsWith(".apk") && (
-                                UpdateHelper.ABI_FILTERS.any { name.contains(it) } || 
-                                name.contains("universal")
-                            )
-                        }
-                        
-                        if (hasCompatibleApk) {
-                            _uiState.value = UpdateUiState.Success(release)
-                            return@launch
-                        }
-                    }
-                }
+    fun getDeviceAbi(): String = Build.SUPPORTED_ABIS.firstOrNull() ?: "unknown"
 
-                // Fallback to manifest if GitHub Release API fails or has no compatible APKs
-                val manifestResponse = updateService.getUpdateManifest(UpdateConstants.MANIFEST_URL)
-                if (manifestResponse.isSuccessful) {
-                    val manifest = manifestResponse.body()
-                    if (manifest != null && !manifest.releases.isNullOrEmpty()) {
-                        _uiState.value = UpdateUiState.ManifestSuccess(manifest)
-                        return@launch
-                    }
-                }
-
-                _uiState.value = UpdateUiState.Error("No compatible update APKs found in the latest release")
-            } catch (e: Exception) {
-                _uiState.value = UpdateUiState.Error(e.message ?: "Network error occurred")
-            }
-        }
+    fun checkForUpdates(force: Boolean = true) {
+        viewModelScope.launch { updateManager.check(showNotification = false, force = force) }
     }
 
-    private var downloadJob: Job? = null
-
-    fun startDownload(url: String) {
-        val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-        val request = DownloadManager.Request(Uri.parse(url))
-            .setTitle("Toolz Update")
-            .setDescription("Downloading latest build...")
-            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            .setDestinationInExternalFilesDir(context, Environment.DIRECTORY_DOWNLOADS, "toolz_update.apk")
-            .setAllowedOverMetered(true)
-            .setAllowedOverRoaming(true)
-
-        // Delete existing file if present
-        val existingFile = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "toolz_update.apk")
-        if (existingFile.exists()) existingFile.delete()
-
-        val downloadId = downloadManager.enqueue(request)
-        
-        downloadJob?.cancel()
-        downloadJob = viewModelScope.launch {
-            var isDownloading = true
-            while (isDownloading) {
-                val query = DownloadManager.Query().setFilterById(downloadId)
-                val cursor = downloadManager.query(query)
-                if (cursor.moveToFirst()) {
-                    val bytesDownloaded = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
-                    val totalBytes = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
-                    val status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
-                    
-                    if (status == DownloadManager.STATUS_SUCCESSFUL) {
-                        _uiState.value = UpdateUiState.Downloading(100f)
-                        isDownloading = false
-                    } else if (status == DownloadManager.STATUS_FAILED) {
-                        _uiState.value = UpdateUiState.Error("Download failed")
-                        isDownloading = false
-                    } else if (totalBytes > 0) {
-                        val progress = (bytesDownloaded.toFloat() / totalBytes.toFloat()) * 100f
-                        _uiState.value = UpdateUiState.Downloading(progress)
-                    }
-                }
-                cursor.close()
-                delay(500)
-            }
-        }
+    fun startDownload(update: PendingUpdate? = null) {
+        updateManager.download(update, autoInstall = true)
     }
-    
+
+    fun cancelDownload() = updateManager.cancelDownload()
+
+    fun installReady() = updateManager.installReady()
+
+    fun needsInstallPermission(): Boolean = updateManager.needsInstallPermission()
+
+    fun openInstallSettings(context: android.content.Context) =
+        updateManager.openInstallSettings(context)
+
+    fun skipVersion(version: String) = updateManager.skipVersion(version)
+
     fun resetState() {
-        downloadJob?.cancel()
-        _uiState.value = UpdateUiState.Idle
+        // Kept for the legacy bottom-sheet dismiss path; manager Idle is sticky-safe.
+    }
+
+    // Legacy download entry kept for old callers (now routes to the manager).
+    fun startDownload(url: String) {
+        val pending = updateManager.currentPendingOrNull()
+        if (pending != null && pending.downloadUrl == url) {
+            updateManager.download(pending, autoInstall = true)
+        }
     }
 }
 
+// Legacy UI state (kept for binary compatibility; new UI reads managerState).
 sealed class UpdateUiState {
     object Idle : UpdateUiState()
     object Checking : UpdateUiState()
     data class Downloading(val progress: Float) : UpdateUiState()
-    data class Success(val release: GitHubRelease) : UpdateUiState()
-    data class ManifestSuccess(val manifest: UpdateManifest) : UpdateUiState()
+    data class Success(val release: com.frerox.toolz.data.update.GitHubRelease) : UpdateUiState()
+    data class ManifestSuccess(val manifest: com.frerox.toolz.data.update.UpdateManifest) : UpdateUiState()
     data class Error(val message: String) : UpdateUiState()
 }
