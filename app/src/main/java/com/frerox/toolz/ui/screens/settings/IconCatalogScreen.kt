@@ -132,7 +132,7 @@ fun IconCatalogScreen(
         ) {
             // Live preview of current selection
             Text(
-                "Tapping a preset switches the home-screen icon too — launchers can take a few seconds to refresh it.",
+                "Tapping a preset switches the home-screen icon too — launchers can take a few seconds to refresh it. Circle also swaps the tile to its round artwork.",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             )

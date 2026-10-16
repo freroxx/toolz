@@ -708,6 +708,622 @@
             </intent-filter>
         </activity-alias>
 
+                <activity-alias
+            android:name=".Icon_grape_haze_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_grape_haze_circle"
+            android:roundIcon="@mipmap/ic_icon_grape_haze_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_grape_deep_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_grape_deep_circle"
+            android:roundIcon="@mipmap/ic_icon_grape_deep_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_lagoon_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_lagoon_circle"
+            android:roundIcon="@mipmap/ic_icon_lagoon_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_mono_grey_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_mono_grey_circle"
+            android:roundIcon="@mipmap/ic_icon_mono_grey_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_midnight_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_midnight_circle"
+            android:roundIcon="@mipmap/ic_icon_midnight_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_legacy_citrus_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_legacy_citrus_circle"
+            android:roundIcon="@mipmap/ic_icon_legacy_citrus_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_legacy_ocean_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_legacy_ocean_circle"
+            android:roundIcon="@mipmap/ic_icon_legacy_ocean_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_legacy_night_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_legacy_night_circle"
+            android:roundIcon="@mipmap/ic_icon_legacy_night_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_paper_light_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_paper_light_circle"
+            android:roundIcon="@mipmap/ic_icon_paper_light_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_paper_dark_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_paper_dark_circle"
+            android:roundIcon="@mipmap/ic_icon_paper_dark_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_citrus_pop_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_citrus_pop_circle"
+            android:roundIcon="@mipmap/ic_icon_citrus_pop_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_ocean_pop_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_ocean_pop_circle"
+            android:roundIcon="@mipmap/ic_icon_ocean_pop_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_royal_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_royal_circle"
+            android:roundIcon="@mipmap/ic_icon_royal_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_rose_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_rose_circle"
+            android:roundIcon="@mipmap/ic_icon_rose_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_mint_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_mint_circle"
+            android:roundIcon="@mipmap/ic_icon_mint_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_sand_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_sand_circle"
+            android:roundIcon="@mipmap/ic_icon_sand_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_slate_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_slate_circle"
+            android:roundIcon="@mipmap/ic_icon_slate_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_snow_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_snow_circle"
+            android:roundIcon="@mipmap/ic_icon_snow_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_carbon_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_carbon_circle"
+            android:roundIcon="@mipmap/ic_icon_carbon_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_cobalt_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_cobalt_circle"
+            android:roundIcon="@mipmap/ic_icon_cobalt_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_sunset_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_sunset_circle"
+            android:roundIcon="@mipmap/ic_icon_sunset_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_forest_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_forest_circle"
+            android:roundIcon="@mipmap/ic_icon_forest_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_lavender_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_lavender_circle"
+            android:roundIcon="@mipmap/ic_icon_lavender_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_peach_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_peach_circle"
+            android:roundIcon="@mipmap/ic_icon_peach_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_crimson_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_crimson_circle"
+            android:roundIcon="@mipmap/ic_icon_crimson_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_ember_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_ember_circle"
+            android:roundIcon="@mipmap/ic_icon_ember_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_arctic_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_arctic_circle"
+            android:roundIcon="@mipmap/ic_icon_arctic_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_dusk_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_dusk_circle"
+            android:roundIcon="@mipmap/ic_icon_dusk_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_moss_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_moss_circle"
+            android:roundIcon="@mipmap/ic_icon_moss_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_amber_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_amber_circle"
+            android:roundIcon="@mipmap/ic_icon_amber_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_bubblegum_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_bubblegum_circle"
+            android:roundIcon="@mipmap/ic_icon_bubblegum_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_tangerine_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_tangerine_circle"
+            android:roundIcon="@mipmap/ic_icon_tangerine_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_lime_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_lime_circle"
+            android:roundIcon="@mipmap/ic_icon_lime_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_teal_pop_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_teal_pop_circle"
+            android:roundIcon="@mipmap/ic_icon_teal_pop_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_sky_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_sky_circle"
+            android:roundIcon="@mipmap/ic_icon_sky_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_indigo_pop_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_indigo_pop_circle"
+            android:roundIcon="@mipmap/ic_icon_indigo_pop_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_violet_haze_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_violet_haze_circle"
+            android:roundIcon="@mipmap/ic_icon_violet_haze_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_mocha_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_mocha_circle"
+            android:roundIcon="@mipmap/ic_icon_mocha_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_olive_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_olive_circle"
+            android:roundIcon="@mipmap/ic_icon_olive_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_rose_gold_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_rose_gold_circle"
+            android:roundIcon="@mipmap/ic_icon_rose_gold_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_storm_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_storm_circle"
+            android:roundIcon="@mipmap/ic_icon_storm_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_crimson_deep_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_crimson_deep_circle"
+            android:roundIcon="@mipmap/ic_icon_crimson_deep_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_system_auto_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_system_auto_circle"
+            android:roundIcon="@mipmap/ic_icon_system_auto_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+                <activity-alias
+            android:name=".Icon_dynamic_glow_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_dynamic_glow_circle"
+            android:roundIcon="@mipmap/ic_icon_dynamic_glow_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
         <!-- V3-FIX (reviewwhisper.md item 6): FCM entry point for Whisper wake pings. -->
         <service
             android:name=".push.WhisperPushService"

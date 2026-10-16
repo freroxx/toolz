@@ -34,6 +34,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -326,11 +327,18 @@ class SettingsViewModel @Inject constructor(
     fun setAppIconPresetId(id: String) = viewModelScope.launch {
         repository.setAppIconPresetId(id)
         repository.setActiveSkinId(null)
-        try { launcherIconManager.apply(id) } catch (_: Exception) { }
+        try {
+            val shape = try { repository.appIconShape.first() } catch (_: Exception) { null }
+            launcherIconManager.apply(id, shape)
+        } catch (_: Exception) { }
     }
     fun setAppIconShape(shape: String) = viewModelScope.launch {
         repository.setAppIconShape(shape)
         repository.setActiveSkinId(null)
+        try {
+            val preset = try { repository.appIconPresetId.first() } catch (_: Exception) { null }
+            launcherIconManager.apply(preset ?: "grape-haze", shape)
+        } catch (_: Exception) { }
     }
     fun setAppIconAdaptTheme(enabled: Boolean) = viewModelScope.launch { repository.setAppIconAdaptTheme(enabled) }
     fun setAppIconFollowDynamic(enabled: Boolean) = viewModelScope.launch { repository.setAppIconFollowDynamic(enabled) }
@@ -353,7 +361,7 @@ class SettingsViewModel @Inject constructor(
     fun applySkin(skin: com.frerox.toolz.data.skin.SkinDto) = viewModelScope.launch {
         try {
             skinRepository.apply(skin)
-            launcherIconManager.apply(skin.iconPresetId)
+            launcherIconManager.apply(skin.iconPresetId, skin.iconShape)
         } catch (_: Exception) { }
     }
     fun submitCurrentAsSkin(name: String, author: String, onResult: (Result<String>) -> Unit) = viewModelScope.launch {

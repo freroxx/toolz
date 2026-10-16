@@ -199,7 +199,7 @@ class OnboardingViewModel @Inject constructor(
             settingsRepository.setActiveSkinId(s.activeSkinId)
             // The launcher tile follows the picked icon — previously onboarding
             // saved the preset but never switched the alias, so the icon "did nothing".
-            try { launcherIconManager.apply(s.iconPresetId) } catch (_: Exception) { }
+            try { launcherIconManager.apply(s.iconPresetId, s.iconShape) } catch (_: Exception) { }
             
             if (s.groqApiKey.isNotBlank()) {
                 aiSettingsManager.setApiKey(s.groqApiKey, "Groq")

@@ -20,6 +20,10 @@ import javax.inject.Singleton
  * MainActivity itself carries no LAUNCHER filter — the aliases are the
  * only home-screen entry points, so there is never a duplicate icon.
  *
+ * Each preset ships two baked tiles: the octagon mark (`.Icon_<san>`) and the
+ * circle mark (`.Icon_<san>_circle`). [shape] picks the variant, so Circle
+ * genuinely reshapes the home-screen tile instead of being in-app only.
+ *
  * Fail-open everywhere: launchers refresh on their own schedule, and some
  * take a few seconds to pick up the change.
  */
@@ -34,22 +38,51 @@ class LauncherIconManager @Inject constructor(
         fun aliasSuffix(presetId: String): String =
             IconCatalog.find(presetId).id.replace('-', '_')
 
-        fun aliasName(presetId: String): String = ".Icon_${aliasSuffix(presetId)}"
+        fun isCircleShape(shape: String?): Boolean =
+            IconShape.parse(shape) == IconShape.CIRCLE
+
+        fun aliasName(presetId: String, shape: String? = null): String =
+            ".Icon_${aliasSuffix(presetId)}${if (isCircleShape(shape)) "_circle" else ""}"
 
         fun allAliasNames(): List<String> =
-            IconCatalog.BUILT_IN.map { ".Icon_${it.id.replace('-', '_')}" }.distinct()
+            IconCatalog.BUILT_IN.flatMap {
+                val san = it.id.replace('-', '_')
+                listOf(".Icon_$san", ".Icon_${san}_circle")
+            }.distinct()
+
+        /** Ground truth for notifications: which tile alias is currently enabled. */
+        fun enabledAlias(context: Context): String? = try {
+            val pm = context.packageManager
+            val pkg = context.packageName
+            allAliasNames().firstOrNull {
+                try {
+                    pm.getComponentEnabledSetting(ComponentName(pkg, pkg + it)) ==
+                        PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+                } catch (_: Exception) { false }
+            }
+        } catch (_: Exception) { null }
+
+        /** Preset id behind an alias name (`.Icon_grape_haze_circle` -> `grape-haze`). */
+        fun presetIdForAlias(alias: String?): String {
+            val san = (alias ?: "").removePrefix(".Icon_").removeSuffix("_circle")
+            val id = san.replace('_', '-')
+            return IconCatalog.find(id).id.takeIf { it == id } ?: DEFAULT_PRESET_ID
+        }
     }
 
-    /** Enable the alias for [presetId], disable every other icon alias. */
-    suspend fun apply(presetId: String) = withContext(Dispatchers.IO) {
+    /** Enable the alias for [presetId] + [shape], disable every other icon alias. */
+    suspend fun apply(presetId: String, shape: String? = null) = withContext(Dispatchers.IO) {
+        val spec = IconCatalog.find(presetId)
         // Mirror the pick to SharedPreferences so NotificationHelper (which can't
         // touch DataStore synchronously) renders notification art for this preset.
         try {
             context.getSharedPreferences("toolz_icon", Context.MODE_PRIVATE).edit()
-                .putString("preset_id", IconCatalog.find(presetId).id)
+                .putString("preset_id", spec.id)
+                .putString("shape", if (isCircleShape(shape)) "CIRCLE" else "OCTAGON")
+                .putInt("body_argb", spec.bodyStart.toInt())
                 .apply()
         } catch (_: Exception) { }
-        val target = aliasName(presetId)
+        val target = aliasName(presetId, shape)
         try {
             val pm = context.packageManager
             val pkg = context.packageName
@@ -80,8 +113,10 @@ class LauncherIconManager @Inject constructor(
             // which is already enabled above when nothing matched.
             if (!changed) Unit
         } catch (_: Exception) { }
+        // Wake ongoing notifications so the shade follows the new tile immediately.
+        try { com.frerox.toolz.util.IconChangeBus.notifyChanged() } catch (_: Exception) { }
     }
 
-    /** Re-assert the persisted preset (boot, update, cold start). */
-    suspend fun ensureApplied(presetId: String) = apply(presetId)
+    /** Re-assert the persisted preset + shape (boot, update, cold start). */
+    suspend fun ensureApplied(presetId: String, shape: String? = null) = apply(presetId, shape)
 }

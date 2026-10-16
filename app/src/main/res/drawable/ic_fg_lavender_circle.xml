@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Generated preset lavender (circle frame): rim/body/disc from IconCatalog. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="1620"
+    android:viewportHeight="1620">
+    <group android:translateX="270" android:translateY="270">
+        <path
+            android:fillColor="#FF7B2FBE"
+            android:pathData="M54,540A486,486,0,1,0,1026,540A486,486,0,1,0,54,540Z" />
+        <path android:pathData="M89,540A451,451,0,1,0,991,540A451,451,0,1,0,89,540Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:type="linear"
+                    android:startX="293.51"
+                    android:startY="174.56"
+                    android:endX="785.77"
+                    android:endY="904.36">
+                    <item android:offset="0.0000" android:color="#FFE6DEF7" />
+                    <item android:offset="0.0930" android:color="#FFE6DEF7" />
+                    <item android:offset="0.2031" android:color="#FFE4DBF6" />
+                    <item android:offset="0.3133" android:color="#FFE1D6F5" />
+                    <item android:offset="0.4234" android:color="#FFDCD1F3" />
+                    <item android:offset="0.5335" android:color="#FFD7CAF1" />
+                    <item android:offset="0.6436" android:color="#FFD2C2EE" />
+                    <item android:offset="0.7537" android:color="#FFCCBAEC" />
+                    <item android:offset="0.8639" android:color="#FFC6B1E9" />
+                    <item android:offset="0.9740" android:color="#FFBFA8E6" />
+                    <item android:offset="1.0000" android:color="#FFBFA8E6" />
+                </gradient>
+            </aapt:attr>
+        </path>
+        <path
+            android:fillColor="#FF7B2FBE"
+            android:pathData="M212,540A328,328,0,1,1,868,540A328,328,0,1,1,212,540Z" />
+        <path
+            android:fillColor="#FFE6DEF7"
+            android:pathData="M299.73,336.49L405.93,573.29A131.7,131.7,0,0,0,646.27,465.51L540.07,228.71A131.7,131.7,0,0,0,299.73,336.49Z" />
+    </group>
+</vector>

@@ -111,7 +111,8 @@ class ToolzApplication : Application(), Configuration.Provider {
         appScope.launch {
             try {
                 val preset = settingsRepository.appIconPresetId.first()
-                launcherIconManager.ensureApplied(preset)
+                val shape = try { settingsRepository.appIconShape.first() } catch (_: Exception) { null }
+                launcherIconManager.ensureApplied(preset, shape)
             } catch (_: Exception) { }
         }
         // Widget generated previews (API 35+, rate-limited, non-fatal).

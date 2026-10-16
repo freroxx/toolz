@@ -44,6 +44,19 @@ class AppSkinTest {
         assertNull(IconShape.parse("TRIANGLE"))
     }
 
+    @Test fun launcherAliasesCoverShapes() {
+        // Every preset ships an octagon tile and a circle tile; exactly one wins.
+        assertEquals(IconCatalog.BUILT_IN.size * 2, LauncherIconManager.allAliasNames().distinct().size)
+        assertEquals(".Icon_grape_haze", LauncherIconManager.aliasName("grape-haze", "OCTAGON"))
+        assertEquals(".Icon_grape_haze", LauncherIconManager.aliasName("grape-haze", null))
+        assertEquals(".Icon_grape_haze_circle", LauncherIconManager.aliasName("grape-haze", "CIRCLE"))
+        assertEquals(".Icon_teal_pop_circle", LauncherIconManager.aliasName("teal-pop", "CIRCLE"))
+        assertEquals(".Icon_grape_haze_circle", LauncherIconManager.aliasName("grape-haze", "PILL"))
+        assertEquals("grape-haze", LauncherIconManager.presetIdForAlias(".Icon_grape_haze_circle"))
+        assertEquals("teal-pop", LauncherIconManager.presetIdForAlias(".Icon_teal_pop"))
+        assertEquals(IconCatalog.DEFAULT_ID, LauncherIconManager.presetIdForAlias(".Icon_nope"))
+    }
+
     @Test fun everyPresetHasGradient() {
         // The in-app gradient toggle works on all presets, so none may be flat-only.
         IconCatalog.BUILT_IN.forEach { assertNotNull("no bodyEnd: ${it.id}", it.bodyEnd) }

@@ -322,8 +322,8 @@ fun AppSkinScreen(
                     }
                 }
 
-                // Icon container — in-app frames. The home-screen tile shape is masked
-                // by your launcher, but its colors always follow the preset below.
+                // Icon container — in-app frames. Circle also reshapes the
+                // home-screen tile to the round variant of the preset.
                 SettingsItem(
                     title = "Icon shape",
                     subtitle = "Octagon is the classic mark · Circle is softer",
