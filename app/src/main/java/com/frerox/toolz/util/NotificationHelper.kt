@@ -223,7 +223,7 @@ object NotificationHelper {
         return NotificationCompat.Builder(context, channelId)
             .setSmallIcon(safeSmallIcon(context))
             .setLargeIcon(toolzLargeIcon(context))
-            .setColor(ACCENT_COLOR)
+            .setColor(notificationAccent(context))
             .setOnlyAlertOnce(true)
             .setAutoCancel(true)
     }
@@ -444,20 +444,36 @@ object NotificationHelper {
             .getString(ICON_PRESET_KEY, DEFAULT_PRESET_ID) ?: DEFAULT_PRESET_ID
     } catch (_: Exception) { DEFAULT_PRESET_ID }
 
+    fun currentShapeCircle(context: Context): Boolean = try {
+        context.getSharedPreferences(ICON_PREFS, Context.MODE_PRIVATE)
+            .getString("shape", "OCTAGON") == "CIRCLE"
+    } catch (_: Exception) { false }
+
+    /** Accent tint for notifications, following the picked icon body (brand orange fallback). */
+    fun notificationAccent(context: Context): Int = try {
+        val prefs = context.getSharedPreferences(ICON_PREFS, Context.MODE_PRIVATE)
+        if (prefs.contains("body_argb")) prefs.getInt("body_argb", ACCENT_COLOR) else ACCENT_COLOR
+    } catch (_: Exception) { ACCENT_COLOR }
+
     fun toolzLargeIcon(context: Context): android.graphics.Bitmap? {
-        // Keyed by preset id: picking a new icon in the catalog invalidates the
-        // cache, so notifications follow the icon change.
-        val key = currentPresetId(context)
+        // Keyed by preset + shape: picking a new icon or frame in the catalog
+        // invalidates the cache, so notifications follow the icon change.
+        val preset = currentPresetId(context)
+        val circle = currentShapeCircle(context)
+        val key = "$preset|${if (circle) "C" else "O"}"
         if (key == largeIconKey) largeIconCache?.let { return it }
         return try {
-            buildToolzLargeIcon(context, key)
+            buildToolzLargeIcon(context, preset, circle)
         } catch (_: Exception) { null }
     }
 
-    private fun buildToolzLargeIcon(context: Context, presetId: String): android.graphics.Bitmap? = try {
-        // Per-preset foreground vector; falls back to the default launcher art.
+    private fun buildToolzLargeIcon(context: Context, presetId: String, circle: Boolean): android.graphics.Bitmap? = try {
+        // Per-preset foreground vector (circle variant when the Circle frame is
+        // active); falls back to the default launcher art.
         val san = presetId.replace('-', '_')
-        var resId = context.resources.getIdentifier("ic_fg_$san", "drawable", context.packageName)
+        var resId = 0
+        if (circle) resId = context.resources.getIdentifier("ic_fg_${san}_circle", "drawable", context.packageName)
+        if (resId == 0) resId = context.resources.getIdentifier("ic_fg_$san", "drawable", context.packageName)
         if (resId == 0) resId = R.drawable.ic_launcher_foreground
         // Foreground is a vector: rasterize via Drawable, not BitmapFactory.
         val drawable = androidx.appcompat.content.res.AppCompatResources.getDrawable(context, resId)
@@ -466,7 +482,7 @@ object NotificationHelper {
         drawable.setBounds(0, 0, side, side)
         val raw = android.graphics.Bitmap.createBitmap(side, side, android.graphics.Bitmap.Config.ARGB_8888)
         drawable.draw(android.graphics.Canvas(raw))
-        val cacheKey = presetId
+        val cacheKey = "$presetId|${if (circle) "C" else "O"}"
         if (cacheKey == largeIconKey && largeIconCache != null) return largeIconCache
         val size = minOf(raw.width, raw.height).coerceAtLeast(1)
         // Rounded-rectangle app mark (~28% radius) so the tray/shade shows

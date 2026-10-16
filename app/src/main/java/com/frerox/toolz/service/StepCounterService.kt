@@ -219,6 +219,14 @@ class StepCounterService : Service(), SensorEventListener {
     override fun onCreate() {
         super.onCreate()
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        // Re-post the ongoing notification when the launcher icon changes.
+        serviceScope.launch {
+            try {
+                com.frerox.toolz.util.IconChangeBus.events.collect {
+                    try { updateNotification() } catch (_: Exception) { }
+                }
+            } catch (_: Exception) { }
+        }
         stepSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
         accelSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
         gyroSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_GYROSCOPE)

@@ -134,6 +134,14 @@ class CaffeinateService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannels()
+        // Re-post the ongoing notification when the launcher icon changes.
+        serviceScope.launch {
+            try {
+                com.frerox.toolz.util.IconChangeBus.events.collect {
+                    try { updateStatusNotificationSafe() } catch (_: Exception) { }
+                }
+            } catch (_: Exception) { }
+        }
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         try {
             registerReceiver(screenReceiver, IntentFilter(Intent.ACTION_SCREEN_OFF))

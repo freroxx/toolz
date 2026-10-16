@@ -284,6 +284,15 @@ class ToolService : Service() {
         super.onCreate()
         NotificationHelper.createAllChannels(this)
 
+        // Re-post ongoing notifications when the launcher icon changes.
+        serviceScope.launch {
+            try {
+                com.frerox.toolz.util.IconChangeBus.events.collect {
+                    try { refreshNotifications() } catch (_: Exception) { }
+                }
+            } catch (_: Exception) { }
+        }
+
         // Timer repeat cache (for dismiss semantics) — additive, never renames existing keys.
         serviceScope.launch(Dispatchers.IO) {
             try {

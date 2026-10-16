@@ -138,6 +138,14 @@ class FlashlightService : Service() {
         }
         createNotificationChannel()
         scope.launch { loadSettings() }
+        // Re-post the ongoing notification when the launcher icon changes.
+        scope.launch {
+            try {
+                com.frerox.toolz.util.IconChangeBus.events.collect {
+                    try { updateNotification() } catch (_: Exception) { }
+                }
+            } catch (_: Exception) { }
+        }
 
         scope.launch {
             dataStore.data.map { it[booleanPreferencesKey("flashlight_notifications")] ?: true }
