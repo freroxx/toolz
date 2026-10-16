@@ -6,21 +6,30 @@
 package com.frerox.toolz.ui.components
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
+import com.frerox.toolz.data.skin.CustomIconManager
 import com.frerox.toolz.data.skin.IconCatalog
 import com.frerox.toolz.data.skin.IconShape
 import kotlin.math.abs
@@ -49,6 +58,30 @@ fun ToolzMark(
     iconGradient: Boolean = true,
     contentDescription: String? = null,
 ) {
+    // Custom photo path: render the user's device image instead of any vector
+    // preset. Falls through to the normal preset when the file is missing.
+    if (presetId == IconCatalog.CUSTOM_ID) {
+        val context = LocalContext.current
+        val bitmap = remember(presetId) {
+            try {
+                val f = CustomIconManager.fileFor(context)
+                if (f.exists()) android.graphics.BitmapFactory.decodeFile(f.absolutePath) else null
+            } catch (_: Exception) { null }
+        }
+        if (bitmap != null) {
+            val frame = IconShape.parse(shape) ?: IconShape.OCTAGON
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = contentDescription,
+                contentScale = ContentScale.Crop,
+                modifier = modifier.clip(
+                    if (frame == IconShape.CIRCLE) CircleShape
+                    else RoundedCornerShape(28.dp)
+                ),
+            )
+            return
+        }
+    }
     val scheme = MaterialTheme.colorScheme
     ToolzMarkThemed(
         presetId = presetId,

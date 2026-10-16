@@ -119,4 +119,39 @@ class LauncherIconManager @Inject constructor(
 
     /** Re-assert the persisted preset + shape (boot, update, cold start). */
     suspend fun ensureApplied(presetId: String, shape: String? = null) = apply(presetId, shape)
+
+    /**
+     * Custom device photo: there is no manifest alias for it, so the launcher
+     * keeps the nearest built-in alias enabled while every in-app surface
+     * (marks, widgets, notification art via the mirrored prefs below) renders
+     * the photo. Returns false when no photo file exists (caller falls back).
+     */
+    suspend fun applyCustomPhoto(shape: String? = null): Boolean = withContext(Dispatchers.IO) {
+        if (!CustomIconManager.exists(context)) return@withContext false
+        val fallback = DEFAULT_PRESET_ID
+        try {
+            context.getSharedPreferences("toolz_icon", Context.MODE_PRIVATE).edit()
+                .putString("preset_id", IconCatalog.CUSTOM_ID)
+                .putString("shape", if (isCircleShape(shape)) "CIRCLE" else "OCTAGON")
+                .putInt("body_argb", IconCatalog.find(fallback).bodyStart.toInt())
+                .apply()
+        } catch (_: Exception) { }
+        try {
+            val pm = context.packageManager
+            val pkg = context.packageName
+            val target = aliasName(fallback, shape)
+            for (alias in allAliasNames()) {
+                try {
+                    pm.setComponentEnabledSetting(
+                        ComponentName(pkg, pkg + alias),
+                        if (alias == target) PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+                        else PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                        PackageManager.DONT_KILL_APP,
+                    )
+                } catch (_: Exception) { }
+            }
+        } catch (_: Exception) { }
+        try { com.frerox.toolz.util.IconChangeBus.notifyChanged() } catch (_: Exception) { }
+        true
+    }
 }

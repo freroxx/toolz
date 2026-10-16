@@ -69,6 +69,14 @@ data class IconSpec(
 object IconCatalog {
     const val DEFAULT_ID = "grape-haze"
 
+    /**
+     * Synthetic id for a user photo picked from the device (App Skin → Use photo).
+     * Never added to BUILT_IN (launcher aliases are manifest-fixed): in-app marks,
+     * widgets and shortcuts render the photo file, while the launcher tile keeps
+     * the nearest built-in alias (see LauncherIconManager.applyCustomPhoto).
+     */
+    const val CUSTOM_ID = "custom-photo"
+
     val BUILT_IN: List<IconSpec> = listOf(
         // --- Reference icons: colours sampled from the original renders ---
         // Every preset carries a bodyEnd so the in-app gradient toggle works on all of them.
