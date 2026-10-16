@@ -1922,14 +1922,18 @@ fun SettingsScreenPreview() {
 @Composable
 fun ColorPickerRow(selectedColor: Int, onColorSelected: (Int) -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        modifier = Modifier.fillMaxWidth().horizontalFadingEdges(left = 12.dp, right = 12.dp).horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         val colors = listOf(
             Color(0xFF2962FF), Color(0xFF00BFA5), Color(0xFFFF6D00),
             Color(0xFFD50000), Color(0xFFAA00FF), Color(0xFF00C853),
             Color(0xFFE91E63), Color(0xFF673AB7), Color(0xFF03A9F4),
-            Color.White, Color.Black
+            Color(0xFFFFAB00), Color(0xFF76FF03), Color(0xFF18FFFF),
+            Color(0xFFFF6E40), Color(0xFFEA80FC), Color(0xFFB2FF59),
+            Color(0xFF8D6E63), Color(0xFF78909C), Color(0xFF5C6BC0),
+            Color(0xFF26A69A), Color(0xFFFFCA28), Color(0xFFEF5350),
+            Color(0xFFAB47BC), Color.White, Color.Black
         )
         colors.forEach { color ->
             val argb = color.toArgb()
