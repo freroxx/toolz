@@ -710,6 +710,16 @@
     <string name="st_SettingsScreen_q7r9">Choose Audio File</string>
     <string name="st_SettingsScreen_s9t1">Custom audio active</string>
     <string name="st_SettingsScreen_u1v3">RESET</string>
+    <string name="st_DeveloperMode_title">Developer Mode</string>
+    <string name="st_DeveloperMode_subtitle_off">Internal tools, diagnostics &amp; local test data</string>
+    <string name="st_DeveloperMode_console_title">Developer console</string>
+    <string name="st_DeveloperMode_console_subtitle">Crashes, spoofs, logs, deep links — local only</string>
+    <string name="st_AppSkin_custom_title">Use photo from device</string>
+    <string name="st_AppSkin_custom_subtitle">Your image becomes the in-app icon (launcher keeps the closest tile)</string>
+    <string name="st_AppSkin_custom_pick">Choose photo</string>
+    <string name="st_AppSkin_custom_picked">Photo applied everywhere in-app</string>
+    <string name="st_AppSkin_custom_pin">Add to Home screen</string>
+    <string name="st_AppSkin_custom_remove">Remove photo</string>
     <string name="st_SettingsScreen_w3x5">HEALTH &amp; ACTIVITY</string>
     <string name="st_SettingsScreen_y5z7">Step Tracker</string>
     <string name="st_SettingsScreen_a7b9">Monitor activity in background</string>
