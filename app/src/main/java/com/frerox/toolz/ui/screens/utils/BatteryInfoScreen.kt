@@ -56,6 +56,7 @@ fun BatteryInfoScreen(
     onBack: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsState()
+    val isSpoofed by viewModel.isSpoofed.collectAsState(initial = false)
     val performanceMode = LocalPerformanceMode.current
 
     DisposableEffect(Unit) {
@@ -115,6 +116,10 @@ fun BatteryInfoScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(24.dp)
             ) {
+                // DEV-SPOOF watermark: required on every sandboxed tool.
+                if (isSpoofed) {
+                    com.frerox.toolz.ui.screens.developer.components.SpoofBanner()
+                }
                 // Main Level Gauge
                 StaggeredEntrance(index = 0) {
                     ExpressiveBatteryGauge(

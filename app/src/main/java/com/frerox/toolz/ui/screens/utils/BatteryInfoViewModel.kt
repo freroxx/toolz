@@ -34,8 +34,12 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -62,11 +66,50 @@ data class BatteryState(
 @HiltViewModel
 class BatteryInfoViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val specsRepository: DeviceSpecsRepository
+    private val specsRepository: DeviceSpecsRepository,
+    private val settingsRepository: com.frerox.toolz.data.settings.SettingsRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(BatteryState())
     val uiState: StateFlow<BatteryState> = _uiState.asStateFlow()
+
+    // DEV-SPOOF: sandboxed, no network. Master OFF => always false => real data.
+    val isSpoofed: StateFlow<Boolean> = combine(
+        settingsRepository.developerModeEnabled,
+        settingsRepository.spoofFlag("spoof_battery"),
+    ) { master, flag -> master && flag }.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5000), false
+    )
+
+    private fun emitSpoofBattery() {
+        // DEV-SPOOF fixture: RAM-only values from SpoofParams (dev console sliders),
+        // never touches BatteryManager beyond what we already hold.
+        val p = try {
+            com.frerox.toolz.data.developer.SpoofParams.parse(
+                kotlinx.coroutines.runBlocking {
+                    try { settingsRepository.spoofParamsJson.first() } catch (_: Exception) { "{}" }
+                }
+            )
+        } catch (_: Exception) { com.frerox.toolz.data.developer.SpoofParams() }
+        _uiState.update {
+            it.copy(
+                level = p.batteryLevel,
+                statusRes = if (p.batteryCharging) R.string.st_BatteryInfoScreen_status_charging else R.string.st_BatteryInfoScreen_status_discharging,
+                healthRes = if (p.batteryTempC >= 45f) R.string.st_BatteryInfoScreen_health_overheat else R.string.st_BatteryInfoScreen_health_good,
+                temperature = p.batteryTempC,
+                voltage = 3420,
+                technology = "Li-Po (SPOOF)",
+                isCharging = p.batteryCharging,
+                isFull = false,
+                powerSourceRes = R.string.st_BatteryInfoScreen_power_battery,
+                currentNowMa = if (p.batteryCharging) 1800 else -1250,
+                chargeCounterUah = 210000,
+                capacityMah = 5000,
+                isRemoteLoading = false,
+                remoteError = null,
+            )
+        }
+    }
 
     private val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
     private val modelQuery: String by lazy {
@@ -165,15 +208,35 @@ class BatteryInfoViewModel @Inject constructor(
     }
 
     fun startListening() {
-        val filter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
-        context.registerReceiver(batteryReceiver, filter)
-        loadRemoteSpecs()
+        // DEV-SPOOF gate: when sandboxed, emit fixtures and NEVER register the
+        // real receiver nor fetch remote specs (BLOCK_REMOTE_SPECS).
+        viewModelScope.launch {
+            try {
+                val sandboxed = settingsRepository.isSandboxNow("spoof_battery")
+                if (sandboxed) {
+                    emitSpoofBattery()
+                    android.util.Log.w("DevSpoof", "Battery sandbox active — real receiver + spec fetch skipped")
+                    return@launch
+                }
+            } catch (_: Exception) { }
+            val filter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
+            try { context.registerReceiver(batteryReceiver, filter) } catch (_: Exception) { }
+            loadRemoteSpecs()
+            // If sandbox turns ON while listening, flip to fixtures immediately.
+            isSpoofed.collect { spoofed -> if (spoofed) emitSpoofBattery() }
+        }
     }
 
     fun loadRemoteSpecs(forceRefresh: Boolean = false) {
         if (_uiState.value.remoteSpec != null && !forceRefresh) return
-        
         viewModelScope.launch {
+            // DEV-SPOOF: never fetch remote specs while sandboxed.
+            try {
+                if (settingsRepository.isSandboxNow("spoof_battery")) {
+                    android.util.Log.w("DevSpoof", "Blocked remote spec fetch (battery sandbox)")
+                    return@launch
+                }
+            } catch (_: Exception) { }
             _uiState.update { it.copy(isRemoteLoading = true, remoteError = null) }
             
             try {
