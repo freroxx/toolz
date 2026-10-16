@@ -226,6 +226,8 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
             val dynamicColor by settingsRepository.dynamicColor.collectAsState(initial = true)
             val customPrimary by settingsRepository.customPrimaryColor.collectAsState(initial = null)
             val customSecondary by settingsRepository.customSecondaryColor.collectAsState(initial = null)
+            val iconPresetId by settingsRepository.appIconPresetId.collectAsState(initial = "grape-haze")
+            val iconAdaptTheme by settingsRepository.appIconAdaptTheme.collectAsState(initial = true)
             val backgroundGradientEnabled by settingsRepository.backgroundGradientEnabled.collectAsState(initial = true)
             val performanceMode by settingsRepository.performanceMode.collectAsState(initial = false)
             val hapticEnabled by settingsRepository.hapticFeedback.collectAsState(initial = true)
@@ -237,6 +239,17 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
                 "DARK" -> true
                 else -> androidx.compose.foundation.isSystemInDarkTheme()
             }
+
+            // Icon-tuned accents: when Dynamic colors are off and Adapt to theme is on,
+            // the selected icon's polished light/dark theme fills in for any accent
+            // the user didn't pick explicitly. Explicit custom colors always win.
+            val iconSpec = com.frerox.toolz.data.skin.IconCatalog.find(iconPresetId)
+            val iconPrimary = if (!dynamicColor && iconAdaptTheme && customPrimary == null) {
+                Color(iconSpec.themePrimary(isDark).toInt())
+            } else null
+            val iconSecondary = if (!dynamicColor && iconAdaptTheme && customSecondary == null) {
+                Color(iconSpec.themeSecondary(isDark).toInt())
+            } else null
 
             val offlineState by offlineManager.offlineState.collectAsState(initial = OfflineState.ONLINE)
 
@@ -312,8 +325,8 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
             ToolzTheme(
                 darkTheme = isDark,
                 dynamicColor = dynamicColor,
-                customPrimary = customPrimary?.let { Color(it) },
-                customSecondary = customSecondary?.let { Color(it) },
+                customPrimary = (customPrimary?.let { Color(it) } ?: iconPrimary),
+                customSecondary = (customSecondary?.let { Color(it) } ?: iconSecondary),
                 backgroundGradientEnabled = backgroundGradientEnabled,
                 performanceMode = performanceMode,
                 hapticEnabled = hapticEnabled,
