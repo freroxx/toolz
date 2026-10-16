@@ -34,6 +34,7 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ColorLens
 import androidx.compose.material.icons.rounded.Crop
 import androidx.compose.material.icons.rounded.GridView
+import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Style
@@ -65,11 +66,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import com.frerox.toolz.R
 import com.frerox.toolz.data.skin.IconCatalog
 import com.frerox.toolz.ui.components.ExpressiveTopAppBar
@@ -322,15 +327,112 @@ fun AppSkinScreen(
                     }
                 }
 
+                // Use photo from device — user image becomes the in-app icon
+                // everywhere. The launcher tile keeps the closest built-in alias
+                // (Android requires launcher icons to be predeclared).
+                SettingsItem(
+                    title = stringResource(R.string.st_AppSkin_custom_title),
+                    subtitle = stringResource(R.string.st_AppSkin_custom_subtitle),
+                    icon = Icons.Rounded.Image,
+                ) {
+                    val customContext = LocalContext.current
+                    val customPath by viewModel.appIconCustomPath.collectAsState(initial = null)
+                    var customBusy by remember { mutableStateOf(false) }
+                    var customFailed by remember { mutableStateOf(false) }
+                    val photoPicker = rememberLauncherForActivityResult(
+                        ActivityResultContracts.PickVisualMedia()
+                    ) { uri ->
+                        if (uri != null) {
+                            customBusy = true
+                            customFailed = false
+                            vibrationManager?.vibrateClick()
+                            viewModel.applyCustomPhoto(uri) { ok ->
+                                customBusy = false
+                                customFailed = !ok
+                            }
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = if (presetId == IconCatalog.CUSTOM_ID) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                            border = BorderStroke(
+                                if (presetId == IconCatalog.CUSTOM_ID) 2.dp else 1.dp,
+                                if (presetId == IconCatalog.CUSTOM_ID) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                            ),
+                            modifier = Modifier.size(68.dp),
+                        ) {
+                            Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(6.dp)) {
+                                if (presetId == IconCatalog.CUSTOM_ID) {
+                                    com.frerox.toolz.ui.components.ToolzMark(
+                                        presetId = IconCatalog.CUSTOM_ID,
+                                        shape = shape,
+                                        modifier = Modifier.fillMaxSize(),
+                                    )
+                                } else {
+                                    Icon(Icons.Rounded.Image, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(28.dp))
+                                }
+                            }
+                        }
+                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                if (presetId == IconCatalog.CUSTOM_ID) stringResource(R.string.st_AppSkin_custom_picked)
+                                else if (customPath != null) "Photo saved — tap to re-apply"
+                                else stringResource(R.string.st_AppSkin_custom_pick),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Button(
+                                onClick = {
+                                    vibrationManager?.vibrateClick()
+                                    photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                                },
+                                enabled = !customBusy,
+                                shape = RoundedCornerShape(14.dp),
+                            ) {
+                                Text(if (customBusy) "…" else stringResource(R.string.st_AppSkin_custom_pick), fontWeight = FontWeight.Black)
+                            }
+                            if (customFailed) {
+                                Text("Couldn't use that image — try another.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                            }
+                            if (presetId == IconCatalog.CUSTOM_ID) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    TextButton(onClick = {
+                                        vibrationManager?.vibrateClick()
+                                        pinCustomIconToHome(customContext)
+                                    }) {
+                                        Text(stringResource(R.string.st_AppSkin_custom_pin), fontWeight = FontWeight.Bold)
+                                    }
+                                    TextButton(onClick = {
+                                        vibrationManager?.vibrateClick()
+                                        viewModel.clearCustomPhoto()
+                                    }) {
+                                        Text(stringResource(R.string.st_AppSkin_custom_remove), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Icon container — in-app frames. Circle also reshapes the
                 // home-screen tile to the round variant of the preset.
                 SettingsItem(
-                    title = "Icon shape",
-                    subtitle = "Octagon is the classic mark · Circle is softer",
+                    title = stringResource(R.string.st_AppSkin_shape_title),
+                    subtitle = stringResource(R.string.st_AppSkin_shape_sub),
                     icon = Icons.Rounded.Crop,
                 ) {
                     Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("OCTAGON", "CIRCLE").forEach { s ->
+                        listOf(
+                            "OCTAGON" to stringResource(R.string.st_AppSkin_shape_octagon),
+                            "CIRCLE" to stringResource(R.string.st_AppSkin_shape_circle),
+                        ).forEach { (s, label) ->
                             val sel = com.frerox.toolz.data.skin.IconShape.parse(shape) == com.frerox.toolz.data.skin.IconShape.parse(s)
                             Surface(
                                 onClick = {
@@ -783,4 +885,32 @@ private fun SkinMiniAction(title: String, desc: String, onClick: () -> Unit) {
 
 private fun Color.appSkinLuminance(): Float {
     return 0.299f * red + 0.587f * green + 0.114f * blue
+}
+
+/**
+ * Pins a Home-screen shortcut with the exact custom photo bitmap. This is the
+ * supported way to get the device image on the launcher: manifest aliases
+ * cannot reference user files, but ShortcutManager icons can.
+ */
+private fun pinCustomIconToHome(context: android.content.Context) {
+    try {
+        val file = com.frerox.toolz.data.skin.CustomIconManager.fileFor(context)
+        if (!file.exists()) return
+        val bitmap = try {
+            android.graphics.BitmapFactory.decodeFile(file.absolutePath)
+        } catch (_: Exception) { null } ?: return
+        val sm = try {
+            context.getSystemService(android.content.pm.ShortcutManager::class.java)
+        } catch (_: Exception) { null } ?: return
+        if (!sm.isRequestPinShortcutSupported) return
+        val launch = context.packageManager.getLaunchIntentForPackage(context.packageName)
+            ?.apply { action = android.content.Intent.ACTION_MAIN } ?: return
+        val shortcut = android.content.pm.ShortcutInfo.Builder(context, "toolz_custom_photo")
+            .setShortLabel("Toolz")
+            .setLongLabel("Toolz")
+            .setIntent(launch)
+            .setIcon(android.graphics.drawable.Icon.createWithAdaptiveBitmap(bitmap))
+            .build()
+        sm.requestPinShortcut(shortcut, null)
+    } catch (_: Exception) { }
 }
