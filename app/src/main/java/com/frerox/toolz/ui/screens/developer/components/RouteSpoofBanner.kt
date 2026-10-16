@@ -10,6 +10,7 @@
 package com.frerox.toolz.ui.screens.developer.components
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -17,7 +18,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.navigation.compose.currentBackStackEntryAsState
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -55,8 +55,10 @@ fun routeToDevTool(route: String?): DevToolId? {
 }
 
 /**
- * Wraps app content and floats a sandbox banner whenever [currentRoute]'s
- * tool is actively spoofed. Tap opens the dev console.
+ * Wraps app content and shows a sandbox banner ABOVE the current tool screen
+ * whenever its tool is actively sandboxed — it pushes content down instead
+ * of floating over it, so no app-bar or button is ever covered. Tap opens
+ * the dev console.
  */
 @Composable
 fun SpoofWatermarkOverlay(
@@ -64,8 +66,7 @@ fun SpoofWatermarkOverlay(
     onOpenControls: () -> Unit,
     content: @Composable () -> Unit,
 ) {
-    Box(Modifier.fillMaxSize()) {
-        content()
+    Column(Modifier.fillMaxSize()) {
         val tool = routeToDevTool(currentRoute)
         if (tool != null) {
             val vm: SpoofStateViewModel = hiltViewModel()
@@ -73,7 +74,6 @@ fun SpoofWatermarkOverlay(
             if (sandboxed) {
                 SpoofBanner(
                     modifier = Modifier
-                        .align(Alignment.TopCenter)
                         .statusBarsPadding()
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                     text = "${tool.title.uppercase()} SANDBOX — fake local data",
@@ -81,6 +81,7 @@ fun SpoofWatermarkOverlay(
                 )
             }
         }
+        Box(Modifier.weight(1f, fill = true)) { content() }
     }
 }
 
