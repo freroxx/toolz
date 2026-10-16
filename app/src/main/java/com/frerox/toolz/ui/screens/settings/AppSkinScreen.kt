@@ -352,7 +352,7 @@ fun AppSkinScreen(
                 AppSkinSectionHeader("Icon colors")
 
                 // Merged color behavior: dynamic palette + custom colors + adapt + follow + gradient.
-                // Adapt / follow only switch on for icons that support them; the rest render as designed.
+                // Adapt works on every icon; follow stays exclusive to scheme-driven icons.
                 SettingsItem(
                     title = "Icon colors",
                     subtitle = "What repaints “${current.name}”",
@@ -431,20 +431,25 @@ fun AppSkinScreen(
                             }
                         }
                         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
-                        if (current.adaptToTheme) {
-                            SkinMiniSwitch(
-                                title = "Adapt to theme",
-                                desc = "“${current.name}” dims its body in dark mode",
-                                checked = adaptTheme,
-                                onCheckedChange = {
-                                    vibrationManager?.vibrateClick()
-                                    viewModel.setAppIconAdaptTheme(it)
-                                },
-                            )
-                        } else {
+                        // Adapt works on every preset now: the icon dims its body in dark
+                        // mode, and (with Dynamic colors off) the app accents follow the
+                        // icon's tuned light/dark theme unless custom colors override it.
+                        SkinMiniSwitch(
+                            title = "Adapt to theme",
+                            desc = if (dynamicColor) "“${current.name}” dims its body in dark mode"
+                            else "Icon dims in dark mode + app accents follow “${current.name}”",
+                            checked = adaptTheme,
+                            onCheckedChange = {
+                                vibrationManager?.vibrateClick()
+                                viewModel.setAppIconAdaptTheme(it)
+                            },
+                        )
+                        if (!dynamicColor && adaptTheme) {
                             SkinMiniNote(
-                                title = "Adapt to theme",
-                                desc = "“${current.name}” is hand-tuned and renders exactly as designed — try System Auto for a theme-aware icon",
+                                title = "Accent source",
+                                desc = if (customPrimaryInt == null && customSecondaryInt == null)
+                                    "App accents follow “${current.name}” for ${if (isDark) "dark" else "light"} mode — pick colors above to override"
+                                else "Your custom colors override the “${current.name}” theme — reset them above to go back",
                             )
                         }
                         if (current.followsScheme) {

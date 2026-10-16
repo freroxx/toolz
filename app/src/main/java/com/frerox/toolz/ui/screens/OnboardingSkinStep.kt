@@ -130,7 +130,7 @@ fun StyleStep(
                     }
                     OnboardingToggleExpressive(
                         title = "Adapt to theme",
-                        desc = "Dark / light variants",
+                        desc = "Themed icon + matching app colors",
                         icon = Icons.Rounded.Palette,
                         checked = state.iconAdaptTheme,
                         onCheckedChange = onIconAdaptChange,
