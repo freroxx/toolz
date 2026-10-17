@@ -170,7 +170,25 @@ class SearchViewModel @Inject constructor(
     private val offlineManager:    com.frerox.toolz.util.OfflineManager,
     private val metaMerger:        MetaMerger,
     private val catalogRepository: com.frerox.toolz.data.catalog.CatalogRepository,
+    private val gate: com.frerox.toolz.data.developer.SpoofGate,
 ) : ViewModel() {
+
+    // DEV-SPOOF: the search demo never leaves the device — results, suggestions,
+    // history, engine health and DNS latencies are fabricated under non-resolving
+    // `.demo` domains, so engine HTTP and DNS probes are bypassed entirely.
+    private val SEARCH = com.frerox.toolz.data.developer.DevToolId.SEARCH
+    private val gateActive = gate.active(SEARCH)
+    private val fake = com.frerox.toolz.data.developer.FakeSearchSandbox
+
+    /** DEV-SPOOF: history source swap (recent searches + suggestion matching). */
+    private val historySrc = combine(
+        repository.history, fake.fixtureHistory, gateActive,
+    ) { real, fixture, demo -> if (demo) fixture else real }
+
+    /** DEV-SPOOF: browser-visit trail swaps to the `.demo` fixture list. */
+    private val browserHistorySrc = combine(
+        browserHistoryStore.items, fake.fixtureBrowserHistory, gateActive,
+    ) { real, fixture, demo -> if (demo) fixture else real }
 
     // ─── Offline state (cached as StateFlow for synchronous .value access) ───
 
@@ -229,11 +247,11 @@ class SearchViewModel @Inject constructor(
 
     // ── DAO-backed flows ───────────────────────────────────────────────────────
 
-    val history     = repository.history
+    // DEV-SPOOF: recent-search history swaps at the source.
+    val history     = historySrc
     val bookmarks   = repository.bookmarks
     val quickLinks  = repository.quickLinks
     val isFirstTime = settingsRepository.searchFirstTime
-    val browserHistory = browserHistoryStore.items
 
     // ── Coroutine job handles ─────────────────────────────────────────────────
 
@@ -241,6 +259,9 @@ class SearchViewModel @Inject constructor(
     private var searchJob: Job?     = null
 
     // ── Init ──────────────────────────────────────────────────────────────────
+
+    val browserHistory: StateFlow<List<BrowserHistoryItem>> = browserHistorySrc
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     init {
         viewModelScope.launch {
@@ -309,6 +330,19 @@ class SearchViewModel @Inject constructor(
                 }
             }
         }
+
+        // DEV-SPOOF: fresh demo history per arm; nothing rounded on disarm.
+        viewModelScope.launch {
+            fake.reset()
+            gateActive.collect { demo ->
+                if (demo) {
+                    fake.arm()
+                    android.util.Log.w("DevSpoof", "Search sandbox armed — RAM results, .demo domains only")
+                } else {
+                    fake.reset()
+                }
+            }
+        }
     }
 
     // ─── Query / Suggestions / Math Evaluation ───────────────────────────────
@@ -321,7 +355,7 @@ class SearchViewModel @Inject constructor(
         if (newQuery.length >= 2 && mathRes == null) {
             // Immediate local history matches on keystroke (0ms delay)
             viewModelScope.launch {
-                val localMatches = repository.history.first()
+                val localMatches = historySrc.first()
                     .map { it.query }
                     .filter { it.contains(newQuery, ignoreCase = true) && !it.equals(newQuery, ignoreCase = true) }
                     .take(3)
@@ -332,9 +366,18 @@ class SearchViewModel @Inject constructor(
 
             suggestionJob = viewModelScope.launch {
                 delay(280)
+                // DEV-SPOOF: suggestions come from fixture history + canned
+                // suffixes — no suggestion API call in demo mode.
+                if (gate.sandboxed(SEARCH)) {
+                    val local = fake.suggestions(newQuery, historySrc.first().map { it.query })
+                    _query.update {
+                        it.copy(suggestions = local.distinctBy { s -> s.lowercase() }.take(8))
+                    }
+                    return@launch
+                }
                 // Merge remote suggestions with matching local history so the user's own
                 // past searches surface immediately, before the network round-trip lands.
-                val localMatches = repository.history.first()
+                val localMatches = historySrc.first()
                     .map { it.query }
                     .filter { it.contains(newQuery, ignoreCase = true) && !it.equals(newQuery, ignoreCase = true) }
                     .take(3)
@@ -386,6 +429,12 @@ class SearchViewModel @Inject constructor(
 
         suggestionJob?.cancel()
         searchJob?.cancel()
+
+        // DEV-SPOOF: demo search — fabricated tiles, no engine HTTP at all.
+        if (gate.sandboxed(SEARCH)) {
+            searchSandboxed(trimmed, category)
+            return
+        }
 
         // 1. Real-time Offline Check
         if (_isOffline.value) {
@@ -448,6 +497,42 @@ class SearchViewModel @Inject constructor(
         }
     }
 
+    /** DEV-SPOOF: staged fake search — Loading → fabricated tiles, RAM history. */
+    private fun searchSandboxed(trimmed: String, category: SearchCategory) {
+        _query.update {
+            it.copy(
+                query            = trimmed,
+                category         = category,
+                phase            = SearchPhase.Loading,
+                isActive         = false,
+                error            = null,
+                results          = emptyList(),
+                suggestions      = emptyList(),
+                canLoadMore      = false,
+                searchDurationMs = null,
+            )
+        }
+        searchJob = viewModelScope.launch {
+            val startedAt = android.os.SystemClock.elapsedRealtime()
+            if (!_settings.value.isIncognito) {
+                fake.addHistory(trimmed)
+            }
+            delay(420)
+            val results = fake.resultsFor(trimmed, page = 0)
+            _engineHealth.value = fake.engineHealthNames()
+            val elapsed = android.os.SystemClock.elapsedRealtime() - startedAt
+            _query.update {
+                it.copy(
+                    results          = results,
+                    phase            = SearchPhase.Results,
+                    canLoadMore      = results.size >= 10,
+                    error            = null,
+                    searchDurationMs = elapsed,
+                )
+            }
+        }
+    }
+
     fun retrySearch() {
         val q = _query.value.query
         if (q.isNotEmpty()) onSearch(q)
@@ -493,6 +578,27 @@ class SearchViewModel @Inject constructor(
         val snapshot = _query.value
         if (snapshot.phase == SearchPhase.LoadingMore || !snapshot.canLoadMore || snapshot.query.isEmpty()) return
         if (snapshot.results.size >= 500) { _query.update { it.copy(canLoadMore = false) }; return }
+
+        // DEV-SPOOF: next fabricated page, ending at 3 pages worth.
+        if (gate.sandboxed(SEARCH)) {
+            _query.update { it.copy(phase = SearchPhase.LoadingMore) }
+            searchJob = viewModelScope.launch {
+                delay(320)
+                val page = snapshot.results.size / 10
+                if (page >= 2) {
+                    _query.update { it.copy(phase = SearchPhase.Results, canLoadMore = false) }
+                    return@launch
+                }
+                _query.update {
+                    it.copy(
+                        results     = snapshot.results + fake.resultsFor(snapshot.query, page),
+                        phase       = SearchPhase.Results,
+                        canLoadMore = true,
+                    )
+                }
+            }
+            return
+        }
 
         _query.update { it.copy(phase = SearchPhase.LoadingMore) }
 
@@ -566,11 +672,26 @@ class SearchViewModel @Inject constructor(
     fun runDnsBenchmark() {
         if (_settings.value.isBenchmarkingDns) return
         _settings.update { it.copy(isBenchmarkingDns = true, dnsBenchmarks = emptyMap()) }
-        
+
+        // DEV-SPOOF: fake per-provider latencies — no DNS UDP probes in demo.
+        if (gate.sandboxed(SEARCH)) {
+            viewModelScope.launch {
+                val providers = dnsEngine.providerLibrary()
+                val results = mutableMapOf<String, Long?>()
+                providers.forEachIndexed { index, provider ->
+                    results[provider.id] = fake.dnsLatency(index)
+                    _settings.update { it.copy(dnsBenchmarks = results.toMap()) }
+                    delay(160)
+                }
+                _settings.update { it.copy(isBenchmarkingDns = false) }
+            }
+            return
+        }
+
         viewModelScope.launch {
             val providers = dnsEngine.providerLibrary()
             val results = mutableMapOf<String, Long?>()
-            
+
             providers.forEach { provider ->
                 val latency = dnsEngine.checkSingleLatency(provider.addresses.first())
                 results[provider.id] = latency
@@ -581,12 +702,25 @@ class SearchViewModel @Inject constructor(
     }
 
     fun applyFastestDns() {
+        // DEV-SPOOF: demo picks the "fastest" fixture latency and stores the
+        // cosmetic preference — no probes, no changes to real resolving.
+        if (gate.sandboxed(SEARCH)) {
+            viewModelScope.launch {
+                _settings.update { it.copy(isBenchmarkingDns = true) }
+                delay(700)
+                _settings.update { it.copy(isBenchmarkingDns = false) }
+                // Fixture fastest is index 0 (12 ms): map first provider id.
+                val fastest = dnsEngine.providerLibrary().firstOrNull()
+                fastest?.let { settingsRepository.setDnsProvider(it.id.uppercase()) }
+            }
+            return
+        }
         viewModelScope.launch {
             _settings.update { it.copy(isBenchmarkingDns = true) }
             val providers = dnsEngine.providerLibrary()
             var fastest: com.frerox.toolz.data.network.DnsProvider? = null
             var minLatency = Long.MAX_VALUE
-            
+
             providers.forEach { provider ->
                 val latency = dnsEngine.checkSingleLatency(provider.addresses.first())
                 if (latency != null && latency < minLatency) {
@@ -594,8 +728,8 @@ class SearchViewModel @Inject constructor(
                     fastest = provider
                 }
             }
-            
-            fastest?.let { 
+
+            fastest?.let {
                 settingsRepository.setDnsProvider(it.id.uppercase())
             }
             _settings.update { it.copy(isBenchmarkingDns = false) }
@@ -630,20 +764,48 @@ class SearchViewModel @Inject constructor(
 
     // ─── Data mutations ───────────────────────────────────────────────────────
 
-    fun deleteHistory(id: Long)     = launch { repository.deleteHistory(id) }
-    fun clearHistory()              = launch { repository.clearHistory() }
-    fun removeBookmark(url: String) = launch { repository.removeBookmark(url) }
-    fun addQuickLink(title: String, url: String) = launch { repository.addQuickLink(title, url) }
-    fun removeQuickLink(id: Long)   = launch { repository.removeQuickLink(id) }
-    fun updateBookmark(id: Long, title: String, url: String) = launch { repository.updateBookmark(id, title, url) }
-    fun updateQuickLink(id: Long, title: String, url: String) = launch { repository.updateQuickLink(id, title, url) }
+    fun deleteHistory(id: Long) {
+        // DEV-SPOOF: RAM history row removal.
+        if (gate.sandboxed(SEARCH)) { fake.deleteHistory(id); return }
+        launch { repository.deleteHistory(id) }
+    }
+    fun clearHistory() {
+        if (gate.sandboxed(SEARCH)) { fake.clearHistory(); return }
+        launch { repository.clearHistory() }
+    }
+    // DEV-SPOOF: bookmarks/quick-links are the user's own Room rows — demo
+    // leaves them alone instead of mutating real data.
+    fun removeBookmark(url: String) {
+        if (gate.sandboxed(SEARCH)) return
+        launch { repository.removeBookmark(url) }
+    }
+    fun addQuickLink(title: String, url: String) {
+        if (gate.sandboxed(SEARCH)) return
+        launch { repository.addQuickLink(title, url) }
+    }
+    fun removeQuickLink(id: Long) {
+        if (gate.sandboxed(SEARCH)) return
+        launch { repository.removeQuickLink(id) }
+    }
+    fun updateBookmark(id: Long, title: String, url: String) {
+        if (gate.sandboxed(SEARCH)) return
+        launch { repository.updateBookmark(id, title, url) }
+    }
+    fun updateQuickLink(id: Long, title: String, url: String) {
+        if (gate.sandboxed(SEARCH)) return
+        launch { repository.updateQuickLink(id, title, url) }
+    }
 
     fun toggleBookmark(result: SearchResult) = viewModelScope.launch {
+        // DEV-SPOOF: bookmark writes pass in demo (fixture urls stay out of
+        // the real set; they're inert in real mode).
+        if (gate.sandboxed(SEARCH)) return@launch
         if (repository.isBookmarked(result.url)) repository.removeBookmark(result.url)
         else repository.addBookmark(result.title, result.url)
     }
 
     fun reorderQuickLinks(from: Int, to: Int) = viewModelScope.launch {
+        if (gate.sandboxed(SEARCH)) return@launch
         val links = repository.quickLinks.firstOrNull() ?: return@launch
         val mutable = links.toMutableList()
         if (from !in mutable.indices || to !in mutable.indices) return@launch
