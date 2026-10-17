@@ -25,6 +25,7 @@ import android.os.IBinder
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.calendar.EventEntry
+import com.frerox.toolz.data.developer.FakeTasksSandbox
 import com.frerox.toolz.data.calendar.EventRepository
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.data.todo.SubTask
@@ -70,8 +71,31 @@ class TodoViewModel @Inject constructor(
     private val eventRepository: EventRepository,
     private val settingsRepository: SettingsRepository,
     private val alarmScheduler: TaskAlarmScheduler,
-    private val calendarAlarmScheduler: CalendarAlarmScheduler
+    private val calendarAlarmScheduler: CalendarAlarmScheduler,
+    private val gate: com.frerox.toolz.data.developer.SpoofGate
 ) : ViewModel() {
+
+    // DEV-SPOOF: the Todo half of the Tasks tool runs on a RAM fixture while
+    // the Tasks flag is on — Room rows, reminder alarms and ToolService
+    // stay untouched; sessions tick in-process instead.
+    private val TASKS = com.frerox.toolz.data.developer.DevToolId.TASKS
+    private val gateActive = gate.active(TASKS)
+
+    private val activeSrc = combine(
+        repository.activeTasks, com.frerox.toolz.data.developer.FakeTasksSandbox.activeTasks, gateActive,
+    ) { real, fixture, demo -> if (demo) fixture else real }
+
+    private val completedSrc = combine(
+        repository.getCompletedTodayAuto(), com.frerox.toolz.data.developer.FakeTasksSandbox.completedTasks, gateActive,
+    ) { real, fixture, demo -> if (demo) fixture else real }
+
+    private val historySrc = combine(
+        repository.getCompletedHistory(), gateActive,
+    ) { real, demo -> if (demo) emptyList() else real }
+
+    /** DEV-SPOOF: RAM session clock ticked in-process, no service involved. */
+    private var fixtureSessionTickJob: kotlinx.coroutines.Job? = null
+    private var fixtureSessionStart = 0L
 
     private val _uiState = MutableStateFlow(TodoUiState())
     val uiState = _uiState.asStateFlow()
@@ -121,10 +145,10 @@ class TodoViewModel @Inject constructor(
         // the old `_uiState.map{sortOrder}` fed back into the same combine).
         // Mirrored into uiState for the sort menu only.
         val taskFlows = combine(
-            repository.activeTasks,
+            activeSrc,
             // D-P1-02: midnight-ticker flow (no stale-until-restart) + history.
-            repository.getCompletedTodayAuto(),
-            repository.getCompletedHistory()
+            completedSrc,
+            historySrc
         ) { active: List<TaskEntry>, completed: List<TaskEntry>, history: List<TaskEntry> ->
             Triple(active, completed, history)
         }
@@ -154,6 +178,22 @@ class TodoViewModel @Inject constructor(
             _uiState.update { it.copy(performanceMode = perf) }
         }.launchIn(viewModelScope)
 
+        // DEV-SPOOF: fresh board per demo arm; on disarm drop the RAM session.
+        viewModelScope.launch {
+            com.frerox.toolz.data.developer.FakeTasksSandbox.reset()
+            gateActive.collect { demo ->
+                if (demo) {
+                    com.frerox.toolz.data.developer.FakeTasksSandbox.arm()
+                    android.util.Log.w("DevSpoof", "Tasks sandbox armed — RAM board only")
+                } else {
+                    com.frerox.toolz.data.developer.FakeTasksSandbox.reset()
+                    fixtureSessionTickJob?.cancel()
+                    fixtureSessionTickJob = null
+                    _uiState.update { it.copy(isSessionActive = false, sessionTaskId = null) }
+                }
+            }
+        }
+
         // T-P0-03: dead-toggle wiring — off cancels ALL alarms, on re-arms.
         // drop(1): launch-time value reflects the persisted toggle; alarms are
         // already armed, so only act on real transitions.
@@ -161,6 +201,9 @@ class TodoViewModel @Inject constructor(
             .distinctUntilChanged()
             .drop(1)
             .onEach { enabled ->
+                // DEV-SPOOF: demo never touches the global alarm set — real
+                // reminder alarms of un-fixture tasks must survive the demo.
+                if (gate.sandboxed(TASKS)) return@onEach
                 if (enabled) alarmScheduler.rescheduleAllFuture()
                 else alarmScheduler.cancelAll()
             }
@@ -173,6 +216,9 @@ class TodoViewModel @Inject constructor(
             service.isTodoSessionActive.combine(service.todoTaskId) { active, id ->
                 active to id
             }.distinctUntilChanged().onEach { (active, id) ->
+                // DEV-SPOOF: while demo is armed the RAM session owns the flags —
+                // a pre-demo service session must not clobber them.
+                if (gate.sandboxed(TASKS)) return@onEach
                 _uiState.update { it.copy(isSessionActive = active, sessionTaskId = id) }
             }.launchIn(viewModelScope)
             service.todoSessionTime.onEach { _sessionTick.value = it }.launchIn(viewModelScope)
@@ -217,6 +263,11 @@ class TodoViewModel @Inject constructor(
     ) {
         // D-P1-03: never trust the UI trim (QuickAdd also trims) — blank guard here.
         if (title.isBlank()) return
+        // DEV-SPOOF: RAM-only add, no alarm scheduling.
+        if (gate.sandboxed(TASKS)) {
+            addTaskSandboxed(title, description, category, priority, dueDate, subTasks)
+            return
+        }
         viewModelScope.launch {
             val task = TaskEntry(
                 title = title.trim(),
@@ -237,6 +288,27 @@ class TodoViewModel @Inject constructor(
         }
     }
 
+    /** DEV-SPOOF: RAM add with a fixture id — no Room row, no reminder alarm. */
+    private fun addTaskSandboxed(
+        title: String,
+        description: String?,
+        category: String,
+        priority: Int,
+        dueDate: Long?,
+        subTasks: List<SubTask>
+    ) {
+        FakeTasksSandbox.addTask(
+            TaskEntry(
+                title = title.trim(),
+                description = description?.trim().ifNullOrBlank(),
+                category = category,
+                priority = TaskPriority.coerce(priority),
+                dueDate = dueDate,
+                subTasks = subTasks
+            )
+        )
+    }
+
     /**
      * Write-through for user-edited fields (the sheet IS the source of truth
      * for title/desc/category/priority/due/subTasks). Toggle paths below MUST
@@ -245,6 +317,14 @@ class TodoViewModel @Inject constructor(
      */
     fun updateTask(task: TaskEntry) {
         if (task.title.isBlank()) return
+        // DEV-SPOOF: RAM edit — sheet writes straight into the fixture row;
+        // no repo readback and no alarm reschedule.
+        if (gate.sandboxed(TASKS)) {
+            FakeTasksSandbox.updateTask(
+                task.copy(title = task.title.trim(), priority = TaskPriority.coerce(task.priority))
+            )
+            return
+        }
         viewModelScope.launch {
             val fresh = repository.getTaskById(task.id)
             val toWrite = if (fresh == null) {
@@ -270,6 +350,11 @@ class TodoViewModel @Inject constructor(
 
     /** D-P1-01 Undo: re-insert with the ORIGINAL id (REPLACE keeps identity) + reschedule. */
     fun restoreTask(task: TaskEntry) {
+        // DEV-SPOOF: undo reappears the fixture row (same id).
+        if (gate.sandboxed(TASKS)) {
+            FakeTasksSandbox.restore(task)
+            return
+        }
         viewModelScope.launch {
             repository.addTask(task)
             val saved = repository.getTaskById(task.id) ?: task
@@ -280,6 +365,16 @@ class TodoViewModel @Inject constructor(
     }
 
     fun toggleTaskCompletion(task: TaskEntry) {
+        // DEV-SPOOF: RAM toggle — completedAt mirrors the real semantics, the
+        // reminder alarm of the fixture id never existed.
+        if (gate.sandboxed(TASKS)) {
+            if (FakeTasksSandbox.toggleCompletion(task.id) &&
+                _uiState.value.sessionTaskId == task.id
+            ) {
+                stopSession()
+            }
+            return
+        }
         viewModelScope.launch {
             // Guard 4: invert the FRESH row, never the possibly-stale snapshot.
             val fresh = repository.getTaskById(task.id) ?: return@launch
@@ -300,6 +395,11 @@ class TodoViewModel @Inject constructor(
     }
 
     fun toggleSubTask(task: TaskEntry, subTaskId: String) {
+        // DEV-SPOOF: RAM subtask flip on the fixture row.
+        if (gate.sandboxed(TASKS)) {
+            FakeTasksSandbox.toggleSubTask(task.id, subTaskId)
+            return
+        }
         viewModelScope.launch {
             // Guard 4: map subtasks on the FRESH row.
             val fresh = repository.getTaskById(task.id) ?: return@launch
@@ -311,6 +411,14 @@ class TodoViewModel @Inject constructor(
     }
 
     fun deleteTask(task: TaskEntry) {
+        // DEV-SPOOF: RAM delete — gone from the board, no alarm cancels.
+        if (gate.sandboxed(TASKS)) {
+            FakeTasksSandbox.delete(task.id)
+            if (_uiState.value.sessionTaskId == task.id) {
+                stopSession()
+            }
+            return
+        }
         viewModelScope.launch {
             repository.deleteTask(task)
             alarmScheduler.cancelReminder(task)
@@ -324,10 +432,33 @@ class TodoViewModel @Inject constructor(
         // D-P1-03: sessions only for ACTIVE tasks (done-task sessions + elapsed
         // carry-over were both broken). Time reset on switch lives in ToolService.
         val task = _uiState.value.tasks.find { it.id == taskId } ?: return
+        // DEV-SPOOF: RAM session — flags set directly, 1 Hz tick in-process;
+        // ToolService sees nothing.
+        if (gate.sandboxed(TASKS)) {
+            android.util.Log.w("DevSpoof", "Tasks sandbox session (RAM tick)")
+            toolService?.stopTodoSession()
+            _uiState.update { it.copy(isSessionActive = true, sessionTaskId = taskId) }
+            fixtureSessionStart = System.currentTimeMillis()
+            fixtureSessionTickJob?.cancel()
+            fixtureSessionTickJob = viewModelScope.launch {
+                while (true) {
+                    _sessionTick.value = System.currentTimeMillis() - fixtureSessionStart
+                    kotlinx.coroutines.delay(1_000)
+                }
+            }
+            return
+        }
         toolService?.startTodoSession(taskId, task.title)
     }
 
     fun stopSession() {
+        // DEV-SPOOF: RAM session teardown, tick job dropped.
+        if (gate.sandboxed(TASKS)) {
+            fixtureSessionTickJob?.cancel()
+            fixtureSessionTickJob = null
+            _uiState.update { it.copy(isSessionActive = false, sessionTaskId = null) }
+            return
+        }
         toolService?.stopTodoSession()
     }
 
@@ -336,6 +467,9 @@ class TodoViewModel @Inject constructor(
     }
 
     fun addToCalendar(task: TaskEntry) {
+        // DEV-SPOOF: demo adds no calendar row and schedules no event alarms —
+        // the "added" toast is suppressed so nothing promises what never happened.
+        if (gate.sandboxed(TASKS)) return
         viewModelScope.launch {
             // D-P1-03: never fabricate `now` (instant-past 3 no-op alarms).
             // Undated -> next 09:00; priority -> matching deadline color.
