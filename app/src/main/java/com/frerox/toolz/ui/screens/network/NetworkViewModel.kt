@@ -17,6 +17,7 @@
 
 package com.frerox.toolz.ui.screens.network
 
+import android.os.SystemClock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.network.DnsProvider
@@ -143,10 +144,10 @@ class NetworkViewModel @Inject constructor(
                     band = "2.4 GHz",
                     channel = 6,
                     signalLevel = 1,
-                    rssiHistory = (wifiState.rssiHistory + -110).takeLast(60),
+                    rssiHistory = (wifiState.rssiHistory + com.frerox.toolz.data.developer.SpoofSim.rssi(SystemClock.elapsedRealtime())).takeLast(60),
                     isConnected = true,
                 ),
-                pingSamples = (pingSamples + com.frerox.toolz.data.network.PingSample(now, p.networkPingMs.toLong())).takeLast(60),
+                pingSamples = (pingSamples + com.frerox.toolz.data.network.PingSample(now, com.frerox.toolz.data.developer.SpoofSim.pingMs(SystemClock.elapsedRealtime(), p))).takeLast(60),
                 vpnStatus = com.frerox.toolz.data.network.VpnStatus.CONNECTED,
                 networkHealthScore = 4,
                 isRefreshingDns = false,
@@ -600,7 +601,7 @@ class NetworkViewModel @Inject constructor(
                 // DEV-SPOOF: no ICMP while sandboxed — append the slider fixture.
                 if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.NETWORK)) {
                     val p = gate.params.value
-                    val history = (uiState.value.pingSamples + com.frerox.toolz.data.network.PingSample(System.currentTimeMillis(), p.networkPingMs.toLong())).takeLast(60)
+                    val history = (uiState.value.pingSamples + com.frerox.toolz.data.network.PingSample(System.currentTimeMillis(), com.frerox.toolz.data.developer.SpoofSim.pingMs(SystemClock.elapsedRealtime(), p))).takeLast(60)
                     updateState { copy(pingSamples = history, stabilityInfo = buildStability(history)) }
                     delay(1_000)
                     continue

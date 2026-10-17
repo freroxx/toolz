@@ -21,6 +21,7 @@ import android.annotation.SuppressLint
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.os.SystemClock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -116,26 +117,25 @@ class SoundMeterViewModel @Inject constructor(
     }
 
     private fun startSpoofLoop() {
-        // DEV-SPOOF fixture: jitter around the slider dB, RAM-only, mic stays closed.
+        // DEV-SPOOF fixture: simulated ambient level (breathing + passer-by dips),
+        // RAM-only, mic stays closed. Slider = target loudness, not a frozen value.
         _isRecording.value = true
-        val base = gate.params.value.soundDb.toFloat()
-        if (base > _maxDecibels.value) _maxDecibels.value = base
+        val base = gate.params.value.soundDb
+        if (base > _maxDecibels.value) _maxDecibels.value = base.toFloat()
         recordingJob = viewModelScope.launch {
-            var t = 0
             while (_isRecording.value) {
-                val jitter = (kotlin.math.sin(t * 0.7) * 4 + ((t * 37) % 5) - 2).toFloat()
-                val db = (base + jitter).coerceIn(0f, 160f)
+                val db = com.frerox.toolz.data.developer.SpoofSim
+                    .decibels(SystemClock.elapsedRealtime(), gate.params.value)
                 _decibels.value = db
                 if (db > _maxDecibels.value) _maxDecibels.value = db
                 val h = _decibelHistory.value.toMutableList()
                 h.add(db)
                 if (h.size > 50) h.removeAt(0)
                 _decibelHistory.value = h
-                t++
                 delay(100)
             }
         }
-        android.util.Log.w("DevSpoof", "Sound sandbox active — mic closed, faking ${base}dB")
+        android.util.Log.w("DevSpoof", "Sound sandbox active — mic closed, simulating up to ${base}dB")
     }
 
     fun resetMax() {

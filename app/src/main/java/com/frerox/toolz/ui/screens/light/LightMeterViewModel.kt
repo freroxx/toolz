@@ -17,13 +17,18 @@
 
 package com.frerox.toolz.ui.screens.light
 
+import android.os.SystemClock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.sensors.LightSensorManager
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+
+/** DEV-SPOOF: sampling rate of the simulated light stream (milliseconds). */
+private const val SIM_TICK_MS = 250L
 
 data class LightMeterState(
     val luxValue: Float = 0f,
@@ -51,30 +56,49 @@ class LightMeterViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            lightSensorManager.getLightLevel().collect { value ->
-                // DEV-SPOOF: fixture replaces the hardware reading, manager untouched.
-                val v = if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.SENSORS)) {
-                    gate.params.value.lightLux.toFloat()
-                } else value
-                _uiState.update { currentState ->
-                    val newHistory = (currentState.history + v).takeLast(100)
-                    val newMax = maxOf(currentState.maxLux, v)
-                    val newMin = if (v > 0) minOf(currentState.minLux, v) else currentState.minMin(v)
-                    val newAvg = if (newHistory.isNotEmpty()) newHistory.average().toFloat() else 0f
-
-                    currentState.copy(
-                        luxValue = v,
-                        history = newHistory,
-                        maxLux = newMax,
-                        minLux = if (currentState.minLux == Float.MAX_VALUE) v else minOf(currentState.minLux, v),
-                        avgLux = newAvg
-                    )
+            // DEV-SPOOF: sandboxed → the simulated light stream owns the meter and
+            // the hardware stream is ignored; collecting real lux again the moment
+            // the sandbox switches off (collectLatest cancels the active branch).
+            gate.active(com.frerox.toolz.data.developer.DevToolId.SENSORS)
+                .collectLatest { spoofed ->
+                    if (spoofed) {
+                        while (true) {
+                            pushSensorValue(
+                                com.frerox.toolz.data.developer.SpoofSim.lux(
+                                    SystemClock.elapsedRealtime(),
+                                    gate.params.value,
+                                ),
+                            )
+                            delay(SIM_TICK_MS)
+                        }
+                    } else {
+                        lightSensorManager.getLightLevel().collect { value ->
+                            if (!gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.SENSORS)) {
+                                pushSensorValue(value)
+                            }
+                        }
+                    }
                 }
-            }
         }
     }
 
-    private fun LightMeterState.minMin(value: Float): Float = if (minLux == Float.MAX_VALUE) value else minOf(minLux, value)
+    private fun pushSensorValue(value: Float) {
+        _uiState.update { currentState ->
+            val newHistory = (currentState.history + value).takeLast(100)
+            val newMax = maxOf(currentState.maxLux, value)
+            val newAvg = if (newHistory.isNotEmpty()) newHistory.average().toFloat() else 0f
+
+            currentState.copy(
+                luxValue = value,
+                history = newHistory,
+                maxLux = newMax,
+                minLux = if (currentState.minLux == Float.MAX_VALUE) value else {
+                    minOf(currentState.minLux, value)
+                },
+                avgLux = newAvg
+            )
+        }
+    }
 
     fun resetStats() {
         _uiState.update { it.copy(

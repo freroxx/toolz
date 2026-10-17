@@ -25,16 +25,22 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.location.LocationListener
 import android.location.LocationManager
+import android.os.SystemClock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+
+/** DEV-SPOOF: sampling rate of the simulated altitude stream (milliseconds). */
+private const val SPOOF_TICK_MS = 250L
 
 /**
  * Supported elevation units.
@@ -91,35 +97,67 @@ class AltimeterViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(AltimeterState())
     val uiState: StateFlow<AltimeterState> = _uiState.asStateFlow()
 
+    /** DEV-SPOOF only: the synthetic climb/dive stream replacing barometer+GPS. */
+    private var spoofTicker: Job? = null
+    /** True while the screen wants the sensors running (start/stopListening parity). */
+    private var listeningHardware = false
+
     init {
-        // DEV-SPOOF: live switch — sandbox freezes barometer+GPS, fixture takes over.
+        // DEV-SPOOF: live switch — sandbox freezes barometer+GPS, the simulated
+        // climb/dive stream takes over; on exit real tracking is re-armed if the
+        // screen had asked for it.
         viewModelScope.launch {
             gate.active(com.frerox.toolz.data.developer.DevToolId.SENSORS).collect { spoofed ->
                 if (spoofed) {
                     sensorManager.unregisterListener(this@AltimeterViewModel)
                     try { locationManager.removeUpdates(locationListener) } catch (_: Exception) { }
-                    emitSpoof()
+                    startSpoofTicker()
+                } else {
+                    stopSpoofTicker()
+                    if (listeningHardware) startListening()
                 }
             }
         }
     }
 
-    private fun emitSpoof() {
-        // DEV-SPOOF fixture: Everest base-camp-ish altitude, RAM-only, no GPS/baro.
-        val p = gate.params.value
-        _uiState.update {
-            it.copy(
-                altitudeMeters = p.altitudeM.toDouble(),
-                pressureHpa = 1008.5f,
-                source = "SPOOF",
-                maxAltitudeMeters = p.altitudeM.toDouble(),
-                minAltitudeMeters = p.altitudeM.toDouble(),
-                accuracy = 1f,
-                climbRateMps = 0.0,
-                isTracking = true,
-            )
+    /** Kicks the [SpoofSim] altitude stream (idempotent). */
+    private fun startSpoofTicker() {
+        if (spoofTicker?.isActive == true) return
+        spoofTicker = viewModelScope.launch {
+            while (true) {
+                val t = SystemClock.elapsedRealtime()
+                val p = gate.params.value
+                val sim = com.frerox.toolz.data.developer.SpoofSim
+                val alt = sim.altitudeM(t, p).toDouble()
+                _uiState.update { s ->
+                    s.copy(
+                        altitudeMeters = alt,
+                        pressureHpa = sim.pressureHpa(alt.toFloat()),
+                        source = "SPOOF",
+                        maxAltitudeMeters = maxOf(s.maxAltitudeMeters, alt),
+                        minAltitudeMeters = if (s.minAltitudeMeters == Double.MAX_VALUE) {
+                            alt
+                        } else {
+                            minOf(s.minAltitudeMeters, alt)
+                        },
+                        accuracy = 1f,
+                        climbRateMps = sim.altitudeRateMps(t, p).toDouble(),
+                        isTracking = true,
+                        lastUpdateTime = System.currentTimeMillis(),
+                    )
+                }
+                delay(SPOOF_TICK_MS)
+            }
         }
-        android.util.Log.w("DevSpoof", "Altimeter sandbox active — GPS+baro off, alt=${p.altitudeM}m")
+        android.util.Log.w(
+            "DevSpoof",
+            "Altimeter sandbox active — GPS+baro off, simulated climbs around ${gate.params.value.altitudeM}m",
+        )
+    }
+
+    private fun stopSpoofTicker() {
+        spoofTicker?.cancel()
+        spoofTicker = null
     }
 
     private val locationListener = LocationListener { location ->
@@ -155,9 +193,11 @@ class AltimeterViewModel @Inject constructor(
 
     @SuppressLint("MissingPermission")
     fun startListening() {
-        // DEV-SPOOF: never touch barometer/GPS while sandboxed.
+        listeningHardware = true
+        // DEV-SPOOF: never touch barometer/GPS while sandboxed — run the
+        // simulated climb stream instead.
         if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.SENSORS)) {
-            emitSpoof()
+            startSpoofTicker()
             return
         }
         if (pressureSensor != null) {
@@ -174,6 +214,9 @@ class AltimeterViewModel @Inject constructor(
     }
 
     fun stopListening() {
+        listeningHardware = false
+        // DEV-SPOOF: the simulated climb lives only while the screen is up.
+        stopSpoofTicker()
         sensorManager.unregisterListener(this)
         locationManager.removeUpdates(locationListener)
         _uiState.update { it.copy(isTracking = false) }

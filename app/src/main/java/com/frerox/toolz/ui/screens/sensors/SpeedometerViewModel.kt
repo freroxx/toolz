@@ -368,6 +368,8 @@ class SpeedometerViewModel @Inject constructor(
     private val smoother = SpeedSmoother()
     private var altitudeSmoothed: Double? = null
     private var lastStepEmissionMs: Long? = null
+    /** DEV-SPOOF only: the synthetic drive-cycle ticker replacing GPS. */
+    private var spoofJob: Job? = null
 
     /** Indoor mode only counts when opted in, permitted and backed by hardware. */
     private fun isIndoorActive(): Boolean =
@@ -379,10 +381,15 @@ class SpeedometerViewModel @Inject constructor(
 
     /** Starts listening for GPS. Auto-records unless the user manually paused this session. */
     fun startUpdates() {
-        // DEV-SPOOF: never open GPS while sandboxed — drive the gauge from sliders.
+        // DEV-SPOOF: sandboxed → never open GPS; run the simulated drive cycle instead.
         if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.SENSORS)) {
-            emitSpoofSpeed()
+            startSpoofDrive()
             return
+        }
+        if (spoofJob?.isActive == true) {
+            // Sandbox turned off mid-screen: drop the fixture and fall through to real GPS.
+            spoofJob?.cancel()
+            spoofJob = null
         }
         if (updatesJob?.isActive == true) return
 
@@ -407,6 +414,11 @@ class SpeedometerViewModel @Inject constructor(
 
     /** Stops listening. A recording trip is paused implicitly: no fixes arrive and no time is counted. */
     fun stopUpdates() {
+        // DEV-SPOOF: sandboxed → only the fixture loop stops; readings stay on screen.
+        if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.SENSORS)) {
+            stopSpoofDrive()
+            return
+        }
         updatesJob?.cancel()
         updatesJob = null
         stepJob?.cancel()
@@ -493,24 +505,90 @@ class SpeedometerViewModel @Inject constructor(
 
     // region GPS handling
 
-    private fun emitSpoofSpeed() {
-        // DEV-SPOOF fixture: fixed slider speed + full signal, RAM-only, GPS closed.
-        val p = gate.params.value
-        val mps = p.speedKmh / 3.6f
-        updateState {
-            it.copy(
-                speedMps = mps,
-                maxSpeedMps = maxOf(it.maxSpeedMps, mps),
-                accuracyMeters = 3f,
-                satellitesUsed = 12,
-                satellitesVisible = 16,
-                signal = GpsSignal.GOOD,
-                bearingDegrees = p.compassDeg.toFloat(),
-                speedHistory = (it.speedHistory + mps).takeLast(120),
-            )
+    // region Synthetic drive (DEV-SPOOF)
+
+    /**
+     * Runs the [SpoofSim] drive cycle in place of the GPS pipeline: a smooth
+     * accelerate → cruise → decelerate loop, with distance/moving-time still
+     * integrated while the trip is RECORDING and the trend chart sampled once a
+     * second. GPS stays off for the whole screen; satellites/signal are fixed at
+     * a healthy lock so the UI renders its normal "connected" chrome.
+     */
+    private fun startSpoofDrive() {
+        if (spoofJob?.isActive == true) return
+
+        if (shouldAutoStart(_state.value.tripState, _state.value.settings.autoRecord, userPaused)) {
+            startOrResumeTrip()
+        } else if (_state.value.tripState == TripState.RECORDING) {
+            segmentStartMs = SystemClock.elapsedRealtime()
+            lastTripFixNanos = null
         }
-        android.util.Log.w("DevSpoof", "Speedometer sandbox active — GPS off, ${p.speedKmh} km/h")
+
+        spoofJob = viewModelScope.launch {
+            var lastTickAt = 0L
+            var lastHistoryAt = 0L
+            while (true) {
+                val now = SystemClock.elapsedRealtime()
+                val p = gate.params.value
+                val mps = com.frerox.toolz.data.developer.SpoofSim.speedMps(now, p)
+                val dtMs = lastTickAt.takeIf { it > 0 }?.let { now - it } ?: 0L
+                lastTickAt = now
+
+                val current = _state.value
+                val recording = current.tripState == TripState.RECORDING
+                var distance = current.distanceMeters
+                var moving = current.movingTimeMs
+                if (recording && dtMs in 1L..MAX_TRIP_GAP_MS) {
+                    distance += mps.toDouble() * dtMs / 1_000.0
+                    moving += dtMs
+                }
+
+                updateState {
+                    it.copy(
+                        speedMps = mps,
+                        maxSpeedMps = if (recording) max(it.maxSpeedMps, mps) else it.maxSpeedMps,
+                        distanceMeters = distance,
+                        movingTimeMs = moving,
+                        accuracyMeters = 3f,
+                        satellitesUsed = 12,
+                        satellitesVisible = 16,
+                        signal = GpsSignal.GOOD,
+                        bearingDegrees = com.frerox.toolz.data.developer.SpoofSim.headingDeg(now, p),
+                        altitudeMeters = com.frerox.toolz.data.developer.SpoofSim.altitudeM(now, p).toDouble(),
+                        indoorActive = false,
+                        elapsedMs = if (recording) {
+                            committedElapsedMs + (now - segmentStartMs)
+                        } else {
+                            it.elapsedMs
+                        },
+                    )
+                }
+
+                if (now - lastHistoryAt >= TICK_MS) {
+                    lastHistoryAt = now
+                    updateState { s ->
+                        s.copy(speedHistory = s.speedHistory.pushed(mps))
+                    }
+                }
+                delay(250)
+            }
+        }
+        updateState { it.copy(indoorActive = false) }
+        android.util.Log.w(
+            "DevSpoof",
+            "Speedometer sandbox active — simulated drive (top ${gate.params.value.speedKmh} km/h), GPS off",
+        )
     }
+
+    private fun stopSpoofDrive() {
+        spoofJob?.cancel()
+        spoofJob = null
+        // Keep the last simulated reading on screen (like GPS staying responsive
+        // between start/stop churn); the next startSpoofDrive() picks the cycle
+        // back up exactly where the deterministic timeline is.
+    }
+
+    // endregion
 
     private fun onEvent(event: GpsEvent) {
         // DEV-SPOOF: drop real GPS while sandboxed.

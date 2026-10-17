@@ -22,18 +22,24 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.os.SystemClock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.developer.DevToolId
 import com.frerox.toolz.data.developer.SpoofGate
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+
+/** DEV-SPOOF: sampling rate of the simulated tilt stream (milliseconds). */
+private const val SPOOF_TICK_MS = 50L
 
 /**
  * State representing the inclination on X and Y axes.
@@ -66,31 +72,70 @@ class BubbleLevelViewModel @Inject constructor(
     private val _bubbleState = MutableStateFlow(BubbleState())
     val bubbleState: StateFlow<BubbleState> = _bubbleState.asStateFlow()
 
+    /** DEV-SPOOF only: the synthetic tilt ticker replacing the accelerometer. */
+    private var spoofTicker: Job? = null
+    /** True while the screen wants the sensor running (start/stopListening parity). */
+    private var listeningHardware = false
+
     init {
-        // DEV-SPOOF: live switch — entering sandbox freezes real sensor, exiting
-        // resumes real listening on next startListening().
+        // DEV-SPOOF: live switch — entering sandbox freezes the real sensor and a
+        // simulated living tilt takes over; on exit real listening is re-armed if
+        // the screen had asked for it.
         viewModelScope.launch {
             gate.active(DevToolId.SENSORS).collect { spoofed ->
                 if (spoofed) {
                     sensorManager.unregisterListener(this@BubbleLevelViewModel)
-                    emitSpoof()
+                    startSpoofTicker()
+                } else {
+                    stopSpoofTicker()
+                    if (listeningHardware) startListening()
                 }
             }
         }
     }
 
-    private fun emitSpoof() {
-        // DEV-SPOOF fixture: stuck 15° tilt, RAM-only, no sensor registered.
-        val p = gate.params.value
-        _bubbleState.update {
-            it.copy(x = 4.5f, y = -3.2f, rawX = 4.5f, rawY = -3.2f, isListening = true)
+    /** Runs the [SpoofSim] tilt stream in place of the accelerometer (idempotent). */
+    private fun startSpoofTicker() {
+        if (spoofTicker?.isActive == true) return
+        spoofTicker = viewModelScope.launch {
+            while (true) {
+                if (!_bubbleState.value.isHeld) {
+                    val t = SystemClock.elapsedRealtime()
+                    val (degX, degY) = com.frerox.toolz.data.developer.SpoofSim.bubbleTilt(t)
+                    // Same units the hardware path reports: axis values in m/s².
+                    val axis = 9.81f // gravity sensor magnitude
+                    val rawX = axis * kotlin.math.sin(Math.toRadians(3.5 * degX.toDouble())).toFloat()
+                    val rawY = axis * kotlin.math.sin(Math.toRadians(3.5 * degY.toDouble())).toFloat()
+                    currentX = rawX
+                    currentY = rawY
+                    _bubbleState.update {
+                        it.copy(
+                            rawX = rawX,
+                            rawY = rawY,
+                            x = rawX - it.offsetX,
+                            y = rawY - it.offsetY,
+                            isListening = true,
+                        )
+                    }
+                }
+                delay(SPOOF_TICK_MS)
+            }
         }
-        android.util.Log.w("DevSpoof", "Bubble sandbox active — accelerometer unregistered, tilt=${p.compassDeg}° ref")
+        android.util.Log.w(
+            "DevSpoof",
+            "Bubble sandbox active — accelerometer unregistered, living tilt stream on",
+        )
+    }
+
+    private fun stopSpoofTicker() {
+        spoofTicker?.cancel()
+        spoofTicker = null
     }
 
     fun startListening() {
+        listeningHardware = true
         if (gate.sandboxed(DevToolId.SENSORS)) {
-            emitSpoof()
+            startSpoofTicker()
             return
         }
         if (accelerometer != null) {
@@ -105,6 +150,9 @@ class BubbleLevelViewModel @Inject constructor(
     private var currentY = 0f
 
     fun stopListening() {
+        listeningHardware = false
+        // DEV-SPOOF: the simulated tilt lives only while the screen is up.
+        stopSpoofTicker()
         sensorManager.unregisterListener(this)
         _bubbleState.update { it.copy(isListening = false) }
     }

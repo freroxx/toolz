@@ -26,16 +26,22 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.location.Location
 import android.location.LocationManager
+import android.os.SystemClock
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.settings.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import kotlin.math.*
+
+/** DEV-SPOOF: sampling rate of the simulated heading stream (milliseconds). */
+private const val SPOOF_TICK_MS = 100L
 
 data class CompassState(
     val azimuth: Float = 0f,
@@ -74,14 +80,22 @@ class CompassViewModel @Inject constructor(
     private var lastMagnetometerSet = false
     
     private var currentAzimuth = 0f
+    /** DEV-SPOOF only: the synthetic heading ticker replacing real sensors. */
+    private var spoofTicker: Job? = null
+    /** True while the screen wants the compass running (start/stopListening parity). */
+    private var listeningHardware = false
 
     init {
-        // DEV-SPOOF: live switch — sandbox freezes compass hardware, fixture takes over.
+        // DEV-SPOOF: live switch — sandbox freezes compass hardware, the simulated
+        // heading takes over; leaving the sandbox re-arms the real listeners.
         viewModelScope.launch {
             gate.active(com.frerox.toolz.data.developer.DevToolId.SENSORS).collect { spoofed ->
                 if (spoofed) {
                     sensorManager.unregisterListener(this@CompassViewModel)
-                    emitSpoof()
+                    startSpoofTicker()
+                } else {
+                    stopSpoofTicker()
+                    if (listeningHardware) startListening()
                 }
             }
         }
@@ -93,24 +107,34 @@ class CompassViewModel @Inject constructor(
         }
     }
 
-    private fun emitSpoof() {
-        // DEV-SPOOF fixture: fixed NW heading + fake qibla, RAM-only.
-        val p = gate.params.value
-        val deg = p.compassDeg.toFloat()
-        _uiState.update {
-            it.copy(
-                azimuth = deg,
-                displayAzimuth = deg,
-                qiblaAngle = (deg + 118f) % 360f,
-                latitude = 24.7136,
-                longitude = 46.6753,
-                accuracy = 3,
-                isLevel = true,
-                pitch = 0f,
-                roll = 0f,
-            )
+    /** Kicks the sandboxed heading stream (idempotent). */
+    private fun startSpoofTicker() {
+        if (spoofTicker?.isActive == true) return
+        spoofTicker = viewModelScope.launch {
+            while (true) {
+                val deg = com.frerox.toolz.data.developer.SpoofSim
+                    .headingDeg(SystemClock.elapsedRealtime(), gate.params.value)
+                _uiState.update {
+                    it.copy(
+                        azimuth = deg,
+                        displayAzimuth = deg,
+                        qiblaAngle = (deg + 118f) % 360f,
+                        accuracy = 3,
+                        isLevel = true,
+                    )
+                }
+                delay(SPOOF_TICK_MS)
+            }
         }
-        android.util.Log.w("DevSpoof", "Compass sandbox active — sensors off, heading=${p.compassDeg}°")
+        android.util.Log.w(
+            "DevSpoof",
+            "Compass sandbox active — sensors off, drifting around ${gate.params.value.compassDeg}°",
+        )
+    }
+
+    private fun stopSpoofTicker() {
+        spoofTicker?.cancel()
+        spoofTicker = null
     }
 
     @SuppressLint("MissingPermission")
@@ -171,9 +195,11 @@ class CompassViewModel @Inject constructor(
     }
 
     fun startListening() {
-        // DEV-SPOOF: never register compass hardware while sandboxed.
+        listeningHardware = true
+        // DEV-SPOOF: never register compass hardware while sandboxed — run the
+        // simulated heading instead.
         if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.SENSORS)) {
-            emitSpoof()
+            startSpoofTicker()
             return
         }
         if (rotationVector != null) {
@@ -185,6 +211,9 @@ class CompassViewModel @Inject constructor(
     }
 
     fun stopListening() {
+        listeningHardware = false
+        // DEV-SPOOF: the simulated heading lives only while the screen is up.
+        stopSpoofTicker()
         sensorManager.unregisterListener(this)
     }
 
