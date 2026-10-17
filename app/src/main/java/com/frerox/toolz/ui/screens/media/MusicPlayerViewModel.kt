@@ -31,6 +31,7 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.util.UnstableApi
+import android.os.SystemClock
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -59,6 +60,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -76,6 +78,7 @@ class MusicPlayerViewModel @Inject constructor(
     val vibrationManager: VibrationManager,
     val player: ExoPlayer,
     private val visualizerManager: MusicVisualizerManager,
+    private val gate: com.frerox.toolz.data.developer.SpoofGate,
     @param:ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -110,24 +113,88 @@ class MusicPlayerViewModel @Inject constructor(
     private val _fallbackQueue = MutableStateFlow<List<QueueEntry>>(emptyList())
     private val _fallbackQueueIndex = MutableStateFlow(0)
 
-    // Exposed flows delegating to controllers (public API identical)
-    val playbackPosition: StateFlow<Long> get() = if (::playbackTransport.isInitialized) playbackTransport.playbackPosition else _fallbackPlaybackPosition
-    val duration: StateFlow<Long> get() = if (::playbackTransport.isInitialized) playbackTransport.duration else _fallbackDuration
-    val sliderPosition: StateFlow<Long?> get() = if (::playbackTransport.isInitialized) playbackTransport.sliderPosition else _fallbackSlider
+    // DEV-SPOOF streams: the fake library/queue fed while the music sandbox is on.
+    private val _sandboxPosition = MutableStateFlow(0L)
+    private val _sandboxDuration = MutableStateFlow(0L)
+    private val _sandboxSlider = MutableStateFlow<Long?>(null)
+    private val _sandboxVisualizer = MutableStateFlow(FloatArray(0))
+    private val _sandboxQueue = MutableStateFlow<List<QueueEntry>>(emptyList())
+    private val _sandboxQueueIndex = MutableStateFlow(0)
+    private val _sandboxControllerReady = MutableStateFlow(true)
+    private var musicSandboxJob: Job? = null
+    private var realMusicPipelineStarted = false
+
+    // Exposed flows delegating to controllers (public API identical). The DEV-SPOOF
+    // music sandbox takes precedence: every consumer reads the fake stream instead.
+    val playbackPosition: StateFlow<Long>
+        get() = if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.MUSIC)) {
+            _sandboxPosition
+        } else if (::playbackTransport.isInitialized) {
+            playbackTransport.playbackPosition
+        } else {
+            _fallbackPlaybackPosition
+        }
+    val duration: StateFlow<Long>
+        get() = if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.MUSIC)) {
+            _sandboxDuration
+        } else if (::playbackTransport.isInitialized) {
+            playbackTransport.duration
+        } else {
+            _fallbackDuration
+        }
+    val sliderPosition: StateFlow<Long?>
+        get() = if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.MUSIC)) {
+            _sandboxSlider
+        } else if (::playbackTransport.isInitialized) {
+            playbackTransport.sliderPosition
+        } else {
+            _fallbackSlider
+        }
     val showSleepTimer: StateFlow<Boolean> get() = if (::sleepTimerManager.isInitialized) sleepTimerManager.showSleepTimer else _fallbackShowSleep
-    val visualizerData: StateFlow<FloatArray> get() = if (::visualizerDelegate.isInitialized) visualizerDelegate.visualizerData else _fallbackVisualizer
+    val visualizerData: StateFlow<FloatArray>
+        get() = if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.MUSIC)) {
+            _sandboxVisualizer
+        } else if (::visualizerDelegate.isInitialized) {
+            visualizerDelegate.visualizerData
+        } else {
+            _fallbackVisualizer
+        }
     val equalizerPresets: StateFlow<List<String>> get() = if (::equalizerController.isInitialized) equalizerController.equalizerPresets else _fallbackEqualizer
 
     // Additional queue flows as per spec
-    val queueFlow: StateFlow<List<QueueEntry>> get() = if (::queueManager.isInitialized) queueManager.queueFlow else _fallbackQueue
-    val currentQueueIndexFlow: StateFlow<Int> get() = if (::queueManager.isInitialized) queueManager.currentQueueIndexFlow else _fallbackQueueIndex
+    val queueFlow: StateFlow<List<QueueEntry>>
+        get() = if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.MUSIC)) {
+            _sandboxQueue
+        } else if (::queueManager.isInitialized) {
+            queueManager.queueFlow
+        } else {
+            _fallbackQueue
+        }
+    val currentQueueIndexFlow: StateFlow<Int>
+        get() = if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.MUSIC)) {
+            _sandboxQueueIndex
+        } else if (::queueManager.isInitialized) {
+            queueManager.currentQueueIndexFlow
+        } else {
+            _fallbackQueueIndex
+        }
+
+    /** DEV-SPOOF: true while the music sandbox is driving this screen. */
+    val isMusicSandboxActive: Boolean
+        get() = gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.MUSIC)
 
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var controller: MediaController? = null
     private var isConnecting = false
     private val pendingActions = mutableListOf<() -> Unit>()
     private val _isControllerReady = MutableStateFlow(false)
-    val isControllerReady: StateFlow<Boolean> = _isControllerReady.asStateFlow()
+    // DEV-SPOOF: sandboxed consumers always see "ready" so no UI stalls on the binder.
+    val isControllerReady: StateFlow<Boolean>
+        get() = if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.MUSIC)) {
+            _sandboxControllerReady
+        } else {
+            _isControllerReady
+        }
     private var lastErrorScanMs = 0L
 
     private fun hapticClick() { if (!_uiState.value.isKaraokeActive) vibrationManager.vibrateClick() }
@@ -351,14 +418,135 @@ class MusicPlayerViewModel @Inject constructor(
         // Initial listener on local player until controller connects
         player.addListener(playerListener)
 
-        connectToMediaController()
+        // DEV-SPOOF: with the music sandbox on, never bind a media session, never
+        // wire the DB or MediaStore observer — the fake track stream runs instead.
+        // Leaving the sandbox wires the real pipeline up (idempotent guard below).
+        if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.MUSIC)) {
+            startMusicSandbox()
+        } else {
+            realMusicPipelineStarted = true
+            connectToMediaController()
+            observeSettings()
+            observeLibrary()
+            repository.startLiveObserver(viewModelScope)
+            if (player.isPlaying) playbackTransport.startProgressUpdate()
+        }
+        viewModelScope.launch {
+            gate.active(com.frerox.toolz.data.developer.DevToolId.MUSIC).collect { spoofed ->
+                if (spoofed) startMusicSandbox() else stopMusicSandbox()
+            }
+        }
+    }
 
-        observeSettings()
-        observeLibrary()
+    // ─────────────────────────────────────────────────────────────────────────
+    // Music sandbox (DEV-SPOOF) — RAM-only fake playback, no media session
+    // ─────────────────────────────────────────────────────────────────────────
 
-        repository.startLiveObserver(viewModelScope)
+    private fun startMusicSandbox() {
+        musicSandboxJob?.cancel()
+        val p = gate.params.value
+        val tracks = com.frerox.toolz.data.developer.FakeMusicSandbox.library(p)
+        _uiState.update {
+            it.copy(
+                tracks = tracks,
+                playlists = emptyList(),
+                favoriteTracks = listOf(tracks[0], tracks[2]),
+                recentlyPlayed = tracks.take(3),
+                mostPlayed = listOf(tracks[2], tracks[1]),
+                folders = mapOf("SPOOF" to tracks),
+                currentTrack = tracks[0],
+                isPlaying = true,
+                playWhenReady = true,
+                duration = tracks[0].duration,
+                playbackPosition = SANDBOX_START_POSITION_MS,
+                isLoading = false,
+                playbackError = null,
+                playbackErrorCode = null,
+                isResolvingCatalog = false,
+                isKaraokeActive = false,
+                performanceMode = it.performanceMode,
+            )
+        }
+        _sandboxDuration.value = tracks[0].duration
+        _sandboxPosition.value = SANDBOX_START_POSITION_MS
+        _sandboxQueue.value = tracks.map { QueueEntry("spoof-${it.uri}", it) }
+        _sandboxQueueIndex.value = 0
+        _sandboxControllerReady.value = true
+        musicSandboxJob = viewModelScope.launch {
+            while (true) {
+                if (_uiState.value.isPlaying) {
+                    val next = _sandboxPosition.value + 250L
+                    if (next >= _sandboxDuration.value) {
+                        // DevSPOOF auto-advance: a track "finishes" and the next starts.
+                        val queue = _sandboxQueue.value
+                        val index = (_sandboxQueueIndex.value + 1) % queue.size
+                        val nextTrack = queue[index].track
+                        _sandboxQueueIndex.value = index
+                        _sandboxDuration.value = nextTrack.duration
+                        _sandboxPosition.value = 0L
+                        _uiState.update {
+                            it.copy(currentTrack = nextTrack, playbackPosition = 0L, duration = nextTrack.duration)
+                        }
+                    } else {
+                        _sandboxPosition.value = next
+                        _uiState.update { it.copy(playbackPosition = next) }
+                    }
+                    _sandboxVisualizer.value = com.frerox.toolz.data.developer.SpoofSim
+                        .visualizerBins(SystemClock.elapsedRealtime(), 32)
+                }
+                delay(250)
+            }
+        }
+        android.util.Log.w(
+            "DevSpoof",
+            "Music sandbox active — fake \"${tracks[0].title}\" playing, no scan, no media session",
+        )
+    }
 
-        if (player.isPlaying) playbackTransport.startProgressUpdate()
+    private fun stopMusicSandbox() {
+        musicSandboxJob?.cancel()
+        musicSandboxJob = null
+        // Wire the real pipeline up the first time the sandbox turns off; it is
+        // then left running — it self-updates and no fixtures fight it anymore.
+        if (!realMusicPipelineStarted) {
+            realMusicPipelineStarted = true
+            connectToMediaController()
+            observeSettings()
+            observeLibrary()
+            repository.startLiveObserver(viewModelScope)
+        }
+        android.util.Log.w("DevSpoof", "Music sandbox over — real player pipelines resumed")
+    }
+
+    /** DEV-SPOOF: advance (or rewind) through the fake queue. */
+    private fun advanceSandboxQueue(delta: Int) {
+        val queue = _sandboxQueue.value
+        if (queue.isEmpty()) return
+        val index = (queue.size + _sandboxQueueIndex.value + delta) % queue.size
+        val next = queue[index].track
+        _sandboxQueueIndex.value = index
+        _sandboxDuration.value = next.duration
+        _sandboxPosition.value = 0L
+        _uiState.update {
+            it.copy(currentTrack = next, playbackPosition = 0L, duration = next.duration, isPlaying = true)
+        }
+    }
+
+    private fun toggleSandboxPlayback() {
+        val playing = _uiState.value.isPlaying
+        _uiState.update { it.copy(isPlaying = !playing, playWhenReady = !playing) }
+    }
+
+    /** Whether music is currently indistinguishably sandboxed (used by command guards). */
+    private val musicSandboxed: Boolean
+        get() = gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.MUSIC)
+
+    private companion object {
+        /** Start each sandboxed session 12s into the track so progress isn't a hard zero. */
+        const val SANDBOX_START_POSITION_MS = 12_000L
+
+        /** DEV-SPOOF: threshold for restart-on-previous behaviour. */
+        const val SMALL_PREVIOUS_SEEK_MS = 5_000L
     }
 
     private fun observeSettings() {
@@ -668,7 +856,11 @@ class MusicPlayerViewModel @Inject constructor(
     // Facade delegations — Playback Transport
     // ─────────────────────────────────────────────────────────────────────────
 
-    fun onSliderChange(position: Long) = playbackTransport.onSliderChange(position)
+    fun onSliderChange(position: Long) {
+        // DEV-SPOOF: sandboxed → scrub through the fake track directly.
+        if (musicSandboxed) { seekTo(position); return }
+        playbackTransport.onSliderChange(position)
+    }
     fun onSliderChangeFinished() = playbackTransport.onSliderChangeFinished()
 
     // Throttled silent entry sync — the lag-free replacement for the old
@@ -681,6 +873,8 @@ class MusicPlayerViewModel @Inject constructor(
     private var autoScanJob: Job? = null
 
     fun onScreenOpened() {
+        // DEV-SPOOF: no MediaStore scan while sandboxed — the fake library is live.
+        if (musicSandboxed) return
         if (!repository.hasAudioPermission()) return
         val now = System.currentTimeMillis()
         if (lastAutoScanMs != 0L && now - lastAutoScanMs < 10 * 60 * 1000L) return
@@ -705,6 +899,11 @@ class MusicPlayerViewModel @Inject constructor(
     // Manual pull-to-refresh keeps the full pass (scan + thumbnails + spinner).
     // Cancels any background delta scan first so the two never contend on IO/DB.
     fun scanMusic() {
+        // DEV-SPOOF: sandboxed → never touch MediaStore/Room, fake library serves.
+        if (musicSandboxed) {
+            android.util.Log.w("DevSpoof", "Music scan suppressed — sandbox active")
+            return
+        }
         autoScanJob?.cancel()
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
@@ -775,6 +974,24 @@ class MusicPlayerViewModel @Inject constructor(
     }
 
     fun playTrack(track: MusicTrack, tracks: List<MusicTrack>? = null) {
+        // DEV-SPOOF: sandboxed → adopt the tapped fake track into the fixture queue.
+        if (musicSandboxed) {
+            _uiState.update {
+                it.copy(
+                    currentTrack = track,
+                    playbackPosition = 0L,
+                    duration = track.duration,
+                    isPlaying = true,
+                    playWhenReady = true,
+                )
+            }
+            _sandboxDuration.value = track.duration
+            _sandboxPosition.value = 0L
+            _sandboxQueue.value.indexOfFirst { it.track.uri == track.uri }
+                .takeIf { it >= 0 }
+                ?.let { _sandboxQueueIndex.value = it }
+            return
+        }
         val effectiveTracks = tracks ?: _uiState.value.tracks
         // Best for the user: never make a tap a no-op. The transport already
         // falls back to the local ExoPlayer when the controller isn't bound yet,
@@ -803,9 +1020,25 @@ class MusicPlayerViewModel @Inject constructor(
         playbackTransport.playUri(uri, title, artist, thumbUrl, sourceUrl)
     }
 
-    fun addToQueue(track: MusicTrack) = playbackTransport.addToQueue(track)
+    fun addToQueue(track: MusicTrack) {
+        // DEV-SPOOF: sandboxed → the fake queue grows in RAM, nothing persists.
+        if (musicSandboxed) {
+            _sandboxQueue.value = _sandboxQueue.value + QueueEntry("spoof-${track.uri}", track)
+            return
+        }
+        playbackTransport.addToQueue(track)
+    }
 
-    fun playNext(track: MusicTrack) = playbackTransport.playNext(track)
+    fun playNext(track: MusicTrack) {
+        // DEV-SPOOF: sandboxed → insert into the fake queue after the head.
+        if (musicSandboxed) {
+            val queue = _sandboxQueue.value.toMutableList()
+            queue.add(_sandboxQueueIndex.value + 1, QueueEntry("spoof-${track.uri}", track))
+            _sandboxQueue.value = queue
+            return
+        }
+        playbackTransport.playNext(track)
+    }
 
     fun playCatalogTracks(tracks: List<CatalogTrack>, startIndex: Int = 0) {
         if (tracks.isEmpty()) return
@@ -829,17 +1062,45 @@ class MusicPlayerViewModel @Inject constructor(
     fun playPlaylist(playlist: Playlist, shuffle: Boolean = false) {
         val tracks = playlist.trackUris.mapNotNull { uri -> _uiState.value.tracks.find { it.uri == uri } }
         if (tracks.isEmpty()) return
+        // DEV-SPOOF: sandboxed → playlists resolve against the fake library only.
+        if (musicSandboxed) { playTrack(tracks.first(), tracks); return }
         playbackTransport.playPlaylist(tracks, shuffle)
     }
 
-    fun togglePlayPause() = playbackTransport.togglePlayPause()
+    fun togglePlayPause() {
+        // DEV-SPOOF: sandboxed → toggle the fake transport, no MediaController.
+        if (musicSandboxed) { toggleSandboxPlayback(); return }
+        playbackTransport.togglePlayPause()
+    }
 
-    fun play() = playbackTransport.play()
-    fun pause() = playbackTransport.pause()
+    fun play() {
+        if (musicSandboxed) { _uiState.update { it.copy(isPlaying = true, playWhenReady = true) }; return }
+        playbackTransport.play()
+    }
 
-    fun stop() = playbackTransport.stop()
+    fun pause() {
+        if (musicSandboxed) { _uiState.update { it.copy(isPlaying = false, playWhenReady = false) }; return }
+        playbackTransport.pause()
+    }
 
-    fun seekTo(position: Long) = playbackTransport.seekTo(position)
+    fun stop() {
+        if (musicSandboxed) {
+            _uiState.update { it.copy(isPlaying = false, playWhenReady = false, playbackPosition = 0L) }
+            _sandboxPosition.value = 0L
+            return
+        }
+        playbackTransport.stop()
+    }
+
+    fun seekTo(position: Long) {
+        if (musicSandboxed) {
+            val clamped = position.coerceIn(0L, _sandboxDuration.value)
+            _sandboxPosition.value = clamped
+            _uiState.update { it.copy(playbackPosition = clamped) }
+            return
+        }
+        playbackTransport.seekTo(position)
+    }
 
     fun setVolume(volume: Float) = playbackTransport.setVolume(volume)
 
@@ -849,13 +1110,46 @@ class MusicPlayerViewModel @Inject constructor(
         _uiState.update { it.copy(karaokeSessionsCount = count, karaokeAvgScore = avgScore) }
     }
 
-    fun skipNext() = playbackTransport.skipNext()
+    fun skipNext() {
+        // DEV-SPOOF: sandboxed → walk the fake queue.
+        if (musicSandboxed) { advanceSandboxQueue(1); return }
+        playbackTransport.skipNext()
+    }
 
-    fun skipPrevious() = playbackTransport.skipPrevious()
+    fun skipPrevious() {
+        if (musicSandboxed) {
+            // Same UX as a real player: a few seconds in restarts the track,
+            // further in jumps to the previous item.
+            if (_sandboxPosition.value > SMALL_PREVIOUS_SEEK_MS) {
+                _sandboxPosition.value = 0L
+                _uiState.update { it.copy(playbackPosition = 0L) }
+            } else {
+                advanceSandboxQueue(-1)
+            }
+            return
+        }
+        playbackTransport.skipPrevious()
+    }
 
-    fun toggleShuffle() = playbackTransport.toggleShuffle()
+    fun toggleShuffle() {
+        if (musicSandboxed) { _uiState.update { it.copy(isShuffleOn = !it.isShuffleOn) }; return }
+        playbackTransport.toggleShuffle()
+    }
 
-    fun toggleRepeat() = playbackTransport.toggleRepeat()
+    fun toggleRepeat() {
+        if (musicSandboxed) {
+            _uiState.update {
+                val next = when (it.repeatMode) {
+                    Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
+                    Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
+                    else -> Player.REPEAT_MODE_OFF
+                }
+                it.copy(repeatMode = next)
+            }
+            return
+        }
+        playbackTransport.toggleRepeat()
+    }
 
     /** Loop the current item (used by note attachments so one song repeats). */
     fun setRepeatMode(mode: Int) = playbackTransport.setRepeatMode(mode)
@@ -954,7 +1248,25 @@ class MusicPlayerViewModel @Inject constructor(
     fun toggleMusicSettings() { _uiState.update { it.copy(showMusicSettings = !it.showMusicSettings) }; hapticClick() }
     fun setCacheSize(mb: Int) { viewModelScope.launch { settingsRepository.setMusicCacheSizeMb(mb); hapticClick() } }
 
-    fun toggleFavorite(track: MusicTrack) = playlistManager.toggleFavorite(track)
+    fun toggleFavorite(track: MusicTrack) {
+        // DEV-SPOOF: sandboxed → flip the favorite on the RAM fixture; Room untouched.
+        if (musicSandboxed) {
+            val flipped = track.copy(isFavorite = !track.isFavorite)
+            _uiState.update { st ->
+                st.copy(
+                    tracks = st.tracks.map { if (it.uri == track.uri) flipped else it },
+                    favoriteTracks = if (flipped.isFavorite) {
+                        st.favoriteTracks + flipped
+                    } else {
+                        st.favoriteTracks.filterNot { it.uri == track.uri }
+                    },
+                    currentTrack = if (st.currentTrack?.uri == track.uri) flipped else st.currentTrack,
+                )
+            }
+            return
+        }
+        playlistManager.toggleFavorite(track)
+    }
 
     fun editTrackTags(
         track: MusicTrack,

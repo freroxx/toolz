@@ -21,6 +21,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.hardware.Sensor
 import android.hardware.SensorManager
+import android.os.SystemClock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.settings.SettingsRepository
@@ -36,6 +37,7 @@ import com.frerox.toolz.util.StepTrackerUtils
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.*
@@ -99,6 +101,10 @@ class StepCounterViewModel @Inject constructor(
 
     private val _debugLogs = MutableStateFlow<List<String>>(emptyList())
     private val _motionStatus = MutableStateFlow("IDLE")
+    /** DEV-SPOOF: the live step count fed while the sandbox is on (null = real data). */
+    private val _spoofSteps = MutableStateFlow<Int?>(null)
+    /** DEV-SPOOF only: the walking-clock ticker. */
+    private var stepsSpoofTickerJob: Job? = null
 
     private var serviceBinder: com.frerox.toolz.service.StepCounterService.LocalBinder? = null
     private val serviceConnection = object : android.content.ServiceConnection {
@@ -304,24 +310,28 @@ class StepCounterViewModel @Inject constructor(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), StepState())
 
     /** Public state: sandbox overrides step count + derived stats with slider fixtures. */
-    val uiState: StateFlow<StepState> = realUiState
-        .map { s ->
-            if (!gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.STEPS)) return@map s
-            val p = gate.params.value
-            val distKm = StepTrackerUtils.calculateDistanceKm(p.stepsToday, s.stepLength)
+    val uiState: StateFlow<StepState> = combine(
+        realUiState,
+        _spoofSteps,
+    ) { s, spoofSteps -> s to spoofSteps }
+        .map { (s, spoofSteps) ->
+            // DEV-SPOOF: live walking counter — the count keeps stepping up from the
+            // slider base while the sandbox is on (RAM-only, Room untouched).
+            if (spoofSteps == null) return@map s
+            val base = spoofSteps
+            val distKm = StepTrackerUtils.calculateDistanceKm(base, s.stepLength)
             val isMetric = s.measurementSystem == "Metric"
-            android.util.Log.w("DevSpoof", "Steps sandbox active — faking ${p.stepsToday} steps")
             s.copy(
-                steps = p.stepsToday,
+                steps = base,
                 isSensorPresent = true,
                 distanceDisplay = if (isMetric) distKm else StepTrackerUtils.kmToMiles(distKm),
-                calories = StepTrackerUtils.calculateCalories(p.stepsToday, s.caloriesPer1k),
-                moveMinutes = StepTrackerUtils.calculateMoveMinutes(p.stepsToday),
-                bestDaySteps = maxOf(s.bestDaySteps, p.stepsToday),
-                averageSteps = p.stepsToday / 7,
+                calories = StepTrackerUtils.calculateCalories(base, s.caloriesPer1k),
+                moveMinutes = StepTrackerUtils.calculateMoveMinutes(base),
+                bestDaySteps = maxOf(s.bestDaySteps, base),
+                averageSteps = base / 7,
                 streak = 7,
                 motionStatus = "SPOOF",
-                debugLogs = listOf("SPOOF sandbox: fake ${p.stepsToday} steps (local only)"),
+                debugLogs = listOf("SPOOF sandbox: walking counter (from ${gate.params.value.stepsToday} steps)"),
             )
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), StepState())
@@ -336,7 +346,14 @@ class StepCounterViewModel @Inject constructor(
         viewModelScope.launch {
             _coachChatIdState.value = getCoachChatId()
         }
-        
+        // DEV-SPOOF: live switch — a walking clock accrues from the slider base
+        // while sandboxed; real sensor data returns untouched when it flips off.
+        viewModelScope.launch {
+            gate.active(com.frerox.toolz.data.developer.DevToolId.STEPS).collect { spoofed ->
+                if (spoofed) startStepsSpoofTicker() else stopStepsSpoofTicker()
+            }
+        }
+
         // Auto-fetch AI advice once on first load if conditions are met.
         // This makes the pill feel alive without requiring a manual tap.
         viewModelScope.launch {
@@ -350,6 +367,31 @@ class StepCounterViewModel @Inject constructor(
     }
 
     private var aiAdviceJob: Job? = null
+
+    /** DEV-SPOOF: ticks the synthetic walking count upward from the slider base. */
+    private fun startStepsSpoofTicker() {
+        if (stepsSpoofTickerJob?.isActive == true) return
+        stepsSpoofTickerJob = viewModelScope.launch {
+            val startedAt = SystemClock.elapsedRealtime()
+            while (true) {
+                val p = gate.params.value
+                val elapsed = SystemClock.elapsedRealtime() - startedAt
+                _spoofSteps.value = p.stepsToday +
+                    com.frerox.toolz.data.developer.SpoofSim.addedSteps(elapsed)
+                delay(1_500)
+            }
+        }
+        android.util.Log.w(
+            "DevSpoof",
+            "Steps sandbox active — walking clock from ${gate.params.value.stepsToday} steps",
+        )
+    }
+
+    private fun stopStepsSpoofTicker() {
+        stepsSpoofTickerJob?.cancel()
+        stepsSpoofTickerJob = null
+        _spoofSteps.value = null
+    }
 
     private fun getSystemPrompt(): String {
         val state = uiState.value

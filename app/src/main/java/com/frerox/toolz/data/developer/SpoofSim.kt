@@ -290,4 +290,20 @@ object SpoofSim {
     }
 
     // endregion
+
+    // region Music — visualizer bins
+
+    /**
+     * Fake spectrum bars: a seeded band shape (lows louder than highs) where each
+     * bin pulses on its own fast oscillator, like a live FFT without any audio.
+     */
+    fun visualizerBins(tMs: Long, bins: Int): FloatArray =
+        FloatArray(bins) { b ->
+            val shape = 0.85f - 0.6f * (b.toFloat() / bins.coerceAtLeast(1))
+            val amp = shape.coerceAtLeast(0.12f) *
+                (0.75f + 0.25f * sin((b * 1.61f).toDouble()).toFloat())
+            (amp * (0.65f + 0.35f * osc(tMs, 240L * (b + 1), b * 0.4f))).coerceIn(0f, 1f)
+        }
+
+    // endregion
 }

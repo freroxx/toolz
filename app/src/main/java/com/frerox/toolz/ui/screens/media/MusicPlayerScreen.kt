@@ -407,7 +407,9 @@ fun MusicPlayerScreen(
             when {
                 // P1-09 fix: music only needs READ_MEDIA_AUDIO; MANAGE_ALL_FILES is optional
                 // for power users. Don't block playback if audio permission is granted.
-                !musicPermission.status.isGranted -> {
+                // DEV-SPOOF: sandboxed → skip the permission prompt entirely; the fake
+                // library needs no real audio files.
+                !musicPermission.status.isGranted && !viewModel.isMusicSandboxActive -> {
                     PermissionPlaceholder(
                         onAllow = { musicPermission.launchPermissionRequest() }
                     )
