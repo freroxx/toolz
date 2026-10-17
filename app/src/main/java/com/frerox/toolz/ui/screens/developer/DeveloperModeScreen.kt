@@ -39,6 +39,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.BugReport
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Forum
@@ -49,6 +50,7 @@ import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Rocket
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Science
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Tune
@@ -667,6 +669,26 @@ private fun SpoofsTabRoot(
                 value = query,
                 onValueChange = viewModel::onSearchQueryChange,
                 placeholder = { Text("Search tools…", fontSize = 13.sp) },
+                leadingIcon = {
+                    Icon(
+                        Icons.Rounded.Search,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp),
+                    )
+                },
+                trailingIcon = {
+                    if (query.isNotEmpty()) {
+                        IconButton(onClick = { viewModel.onSearchQueryChange("") }) {
+                            Icon(
+                                Icons.Rounded.Close,
+                                contentDescription = "Clear search",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    }
+                },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -676,12 +698,20 @@ private fun SpoofsTabRoot(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("Sandboxes", fontWeight = FontWeight.Black)
-                        Text(
-                            if (!devOn) "Master OFF — everything shows real data"
-                            else if (activeCount == 0) "None active — tap a tile to configure"
-                            else "$activeCount active — tap a tile to configure its fixtures",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            // Live beacon: breathes while spoofs are armed.
+                            DevPulseDot(devOn && activeCount > 0)
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                if (!devOn) "Master OFF — everything shows real data"
+                                else if (activeCount == 0) "None active — tap a tile to configure"
+                                else "$activeCount active — tap a tile to configure its fixtures",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (devOn && activeCount > 0) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
                     }
                     TextButton(enabled = devOn, onClick = onSpoofAll) {
                         Text("SPOOF ALL", fontWeight = FontWeight.Black, fontSize = 12.sp)
