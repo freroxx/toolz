@@ -372,17 +372,28 @@ class TimerViewModel @Inject constructor(
     )
 
     fun onTimeSelectedChange(hours: Int, min: Int, sec: Int, force: Boolean = false) {
-        // DEV-SPOOF: sandboxed → wheels stage on the fixture only.
+        // DEV-SPOOF: sandboxed → stage on the fixture exactly like the real
+        // pipeline (wheels apply to remaining/initial, staged = never ran).
         if (timersSandboxActive) {
-            _sandboxTimer.update { cur ->
-                val fixture = cur ?: sandboxFixture()
-                fixture.copy(
-                    selectedHours = hours,
-                    selectedMinutes = min,
-                    selectedSeconds = sec,
-                    remainingTime = fixture.remainingTime.coerceAtLeast(0L),
-                )
-            }
+            val safeHours = hours.coerceIn(0, 99)
+            val safeMinutes = min.coerceIn(0, 59)
+            val safeSeconds = sec.coerceIn(0, 59)
+            val duration = (((safeHours * 3600L) + (safeMinutes * 60L) + safeSeconds) * 1000L)
+            val fixture = _sandboxTimer.value ?: sandboxFixture()
+            if (fixture.isRunning) return // staging blocked while running, as real mode
+            if (fixture.isRinging && !force) return
+            _sandboxTimer.value = fixture.copy(
+                selectedHours = safeHours,
+                selectedMinutes = safeMinutes,
+                selectedSeconds = safeSeconds,
+                remainingTime = duration,
+                initialTime = duration,
+                isFinished = false,
+                isRinging = false,
+                isPaused = duration > 0L,
+                isStarted = duration > 0L,
+                hasRun = false, // fresh staging counts as never-run
+            )
             return
         }
         val safeHours = hours.coerceIn(0, 99)
@@ -462,16 +473,25 @@ class TimerViewModel @Inject constructor(
     }
 
     fun setTimer(hours: Int, minutes: Int, seconds: Int, force: Boolean = false) {
-        // DEV-SPOOF: sandboxed → restage the fixture duration (1s clamped).
+        // DEV-SPOOF: sandboxed → restage the fixture with the real staging
+        // semantics: zero is a valid (empty) stage, running blocks edits.
         if (timersSandboxActive) {
-            val total = (((hours * 3600L) + (minutes * 60L) + seconds).coerceAtLeast(1L))
-                .coerceAtMost(21_600L)
-            _sandboxTimer.value =
-                sandboxFixture(seconds = total / 1000L).copy(
-                    selectedHours = (hours.coerceIn(0, 99)),
-                    selectedMinutes = minutes.coerceIn(0, 59),
-                    selectedSeconds = seconds.coerceIn(0, 59),
-                )
+            val fixture = _sandboxTimer.value ?: sandboxFixture()
+            if (fixture.isRunning) return
+            if (fixture.isRinging && !force) return
+            val totalMillis = ((hours * 3600L) + (minutes * 60L) + seconds) * 1000L
+            _sandboxTimer.value = fixture.copy(
+                selectedHours = hours.coerceIn(0, 99),
+                selectedMinutes = minutes.coerceIn(0, 59),
+                selectedSeconds = seconds.coerceIn(0, 59),
+                remainingTime = totalMillis,
+                initialTime = totalMillis,
+                isFinished = false,
+                isRinging = false,
+                isPaused = totalMillis > 0L,
+                isStarted = totalMillis > 0L,
+                hasRun = false,
+            )
             return
         }
         val cur = _uiState.value
@@ -670,12 +690,9 @@ class TimerViewModel @Inject constructor(
                         _sandboxTimer.value = _sandboxTimer.value
                             ?.copy(isFinished = false, isRinging = false)
                         delay(250)
+                        // Re-arm onto the exact staged duration (no /1000 loss).
                         _sandboxTimer.value = _sandboxTimer.value
-                            ?.let { cur ->
-                                sandboxFixture(
-                                    seconds = (cur.initialTime / 1000L).coerceAtLeast(1L),
-                                ).copy(isStarted = true)
-                            }
+                            ?.let { cur -> cur.copy(remainingTime = cur.initialTime) }
                     }
                 }
                 delay(100)
@@ -687,9 +704,15 @@ class TimerViewModel @Inject constructor(
     private fun toggleSandboxTimer() {
         val s = _sandboxTimer.value ?: sandboxFixture()
         _sandboxTimer.value = when {
-            s.isFinished || s.isRinging ->
-                sandboxFixture(seconds = (s.initialTime / 1000L).coerceAtLeast(1L))
-                    .copy(isStarted = true)
+            s.isFinished || s.isRinging -> s.copy(
+                remainingTime = s.initialTime,
+                isRunning = false,
+                isPaused = s.initialTime > 0L,
+                isStarted = s.initialTime > 0L,
+                isFinished = false,
+                isRinging = false,
+                hasRun = false,
+            )
             else -> {
                 val starting = !s.isRunning
                 s.copy(
@@ -879,11 +902,22 @@ class TimerViewModel @Inject constructor(
     }
 
     fun reset() {
-        // DEV-SPOOF: sandboxed → the fixture re-arms; no service action at all.
+        // DEV-SPOOF: sandboxed → re-arms onto the currently staged duration
+        // (3s demo default when nothing staged); no service action at all.
         if (timersSandboxActive) {
             sandboxTickJob?.cancel()
             sandboxTickJob = null
-            _sandboxTimer.value = sandboxFixture()
+            val initial = (_sandboxTimer.value?.initialTime ?: 3000L).coerceAtLeast(0L)
+            _sandboxTimer.value =
+                if (initial > 0L) {
+                    sandboxFixture(seconds = initial / 1000L).copy(
+                        remainingTime = initial,
+                        isStarted = true,
+                        isPaused = true, // staged but not ticking, like a real reset
+                    )
+                } else {
+                    sandboxFixture()
+                }
             startSandboxTicker()
             return
         }
@@ -911,9 +945,19 @@ class TimerViewModel @Inject constructor(
     }
 
     fun resetToInitial() {
-        // DEV-SPOOF: sandboxed → the fixture re-arms.
+        // DEV-SPOOF: sandboxed → re-arms the staged duration exactly (no /1000 loss).
         if (timersSandboxActive) {
-            _sandboxTimer.value = sandboxFixture(seconds = (_sandboxTimer.value?.initialTime ?: 3000L) / 1000L)
+            val fixture = _sandboxTimer.value ?: sandboxFixture()
+            if (fixture.initialTime <= 0L) { reset(); return } // mirrors the real fallback
+            _sandboxTimer.value = fixture.copy(
+                remainingTime = fixture.initialTime,
+                isRunning = false,
+                isPaused = fixture.initialTime > 0L,
+                isStarted = fixture.initialTime > 0L,
+                isFinished = false,
+                isRinging = false,
+                hasRun = false,
+            )
             return
         }
         val initial = _uiState.value.initialTime

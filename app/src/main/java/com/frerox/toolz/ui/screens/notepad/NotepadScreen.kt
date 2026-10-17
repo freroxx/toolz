@@ -83,6 +83,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import com.frerox.toolz.R
 import com.frerox.toolz.data.notepad.Note
@@ -111,6 +112,11 @@ private fun isDark(color: Color): Boolean {
 
 private fun noteContentColor(noteColor: Color) =
     if (isDark(noteColor)) Color.White else Color.Black
+
+/** Opaque surface color for a note: 0 = legacy "no color" (transparent black)
+ *  and any legacy ARGB with alpha < 255 must never render as transparent. */
+private fun noteSurfaceColor(color: Int, fallback: Color): Color =
+    if (color == 0) fallback else Color(color).copy(alpha = 1f)
 
 // ─────────────────────────────────────────────────────────────
 //  Constants & enums
@@ -156,12 +162,13 @@ private fun NoteCardOptionsSheet(
     onDuplicate: () -> Unit,
 ) {
     val haptic    = rememberToolzHapticFeedback()
-    val noteColor = Color(note.color)
+    val noteColor = noteSurfaceColor(note.color, MaterialTheme.colorScheme.surfaceContainerHighest)
     val onColor   = noteContentColor(noteColor)
     val sizeOptions = listOf(
-        NOTE_CARD_SIZE_SMALL  to stringResource(R.string.st_NotepadScreen_s2)  to stringResource(R.string.st_NotepadScreen_cqs3),
-        NOTE_CARD_SIZE_MEDIUM to stringResource(R.string.st_NotepadScreen_m4) to stringResource(R.string.st_NotepadScreen_blfen5),
-        NOTE_CARD_SIZE_LARGE  to stringResource(R.string.st_NotepadScreen_l6)  to stringResource(R.string.st_NotepadScreen_ewfrm7),
+        Triple(NOTE_CARD_SIZE_AUTO,   stringResource(R.string.st_NotepadScreen_auto51),   stringResource(R.string.st_NotepadScreen_ades52)),
+        Triple(NOTE_CARD_SIZE_SMALL,  stringResource(R.string.st_NotepadScreen_s2),       stringResource(R.string.st_NotepadScreen_cqs3)),
+        Triple(NOTE_CARD_SIZE_MEDIUM, stringResource(R.string.st_NotepadScreen_m4),       stringResource(R.string.st_NotepadScreen_blfen5)),
+        Triple(NOTE_CARD_SIZE_LARGE,  stringResource(R.string.st_NotepadScreen_l6),       stringResource(R.string.st_NotepadScreen_ewfrm7)),
     )
 
     ModalBottomSheet(
@@ -192,10 +199,10 @@ private fun NoteCardOptionsSheet(
                 style         = MaterialTheme.typography.labelSmall,
                 fontWeight    = FontWeight.Black,
                 letterSpacing = 2.sp,
-                color         = onColor.copy(0.55f),
+                color         = onColor.copy(0.7f),
             )
             Text(
-                note.title.ifBlank { stringResource(R.string.st_NotepadScreen_u28) + " note" },
+                note.title.ifBlank { stringResource(R.string.st_NotepadScreen_u28) },
                 style      = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Black,
                 color      = onColor,
@@ -204,9 +211,8 @@ private fun NoteCardOptionsSheet(
             Spacer(Modifier.height(4.dp))
 
             // Size options
-            sizeOptions.forEach { (pair, desc) ->
-                val (value, label) = pair
-                val selected = note.cardSize == value
+            sizeOptions.forEach { (value, label, desc) ->
+                val selected = note.cardSize.uppercase() == value
                 val scale by animateFloatAsState(
                     targetValue   = if (selected) 1f else 0.98f,
                     animationSpec = spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMediumLow),
@@ -221,8 +227,8 @@ private fun NoteCardOptionsSheet(
                             onSizeSelected(value)
                         },
                     shape  = LargeExpressiveShape,
-                    color  = onColor.copy(if (selected) 0.16f else 0.07f),
-                    border = BorderStroke(1.5.dp, onColor.copy(if (selected) 0.3f else 0.1f)),
+                    color  = onColor.copy(if (selected) 0.22f else 0.12f),
+                    border = BorderStroke(1.5.dp, onColor.copy(if (selected) 0.4f else 0.18f)),
                 ) {
                     Row(
                         Modifier.padding(horizontal = 18.dp, vertical = 15.dp),
@@ -239,7 +245,7 @@ private fun NoteCardOptionsSheet(
                             Text(
                                 desc,
                                 style  = MaterialTheme.typography.bodySmall,
-                                color  = onColor.copy(0.55f),
+                                color  = onColor.copy(0.7f),
                             )
                         }
                         AnimatedVisibility(
@@ -275,8 +281,8 @@ private fun NoteCardOptionsSheet(
                             .weight(1f)
                             .bouncyClick { haptic.click(); action() },
                         shape  = MediumExpressiveShape,
-                        color  = onColor.copy(0.09f),
-                        border = BorderStroke(1.dp, onColor.copy(0.1f)),
+                        color  = onColor.copy(0.14f),
+                        border = BorderStroke(1.dp, onColor.copy(0.18f)),
                     ) {
                         Row(
                             Modifier.padding(horizontal = 14.dp, vertical = 13.dp),
@@ -326,6 +332,15 @@ private fun rememberImageLayoutHints(notes: List<Note>): Map<String, ImageLayout
         }
     }
     return hints
+}
+
+/** Stable internal category keys ("All", "Pinned", …) render localized. */
+private fun categoryLabelRes(category: String): Int = when (category) {
+    "Pinned" -> R.string.st_NotepadScreen_catpin55
+    "Audio"  -> R.string.st_NotepadScreen_cataud56
+    "PDFs"   -> R.string.st_NotepadScreen_catpdf57
+    "Images" -> R.string.st_NotepadScreen_catimg58
+    else     -> R.string.st_NotepadScreen_catall54
 }
 
 private fun resolveNoteCardStyle(note: Note, imageHint: ImageLayoutHint?): NoteCardStyle {
@@ -684,7 +699,7 @@ fun NotepadScreen(
                         )
                 ) {
                     val appbarTitle = when {
-                        isSelectionMode -> "${selectedNoteIds.size} " + stringResource(R.string.st_NotepadScreen_sel8)
+                        isSelectionMode -> pluralStringResource(R.plurals.st_NotepadScreen_selcnt60, selectedNoteIds.size, selectedNoteIds.size)
                         viewedNoteId != null -> viewedNote?.title ?: stringResource(R.string.st_NotepadScreen_d29)
                         else -> stringResource(R.string.st_NotepadScreen_np12)
                     }
@@ -732,7 +747,7 @@ fun NotepadScreen(
                                 }
                                 Icon(
                                     navIcon,
-                                    contentDescription = "Back"
+                                    contentDescription = stringResource(R.string.st_NotepadScreen_cdb53)
                                 )
                             }
                         },
@@ -890,7 +905,7 @@ fun NotepadScreen(
                                                 horizontalArrangement = Arrangement.spacedBy(5.dp),
                                             ) {
                                                 Text(
-                                                    category,
+                                                    stringResource(categoryLabelRes(category)),
                                                     style = MaterialTheme.typography.labelMedium,
                                                     fontWeight = if (selected) FontWeight.Black else FontWeight.Medium,
                                                 )
@@ -1177,7 +1192,7 @@ fun NotepadScreen(
                                                 ) {
                                                     Box(contentAlignment = Alignment.Center) {
                                                         Icon(
-                                                            Icons.Rounded.PushPin, contentDescription = "Pinned",
+                                                            Icons.Rounded.PushPin, contentDescription = stringResource(R.string.st_NotepadScreen_catpin55),
                                                             Modifier.size(15.dp).graphicsLayer { rotationZ = -20f },
                                                             tint = onColor.copy(0.8f),
                                                         )
@@ -1195,7 +1210,7 @@ fun NotepadScreen(
                                         note.attachedImageUri?.let { uri ->
                                             AsyncImage(
                                                 model = uri,
-                                                contentDescription = "Note image",
+                                                contentDescription = stringResource(R.string.st_NotepadScreen_cdnimg65),
                                                 modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp).clip(RoundedCornerShape(16.dp)),
                                                 contentScale = ContentScale.FillWidth
                                             )
@@ -1406,7 +1421,7 @@ private fun NotesEmptyState(isSearching: Boolean, selectedCategory: String) {
             Text(
                 text = when {
                     isSearching        -> stringResource(R.string.st_NotepadScreen_nmf22)
-                    selectedCategory != "All" -> "No $selectedCategory yet"
+                    selectedCategory != "All" -> stringResource(R.string.st_NotepadScreen_nonyet59, stringResource(categoryLabelRes(selectedCategory)))
                     else               -> stringResource(R.string.st_NotepadScreen_yca24)
                 },
                 style      = MaterialTheme.typography.titleLarge,
@@ -1571,7 +1586,7 @@ private fun NoteCard(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                             Text(
-                                note.title.ifEmpty { "Untitled" },
+                                note.title.ifEmpty { stringResource(R.string.st_NotepadScreen_u28) },
                                 style      = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.ExtraBold,
                                 color      = onColor,
@@ -1625,7 +1640,7 @@ private fun NoteCard(
                         Spacer(Modifier.height(14.dp))
                         AsyncImage(
                             model        = uri,
-                            contentDescription = "Note image",
+                            contentDescription = stringResource(R.string.st_NotepadScreen_cdnimg65),
                             modifier     = Modifier
                                 .fillMaxWidth()
                                 .height(cardStyle.imageHeight)
@@ -1656,7 +1671,7 @@ private fun NoteCard(
                         note.attachedAudioUri?.let { uri ->
                             val track = allTracks.find { it.uri == uri }
                             MusicPill(
-                                title          = note.attachedAudioName ?: "Attached Audio",
+                                title          = note.attachedAudioName ?: stringResource(R.string.st_NotepadScreen_attaud69),
                                 isPlaying      = isPlaying,
                                 isCurrentTrack = isCurrentTrack,
                                 thumbnail      = track?.thumbnailUri ?: if (isPlaying) currentTrackThumbnail else null,
@@ -1714,7 +1729,7 @@ private fun NoteCard(
                                     )
                                     if (wordCount > 0) {
                                         Text(
-                                            if (wordCount == 1) "1 word" else "$wordCount words",
+                                            pluralStringResource(R.plurals.st_NotepadScreen_words61, wordCount, wordCount),
                                             style         = MaterialTheme.typography.labelSmall,
                                             color         = onColor.copy(0.35f),
                                             fontWeight    = FontWeight.Bold,
@@ -1728,11 +1743,11 @@ private fun NoteCard(
                                     modifier = Modifier.padding(horizontal = 6.dp)
                                 ) {
                                     if (note.attachedAudioUri != null)
-                                        AttachmentIndicator(Icons.Rounded.MusicNote, onColor, "Has audio")
+                                        AttachmentIndicator(Icons.Rounded.MusicNote, onColor, stringResource(R.string.st_NotepadScreen_cdhaud66))
                                     if (note.attachedPdfUri != null)
-                                        AttachmentIndicator(Icons.Rounded.Description, onColor, "Has PDF")
+                                        AttachmentIndicator(Icons.Rounded.Description, onColor, stringResource(R.string.st_NotepadScreen_cdhpdf67))
                                     if (note.attachedImageUri != null)
-                                        AttachmentIndicator(Icons.Rounded.Image, onColor, "Has image")
+                                        AttachmentIndicator(Icons.Rounded.Image, onColor, stringResource(R.string.st_NotepadScreen_cdhimg68))
                                 }
                             }
                         }
@@ -1749,7 +1764,7 @@ private fun NoteCard(
                                 )
                             ) {
                                 Icon(
-                                    Icons.Rounded.PushPin, contentDescription = if (note.isPinned) "Unpin note" else "Pin note",
+                                    Icons.Rounded.PushPin, contentDescription = if (note.isPinned) stringResource(R.string.st_NotepadScreen_cdunpin63) else stringResource(R.string.st_NotepadScreen_cdpin62),
                                     Modifier.size(17.dp).graphicsLayer { rotationZ = if (note.isPinned) -20f else 0f }
                                 )
                             }
@@ -1761,7 +1776,7 @@ private fun NoteCard(
                                     contentColor = onColor.copy(0.45f)
                                 )
                             ) {
-                                Icon(Icons.Rounded.Delete, contentDescription = "Delete note", Modifier.size(17.dp))
+                                Icon(Icons.Rounded.Delete, contentDescription = stringResource(R.string.st_NotepadScreen_cddel64), Modifier.size(17.dp))
                             }
                         }
                     }
@@ -1806,480 +1821,6 @@ private fun NoteCard(
     }
 }
 
-// ─────────────────────────────────────────────────────────────
-//  Note viewer bottom sheet
-// ─────────────────────────────────────────────────────────────
-
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
-@Composable
-fun NoteViewerSheet(
-    note                  : Note,
-    viewModel             : NotepadViewModel,
-    isPlaying             : Boolean,
-    allTracks             : List<com.frerox.toolz.data.music.MusicTrack> = emptyList(),
-    isCurrentTrack        : Boolean,
-    currentTrackThumbnail : String?,
-    musicViewModel        : MusicPlayerViewModel,
-    onDismiss             : () -> Unit,
-    onEdit                : () -> Unit,
-    onPlayAudio           : (String) -> Unit,
-    onViewPdf             : (String, Int) -> Unit,
-) {
-    val haptic          = rememberToolzHapticFeedback()
-    val context         = LocalContext.current
-    val performanceMode = LocalPerformanceMode.current
-    val scope           = rememberCoroutineScope()
-    val noteColor       = Color(note.color)
-    val onColor         = noteContentColor(noteColor)
-    val aiSummary       by viewModel.aiSummary.collectAsStateWithLifecycle()
-    val aiSummaryNoteId by viewModel.aiSummaryNoteId.collectAsStateWithLifecycle()
-    val isSummarizing   by viewModel.isAiSummarizing.collectAsStateWithLifecycle()
-    val offlineMode     by viewModel.offlineModeEnabled.collectAsStateWithLifecycle(false)
-    val musicState      by musicViewModel.uiState.collectAsStateWithLifecycle()
-    val visibleSummary = if (aiSummaryNoteId == null || aiSummaryNoteId == note.id) aiSummary else null
-    val inlineProgress  = if (isCurrentTrack && musicState.duration > 0L) {
-        (musicState.playbackPosition.toFloat() / musicState.duration.toFloat()).coerceIn(0f, 1f)
-    } else 0f
-    var contentReady    by remember(note.id) { mutableStateOf(false) }
-
-    val contentEntrance by animateFloatAsState(
-        targetValue   = if (contentReady) 1f else 0f,
-        animationSpec = tween(if (performanceMode) 0 else 360, easing = FastOutSlowInEasing),
-        label         = "viewerEntrance",
-    )
-
-    val viewedNoteSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-
-    LaunchedEffect(note.id) { contentReady = true }
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState       = viewedNoteSheetState,
-        containerColor   = noteColor,
-        contentColor     = onColor,
-        shape            = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
-        dragHandle = {
-            Box(
-                Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Box(
-                    Modifier
-                        .size(40.dp, 4.dp)
-                        .background(onColor.copy(alpha = 0.28f), CircleShape)
-                )
-            }
-        },
-        modifier = Modifier.fillMaxHeight(0.95f),
-    ) {
-        Column(Modifier.fillMaxSize()) {
-            // Scrollable content
-            Box(
-                Modifier
-                    .weight(1f)
-                    .fadingEdges(top = 4.dp, bottom = 4.dp)
-            ) {
-                Column(
-                    Modifier
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 24.dp)
-                        .padding(top = 16.dp, bottom = 120.dp)
-                        .graphicsLayer {
-                            alpha        = contentEntrance
-                            translationY = (1f - contentEntrance) * 24.dp.toPx()
-                        }
-                ) {
-                    // ── Header: date + timestamp ─────────────────────────
-                    Text(
-                        SimpleDateFormat("MMMM d, yyyy · HH:mm", Locale.getDefault())
-                            .format(Date(note.timestamp)).uppercase(java.util.Locale.ROOT),
-                        style         = MaterialTheme.typography.labelSmall,
-                        color         = onColor.copy(0.38f),
-                        fontWeight    = FontWeight.Black,
-                        letterSpacing = 0.8.sp,
-                        modifier      = Modifier.padding(top = 8.dp, bottom = 16.dp),
-                    )
-
-                    // ── Title ─────────────────────────────────────────
-                    Text(
-                        note.title.ifEmpty { "Untitled" },
-                        style      = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Black,
-                        color      = onColor,
-                        modifier   = Modifier.padding(bottom = 18.dp),
-                    )
-
-                    // ── Stats bar ─────────────────────────────────────
-                    val wordCount  = remember(note.content) {
-                        note.content.split(Regex("""\s+""")).count { it.isNotBlank() }
-                    }
-                    val charCount  = note.content.length
-                    val readMin    = remember(wordCount) { maxOf(1, wordCount / 200) }
-
-                    Surface(
-                        color    = onColor.copy(0.07f),
-                        shape    = LargeExpressiveShape,
-                        border   = BorderStroke(1.dp, onColor.copy(0.05f)),
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp),
-                    ) {
-                        Row(
-                            Modifier
-                                .padding(horizontal = 16.dp, vertical = 10.dp)
-                                .horizontalFadingEdges(left = 4.dp, right = 4.dp)
-                                .horizontalScroll(rememberScrollState()),
-                            verticalAlignment     = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(18.dp),
-                        ) {
-                            NoteStatChip("$wordCount words", Icons.Rounded.TextFields, onColor)
-                            NoteStatChip("$charCount chars", Icons.Rounded.Tag, onColor)
-                            NoteStatChip("~$readMin min",    Icons.Rounded.Schedule, onColor)
-                            Spacer(Modifier.weight(1f))
-                            // Copy action
-                            ToolzExpressiveIconButton(
-                                onClick = {
-                                    haptic.click()
-                                    val body = if (note.title.isBlank()) note.content
-                                    else "${note.title}\n\n${note.content}"
-                                    try {
-                                        val cb = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
-                                                as android.content.ClipboardManager
-                                        cb.setPrimaryClip(android.content.ClipData.newPlainText("Note", body))
-                                        android.widget.Toast.makeText(context, context.getString(R.string.notepad_copied), android.widget.Toast.LENGTH_SHORT).show()
-                                    } catch (_: Exception) { }
-                                },
-                                modifier = Modifier.size(48.dp),
-                                shapes = IconButtonDefaults.shapes(),
-                                colors = IconButtonDefaults.filledIconButtonColors(
-                                    containerColor = onColor.copy(alpha = 0.1f),
-                                    contentColor = onColor
-                                )
-                            ) {
-                                Icon(Icons.Rounded.ContentCopy, contentDescription = "Copy note", Modifier.size(20.dp))
-                            }
-                            // Share action
-                            ToolzExpressiveIconButton(
-                                onClick = {
-                                    haptic.click()
-                                    val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                                        type = "text/plain"
-                                        putExtra(android.content.Intent.EXTRA_SUBJECT, note.title.ifEmpty { "Note" })
-                                        putExtra(android.content.Intent.EXTRA_TEXT, "${note.title.ifEmpty { "Note" }}\n\n${note.content}")
-                                    }
-                                    try {
-                                        context.startActivity(android.content.Intent.createChooser(intent, "Share note"))
-                                    } catch (_: Exception) { }
-                                },
-                                modifier = Modifier.size(48.dp),
-                                colors = IconButtonDefaults.filledIconButtonColors(
-                                    containerColor = onColor.copy(0.1f),
-                                    contentColor = onColor
-                                )
-                            ) {
-                                Icon(Icons.Rounded.Share, contentDescription = "Share note", Modifier.size(20.dp))
-                            }
-                        }
-                    }
-
-                    // ── Attachments row ───────────────────────────────────
-                    if (note.attachedAudioUri != null || note.attachedPdfUri != null || note.attachedImageUri != null) {
-                        Row(
-                            Modifier
-                                .padding(bottom = 24.dp)
-                                .horizontalFadingEdges(left = 12.dp, right = 12.dp)
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            note.attachedAudioUri?.let { uri ->
-                                val track = allTracks.find { it.uri == uri }
-                                MusicPill(
-                                    title          = note.attachedAudioName ?: "Audio",
-                                    isPlaying      = isPlaying,
-                                    isCurrentTrack = isCurrentTrack,
-                                    thumbnail      = track?.thumbnailUri ?: currentTrackThumbnail?.takeIf { isCurrentTrack },
-                                    artist         = track?.artist,
-                                    containerColor = onColor.copy(0.12f),
-                                    contentColor   = onColor,
-                                    onClick        = { onPlayAudio(uri) },
-                                    compact        = false,
-                                    progress       = inlineProgress,
-                                    positionMs     = musicState.playbackPosition,
-                                    durationMs     = musicState.duration,
-                                    onSeek         = { frac ->
-                                        musicViewModel.seekTo((frac * musicState.duration).toLong())
-                                    },
-                                    musicViewModel = musicViewModel,
-                                    modifier       = Modifier.widthIn(max = 280.dp),
-                                )
-                            }
-                            note.attachedPdfUri?.let { uri ->
-                                Surface(
-                                    onClick = { haptic.click(); onViewPdf(uri, 0) },
-                                    color   = onColor.copy(0.12f),
-                                    shape   = RoundedCornerShape(22.dp),
-                                    border  = BorderStroke(1.5.dp, onColor.copy(0.15f)),
-                                ) {
-                                    Row(
-                                        Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    ) {
-                                        Icon(Icons.Rounded.Description, null, Modifier.size(24.dp), tint = onColor)
-                                        @Suppress("DEPRECATION")
-                                        Text("PDF VIEW", style = MaterialTheme.typography.labelLarge, color = onColor, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // ── Image ──────────────────────────────────────────────
-                    note.attachedImageUri?.let { uri ->
-                        AsyncImage(
-                            model            = uri,
-                            contentDescription = null,
-                            modifier         = Modifier
-                                .fillMaxWidth()
-                                .padding(bottom = 20.dp)
-                                .clip(LargeExpressiveShape),
-                            contentScale     = ContentScale.FillWidth,
-                        )
-                    }
-                    note.attachedPdfUri?.let { uri ->
-                        PdfPreview(
-                            uri      = uri,
-                            onClick  = { onViewPdf(uri, 0) },
-                            modifier = Modifier.height(160.dp).padding(bottom = 20.dp),
-                        )
-                    }
-                    NotePdfAttachmentStrip(viewModel = viewModel, note = note, onOpenPdf = onViewPdf, modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp),
-                        // Legacy thumbnail card above already shows this URI.
-                        excludeUris = setOfNotNull(note.attachedPdfUri))
-
-                    // ── Note content (markdown) ────────────────────────────
-                    val segments = remember(note.content) { parseMarkdownToSegments(note.content) }
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        segments.forEach { seg ->
-                            MarkdownSegment(
-                                seg          = seg,
-                                baseFontSize = note.fontSize.sp,
-                                textColor    = onColor.copy(0.88f),
-                                onLinkClick  = {},
-                            )
-                        }
-                    }
-                }
-
-                // Bottom gradient fade
-                Box(
-                    Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .height(80.dp)
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(Color.Transparent, noteColor.copy(alpha = 0.95f))
-                            )
-                        )
-                )
-
-                // Floating toolbar actions
-                ViewerFloatingActions(
-                    noteColor = noteColor,
-                    onColor = onColor,
-                    onEdit = onEdit,
-                    onDismiss = onDismiss,
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 28.dp)
-                )
-            }
-        }
-    }
-
-    // Summary sheet is driven by VM state (keyed per-note), not a dead local flag.
-    val summaryVisible = isSummarizing || visibleSummary != null
-    if (summaryVisible) {
-        AiSummarySheet(
-            summary     = visibleSummary,
-            isLoading   = isSummarizing,
-            accentColor = onColor,
-            bgColor     = noteColor,
-            onDismiss   = { viewModel.clearAiSummary() },
-            onRegenerate = {
-                viewModel.summarizeNote(note, forceRegenerate = true)
-            }
-        )
-    }
-}
-
-@Composable
-private fun ViewerFloatingActions(
-    noteColor: Color,
-    onColor: Color,
-    onEdit: () -> Unit,
-    onDismiss: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val haptic = rememberToolzHapticFeedback()
-    
-    Surface(
-        modifier = modifier.shadow(12.dp, CircleShape),
-        color = onColor,
-        shape = CircleShape
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            ToolzExpressiveIconButton(
-                onClick = { haptic.click(); onEdit() },
-                colors = IconButtonDefaults.filledIconButtonColors(
-                    containerColor = Color.Transparent,
-                    contentColor = noteColor
-                ),
-                modifier = Modifier.size(48.dp)
-            ) {
-                Icon(Icons.Rounded.Edit, stringResource(R.string.st_MusicPlayerScreen_rn_item51), modifier = Modifier.size(24.dp))
-            }
-            
-            VerticalDivider(modifier = Modifier.height(24.dp), color = noteColor.copy(0.2f))
-            
-            ToolzExpressiveIconButton(
-                onClick = { haptic.click(); onDismiss() },
-                colors = IconButtonDefaults.filledIconButtonColors(
-                    containerColor = Color.Transparent,
-                    contentColor = noteColor
-                ),
-                modifier = Modifier.size(48.dp)
-            ) {
-                Icon(Icons.Rounded.Close, stringResource(R.string.st_CatalogScreen_c3), modifier = Modifier.size(24.dp))
-            }
-        }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────
-//  AI summary bottom sheet
-// ─────────────────────────────────────────────────────────────
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun AiSummarySheet(
-    summary    : String?,
-    isLoading  : Boolean,
-    accentColor: Color,
-    bgColor    : Color,
-    onDismiss  : () -> Unit,
-    onRegenerate: () -> Unit,
-) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor   = bgColor.copy(0.97f),
-        shape            = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        dragHandle = {
-            Box(
-                Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 2.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Box(Modifier.size(32.dp, 3.dp).background(accentColor.copy(0.22f), CircleShape))
-            }
-        },
-    ) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp)
-                .padding(bottom = 48.dp)
-                .navigationBarsPadding(),
-        ) {
-            Row(
-                verticalAlignment     = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier              = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-            ) {
-                Row(
-                    verticalAlignment     = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    val inf    = rememberInfiniteTransition(label = "aiSpin")
-                    val spinRaw by inf.animateFloat(
-                        0f, 360f,
-                        infiniteRepeatable(tween(2600, easing = LinearEasing)),
-                        label = "spin",
-                    )
-                    val spin = if (isLoading) spinRaw else 0f
-                    Icon(
-                        Icons.Rounded.AutoAwesome, null,
-                        Modifier.size(20.dp).graphicsLayer { rotationZ = spin },
-                        tint = accentColor,
-                    )
-                    Text(
-                        stringResource(R.string.st_NowPlayingAiScreen_an9),
-                        style         = MaterialTheme.typography.labelMedium,
-                        fontWeight    = FontWeight.Black,
-                        color         = accentColor,
-                        letterSpacing = 1.8.sp,
-                    )
-                }
-
-                if (!isLoading && summary != null) {
-                    ToolzExpressiveIconButton(
-                        onClick = onRegenerate,
-                        colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = accentColor.copy(0.1f),
-                            contentColor = accentColor
-                        ),
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(16.dp))
-                    }
-                }
-            }
-
-            if (isLoading) {
-                Row(
-                    Modifier.padding(vertical = 24.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment     = Alignment.CenterVertically,
-                ) {
-                    val loadInf = rememberInfiniteTransition(label = "load")
-                    val d1 by loadInf.animateFloat(0.2f, 1f, infiniteRepeatable(tween(460),              RepeatMode.Reverse), "d1")
-                    val d2 by loadInf.animateFloat(0.2f, 1f, infiniteRepeatable(tween(460, 150),         RepeatMode.Reverse), "d2")
-                    val d3 by loadInf.animateFloat(0.2f, 1f, infiniteRepeatable(tween(460, 300),         RepeatMode.Reverse), "d3")
-                    listOf(d1, d2, d3).forEach { a ->
-                        Box(Modifier.size(8.dp).alpha(a).background(accentColor, CircleShape))
-                    }
-                    Spacer(Modifier.width(8.dp))
-                    Text(stringResource(R.string.st_NowPlayingAiScreen_an9), style = MaterialTheme.typography.bodyMedium, color = accentColor.copy(0.5f))
-                }
-            } else if (summary != null) {
-                Surface(
-                    color    = accentColor.copy(0.08f),
-                    shape    = LargeExpressiveShape,
-                    border   = BorderStroke(1.dp, accentColor.copy(0.1f)),
-                ) {
-                    TypewriterText(
-                        text       = summary,
-                        modifier   = Modifier.padding(16.dp),
-                        style      = MaterialTheme.typography.bodyMedium,
-                        color      = accentColor.copy(0.88f),
-                        lineHeight = 22.sp,
-                    )
-                }
-                Spacer(Modifier.height(14.dp))
-                Text(
-                    stringResource(R.string.st_NowPlayingAiScreen_gbg10),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = accentColor.copy(0.28f),
-                )
-            }
-        }
-    }
-}
-
 @Composable
 private fun VerticalColorPickerBanner(
     onColor: Color,
@@ -2298,27 +1839,27 @@ private fun VerticalColorPickerBanner(
     ).map { it.toInt() }
 
     val colorNames = mapOf(
-        0 to "Default",
-        0xFFFFF9C4.toInt() to "Soft Yellow",
-        0xFFFFCCBC.toInt() to "Pale Orange",
-        0xFFC8E6C9.toInt() to "Mint Green",
-        0xFFB3E5FC.toInt() to "Sky Blue",
-        0xFFE1BEE7.toInt() to "Lavender",
-        0xFFF5F5F5.toInt() to "Pearl White",
-        0xFFD7CCC8.toInt() to "Warm Taupe",
-        0xFFCFD8DC.toInt() to "Cool Gray",
-        0xFFFFE0B2.toInt() to "Apricot",
-        0xFF263238.toInt() to "Deep Slate",
-        0xFFFF5252.toInt() to "Rose Red",
-        0xFFFF4081.toInt() to "Pink Punch",
-        0xFF7C4DFF.toInt() to "Deep Purple",
-        0xFF536DFE.toInt() to "Indigo",
-        0xFF448AFF.toInt() to "Electric Blue",
-        0xFF03A9F4.toInt() to "Light Blue",
-        0xFF00BCD4.toInt() to "Cyan",
-        0xFF009688.toInt() to "Teal",
-        0xFF4CAF50.toInt() to "Green",
-        0xFF8BC34A.toInt() to "Lime"
+        0 to R.string.st_NotepadScreen_cpd104,
+        0xFFFFF9C4.toInt() to R.string.st_NotepadScreen_cpsy105,
+        0xFFFFCCBC.toInt() to R.string.st_NotepadScreen_cpo106,
+        0xFFC8E6C9.toInt() to R.string.st_NotepadScreen_cmg107,
+        0xFFB3E5FC.toInt() to R.string.st_NotepadScreen_csb108,
+        0xFFE1BEE7.toInt() to R.string.st_NotepadScreen_clav109,
+        0xFFF5F5F5.toInt() to R.string.st_NotepadScreen_cpw110,
+        0xFFD7CCC8.toInt() to R.string.st_NotepadScreen_cwt111,
+        0xFFCFD8DC.toInt() to R.string.st_NotepadScreen_ccg112,
+        0xFFFFE0B2.toInt() to R.string.st_NotepadScreen_cap113,
+        0xFF263238.toInt() to R.string.st_NotepadScreen_cds114,
+        0xFFFF5252.toInt() to R.string.st_NotepadScreen_crr115,
+        0xFFFF4081.toInt() to R.string.st_NotepadScreen_cpa116,
+        0xFF7C4DFF.toInt() to R.string.st_NotepadScreen_cdp117,
+        0xFF536DFE.toInt() to R.string.st_NotepadScreen_cin118,
+        0xFF448AFF.toInt() to R.string.st_NotepadScreen_ceb119,
+        0xFF03A9F4.toInt() to R.string.st_NotepadScreen_clb120,
+        0xFF00BCD4.toInt() to R.string.st_NotepadScreen_ccy121,
+        0xFF009688.toInt() to R.string.st_NotepadScreen_ctl122,
+        0xFF4CAF50.toInt() to R.string.st_NotepadScreen_cgn123,
+        0xFF8BC34A.toInt() to R.string.st_NotepadScreen_clm124,
     )
 
     Surface(
@@ -2348,7 +1889,7 @@ private fun VerticalColorPickerBanner(
                         tint = onColor
                     )
                     Text(
-                        stringResource(R.string.st_NowPlayingAiScreen_ec11),
+                        stringResource(R.string.st_NotepadScreen_colhdr103),
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Black,
                         color = onColor,
@@ -2431,7 +1972,7 @@ private fun VerticalColorPickerBanner(
                                 }
                             }
                             Text(
-                                text = colorNames[colorInt] ?: "Custom Color",
+                                text = colorNames[colorInt]?.let { stringResource(it) } ?: stringResource(R.string.st_NotepadScreen_ccc125),
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = if (isSelected) FontWeight.Black else FontWeight.Medium,
                                 color = onColor.copy(if (isSelected) 1f else 0.7f),
@@ -2548,11 +2089,11 @@ private fun AttachmentMenuSheet(
                 letterSpacing = 2.sp,
                 modifier      = Modifier.padding(bottom = 16.dp, start = 4.dp),
             )
-            AttachmentTypeItem(stringResource(R.string.st_NotepadScreen_ma38), "Attach a track or voice memo", Icons.Rounded.MusicNote,     Color(0xFFFF4081)) { onPickAudio() }
+            AttachmentTypeItem(stringResource(R.string.st_NotepadScreen_ma38), stringResource(R.string.st_NotepadScreen_dmaud138), Icons.Rounded.MusicNote,     Color(0xFFFF4081)) { onPickAudio() }
             Spacer(Modifier.height(10.dp))
-            AttachmentTypeItem(stringResource(R.string.st_NotepadScreen_pd39),  "Attach a document reference", Icons.Rounded.Description, Color(0xFF2196F3)) { onPickPdf() }
+            AttachmentTypeItem(stringResource(R.string.st_NotepadScreen_pd39),  stringResource(R.string.st_NotepadScreen_dmpdf139), Icons.Rounded.Description, Color(0xFF2196F3)) { onPickPdf() }
             Spacer(Modifier.height(10.dp))
-            AttachmentTypeItem(stringResource(R.string.st_NotepadScreen_i40),         "Attach a photo or graphic", Icons.Rounded.Image, Color(0xFF4CAF50)) { onPickImage() }
+            AttachmentTypeItem(stringResource(R.string.st_NotepadScreen_i40),         stringResource(R.string.st_NotepadScreen_dmimg140), Icons.Rounded.Image, Color(0xFF4CAF50)) { onPickImage() }
         }
     }
 }
@@ -2565,12 +2106,13 @@ private fun AttachmentMenuSheet(
 @Composable
 fun AttachmentPickerDialog(
     title         : String,
+    isAudio       : Boolean,
     items         : List<Pair<String, String>>,
     onDismiss     : () -> Unit,
     onSelect      : (String, String) -> Unit,
     viewModel     : NotepadViewModel,
     musicViewModel: MusicPlayerViewModel = hiltViewModel(),
-    emptyText     : String = "Nothing here yet",
+    emptyText     : String,
     browseLabel   : String? = null,
     onBrowse      : (() -> Unit)? = null,
 ) {
@@ -2604,7 +2146,7 @@ fun AttachmentPickerDialog(
                     
                     IconButton(
                         onClick = {
-                            if (title.contains("AUDIO", ignoreCase = true)) {
+                            if (isAudio) {
                                 viewModel.refreshTracks()
                             } else {
                                 viewModel.refreshPdfs()
@@ -2632,7 +2174,7 @@ fun AttachmentPickerDialog(
                         }
                     }
                     lazyItems(items) { (name, uri) ->
-                        val isMusic  = title.contains("AUDIO", ignoreCase = true)
+                        val isMusic  = isAudio
                         val track    = if (isMusic) musicState.tracks.find { it.uri == uri } else null
                         val isPlaying = isMusic && musicState.isPlaying && isCurrentNoteTrack(musicState.currentTrack, uri)
 
@@ -2704,7 +2246,7 @@ fun AttachmentPickerDialog(
                                         )
                                     } else if (isMusic) {
                                         Text(
-                                            "Generic Audio",
+                                            stringResource(R.string.st_NotepadScreen_genaud100),
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.55f),
                                         )
@@ -2742,7 +2284,7 @@ fun AttachmentPickerDialog(
                         onClick = { haptic.click(); onDismiss() },
                     ) {
                         @Suppress("DEPRECATION")
-                        Text("CANCEL", fontWeight = FontWeight.Black)
+                        Text(stringResource(R.string.st_NotepadScreen_c31), fontWeight = FontWeight.Black)
                     }
                 }
             }
@@ -2787,11 +2329,17 @@ fun MusicPill(
     val shownFraction = (scrubFraction ?: progress).coerceIn(0f, 1f)
     val shownPositionMs = if (scrubFraction != null) (scrubFraction!! * durationMs).toLong() else positionMs
 
+    val playingLbl      = stringResource(R.string.st_NotepadScreen_mpplay126)
+    val playingPauseLbl = stringResource(R.string.st_NotepadScreen_mptpps127)
+    val pausedLbl       = stringResource(R.string.st_NotepadScreen_mppr128)
+    val tapPlayLabel    = stringResource(R.string.st_NotepadScreen_mptp129)
+    val attachPlayLbl   = stringResource(R.string.st_NotepadScreen_mpat130)
+    val audioUppercase  = stringResource(R.string.st_NotepadScreen_aud93)
     val secondaryLabel = when {
-        isPlaying -> if (isRealSong && artist != null) "${artist.uppercase(java.util.Locale.ROOT)} • PLAYING" else "PLAYING • TAP TO PAUSE"
-        isCurrentTrack -> "PAUSED • TAP TO RESUME"
-        isRealSong -> (artist?.uppercase(java.util.Locale.ROOT) ?: "AUDIO") + " • TAP TO PLAY"
-        else -> "ATTACHMENT • TAP TO PLAY"
+        isPlaying -> if (isRealSong && artist != null) artist.uppercase(java.util.Locale.ROOT) + " • " + playingLbl else playingPauseLbl
+        isCurrentTrack -> pausedLbl
+        isRealSong -> artist?.uppercase(java.util.Locale.ROOT)?.let { "$it • $tapPlayLabel" } ?: ("$audioUppercase • $tapPlayLabel")
+        else -> attachPlayLbl
     }
 
     val inf = rememberInfiniteTransition(label = "pill")
@@ -2943,7 +2491,7 @@ fun MusicPill(
                 ) {
                     Icon(
                         if (isCurrentTrack && isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                        contentDescription = if (isCurrentTrack && isPlaying) "Pause preview" else "Play preview",
+                        contentDescription = if (isCurrentTrack && isPlaying) stringResource(R.string.st_NotepadScreen_mppause131) else stringResource(R.string.st_NotepadScreen_mpplayb132),
                         Modifier.size(if (compact) 18.dp else 24.dp),
                         tint = contentColor
                     )
@@ -3144,7 +2692,7 @@ fun PdfPreview(uri: String, onClick: () -> Unit = {}, modifier: Modifier = Modif
                             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
                         )
                         Text(
-                            if (loadFailed) context.resources.getString(R.string.notepad_pdf_preview_failed) else "Loading PDF...",
+                            if (loadFailed) context.resources.getString(R.string.notepad_pdf_preview_failed) else stringResource(R.string.st_NotepadScreen_pdfload135),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                         )
@@ -3204,7 +2752,7 @@ fun NotePdfAttachmentStrip(
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(
-                            if (att.pageHint > 0) "Opens at page ${att.pageHint + 1} · tap to read" else "Tap to read",
+                            if (att.pageHint > 0) stringResource(R.string.st_NotepadScreen_pdfpage133, att.pageHint + 1) else stringResource(R.string.st_NotepadScreen_pdftap134),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.Bold
@@ -3237,38 +2785,6 @@ fun NotePdfAttachmentStrip(
 // ─────────────────────────────────────────────────────────────
 //  Shared small components (public API preserved)
 // ─────────────────────────────────────────────────────────────
-
-@Composable
-fun AttachmentChip(label: String, icon: ImageVector, color: Color, onDelete: () -> Unit) {
-    ExpressiveCard(
-        onClick = onDelete,
-        containerColor = color.copy(0.08f),
-        contentColor = color,
-        shape = RoundedCornerShape(12.dp),
-        elevation = 0.dp,
-        border = BorderStroke(1.dp, color.copy(0.15f))
-    ) {
-        Row(
-            Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Icon(icon, null, Modifier.size(16.dp), tint = color)
-            Text(
-                label,
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Black,
-                color = color
-            )
-            Icon(
-                Icons.Rounded.Close,
-                null,
-                Modifier.size(14.dp),
-                tint = color.copy(0.4f)
-            )
-        }
-    }
-}
 
 @Composable
 fun AttachmentTypeItem(title: String, desc: String, icon: ImageVector, color: Color, onClick: () -> Unit) {
@@ -3304,29 +2820,6 @@ fun AttachmentIndicator(icon: ImageVector, color: Color, contentDescription: Str
     }
 }
 
-@Composable
-fun ViewerActionButton(icon: ImageVector, tint: Color, bgAlpha: Float, bgColor: Color, onClick: () -> Unit) {
-    Surface(
-        onClick = onClick,
-        color   = bgColor.copy(bgAlpha),
-        shape   = LargeExpressiveShape,
-        modifier = Modifier.size(44.dp)
-    ) {
-        Box(contentAlignment = Alignment.Center) {
-            Icon(icon, null, Modifier.size(22.dp), tint = tint)
-        }
-    }
-}
-
-@Composable
-fun NoteStatChip(text: String, icon: ImageVector, color: Color) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-        Icon(icon, null, Modifier.size(13.dp), tint = color.copy(0.45f))
-        Text(text.uppercase(java.util.Locale.ROOT), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = color.copy(0.65f), letterSpacing = 0.3.sp)
-    }
-}
-
-// ─────────────────────────────────────────────────────────────
 //  Editor formatting helpers
 // ─────────────────────────────────────────────────────────────
 
@@ -3367,21 +2860,6 @@ private fun FontSizeControl(size: Float, tint: Color, onChange: (Float) -> Unit)
             border  = BorderStroke(1.dp, tint.copy(0.08f)),
         ) {
             Text("+", Modifier.padding(horizontal = 10.dp, vertical = 5.dp), color = tint, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge)
-        }
-    }
-}
-
-@Composable
-private fun QuickAttachButton(icon: ImageVector, color: Color, label: String, onClick: () -> Unit) {
-    Surface(
-        onClick  = onClick,
-        shape    = MediumExpressiveShape,
-        color    = color.copy(0.1f),
-        border   = BorderStroke(1.2.dp, color.copy(0.08f)),
-        modifier = Modifier.size(40.dp),
-    ) {
-        Box(contentAlignment = Alignment.Center) {
-            Icon(icon, null, Modifier.size(19.dp), tint = color)
         }
     }
 }
@@ -3656,6 +3134,15 @@ private fun NotepadActionComponent(
         else -> MaterialTheme.colorScheme.surfaceContainerHigh
     }
 
+    // Labels are resolved here, in a composable context: the toolbar row
+    // builder lambdas below are not composable, so they can't call
+    // stringResource() themselves.
+    val lblSearch = stringResource(R.string.st_NotepadScreen_s42)
+    val lblAi     = stringResource(R.string.st_NotepadScreen_ai43)
+    val lblEdit   = stringResource(R.string.st_NotepadScreen_lbled72)
+    val lblDelete = stringResource(R.string.st_NotepadScreen_d44)
+    val lblClear  = stringResource(R.string.st_NotepadScreen_lblclr77)
+
     Box(
         modifier = Modifier
             .fillMaxWidth(widthFactor)
@@ -3707,7 +3194,7 @@ private fun NotepadActionComponent(
                                     contentColor = MaterialTheme.colorScheme.onPrimaryContainer
                                 )
                             ) {
-                                Icon(Icons.Rounded.Add, "New Note")
+                                Icon(Icons.Rounded.Add, stringResource(R.string.st_NotepadScreen_newn70))
                             }
                         },
                         trailingContent = {
@@ -3716,8 +3203,8 @@ private fun NotepadActionComponent(
                                     haptic.click()
                                     onSearchClick()
                                 },
-                                icon = { Icon(Icons.Rounded.Search, "Search") },
-                                label = "Search"
+                                icon = { Icon(Icons.Rounded.Search, stringResource(R.string.st_NotepadScreen_s42)) },
+                                label = lblSearch
                             )
                             if (aiToolsEnabled && !offlineMode) {
                                 clickableItem(
@@ -3725,8 +3212,8 @@ private fun NotepadActionComponent(
                                         haptic.click()
                                         onStateChange(NotepadActionState.AI_TOOLS)
                                     },
-                                    icon = { Icon(Icons.Rounded.AutoAwesome, "AI Tools") },
-                                    label = "AI"
+                                    icon = { Icon(Icons.Rounded.AutoAwesome, stringResource(R.string.st_NotepadScreen_cdait76)) },
+                                    label = lblAi
                                 )
                             }
                         }
@@ -3761,7 +3248,7 @@ private fun NotepadActionComponent(
                                         contentColor = MaterialTheme.colorScheme.onSecondaryContainer
                                     )
                                 ) {
-                                    Icon(Icons.Rounded.SelectAll, "Select All")
+                                    Icon(Icons.Rounded.SelectAll, stringResource(R.string.st_NotepadScreen_cdsall71))
                                 }
                             }
                         },
@@ -3772,8 +3259,8 @@ private fun NotepadActionComponent(
                                         haptic.click()
                                         onStateChange(NotepadActionState.AI_TOOLS)
                                     },
-                                    icon = { Icon(Icons.Rounded.AutoAwesome, "AI") },
-                                    label = "AI"
+                                    icon = { Icon(Icons.Rounded.AutoAwesome, stringResource(R.string.st_NotepadScreen_ai43)) },
+                                    label = lblAi
                                 )
                             }
                             if (selectedNotes.size == 1) {
@@ -3783,8 +3270,8 @@ private fun NotepadActionComponent(
                                         onStateChange(NotepadActionState.FULL_EDITOR)
                                         onDraftChange(selectedNotes.first())
                                     },
-                                    icon = { Icon(Icons.Rounded.Edit, "Edit") },
-                                    label = "Edit"
+                                    icon = { Icon(Icons.Rounded.Edit, stringResource(R.string.st_NotepadScreen_cdedit73)) },
+                                    label = lblEdit
                                 )
                             }
                             clickableItem(
@@ -3793,8 +3280,8 @@ private fun NotepadActionComponent(
                                     viewModel.deleteNotes(selectedNotes)
                                     onClearSelection()
                                 },
-                                icon = { Icon(Icons.Rounded.Delete, "Delete") },
-                                label = "Delete"
+                                icon = { Icon(Icons.Rounded.Delete, stringResource(R.string.st_NotepadScreen_d44)) },
+                                label = lblDelete
                             )
                             clickableItem(
                                 onClick = {
@@ -3803,8 +3290,8 @@ private fun NotepadActionComponent(
                                     // Selection mode is driven by forceSelectionMode or selectedNoteIds
                                     // So we need to ensure the caller resets both.
                                 },
-                                icon = { Icon(Icons.Rounded.Close, "Cancel") },
-                                label = "X"
+                                icon = { Icon(Icons.Rounded.Close, stringResource(R.string.st_NotepadScreen_c31)) },
+                                label = lblClear
                             )
                         }
                     )
@@ -3896,7 +3383,7 @@ private fun NotepadActionComponent(
                                         contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 ) {
-                                    Icon(Icons.Rounded.AutoAwesome, contentDescription = "AI tools")
+                                    Icon(Icons.Rounded.AutoAwesome, contentDescription = stringResource(R.string.st_NotepadScreen_cdait76))
                                 }
                                 Spacer(Modifier.width(8.dp))
                             }
@@ -3911,7 +3398,7 @@ private fun NotepadActionComponent(
                                     contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             ) {
-                                Icon(Icons.Rounded.Edit, contentDescription = "Edit note")
+                                Icon(Icons.Rounded.Edit, contentDescription = stringResource(R.string.st_NotepadScreen_cdedit73))
                             }
                             Spacer(Modifier.width(8.dp))
                             ToolzExpressiveIconButton(
@@ -3925,7 +3412,7 @@ private fun NotepadActionComponent(
                                     contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             ) {
-                                Icon(Icons.Rounded.MoreVert, contentDescription = "Note options")
+                                Icon(Icons.Rounded.MoreVert, contentDescription = stringResource(R.string.st_NotepadScreen_cdopt74))
                             }
                             Spacer(Modifier.width(8.dp))
                             VerticalDivider(
@@ -3945,7 +3432,7 @@ private fun NotepadActionComponent(
                                     contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             ) {
-                                Icon(Icons.Rounded.Delete, contentDescription = "Delete note")
+                                Icon(Icons.Rounded.Delete, contentDescription = stringResource(R.string.st_NotepadScreen_cddel64))
                             }
                             Spacer(Modifier.width(8.dp))
                             ToolzExpressiveIconButton(
@@ -3960,7 +3447,7 @@ private fun NotepadActionComponent(
                                     contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             ) {
-                                Icon(Icons.Rounded.Close, contentDescription = "Close viewer")
+                                Icon(Icons.Rounded.Close, contentDescription = stringResource(R.string.st_NotepadScreen_cdclose75))
                             }
                         },
                     )
@@ -4109,11 +3596,15 @@ private fun FullExpressiveEditor(
             ExpressiveTopAppBar(
                 title = {
                     AnimatedContent(
-                        targetState = if (isFocusMode) "Focus" else "Editor",
+                        targetState = isFocusMode,
                         transitionSpec = { fadeIn(tween(400)) togetherWith fadeOut(tween(300)) },
                         label = "titleAnim"
-                    ) { text ->
-                        Text(text, fontWeight = FontWeight.Black, color = onColor)
+                    ) { focused ->
+                        Text(
+                            stringResource(if (focused) R.string.st_NotepadScreen_edfocus81 else R.string.st_NotepadScreen_ededtr82),
+                            fontWeight = FontWeight.Black,
+                            color = onColor,
+                        )
                     }
                 },
                 navigationIcon = {
@@ -4121,7 +3612,7 @@ private fun FullExpressiveEditor(
                         onClick = { onMinimize(currentNote) },
                         modifier = Modifier.padding(start = 8.dp)
                     ) {
-                        Icon(Icons.Rounded.KeyboardArrowDown, "Minimize", tint = onColor, modifier = Modifier.size(28.dp))
+                        Icon(Icons.Rounded.KeyboardArrowDown, stringResource(R.string.st_NotepadScreen_cdmin78), tint = onColor, modifier = Modifier.size(28.dp))
                     }
                 },
                 actions = {
@@ -4147,7 +3638,7 @@ private fun FullExpressiveEditor(
                                     if (isAiStyling) {
                                         ToolzWavyCircularProgressIndicator(modifier = Modifier.size(20.dp), color = onColor)
                                     } else {
-                                        Icon(Icons.Rounded.AutoAwesome, "AI Style", modifier = Modifier.size(20.dp))
+                                        Icon(Icons.Rounded.AutoAwesome, stringResource(R.string.st_NotepadScreen_cdaist79), modifier = Modifier.size(20.dp))
                                     }
                                 }
                             }
@@ -4164,7 +3655,7 @@ private fun FullExpressiveEditor(
                     ) {
                         Icon(
                             if (isFocusMode) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility, 
-                            "Focus Mode",
+                            stringResource(R.string.st_NotepadScreen_cdfocus80),
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -4195,7 +3686,7 @@ private fun FullExpressiveEditor(
                         modifier = Modifier.padding(end = 12.dp),
                         shapes = ButtonDefaults.shapes(shape = RoundedCornerShape(16.dp))
                     ) {
-                        Text("SAVE", fontWeight = FontWeight.Black)
+                        Text(stringResource(R.string.st_NotepadScreen_save83), fontWeight = FontWeight.Black)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
@@ -4259,11 +3750,11 @@ private fun FullExpressiveEditor(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Text("$words words", style = MaterialTheme.typography.labelSmall, color = onColor)
+                                Text(pluralStringResource(R.plurals.st_NotepadScreen_words61, words, words), style = MaterialTheme.typography.labelSmall, color = onColor)
                                 Text("•", style = MaterialTheme.typography.labelSmall, color = onColor)
-                                Text("$chars chars", style = MaterialTheme.typography.labelSmall, color = onColor)
+                                Text(stringResource(R.string.st_NotepadScreen_chrfs136, chars), style = MaterialTheme.typography.labelSmall, color = onColor)
                                 Text("•", style = MaterialTheme.typography.labelSmall, color = onColor)
-                                Text("${readingTime}m", style = MaterialTheme.typography.labelSmall, color = onColor)
+                                Text(stringResource(R.string.st_NotepadScreen_mintl137, readingTime), style = MaterialTheme.typography.labelSmall, color = onColor)
                             }
                         }
                         
@@ -4271,7 +3762,7 @@ private fun FullExpressiveEditor(
                             onClick = { showAttachmentMenu = true },
                             modifier = Modifier.size(32.dp).background(onColor.copy(0.1f), CircleShape)
                         ) {
-                            Icon(Icons.Rounded.AttachFile, "Attach", modifier = Modifier.size(18.dp), tint = onColor)
+                            Icon(Icons.Rounded.AttachFile, stringResource(R.string.st_NotepadScreen_att37), modifier = Modifier.size(18.dp), tint = onColor)
                         }
                     }
 
@@ -4300,19 +3791,19 @@ private fun FullExpressiveEditor(
                             checked = currentNote.isBold,
                             onCheckedChange = { currentNote = currentNote.copy(isBold = it) },
                             colors = IconButtonDefaults.iconToggleButtonColors(contentColor = onColor, checkedContentColor = noteColor, checkedContainerColor = onColor)
-                        ) { Icon(Icons.Rounded.FormatBold, "Bold") }
+                        ) { Icon(Icons.Rounded.FormatBold, stringResource(R.string.st_NotepadScreen_cdbold84)) }
                         
                         ToolzExpressiveIconToggleButton(
                             checked = currentNote.isItalic,
                             onCheckedChange = { currentNote = currentNote.copy(isItalic = it) },
                             colors = IconButtonDefaults.iconToggleButtonColors(contentColor = onColor, checkedContentColor = noteColor, checkedContainerColor = onColor)
-                        ) { Icon(Icons.Rounded.FormatItalic, "Italic") }
+                        ) { Icon(Icons.Rounded.FormatItalic, stringResource(R.string.st_NotepadScreen_cdital85)) }
                         
                         ToolzExpressiveIconToggleButton(
                             checked = showColorGrid,
                             onCheckedChange = { showColorGrid = it },
                             colors = IconButtonDefaults.iconToggleButtonColors(contentColor = onColor, checkedContentColor = noteColor, checkedContainerColor = onColor)
-                        ) { Icon(Icons.Rounded.Palette, "Colors") }
+                        ) { Icon(Icons.Rounded.Palette, stringResource(R.string.st_NotepadScreen_cdcol86)) }
                         
                         Spacer(Modifier.weight(1f))
                         
@@ -4333,7 +3824,7 @@ private fun FullExpressiveEditor(
                 TextField(
                     value = currentNote.title,
                     onValueChange = { currentNote = currentNote.copy(title = it) },
-                    placeholder = { Text("Title", style = MaterialTheme.typography.headlineMedium, color = onColor.copy(0.5f)) },
+                    placeholder = { Text(stringResource(R.string.st_NotepadScreen_phtitle87), style = MaterialTheme.typography.headlineMedium, color = onColor.copy(0.5f)) },
                     modifier = Modifier.fillMaxWidth(),
                     textStyle = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Black, color = onColor),
                     colors = transparentTextFieldColors(cursorColor = onColor, textColor = onColor)
@@ -4346,7 +3837,7 @@ private fun FullExpressiveEditor(
                 TextField(
                     value = currentNote.content,
                     onValueChange = { currentNote = currentNote.copy(content = it) },
-                    placeholder = { Text("Start writing...", style = MaterialTheme.typography.bodyLarge, color = onColor.copy(0.5f)) },
+                    placeholder = { Text(stringResource(R.string.st_NotepadScreen_phbody88), style = MaterialTheme.typography.bodyLarge, color = onColor.copy(0.5f)) },
                     modifier = Modifier.fillMaxWidth().heightIn(min = 300.dp),
                     textStyle = MaterialTheme.typography.bodyLarge.copy(
                         fontSize = currentNote.fontSize.sp,
@@ -4367,7 +3858,7 @@ private fun FullExpressiveEditor(
                             Box {
                                 AsyncImage(
                                     model = uri,
-                                    contentDescription = "Attached image",
+                                    contentDescription = stringResource(R.string.st_NotepadScreen_cdattimg89),
                                     modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)),
                                     contentScale = ContentScale.FillWidth
                                 )
@@ -4379,7 +3870,7 @@ private fun FullExpressiveEditor(
                                         contentColor = Color.White
                                     )
                                 ) {
-                                    Icon(Icons.Rounded.Close, contentDescription = "Remove image", modifier = Modifier.size(18.dp))
+                                    Icon(Icons.Rounded.Close, contentDescription = stringResource(R.string.st_NotepadScreen_cdrmimg90), modifier = Modifier.size(18.dp))
                                 }
                             }
                         }
@@ -4405,7 +3896,7 @@ private fun FullExpressiveEditor(
                                         contentColor = Color.White
                                     )
                                 ) {
-                                    Icon(Icons.Rounded.Close, contentDescription = "Remove PDF", modifier = Modifier.size(18.dp))
+                                    Icon(Icons.Rounded.Close, contentDescription = stringResource(R.string.st_NotepadScreen_cdrmpdf91), modifier = Modifier.size(18.dp))
                                 }
                             }
                         }
@@ -4416,6 +3907,8 @@ private fun FullExpressiveEditor(
                                 ?: musicState.tracks.find { it.uri == uri }
                             val editorIsCurrent = isCurrentNoteTrack(musicState.currentTrack, uri)
                             val editorIsPlaying = musicState.isPlaying && editorIsCurrent
+                            val editorAudioName = currentNote.attachedAudioName
+                                ?: stringResource(R.string.st_NotepadScreen_noteaud94)
                             CurrentTrackProgress(
                                 isCurrent = editorIsCurrent,
                                 durationMs = musicState.duration,
@@ -4423,7 +3916,7 @@ private fun FullExpressiveEditor(
                             ) { editorProgress, editorLivePos ->
                             Box {
                                 MusicPill(
-                                    title = currentNote.attachedAudioName ?: editorTrack?.title ?: "Audio",
+                                    title = currentNote.attachedAudioName ?: editorTrack?.title ?: stringResource(R.string.st_NotepadScreen_aud93),
                                     isPlaying = editorIsPlaying,
                                     isCurrentTrack = editorIsCurrent,
                                     thumbnail = editorTrack?.thumbnailUri,
@@ -4441,7 +3934,7 @@ private fun FullExpressiveEditor(
                                                 try {
                                                     musicViewModel.playUri(
                                                         Uri.parse(uri),
-                                                        currentNote.attachedAudioName ?: "Note audio"
+                                                        editorAudioName
                                                     )
                                                 } catch (_: Exception) { }
                                             }
@@ -4474,7 +3967,7 @@ private fun FullExpressiveEditor(
                                         contentColor = Color.White
                                     )
                                 ) {
-                                    Icon(Icons.Rounded.Close, contentDescription = "Remove audio", modifier = Modifier.size(18.dp))
+                                    Icon(Icons.Rounded.Close, contentDescription = stringResource(R.string.st_NotepadScreen_cdrmaud92), modifier = Modifier.size(18.dp))
                                 }
                             }
                             } // CurrentTrackProgress
@@ -4522,8 +4015,10 @@ private fun FullExpressiveEditor(
 
     if (showAudioPicker) {
         AttachmentPickerDialog(
-            title = "ATTACH AUDIO",
+            title = stringResource(R.string.st_NotepadScreen_apatitle95),
+            isAudio = true,
             items = availableTracks.map { it.title to it.uri },
+            emptyText = stringResource(R.string.st_NotepadScreen_nthing160),
             onDismiss = { showAudioPicker = false },
             onSelect = { name, uri ->
                 currentNote = currentNote.copy(attachedAudioUri = uri, attachedAudioName = name)
@@ -4540,11 +4035,12 @@ private fun FullExpressiveEditor(
     val pdfPickerItems = remember(availablePdfs) { availablePdfs.map { it.name to it.uri.toString() } }
     if (showPdfPicker) {
         AttachmentPickerDialog(
-            title = "ATTACH PDF",
+            title = stringResource(R.string.st_NotepadScreen_apdftit96),
+            isAudio = false,
             items = pdfPickerItems,
             onDismiss = { showPdfPicker = false },
-            emptyText = "No PDFs found — import one from the PDF tool first",
-            browseLabel = if (isBrowsingPdf) "Opening…" else "Browse files…",
+            emptyText = stringResource(R.string.st_NotepadScreen_pdfempty97),
+            browseLabel = if (isBrowsingPdf) stringResource(R.string.st_NotepadScreen_opening98) else stringResource(R.string.st_NotepadScreen_browse99),
             onBrowse = {
                 if (!isBrowsingPdf) {
                     isBrowsingPdf = true
@@ -4623,74 +4119,6 @@ private fun FullExpressiveEditor(
 }
 
 @Composable
-private fun ExpressiveColorGrid(
-    selectedColor: Int,
-    onColorSelected: (Int) -> Unit,
-    onDismiss: () -> Unit,
-    onCustomColor: () -> Unit
-) {
-    val colors = listOf(
-        0xFFFFF9C4, 0xFFFFCCBC, 0xFFC8E6C9, 0xFFB3E5FC, 0xFFE1BEE7,
-        0xFFF5F5F5, 0xFFD7CCC8, 0xFFCFD8DC, 0xFFFFE0B2, 0xFF263238,
-        0xFFFF5252, 0xFFFF4081, 0xFF7C4DFF, 0xFF536DFE, 0xFF448AFF,
-        0xFF03A9F4, 0xFF00BCD4, 0xFF009688, 0xFF4CAF50, 0xFF8BC34A
-    ).map { it.toInt() }
-
-    androidx.compose.ui.window.Popup(
-        alignment = Alignment.BottomEnd,
-        offset = androidx.compose.ui.unit.IntOffset(0, -120),
-        onDismissRequest = onDismiss
-    ) {
-        Box(
-            modifier = Modifier
-                .width(220.dp)
-                .shadow(12.dp, RoundedCornerShape(24.dp))
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(24.dp))
-                .padding(12.dp)
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Colors", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 4.dp))
-                androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
-                    columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(5),
-                    modifier = Modifier.height(160.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(colors) { colorInt ->
-                        Surface(
-                            modifier = Modifier.size(32.dp),
-                            shape = CircleShape,
-                            color = Color(colorInt),
-                            border = if (selectedColor == colorInt) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
-                            onClick = { onColorSelected(colorInt) }
-                        ) {
-                            if (selectedColor == colorInt) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(Icons.Rounded.Check, null, modifier = Modifier.size(16.dp), tint = noteContentColor(Color(colorInt)))
-                                }
-                            }
-                        }
-                    }
-                }
-                ToolzOutlinedExpressiveButton(
-                    onClick = { 
-                        onDismiss()
-                        onCustomColor()
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Rounded.Palette, null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("Custom Color", style = MaterialTheme.typography.labelSmall)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
 private fun QuickEditor(
     draft: Note,
     onDraftUpdate: (Note) -> Unit,
@@ -4722,7 +4150,7 @@ private fun QuickEditor(
                     }
                 }
                 Text(
-                    "QUICK NOTE",
+                    stringResource(R.string.st_NotepadScreen_qn45),
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Black,
                     letterSpacing = 1.2.sp,
@@ -4744,7 +4172,7 @@ private fun QuickEditor(
                 ) {
                     Icon(
                         Icons.Rounded.OpenInFull,
-                        null,
+                        stringResource(R.string.st_NotepadScreen_cdxpand101),
                         modifier = Modifier.size(16.dp)
                     )
                 }
@@ -4762,7 +4190,7 @@ private fun QuickEditor(
                 ) {
                     Icon(
                         Icons.Rounded.Close,
-                        null,
+                        stringResource(R.string.st_NotepadScreen_cdclosegen102),
                         modifier = Modifier.size(16.dp)
                     )
                 }
@@ -4775,7 +4203,7 @@ private fun QuickEditor(
                 onValueChange = { onDraftUpdate(draft.copy(title = it)) },
                 placeholder = {
                     Text(
-                        "Title",
+                        stringResource(R.string.st_NotepadScreen_phtitle87),
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSurface.copy(0.4f)
                     )
@@ -4794,7 +4222,7 @@ private fun QuickEditor(
                 onValueChange = { onDraftUpdate(draft.copy(content = it)) },
                 placeholder = {
                     Text(
-                        "Start writing...",
+                        stringResource(R.string.st_NotepadScreen_phbody88),
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurface.copy(0.4f)
                     )
@@ -4823,7 +4251,7 @@ private fun QuickEditor(
             shapes = ButtonDefaults.shapes(shape = RoundedCornerShape(16.dp))
         ) {
             Text(
-                "SAVE NOTE",
+                stringResource(R.string.st_NotepadScreen_sn46),
                 fontWeight = FontWeight.Black,
                 letterSpacing = 1.2.sp
             )
@@ -5077,7 +4505,7 @@ private fun AiToolsPopup(
                                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, modifier = Modifier.size(16.dp))
                                     }
                                     Spacer(Modifier.width(8.dp))
-                                    Text(stringResource(R.string.st_MusicPlayerScreen_q72), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                                    Text(stringResource(R.string.st_NotepadScreen_sumttl141), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                                 }
                                 
                                 if (aiSummary != null && !aiLoading) {
@@ -5147,7 +4575,7 @@ private fun ModelSettingsView(
                 Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, modifier = Modifier.size(16.dp))
             }
             Spacer(Modifier.width(8.dp))
-            Text(stringResource(R.string.st_MusicPlayerScreen_ail73), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            Text(stringResource(R.string.st_NotepadScreen_aimodels142), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
         }
         LazyColumn(modifier = Modifier.heightIn(max = 200.dp)) {
             lazyItems(models) { model ->
@@ -5172,10 +4600,15 @@ private fun AiMenu(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (!isViewerMode && !isSelectionMode) {
-            AiMenuItem(stringResource(R.string.st_NowPlayingAiScreen_an9), "Create a new note from scratch", Icons.Rounded.Add, onGenerate)
+            AiMenuItem(stringResource(R.string.st_NotepadScreen_ainnew143), stringResource(R.string.st_NotepadScreen_ainnewd144), Icons.Rounded.Add, onGenerate)
         }
-        AiMenuItem(stringResource(R.string.st_MusicPlayerScreen_rn_item51), if (isViewerMode || (isSelectionMode && !isViewerMode)) "Transform this note" else "Transform an existing note", Icons.Rounded.Edit, onEdit)
-        AiMenuItem(stringResource(R.string.st_NowPlayingAiScreen_an9), if (isViewerMode || (isSelectionMode && !isViewerMode)) "Get a quick breakdown" else "Get a quick breakdown", Icons.Rounded.Summarize, onSummarize)
+        AiMenuItem(
+            stringResource(R.string.st_NotepadScreen_aitrn145),
+            if (isViewerMode || (isSelectionMode && !isViewerMode)) stringResource(R.string.st_NotepadScreen_aitrnt146) else stringResource(R.string.st_NotepadScreen_aitnre147),
+            Icons.Rounded.Edit,
+            onEdit,
+        )
+        AiMenuItem(stringResource(R.string.st_NotepadScreen_aisum148), stringResource(R.string.st_NotepadScreen_aisd149), Icons.Rounded.Summarize, onSummarize)
     }
 }
 
@@ -5216,7 +4649,7 @@ private fun NotePicker(
                 Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, modifier = Modifier.size(16.dp))
             }
             Spacer(Modifier.width(8.dp))
-            Text(stringResource(R.string.st_NotepadScreen_sel8) + " a Note", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            Text(stringResource(R.string.st_NotepadScreen_aipick150), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
         }
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             lazyItems(notes) { note ->
@@ -5224,7 +4657,7 @@ private fun NotePicker(
                     onClick = { onSelect(note) },
                     modifier = Modifier.size(100.dp),
                     shape = SmallExpressiveShape,
-                    color = Color(note.color)
+                    color = noteSurfaceColor(note.color, MaterialTheme.colorScheme.surfaceContainerHighest)
                 ) {
                     Box(Modifier.padding(8.dp)) {
                         Text(note.title, style = MaterialTheme.typography.labelSmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
@@ -5256,12 +4689,12 @@ private fun PromptInput(
                 Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, modifier = Modifier.size(16.dp))
             }
             Spacer(Modifier.width(8.dp))
-            Text(if (isGenerate) stringResource(R.string.st_NowPlayingAiScreen_an9) else "What should AI do?", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            Text(if (isGenerate) stringResource(R.string.st_NotepadScreen_aigenq151) else stringResource(R.string.st_NotepadScreen_aiedq152), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
         }
         TextField(
             value = prompt,
             onValueChange = onPromptChange,
-            placeholder = { Text("e.g. make it formal, summarize into bullets...") },
+            placeholder = { Text(stringResource(R.string.st_NotepadScreen_aihint153)) },
             modifier = Modifier.fillMaxWidth(),
             colors = TextFieldDefaults.colors(
                 focusedContainerColor = Color.Transparent,
@@ -5269,7 +4702,7 @@ private fun PromptInput(
             )
         )
         ToolzExpressiveButton(onClick = onConfirm, modifier = Modifier.align(Alignment.End)) {
-            Text("PROCEED", fontWeight = FontWeight.Black)
+            Text(stringResource(R.string.st_NotepadScreen_aigo154), fontWeight = FontWeight.Black)
         }
     }
 }
@@ -5322,7 +4755,7 @@ private fun TrashBottomSheet(
                         letterSpacing = 2.sp
                     )
                     Text(
-                        "${deletedNotes.size} " + stringResource(R.string.st_NotepadScreen_np12),
+                        pluralStringResource(R.plurals.st_NotepadScreen_trashcnt155, deletedNotes.size, deletedNotes.size),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.7f)
                     )
@@ -5357,9 +4790,9 @@ private fun TrashBottomSheet(
                     lazyItems(deletedNotes, key = { it.id }) { note ->
                         Surface(
                             modifier = Modifier.fillMaxWidth(),
-                            color = Color(note.color).copy(0.1f).compositeOver(MaterialTheme.colorScheme.surfaceContainerHighest),
+                            color = noteSurfaceColor(note.color, MaterialTheme.colorScheme.surfaceContainerHighest).copy(0.1f).compositeOver(MaterialTheme.colorScheme.surfaceContainerHighest),
                             shape = LargeExpressiveShape,
-                            border = BorderStroke(1.dp, Color(note.color).copy(0.2f))
+                            border = BorderStroke(1.dp, noteSurfaceColor(note.color, MaterialTheme.colorScheme.surfaceContainerHighest).copy(0.2f))
                         ) {
                             Row(
                                 Modifier.padding(14.dp),
@@ -5367,7 +4800,7 @@ private fun TrashBottomSheet(
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
                                 Box(
-                                    Modifier.size(8.dp).background(Color(note.color), CircleShape)
+                                    Modifier.size(8.dp).background(noteSurfaceColor(note.color, MaterialTheme.colorScheme.surfaceContainerHighest), CircleShape)
                                 )
                                 Column(Modifier.weight(1f)) {
                                     val title = if (note.title.isBlank()) stringResource(R.string.st_NotepadScreen_u28) else note.title
@@ -5386,7 +4819,7 @@ private fun TrashBottomSheet(
                                 }
                                 
                                     IconButton(onClick = { haptic.click(); onRestore(note) }) {
-                                    Icon(Icons.Rounded.Restore, stringResource(R.string.st_NotepadScreen_trash20), tint = MaterialTheme.colorScheme.primary)
+                                    Icon(Icons.Rounded.Restore, stringResource(R.string.st_NotepadScreen_cdrestore156), tint = MaterialTheme.colorScheme.primary)
                                 }
                                 
                                 IconButton(onClick = { haptic.click(); confirmDeleteId = note.id }) {
@@ -5411,6 +4844,7 @@ private fun TrashBottomSheet(
                         }
                     },
                     title = { Text(stringResource(R.string.st_NotepadScreen_et49)) },
+                    text = { Text(stringResource(R.string.st_NotepadScreen_etrb159)) },
                 )
             }
             confirmDeleteId?.let { doomedId ->
@@ -5427,7 +4861,8 @@ private fun TrashBottomSheet(
                                 Text(stringResource(R.string.st_NotepadScreen_c31))
                             }
                         },
-                        title = { Text(stringResource(R.string.st_NotepadScreen_d44)) },
+                        title = { Text(stringResource(R.string.st_NotepadScreen_delt157)) },
+                        text = { Text(stringResource(R.string.st_NotepadScreen_delb158)) },
                     )
                 }
             }

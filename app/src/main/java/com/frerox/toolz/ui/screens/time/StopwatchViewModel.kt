@@ -219,13 +219,21 @@ class StopwatchViewModel @Inject constructor(
 
     // ── DEV-SPOOF: fixture stopwatch internals ──────────────────────────────
 
+    /** DEV-SPOOF: fixture armed from the real cosmetic switches (sandbox QoL). */
+    private fun fixturedFromReal() = StopwatchState(
+        elapsedTime = 0L,
+        isRunning = false,
+        laps = emptyList(),
+        keepScreenOn = _uiState.value.keepScreenOn,
+        showMilliseconds = _uiState.value.showMilliseconds,
+        showStatusPill = _uiState.value.showStatusPill,
+        isBound = true,
+        isLoading = false,
+    )
+
     private fun enterSandboxImmediately() {
         sandboxActiveNow = true
-        _sandboxState.value = StopwatchState(
-            isBound = true,
-            isLoading = false,
-            showMilliseconds = true,
-        )
+        _sandboxState.value = fixturedFromReal()
         try { context.unbindService(connection) } catch (_: Exception) {}
         toolService = null
         isBound = false
@@ -252,12 +260,8 @@ class StopwatchViewModel @Inject constructor(
 
     /** DEV-SPOOF: start/pause the RAM counter; never touches the service. */
     private fun toggleSandbox() {
-        val s = _sandboxState.value ?: StopwatchState(
-            isBound = true,
-            isLoading = false,
-            showMilliseconds = true,
-        )
-        _sandboxState.value = s.copy(isRunning = !s.isRunning, isBound = true, isLoading = false)
+        val s = _sandboxState.value ?: fixturedFromReal()
+        _sandboxState.value = s.copy(isRunning = !s.isRunning)
     }
 
     // ── Facade: Stopwatch commands ──────────────────────────────────────────
@@ -343,14 +347,24 @@ class StopwatchViewModel @Inject constructor(
     }
 
     fun setKeepScreenOn(enabled: Boolean) {
+        // DEV-SPOOF: sandboxed → the fixture mirrors the cosmetic switch too.
+        if (stopwatchSandboxActive) {
+            _sandboxState.value = _sandboxState.value?.copy(keepScreenOn = enabled)
+        }
         viewModelScope.launch { settingsRepository.setStopwatchKeepScreenOn(enabled) }
     }
 
     fun setShowMilliseconds(enabled: Boolean) {
+        if (stopwatchSandboxActive) {
+            _sandboxState.value = _sandboxState.value?.copy(showMilliseconds = enabled)
+        }
         viewModelScope.launch { settingsRepository.setStopwatchShowMs(enabled) }
     }
 
     fun setShowStatusPill(enabled: Boolean) {
+        if (stopwatchSandboxActive) {
+            _sandboxState.value = _sandboxState.value?.copy(showStatusPill = enabled)
+        }
         viewModelScope.launch { settingsRepository.setStopwatchShowStatusPill(enabled) }
     }
 

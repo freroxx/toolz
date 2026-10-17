@@ -56,17 +56,16 @@ class ClipboardViewModel @Inject constructor(
 
     /**
      * DEV-SPOOF: sandboxed → the list is 30 RAM-only fixtures and the real
-     * Room table is neither read nor written while the flag is on.
+     * Room table is neither read nor written while the flag is on. The fake
+     * state flow is a live combine source so RAM mutations (delete/pin/clear)
+     * repaint without any real storage activity.
      */
     val entries: StateFlow<List<ClipboardEntry>> = combine(
         clipboardDao.getAllEntries(),
         gate.active(com.frerox.toolz.data.developer.DevToolId.CLIPBOARD),
-    ) { real, spoofed ->
-        if (spoofed) {
-            com.frerox.toolz.data.developer.FakeClipboardSandbox.entries().value
-        } else {
-            real
-        }
+        com.frerox.toolz.data.developer.FakeClipboardSandbox.entries(),
+    ) { real, spoofed, fake ->
+        if (spoofed) fake else real
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val offlineModeEnabled = settingsRepository.offlineModeEnabled
@@ -233,6 +232,7 @@ class ClipboardViewModel @Inject constructor(
     fun deleteEntry(entry: ClipboardEntry) {
         // DEV-SPOOF: sandboxed → the fixture list mutates in RAM, Room untouched.
         if (clipboardSandboxActive) {
+            lastDeleted = entry // keeps the undo snackbar working inside the sandbox
             com.frerox.toolz.data.developer.FakeClipboardSandbox.delete(entry.id)
             return
         }
