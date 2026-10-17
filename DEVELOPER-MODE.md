@@ -93,7 +93,7 @@ Fixed top bar: back, live `SPOOF` count chip, **command palette** (`Tune` icon) 
 | Sensors (compass/bubble/altimeter/speed/sound/light) | listener unregister + event guards | `SpoofSim` drive cycle, dB, lux, tilt, altitude+pressure streams | accel, baro, GPS, mic, light sensor |
 | Music | `FakeMusicSandbox` + full transport intercept | 7-track `spoof://` library, ticker/visualizer, queue/favs in RAM | MediaStore scan, Room, MediaController binding, audio permission |
 | Clipboard | `FakeClipboardSandbox` + entries swap | 30 typed clips (OTP/links/code…), capture gate=fake Shizuku | device clipboard read, capture service, Room, AI summarize |
-| Timers | fixture countdown/counter + service detach (timer & stopwatch) | 3s loop timer, RAM stopwatch + laps (200 cap) | ToolService bind/start, AlarmManager, notifications |
+| Timers | fixture countdown/counter + service detach (timer, stopwatch, pomodoro) | 3s loop timer, RAM stopwatch + laps (200 cap), RAM pomodoro ticking real phase rules (`nextModeAfterWork`), auto-start + skip counts | ToolService bind/start, AlarmManager, notifications |
 | QR | scanner `rememberSandboxActive` bypass | fake WIFI: payload card, camera idle | camera permission prompt, analyzer binding |
 | Device info | `refresh`/`executeSearch` gates | flagship-almost-full fixture | spec API, disk rescan |
 | Network | trigger + monitor guards | `SpoofSim` ping/RSSI drift ×2 sites, FakeFiber-5G | scans, DNS, ping, traceroute, Shizuku system writes |
