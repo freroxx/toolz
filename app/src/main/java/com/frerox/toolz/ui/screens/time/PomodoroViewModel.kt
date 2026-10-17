@@ -34,6 +34,7 @@ import com.frerox.toolz.data.ai.OpenAiService
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.service.ToolService
 import com.frerox.toolz.service.nextModeAfterWork
+import com.frerox.toolz.service.nextPomodoroMode
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -93,6 +94,7 @@ class PomodoroViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val aiSettingsManager: AiSettingsManager,
     private val openAiService: OpenAiService,
+    private val gate: com.frerox.toolz.data.developer.SpoofGate,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(PomodoroState())
@@ -104,8 +106,23 @@ class PomodoroViewModel @Inject constructor(
     private var pomodoroJobs: List<Job> = emptyList()
     private var lastFinishCount = -1
 
+    // ── DEV-SPOOF: Timers sandbox — pomodoro runs on a RAM ticker, ToolService
+    // is never started/bound while the flag is on (no alarm FIFO, no foreground
+    // notification, nothing persisted). Rebinds like a fresh open on disarm.
+    private var sandboxActiveNow = false
+    private var sandboxPomodoroJob: Job? = null
+
+    private val isPomodoroSandboxActive: Boolean
+        get() = gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.TIMERS)
+
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            // DEV-SPOOF: a bind queued before the sandbox armed can still land
+            // here — drop it instead of piping real service flows over fixtures.
+            if (sandboxActiveNow) {
+                unbindQuietly()
+                return
+            }
             val binder = service as ToolService.LocalBinder
             toolService = binder.getService()
             isBound = true
@@ -121,6 +138,32 @@ class PomodoroViewModel @Inject constructor(
     init {
         // P-P0-03: startService() before bind so the service survives UI death
         // (bind-only dies with the activity; started service survives Doze/kill).
+        // DEV-SPOOF: skipped entirely while the Timers sandbox is on — the fake
+        // pomodoro needs neither the service nor its foreground state.
+        if (isPomodoroSandboxActive) {
+            enterSandboxImmediately()
+        } else {
+            sandboxActiveNow = false
+            bindToolService()
+        }
+        viewModelScope.launch {
+            gate.active(com.frerox.toolz.data.developer.DevToolId.TIMERS).collect { spoofed ->
+                if (spoofed) {
+                    if (!sandboxActiveNow) enterSandboxImmediately()
+                } else {
+                    leaveSandboxToReal()
+                }
+            }
+        }
+        observeSettings()
+    }
+
+    /** Quiet unbind reused by the guarded connect + sandbox teardown paths. */
+    private fun unbindQuietly() {
+        try { context.unbindService(connection) } catch (_: Exception) {}
+    }
+
+    private fun bindToolService() {
         try {
             val startIntent = Intent(context, ToolService::class.java)
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
@@ -132,7 +175,53 @@ class PomodoroViewModel @Inject constructor(
         Intent(context, ToolService::class.java).also { intent ->
             context.bindService(intent, connection, Context.BIND_AUTO_CREATE)
         }
-        observeSettings()
+    }
+
+    /** DEV-SPOOF: unbind/stop the service and stage a paused RAM fixture. */
+    private fun enterSandboxImmediately() {
+        sandboxActiveNow = true
+        try { context.unbindService(connection) } catch (_: Exception) {}
+        try { context.stopService(Intent(context, ToolService::class.java)) } catch (_: Exception) {}
+        isBound = false
+        toolService = null
+        pomodoroJobs.forEach { try { it.cancel() } catch (_: Exception) {} }
+        pomodoroJobs = emptyList()
+        // Fixture: staged at the user's current work length, paused at zero sessions.
+        val duration = fixtureDurationMs(_uiState.value)
+        _uiState.update {
+            it.copy(
+                remainingTime = duration,
+                totalTime = duration,
+                mode = PomodoroMode.WORK,
+                isRunning = false,
+                isFinished = false,
+                sessionsCompleted = 0,
+            )
+        }
+        android.util.Log.w(
+            "DevSpoof",
+            "Timers sandbox active — pomodoro on RAM ticker, ToolService detached",
+        )
+    }
+
+    /** DEV-SPOOF: drop the fixture and rebind the service like a fresh open. */
+    private fun leaveSandboxToReal() {
+        if (!sandboxActiveNow) return
+        sandboxActiveNow = false
+        sandboxPomodoroJob?.cancel()
+        sandboxPomodoroJob = null
+        // Run state zeroes; settings-driven fields are kept for a flicker-free dial
+        // (settings collectors are still live; service flows re-seed on connect).
+        _uiState.update {
+            it.copy(
+                isRunning = false,
+                isFinished = false,
+                remainingTime = 0L,
+                totalTime = 0L,
+                sessionsCompleted = 0,
+            )
+        }
+        bindToolService()
     }
 
     private fun observeSettings() {
@@ -275,6 +364,8 @@ class PomodoroViewModel @Inject constructor(
     }
 
     fun toggleStartStop() {
+        // DEV-SPOOF: sandboxed → start/pause the RAM ticker; no alarm scheduling.
+        if (isPomodoroSandboxActive) { toggleSandboxPomodoro(); return }
         val state = _uiState.value
         if (state.isRunning) {
             toolService?.pausePomodoro()
@@ -289,6 +380,19 @@ class PomodoroViewModel @Inject constructor(
     }
 
     fun selectMode(mode: PomodoroMode) {
+        // DEV-SPOOF: sandboxed → restage the fixture for the picked phase.
+        if (isPomodoroSandboxActive) {
+            val cur = _uiState.value
+            if (cur.isRunning) return // as real mode
+            val duration = fixtureDurationMs(cur.copy(mode = mode))
+            _uiState.value = cur.copy(
+                mode = mode,
+                remainingTime = duration,
+                totalTime = duration,
+                isFinished = false,
+            )
+            return
+        }
         // P-P2-01: VM calls service only — flows echo the truth. No optimistic
         // duration math from laggy settings cache (flicker source).
         if (_uiState.value.isRunning) return
@@ -461,11 +565,25 @@ class PomodoroViewModel @Inject constructor(
     }
 
     fun stopRingtone() {
+        // DEV-SPOOF: sandboxed → nothing ever rang; just clear the fake banner.
+        if (isPomodoroSandboxActive) {
+            _uiState.update { it.copy(isFinished = false) }
+            return
+        }
         toolService?.stopAlarm()
         _uiState.update { it.copy(isFinished = false) }
     }
 
     fun reset() {
+        // DEV-SPOOF: sandboxed → restage the current phase on the fixture.
+        if (isPomodoroSandboxActive) {
+            val cur = _uiState.value
+            val duration = fixtureDurationMs(cur)
+            _uiState.update {
+                it.copy(isRunning = false, isFinished = false, remainingTime = duration, totalTime = duration)
+            }
+            return
+        }
         // P-P2-01: service is truth — no optimistic duration math. Flows echo.
         toolService?.stopAlarm()
         toolService?.resetPomodoro()
@@ -475,6 +593,12 @@ class PomodoroViewModel @Inject constructor(
     }
 
     fun resetGoal() {
+        // DEV-SPOOF: sandboxed → RAM-only count, the real persisted progress
+        // must never be wiped by the fake tool.
+        if (isPomodoroSandboxActive) {
+            _uiState.update { it.copy(sessionsCompleted = 0) }
+            return
+        }
         // Reset session progress back to 0/goal. Optimistic UI update first so
         // the settings row + stats clear instantly, then service (truth) or
         // direct repo fallback when unbound (service null = silent no-op before).
@@ -490,6 +614,9 @@ class PomodoroViewModel @Inject constructor(
     }
 
     fun skip() {
+        // DEV-SPOOF: sandboxed → silent RAM phase cycle; skipping WORK still
+        // counts as completed, exactly like the real service rule (P-P2-02).
+        if (isPomodoroSandboxActive) { skipSandboxPomodoro(); return }
         // Skipping WORK counts as completed (service increments); skipping a
         // break never counts. Service cycles silently, no alarm.
         toolService?.stopAlarm()
@@ -497,10 +624,111 @@ class PomodoroViewModel @Inject constructor(
         _uiState.update { it.copy(isFinished = false) }
     }
 
+    // ── DEV-SPOOF: pomodoro fixture internals ───────────────────────────────
+
+    /** Fixture length for a phase, straight from the user's live settings. */
+    private fun fixtureDurationMs(s: PomodoroState): Long {
+        val minutes = when (s.mode) {
+            PomodoroMode.WORK -> s.workMinutes
+            PomodoroMode.SHORT_BREAK -> s.shortBreakMinutes
+            PomodoroMode.LONG_BREAK -> s.longBreakMinutes
+        }.coerceAtLeast(1)
+        return minutes * 60_000L
+    }
+
+    /** DEV-SPOOF: start/pause the RAM ticker; never touches the service. */
+    private fun toggleSandboxPomodoro() {
+        val s = _uiState.value
+        if (s.isRunning) {
+            _uiState.update { it.copy(isRunning = false) }
+            return
+        }
+        // Service parity: a zero remaining falls back to the phase duration.
+        val duration = if (s.remainingTime > 0L) s.remainingTime else fixtureDurationMs(s)
+        _uiState.update {
+            it.copy(
+                isRunning = true,
+                isFinished = false,
+                remainingTime = duration,
+                totalTime = if (it.remainingTime > 0L) it.totalTime else duration,
+            )
+        }
+        startSandboxPomodoroTicker()
+    }
+
+    /** DEV-SPOOF: silent RAM cycle — WORK counts, breaks never increment. */
+    private fun skipSandboxPomodoro() {
+        val s = _uiState.value
+        val nextMode = PomodoroMode.valueOf(nextPomodoroMode(s.mode.name, s.sessionsCompleted))
+        val completed = if (s.mode == PomodoroMode.WORK) s.sessionsCompleted + 1 else s.sessionsCompleted
+        val duration = fixtureDurationMs(s.copy(mode = nextMode))
+        _uiState.update {
+            it.copy(
+                mode = nextMode,
+                sessionsCompleted = completed,
+                remainingTime = duration,
+                totalTime = duration,
+                isRunning = it.isRunning, // silent continue, as the real skip
+                isFinished = false,
+            )
+        }
+    }
+
+    /** One-tick-at-a-time RAM pomodoro; finish → quiet phase cycle (auto-start aware). */
+    private fun startSandboxPomodoroTicker() {
+        if (sandboxPomodoroJob?.isActive == true) return
+        sandboxPomodoroJob = viewModelScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(1000)
+                val base = _uiState.value
+                if (!base.isRunning || base.remainingTime <= 0L) continue
+                val next = base.remainingTime - 1000L
+                if (next > 0L) {
+                    _uiState.update { it.copy(remainingTime = next) }
+                    continue
+                }
+                // Fake finish — visual only: no alarm FIFO, no sound, no
+                // notification, nothing persisted.
+                _uiState.update {
+                    it.copy(remainingTime = 0L, isRunning = false, isFinished = true)
+                }
+                if (base.mode == PomodoroMode.WORK) {
+                    _uiState.update { it.copy(sessionsCompleted = it.sessionsCompleted + 1) }
+                }
+                kotlinx.coroutines.delay(1500)
+                val after = _uiState.value
+                // The user may have reset/skipped/started during the quiet beat —
+                // then this finish is already handled and no chain fires.
+                if (!after.isFinished || after.isRunning) continue
+                if (!after.autoStartNext) continue
+                val nextPhaseName = if (after.mode == PomodoroMode.WORK) {
+                    // One shared phase-truth fn, pre-increment count — service rule.
+                    nextModeAfterWork(after.sessionsCompleted - 1)
+                } else {
+                    "WORK"
+                }
+                val nextMode = PomodoroMode.valueOf(nextPhaseName)
+                val duration = fixtureDurationMs(after.copy(mode = nextMode))
+                _uiState.update {
+                    it.copy(
+                        mode = nextMode,
+                        remainingTime = duration,
+                        totalTime = duration,
+                        isRunning = true,
+                        isFinished = false,
+                    )
+                }
+            }
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
         pomodoroJobs.forEach { try { it.cancel() } catch (_: Exception) {} }
         pomodoroJobs = emptyList()
+        // DEV-SPOOF: drop the RAM ticker with the VM.
+        sandboxPomodoroJob?.cancel()
+        sandboxPomodoroJob = null
         if (isBound) {
             try { context.unbindService(connection) } catch (_: Exception) {}
             isBound = false
