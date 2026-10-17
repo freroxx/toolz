@@ -23,14 +23,16 @@ object NewsLinks {
         }
     }
 
-    /** Share sheet: title + the stable `#news-<id>` anchor on the website. */
+    /**
+     * Share sheet: the bare, stable `#news-<id>` anchor on the website —
+     * paste-anywhere friendly, no titles or captions, just the link.
+     */
     fun share(context: Context, item: NewsEntity) {
         try {
             val link = "${NewsConstants.WEBSITE_NEWS_URL}#news-${item.id}"
             val send = Intent(Intent.ACTION_SEND).apply {
                 type = "text/plain"
-                putExtra(Intent.EXTRA_SUBJECT, item.title)
-                putExtra(Intent.EXTRA_TEXT, "${item.title}\n\n$link")
+                putExtra(Intent.EXTRA_TEXT, link)
             }
             context.startActivity(
                 Intent.createChooser(send, context.getString(R.string.st_News_share_chooser))
