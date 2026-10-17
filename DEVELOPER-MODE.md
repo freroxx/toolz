@@ -78,6 +78,11 @@ Fixed top bar: back, live `SPOOF` count chip, **command palette** (`Tune` icon) 
 - Sandbox-first screens implemented so far: Music (audio placeholder skipped — the fake library needs no real files), QR scanner (camera prompt + analyzer binding skipped, fixture payload card shown), Whisper (auth/onboarding never shown).
 - Contract: the skip is screen-local; flipping the sandbox off restores the real permission flow untouched.
 
+## Dashboard affordances (star + quick-fix)
+
+- Sandboxed tools get a small red star on their dashboard card — top-right in grid layout, right-center in list layout (`SpoofSandboxStar`, fed by `SpoofQuickFixViewModel.activeSandboxes`; cards resolve their tool via the same `routeToDevTool` map as the watermark).
+- Long-pressing a spoofed card replaces the default long-press (pin/detail sheet) with `SpoofQuickFixDialog`: the tool's data is announced fake and spoofed, with **Disable spoof** (writes the same pref the console toggle writes) and **Developer options** (navigates to `developer_mode`). Disabling drops the star instantly — the live flags flow repaints the card without a relaunch.
+
 ## Sandbox coverage (all enforced, all local-only)
 
 | Tool | Hook | Fixture | Blocked |

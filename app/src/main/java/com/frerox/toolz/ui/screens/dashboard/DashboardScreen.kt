@@ -92,6 +92,7 @@ import com.frerox.toolz.ui.screens.media.MusicPlayerViewModel
 import com.frerox.toolz.ui.screens.media.isCurrentNoteTrack
 import com.frerox.toolz.ui.screens.media.MusicUiState
 import com.frerox.toolz.ui.screens.media.catalog.CatalogUiState
+import com.frerox.toolz.data.developer.DevToolId
 import com.frerox.toolz.ui.screens.media.catalog.CatalogViewModel
 import com.frerox.toolz.ui.screens.notepad.NotepadViewModel
 import com.frerox.toolz.ui.screens.sensors.RecordingState
@@ -105,6 +106,10 @@ import com.frerox.toolz.ui.screens.time.StopwatchState
 import com.frerox.toolz.ui.screens.time.StopwatchViewModel
 import com.frerox.toolz.ui.screens.time.TimerState
 import com.frerox.toolz.ui.screens.time.TimerViewModel
+import com.frerox.toolz.ui.screens.developer.components.SpoofQuickFixDialog
+import com.frerox.toolz.ui.screens.developer.components.SpoofQuickFixViewModel
+import com.frerox.toolz.ui.screens.developer.components.SpoofSandboxStar
+import com.frerox.toolz.ui.screens.developer.components.routeToDevTool
 import com.frerox.toolz.ui.screens.todo.TodoViewModel
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
@@ -2171,9 +2176,29 @@ fun ToolGridCard(
     onLongClick: () -> Unit = {},
 ) {
     val vibrationManager = LocalVibrationManager.current
+
+    // DEV-SPOOF: sandboxed tool → small red star + long-press quick-fix
+    // ("this data is fake") instead of the default long-press action.
+    val spoofVm: SpoofQuickFixViewModel = hiltViewModel()
+    val sandboxes by spoofVm.activeSandboxes.collectAsStateWithLifecycle()
+    val devTool = remember(item.route) { routeToDevTool(item.route) }
+    val spoofed = devTool != null && devTool in sandboxes
+    var showSpoofFix by remember { mutableStateOf(false) }
+    if (showSpoofFix && devTool != null) {
+        SpoofQuickFixDialog(
+            tool = devTool,
+            onDismiss = { showSpoofFix = false },
+            onDisable = { spoofVm.disableSandbox(devTool) },
+            onOpenDeveloperOptions = { onNavigate("developer_mode") },
+        )
+    }
+
     ExpressiveCard(
         onClick     = { vibrationManager?.vibrateClick(); onNavigate(item.route) },
-        onLongClick = { vibrationManager?.vibrateLongClick(); onLongClick() },
+        onLongClick = {
+            vibrationManager?.vibrateLongClick()
+            if (spoofed) showSpoofFix = true else onLongClick()
+        },
         modifier    = modifier.height(110.dp),
         shape       = RoundedCornerShape(24.dp), // More squared for grid
         containerColor = item.color.copy(alpha = 0.08f),
@@ -2200,6 +2225,14 @@ fun ToolGridCard(
                     letterSpacing = 0.5.sp,
                     maxLines      = 1,
                     overflow      = TextOverflow.Ellipsis)
+            }
+            if (spoofed) {
+                // DEV-SPOOF: top-right red star — this card's data is fake.
+                SpoofSandboxStar(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(10.dp),
+                )
             }
         }
     }
@@ -2229,9 +2262,29 @@ fun ToolListCard(
     onLongClick: () -> Unit = {},
 ) {
     val vibrationManager = LocalVibrationManager.current
+
+    // DEV-SPOOF: sandboxed tool → red star (right center) + long-press
+    // quick-fix ("this data is fake") instead of the default action.
+    val spoofVm: SpoofQuickFixViewModel = hiltViewModel()
+    val sandboxes by spoofVm.activeSandboxes.collectAsStateWithLifecycle()
+    val devTool = remember(item.route) { routeToDevTool(item.route) }
+    val spoofed = devTool != null && devTool in sandboxes
+    var showSpoofFix by remember { mutableStateOf(false) }
+    if (showSpoofFix && devTool != null) {
+        SpoofQuickFixDialog(
+            tool = devTool,
+            onDismiss = { showSpoofFix = false },
+            onDisable = { spoofVm.disableSandbox(devTool) },
+            onOpenDeveloperOptions = { onNavigate("developer_mode") },
+        )
+    }
+
     ExpressiveCard(
         onClick     = { vibrationManager?.vibrateClick(); onNavigate(item.route) },
-        onLongClick = { vibrationManager?.vibrateLongClick(); onLongClick() },
+        onLongClick = {
+            vibrationManager?.vibrateLongClick()
+            if (spoofed) showSpoofFix = true else onLongClick()
+        },
         modifier    = Modifier.fillMaxWidth().height(84.dp),
         shape       = ExtraLargeExpressiveShape, // Matching grid cards
         containerColor = item.color.copy(alpha = 0.08f), // Use tool color subtly
@@ -2256,6 +2309,11 @@ fun ToolListCard(
                     maxLines   = 1,
                     overflow   = TextOverflow.Ellipsis,
                     fontWeight = FontWeight.Bold)
+            }
+            if (spoofed) {
+                // DEV-SPOOF: red star, right center — this card's data is fake.
+                SpoofSandboxStar()
+                Spacer(Modifier.width(6.dp))
             }
             Icon(Icons.AutoMirrored.Rounded.ArrowForwardIos, null,
                 modifier = Modifier.size(14.dp).alpha(0.26f))
