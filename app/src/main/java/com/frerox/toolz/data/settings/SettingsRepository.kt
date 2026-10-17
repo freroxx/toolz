@@ -2057,28 +2057,31 @@ class SettingsRepository @Inject constructor(
         dataStore.edit { it[spoofKeyFor(prefKey)] = enabled }
     }
 
-    suspend fun clearAllSpoofs() {
+    /** Arms/disarms every tool spoof flag with one atomic write. */
+    suspend fun setAllSpoofs(enabled: Boolean) {
         dataStore.edit {
-            it[SPOOF_BATTERY] = false
-            it[SPOOF_DEVICE] = false
-            it[SPOOF_NETWORK] = false
-            it[SPOOF_STEPS] = false
-            it[SPOOF_SENSORS] = false
-            it[SPOOF_MUSIC] = false
-            it[SPOOF_DOWNLOADER] = false
-            it[SPOOF_CLEANER] = false
-            it[SPOOF_NOTIFICATIONS] = false
-            it[SPOOF_CLIPBOARD] = false
-            it[SPOOF_TASKS] = false
-            it[SPOOF_QR] = false
-            it[SPOOF_TIMERS] = false
-            it[SPOOF_UPDATE_NEWS] = false
-            it[SPOOF_WHISPER] = false
-            it[SPOOF_SEARCH] = false
-            it[SPOOF_FILES] = false
-            it[SPOOF_SYSTEM] = false
+            it[SPOOF_BATTERY] = enabled
+            it[SPOOF_DEVICE] = enabled
+            it[SPOOF_NETWORK] = enabled
+            it[SPOOF_STEPS] = enabled
+            it[SPOOF_SENSORS] = enabled
+            it[SPOOF_MUSIC] = enabled
+            it[SPOOF_DOWNLOADER] = enabled
+            it[SPOOF_CLEANER] = enabled
+            it[SPOOF_NOTIFICATIONS] = enabled
+            it[SPOOF_CLIPBOARD] = enabled
+            it[SPOOF_TASKS] = enabled
+            it[SPOOF_QR] = enabled
+            it[SPOOF_TIMERS] = enabled
+            it[SPOOF_UPDATE_NEWS] = enabled
+            it[SPOOF_WHISPER] = enabled
+            it[SPOOF_SEARCH] = enabled
+            it[SPOOF_FILES] = enabled
+            it[SPOOF_SYSTEM] = enabled
         }
     }
+
+    suspend fun clearAllSpoofs() = setAllSpoofs(false)
 
     /**
      * Version-change guard: if [currentVersionCode] differs from stored,

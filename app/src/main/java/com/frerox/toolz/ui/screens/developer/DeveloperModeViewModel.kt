@@ -208,6 +208,17 @@ class DeveloperModeViewModel @Inject constructor(
         repository.clearAllSpoofs()
         _lastAction.value = "All spoofs OFF — real data restored"
     }
+
+    /**
+     * Spoof-all hero action: master ON + all 18 flags ON, so the app
+     * relaunches into full "Spoofed mode" (the caller performs the
+     * relaunch right after this suspends, once the writes have landed).
+     */
+    suspend fun spoofAll() {
+        repository.setDeveloperModeEnabled(true)
+        repository.setAllSpoofs(true)
+        _lastAction.value = "Spoofed mode armed — all 18 sandboxes ON"
+    }
     fun resetAll() = viewModelScope.launch {
         repository.resetDeveloperMode()
         _lastAction.value = "Developer mode reset"

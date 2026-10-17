@@ -1534,7 +1534,15 @@ fun SettingsScreen(
 
                     // 12. Section: ABOUT
                     StaggeredEntrance(index = 12) {
-                        AboutSection(onCheckUpdate = onNavigateToUpdate, onNewsClick = onNavigateToNews)
+                        AboutSection(
+                            onCheckUpdate = onNavigateToUpdate,
+                            onNewsClick = onNavigateToNews,
+                            // Mirrors the console state: "V1.2.0 - Spoofed - Developer Mode".
+                            statusSuffix = buildString {
+                                if (developerModeEnabled && devActiveSpoofs > 0) append(" - Spoofed")
+                                if (developerModeEnabled) append(" - Developer Mode")
+                            },
+                        )
                     }
 
                     Spacer(modifier = Modifier.height(80.dp))
@@ -1812,7 +1820,11 @@ fun SearchField(query: String, onQueryChange: (String) -> Unit) {
 }
 
 @Composable
-fun AboutSection(onCheckUpdate: () -> Unit, onNewsClick: () -> Unit = {}) {
+fun AboutSection(
+    onCheckUpdate: () -> Unit,
+    onNewsClick: () -> Unit = {},
+    statusSuffix: String = "",
+) {
     val context = LocalContext.current
     val vibrationManager = LocalVibrationManager.current
 
@@ -1843,7 +1855,13 @@ fun AboutSection(onCheckUpdate: () -> Unit, onNewsClick: () -> Unit = {}) {
             Spacer(modifier = Modifier.height(20.dp))
             Text(stringResource(R.string.st_About_Toolz), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
             @Suppress("DEPRECATION")
-            Text("V${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 3.sp)
+            Text(
+                "V${BuildConfig.VERSION_NAME}$statusSuffix",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Black,
+                color = MaterialTheme.colorScheme.primary,
+                letterSpacing = 1.sp,
+            )
 
             Spacer(modifier = Modifier.height(20.dp))
 

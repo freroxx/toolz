@@ -45,6 +45,7 @@ import androidx.compose.material.icons.rounded.Forum
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.RestartAlt
+import androidx.compose.material.icons.rounded.Rocket
 import androidx.compose.material.icons.rounded.Science
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Tune
@@ -74,6 +75,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -110,6 +112,7 @@ import com.frerox.toolz.ui.screens.developer.components.TelemetryCard
 import com.frerox.toolz.ui.screens.developer.components.DevCommand
 import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.ui.theme.toolzBackground
+import kotlinx.coroutines.launch
 
 private enum class DevTab(val title: String) {
     HOME("Home"),
@@ -203,6 +206,17 @@ fun DeveloperModeScreen(
     var dangerArmed by remember { mutableStateOf(false) }
     var showDevEnableNotice by remember { mutableStateOf(false) }
 
+    // "Spoof all" hero action: arms master + all 18 flags, then recreates the
+    // Activity so the app relaunches straight into full Spoofed mode.
+    val scope = rememberCoroutineScope()
+    val spoofAllAndRelaunch: () -> Unit = {
+        vibrationManager?.vibrateLongClick()
+        scope.launch {
+            viewModel.spoofAll()
+            try { activity?.recreate() } catch (_: Exception) { }
+        }
+    }
+
     // Gate: the console is unreachable while the master switch is OFF.
     // This covers every entry path (Settings, shake, watermark banner tap,
     // stale back stack). Enabling has to go through the warning dialog.
@@ -270,6 +284,7 @@ fun DeveloperModeScreen(
 
     val commands = buildList {
         add(DevCommand("Toggle master ${if (devOn) "off" else "on"}", "Developer mode switch") { viewModel.setDevMode(!devOn) })
+        add(DevCommand("Spoof all + relaunch", "${DevToolId.entries.size} sandboxes armed, app relaunches") { spoofAllAndRelaunch() })
         add(DevCommand("Turn all spoofs off", "Real data everywhere") { viewModel.clearAllSpoofs() })
         if (!devOn) add(DevCommand("Enable developer mode", "Show warning first") { showDevEnableNotice = true })
         add(DevCommand("Copy bug report", "Local text report") { viewModel.copyBugReport(info) })
@@ -353,11 +368,12 @@ fun DeveloperModeScreen(
                         if (enabled) showDevEnableNotice = true else viewModel.setDevMode(false)
                     },
                     onOpenConfigurator = { configuratorFor = it },
-                    onOpenRoute = onOpenRoute,
+                    onOpenSpoofs = { tab = 1 },
                     refreshStorage = {
                         viewModel.refreshStorageInfo()
                         viewModel.refreshTableCounts()
                     },
+                    onSpoofAll = spoofAllAndRelaunch,
                     viewModel = viewModel,
                 )
                 DevTab.SPOOFS -> SpoofsTabRoot(
@@ -367,6 +383,7 @@ fun DeveloperModeScreen(
                     viewModel = viewModel,
                     onOpenConfigurator = { configuratorFor = it },
                     onSetSpoof = viewModel::setSpoof,
+                    onSpoofAll = spoofAllAndRelaunch,
                 )
                 DevTab.LABS -> LabsTab(
                     devOn = devOn,
@@ -448,8 +465,9 @@ private fun HomeTab(
     params: SpoofParams,
     onSetDevMode: (Boolean) -> Unit,
     onOpenConfigurator: (DevToolId) -> Unit,
-    onOpenRoute: (String) -> Unit,
+    onOpenSpoofs: () -> Unit,
     refreshStorage: () -> Unit,
+    onSpoofAll: () -> Unit,
     viewModel: DeveloperModeViewModel,
 ) {
     val vibrationManager = LocalVibrationManager.current
@@ -497,12 +515,13 @@ private fun HomeTab(
             DevCard {
                 DevCardTitle("Quick actions")
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    DevBtn("Spoof all", Icons.Rounded.Rocket, enabled = devOn) { onSpoofAll() }
                     DevBtn("Bug report", Icons.Rounded.BugReport) { viewModel.copyBugReport(info) }
                     DevBtn("Share", Icons.Rounded.Share) { viewModel.shareBugReport(info) }
-                    DevBtn("Discord", Icons.Rounded.Forum) { DevUiOverrider.openToolzDiscord(context) }
                 }
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    DevBtn("Discord", Icons.Rounded.Forum) { DevUiOverrider.openToolzDiscord(context) }
                     DevBtn(
                         if (activeCount > 0) "All spoofs off ($activeCount)" else "All spoofs off",
                         Icons.Rounded.Science,
@@ -526,14 +545,19 @@ private fun HomeTab(
         if (activeCount == 0) {
             item {
                 DevCard {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Rounded.Info, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(10.dp))
-                        Text(
-                            if (devOn) "No sandbox active — every screen is real data. Tap the Spoofs tab to arm one."
-                            else "Enable Developer Mode to arm sandboxes.",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.Info, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                "No sandbox active — every screen is real data.",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        TextButton(onClick = onOpenSpoofs) {
+                            Text("OPEN SPOOFS TAB →", fontWeight = FontWeight.Black, fontSize = 12.sp)
+                        }
                     }
                 }
             }
@@ -575,6 +599,7 @@ private fun SpoofsTabRoot(
     viewModel: DeveloperModeViewModel,
     onOpenConfigurator: (DevToolId) -> Unit,
     onSetSpoof: (DevToolId, Boolean) -> Unit,
+    onSpoofAll: () -> Unit,
 ) {
     val query by viewModel.searchQuery.collectAsState()
     val tools = remember(query) {
@@ -611,6 +636,9 @@ private fun SpoofsTabRoot(
                             else "$activeCount active — tap a tile to configure its fixtures",
                             style = MaterialTheme.typography.bodySmall,
                         )
+                    }
+                    TextButton(enabled = devOn, onClick = onSpoofAll) {
+                        Text("SPOOF ALL", fontWeight = FontWeight.Black, fontSize = 12.sp)
                     }
                     TextButton(enabled = devOn && activeCount > 0, onClick = { viewModel.clearAllSpoofs() }) {
                         Text("TURN ALL OFF", fontWeight = FontWeight.Black, fontSize = 12.sp)
