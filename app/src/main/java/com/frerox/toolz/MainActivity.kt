@@ -241,7 +241,7 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
                 } catch (_: Exception) { false }
                 if (crashNext) {
                     try { settingsRepository.setDevCrashOnNextLaunch(false) } catch (_: Exception) { }
-                    throw RuntimeException("[SPOOF TEST] crash-on-next-launch flag was set")
+                    throw RuntimeException("[DEMO TEST] crash-on-next-launch flag was set")
                 }
             } catch (e: RuntimeException) {
                 throw e

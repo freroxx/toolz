@@ -1,28 +1,17 @@
 /*
  * Copyright (C) 2026 Toolz Contributors
  *
- * Global spoof watermark overlay. Mounted once around the NavHost: whenever
- * the current route belongs to a sandboxed tool, a banner floats at the top.
- * Central placement means new screens can never forget their watermark —
- * the route→tool map below is the single source of truth.
+ * Route → demo-tool mapping + (formerly) the watermark overlay. WATERMARKS ARE
+ * GONE: demo mode is silent by design — the fake data IS the giveaway, and a
+ * banner on every screen defeats the purpose of a realistic showcase. The
+ * routeToDevTool map below stays: the dashboard star logic and console reuse
+ * it as the single source of truth.
  */
 
 package com.frerox.toolz.ui.screens.developer.components
 
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.navigation.compose.currentBackStackEntryAsState
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
 import com.frerox.toolz.data.developer.DevToolId
-import com.frerox.toolz.ui.screens.developer.SpoofStateViewModel
 
 /** Maps a nav route (without args) to its spoofable tool, or null. */
 fun routeToDevTool(route: String?): DevToolId? {
@@ -55,73 +44,35 @@ fun routeToDevTool(route: String?): DevToolId? {
 }
 
 /**
- * Wraps app content and shows a sandbox banner ABOVE the current tool screen
- * whenever its tool is actively sandboxed — it pushes content down instead
- * of floating over it, so no app-bar or button is ever covered. Tap opens
- * the dev console.
+ * Kept for call-site compatibility (mounted around the NavHost and per-screen
+ * hosts) but renders CONTENT ONLY — no banner, no overlay, nothing appears on
+ * tool screens while demo mode is armed.
  */
 @Composable
 fun SpoofWatermarkOverlay(
     currentRoute: String?,
-    onOpenControls: () -> Unit,
+    onOpenControls: (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
-    Column(Modifier.fillMaxSize()) {
-        val tool = routeToDevTool(currentRoute)
-        if (tool != null) {
-            val vm: SpoofStateViewModel = hiltViewModel()
-            val sandboxed by vm.isSandbox(tool).collectAsState(initial = false)
-            if (sandboxed) {
-                SpoofBanner(
-                    modifier = Modifier
-                        .statusBarsPadding()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    text = "${tool.title.uppercase()} SANDBOX — fake local data",
-                    onOpenControls = onOpenControls,
-                )
-            }
-        }
-        Box(Modifier.weight(1f, fill = true)) { content() }
-    }
+    content()
 }
 
-/**
- * NavController overload: observes the back stack itself. Mount once around
- * the app [androidx.navigation.NavHost] and every spoofed tool is watermarked.
- */
+/** NavController overload: observes the back stack itself. */
 @Composable
 fun SpoofWatermarkOverlay(
     navController: androidx.navigation.NavHostController,
     onOpenControls: () -> Unit,
     content: @Composable () -> Unit,
 ) {
-    val entry by navController.currentBackStackEntryAsState()
-    SpoofWatermarkOverlay(
-        currentRoute = entry?.destination?.route,
-        onOpenControls = onOpenControls,
-        content = content,
-    )
+    content()
 }
 
-/**
- * Per-screen host for tool ViewModels that want the banner inline instead of
- * floating. One line in the screen, no DataStore access needed.
- */
+/** Per-screen host variant — content only, no banner. */
 @Composable
 fun SandboxWatermarkHost(
     tool: DevToolId,
     onOpenControls: (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
-    val vm: SpoofStateViewModel = hiltViewModel()
-    val sandboxed by vm.isSandbox(tool).collectAsState(initial = false)
-    androidx.compose.foundation.layout.Column(Modifier.fillMaxSize()) {
-        if (sandboxed) {
-            SpoofBanner(
-                text = "${tool.title.uppercase()} SANDBOX — fake local data",
-                onOpenControls = onOpenControls,
-            )
-        }
-        content()
-    }
+    content()
 }

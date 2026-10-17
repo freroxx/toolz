@@ -125,7 +125,7 @@ import kotlinx.coroutines.launch
 
 private enum class DevTab(val title: String) {
     HOME("Home"),
-    SPOOFS("Spoofs"),
+    SPOOFS("Demo Mode"),
     LABS("Labs"),
     SYSTEM("System"),
 }
@@ -265,7 +265,7 @@ fun DeveloperModeScreen(
         AlertDialog(
             onDismissRequest = { showResetDialog = false },
             title = { Text("Reset developer mode?", fontWeight = FontWeight.Black) },
-            text = { Text("Turns master OFF and clears all 18 spoof flags, crash history included. Slider values are kept. Real data returns instantly.") },
+            text = { Text("Turns master OFF and clears all 18 demo flags, crash history included. Slider values are kept. Real data returns instantly.") },
             confirmButton = {
                 Button(
                     onClick = {
@@ -299,19 +299,19 @@ fun DeveloperModeScreen(
 
     val commands = buildList {
         add(DevCommand("Toggle master ${if (devOn) "off" else "on"}", "Developer mode switch") { viewModel.setDevMode(!devOn) })
-        add(DevCommand("Spoof all + relaunch", "${DevToolId.entries.size} sandboxes armed, app relaunches") { spoofAllAndRelaunch() })
-        add(DevCommand("Turn all spoofs off", "Real data everywhere") { viewModel.clearAllSpoofs() })
+        add(DevCommand("Demo all + relaunch", "${DevToolId.entries.size} tool sandboxes armed, app relaunches") { spoofAllAndRelaunch() })
+        add(DevCommand("Turn all demos off", "Real data everywhere") { viewModel.clearAllSpoofs() })
         if (!devOn) add(DevCommand("Enable developer mode", "Show warning first") { showDevEnableNotice = true })
         add(DevCommand("Copy bug report", "Local text report") { viewModel.copyBugReport(info) })
         add(DevCommand("Share bug report", "System share sheet — you paste it") { viewModel.shareBugReport(info) })
         add(DevCommand("Open Toolz Discord", "Paste the report there") { DevUiOverrider.openToolzDiscord(context) })
         add(DevCommand("Refresh logcat", "Read last 300 lines") { viewModel.refreshLogcat() })
         add(DevCommand("Clear logcat", "logcat -c (local)") { viewModel.clearLogcat() })
-        add(DevCommand("Fire alarm notification", "[SPOOF TEST] tagged") {
+        add(DevCommand("Fire alarm notification", "[DEMO TEST] tagged") {
             viewModel.sendSpoofNotification(com.frerox.toolz.util.NotificationHelper.CHANNEL_TOOL_ALARM, "Alarm", "Test from palette", 60109)
         })
         add(DevCommand("Flood x6 notifications", "Stress test") { viewModel.floodNotifications() })
-        add(DevCommand("Cancel dev notifications", "Removes [SPOOF TEST] posts") { viewModel.cancelDevNotifications() })
+        add(DevCommand("Cancel dev notifications", "Removes [DEMO TEST] posts") { viewModel.cancelDevNotifications() })
         add(DevCommand("Clear cache", "App cache dir only") { viewModel.clearCache() })
         add(DevCommand("Dump prefs", "Sensitive values redacted") { viewModel.refreshPrefs() })
         add(DevCommand("Open system dev options", "Android settings") { DevUiOverrider.openSystemDeveloperOptions(context) })
@@ -320,7 +320,7 @@ fun DeveloperModeScreen(
         add(DevCommand("Crash: NPE", "Lab test", danger = true) { showCrashConfirm = "NPE" })
         add(DevCommand("Crash: ANR 6s", "Lab test", danger = true) { showCrashConfirm = "ANR" })
         add(DevCommand("Crash: OOM", "Lab test", danger = true) { showCrashConfirm = "OOM" })
-        add(DevCommand("Reset developer mode", "Master off + spoofs off", danger = true) { showResetDialog = true })
+        add(DevCommand("Reset developer mode", "Master off + demos off", danger = true) { showResetDialog = true })
     }
 
     Scaffold(
@@ -338,7 +338,7 @@ fun DeveloperModeScreen(
                 },
                 actions = {
                     if (devOn && activeCount > 0) {
-                        SpoofChip(modifier = Modifier.padding(end = 4.dp), label = "$activeCount SPOOF")
+                        SpoofChip(modifier = Modifier.padding(end = 4.dp), label = "$activeCount DEMO")
                     }
                     IconButton(
                         onClick = { vibrationManager?.vibrateClick(); paletteOpen = true },
@@ -552,7 +552,7 @@ private fun HomeTab(
             DevCard {
                 DevCardTitle("Quick actions")
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    DevBtn("Spoof all", Icons.Rounded.Rocket, primary = true, enabled = devOn, modifier = Modifier.weight(1f)) { onSpoofAll() }
+                    DevBtn("Demo all", Icons.Rounded.Rocket, primary = true, enabled = devOn, modifier = Modifier.weight(1f)) { onSpoofAll() }
                     DevBtn("Bug report", Icons.Rounded.BugReport, modifier = Modifier.weight(1f)) { viewModel.copyBugReport(info) }
                     DevBtn("Share", Icons.Rounded.Share, modifier = Modifier.weight(1f)) { viewModel.shareBugReport(info) }
                 }
@@ -594,7 +594,7 @@ private fun HomeTab(
                         }
                         Spacer(Modifier.height(6.dp))
                         TextButton(onClick = onOpenSpoofs) {
-                            Text("OPEN SPOOFS TAB →", fontWeight = FontWeight.Black, fontSize = 12.sp)
+                            Text("OPEN DEMO TAB →", fontWeight = FontWeight.Black, fontSize = 12.sp)
                         }
                     }
                 }
@@ -622,7 +622,7 @@ private fun HomeTab(
                             Column(Modifier.weight(1f)) {
                                 Text(tool.title, fontWeight = FontWeight.Bold)
                                 Text(
-                                    "SANDBOX • ${spoofFixtureSummary(tool, params)}",
+                                    "DEMO • ${spoofFixtureSummary(tool, params)}",
                                     fontSize = 11.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -714,7 +714,7 @@ private fun SpoofsTabRoot(
                         }
                     }
                     TextButton(enabled = devOn, onClick = onSpoofAll) {
-                        Text("SPOOF ALL", fontWeight = FontWeight.Black, fontSize = 12.sp)
+                        Text("DEMO ALL", fontWeight = FontWeight.Black, fontSize = 12.sp)
                     }
                     TextButton(enabled = devOn && activeCount > 0, onClick = { viewModel.clearAllSpoofs() }) {
                         Text("TURN ALL OFF", fontWeight = FontWeight.Black, fontSize = 12.sp)
@@ -795,7 +795,7 @@ private fun LabsTab(
         }
 
         DevCard {
-            DevCardTitle("Notification lab ([SPOOF TEST])")
+            DevCardTitle("Notification lab ([DEMO TEST])")
             Text("Posted to real channels for look/sound checks; tagged, IDs 60001+.", style = MaterialTheme.typography.bodySmall)
             Spacer(Modifier.height(8.dp))
             listOf(
@@ -1090,7 +1090,7 @@ private fun SystemTab(
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 DevBtn(
-                    "Turn off all spoofs",
+                    "Turn off all demos",
                     Icons.Rounded.Science,
                     danger = dangerArmed,
                     enabled = dangerArmed && devOn,
@@ -1104,7 +1104,7 @@ private fun SystemTab(
             }
             Spacer(Modifier.height(6.dp))
             Text(
-                "Auto-reset: dev mode + all spoofs + crash history turn OFF on every version bump. Onboarding reset also clears dev flags.",
+                "Auto-reset: dev mode + all demo sandboxes + crash history turn OFF on every version bump. Onboarding reset also clears dev flags.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1152,7 +1152,7 @@ private fun DevLockedPanel(
             letterSpacing = 1.sp,
         )
         Text(
-            "Developer Mode is OFF. Every spoof flag is inert and every screen shows real data. " +
+            "Developer Mode is OFF. Toolz Demo Mode is unavailable and every screen shows real data. " +
                 "Turn it on to arm the console — everything stays on this device.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1183,7 +1183,7 @@ private fun DevEnableNoticeDialog(
         title = { Text("Enable Developer Mode?", fontWeight = FontWeight.Black, letterSpacing = 1.sp) },
         text = {
             Text(
-                "• Internal diagnostics + LOCAL-ONLY spoofs (fake data never leaves the device).\n" +
+                "• Internal diagnostics + Toolz Demo Mode (fake data never leaves the device).\n" +
                     "• Crash lab, test notifications and data labs can disturb the app until you turn them off.\n" +
                     "• Auto-disables after every app update.\n\n" +
                     "No telemetry: bug reports are copied/shared by you only.",

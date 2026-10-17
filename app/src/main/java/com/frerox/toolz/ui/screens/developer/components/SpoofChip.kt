@@ -31,15 +31,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * Required watermark on every spoofed tool screen. Small, honest, greppable.
+ * Demo chip used by the console (armed-indicator on tiles/headers). Small,
+ * greppable. The watermark banners were removed — demo mode is silent.
  */
 @Composable
 fun SpoofChip(
     modifier: Modifier = Modifier,
-    label: String = "SPOOF • LOCAL",
+    label: String = "DEMO • LOCAL",
 ) {
     Surface(
-        modifier = modifier.semantics { contentDescription = "Spoofed test data" },
+        modifier = modifier.semantics { contentDescription = "Toolz Demo Mode card" },
         shape = RoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.errorContainer,
         contentColor = MaterialTheme.colorScheme.onErrorContainer,

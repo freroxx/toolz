@@ -210,7 +210,7 @@ class DeveloperModeViewModel @Inject constructor(
     }
     fun clearAllSpoofs() = viewModelScope.launch {
         repository.clearAllSpoofs()
-        _lastAction.value = "All spoofs OFF — real data restored"
+        _lastAction.value = "All demos OFF — real data restored"
     }
 
     /**
@@ -221,7 +221,7 @@ class DeveloperModeViewModel @Inject constructor(
     suspend fun spoofAll() {
         repository.setDeveloperModeEnabled(true)
         repository.setAllSpoofs(true)
-        _lastAction.value = "Spoofed mode armed — all 18 sandboxes ON"
+        _lastAction.value = "Toolz Demo Mode armed — all 18 tool sandboxes ON"
     }
     fun resetAll() = viewModelScope.launch {
         repository.resetDeveloperMode()
@@ -259,7 +259,7 @@ class DeveloperModeViewModel @Inject constructor(
         return "## Toolz bug report\n" +
             "- App: Toolz ${info.versionName} (${info.versionCode})\n" +
             "- Device: ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} (SDK ${android.os.Build.VERSION.SDK_INT})\n" +
-            "- Active dev spoofs: $active\n" +
+            "- Active demo sandboxes: $active\n" +
             "- Heap: ${info.heapMb} | Native: ${info.nativeHeapMb} | Threads: ${info.threads}\n" +
             "- Uptime: ${info.uptimeMs / 1000}s\n" +
             "- Crash-lab history (test only): \n$crashSection\n\n" +
@@ -284,14 +284,14 @@ class DeveloperModeViewModel @Inject constructor(
         }
     }
 
-    // ---- Notification lab: every post is tagged [SPOOF TEST] on private IDs ----
+    // ---- Notification lab: every post is tagged [DEMO TEST] on private IDs ----
     private val devPostedIds = mutableSetOf<Int>()
 
     fun sendSpoofNotification(channelId: String, title: String, body: String, id: Int) {
         try {
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             val notif = NotificationHelper.baseBuilder(context, channelId)
-                .setContentTitle("[SPOOF TEST] $title")
+                .setContentTitle("[DEMO TEST] $title")
                 .setContentText(body)
                 .setAutoCancel(true)
                 .build()
@@ -419,13 +419,13 @@ class DeveloperModeViewModel @Inject constructor(
             }
             delay(200)
             when (type) {
-                "NPE" -> throw NullPointerException("[SPOOF TEST] Developer crash lab NPE")
+                "NPE" -> throw NullPointerException("[DEMO TEST] Developer crash lab NPE")
                 "ANR" -> Thread.sleep(6000)
                 "OOM" -> {
                     val hog = mutableListOf<ByteArray>()
                     repeat(40) { hog.add(ByteArray(16 * 1024 * 1024)) }
                 }
-                else -> throw IllegalStateException("[SPOOF TEST] Developer crash lab: $type")
+                else -> throw IllegalStateException("[DEMO TEST] Developer crash lab: $type")
             }
         }
     }
@@ -436,7 +436,7 @@ class DeveloperModeViewModel @Inject constructor(
     }
 
     fun logNonFatal() {
-        android.util.Log.e("DevCrashLab", "[SPOOF TEST] non-fatal test exception", IllegalStateException("test"))
+        android.util.Log.e("DevCrashLab", "[DEMO TEST] non-fatal test exception", IllegalStateException("test"))
         _lastAction.value = "Non-fatal logged to logcat (DevCrashLab)"
     }
 

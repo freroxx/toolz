@@ -153,7 +153,7 @@ fun SpoofToolTile(
             }
             Spacer(Modifier.height(6.dp))
             Text(
-                if (active && devOn) "SANDBOX • ${spoofFixtureSummary(tool, params)}"
+                if (active && devOn) "DEMO • ${spoofFixtureSummary(tool, params)}"
                 else tool.subtitle,
                 fontSize = 11.sp,
                 style = MaterialTheme.typography.bodySmall,
@@ -179,7 +179,7 @@ fun SpoofToolTile(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                if (active && devOn) SpoofChip(label = "SPOOF • LOCAL")
+                if (active && devOn) SpoofChip(label = "DEMO • LOCAL")
                 Text(
                     "Configure →",
                     modifier = Modifier.weight(1f),

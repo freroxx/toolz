@@ -56,7 +56,7 @@ fun BatteryInfoScreen(
     onBack: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsState()
-    val isSpoofed by viewModel.isSpoofed.collectAsState(initial = false)
+    // DEV-SPOOF: dummy battery fixtures swap in without a single real read.
     val performanceMode = LocalPerformanceMode.current
 
     DisposableEffect(Unit) {
@@ -116,10 +116,8 @@ fun BatteryInfoScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(24.dp)
             ) {
-                // DEV-SPOOF watermark: required on every sandboxed tool.
-                if (isSpoofed) {
-                    com.frerox.toolz.ui.screens.developer.components.SpoofBanner()
-                }
+                // DEV-SPOOF: no watermark — demo mode is silent; the fake data
+                // itself is the showcase state.
                 // Main Level Gauge
                 StaggeredEntrance(index = 0) {
                     ExpressiveBatteryGauge(

@@ -62,12 +62,12 @@ class SpoofQuickFixViewModel @Inject constructor(
     }
 }
 
-/** Small red star marking a spoofed tool's card (top-right on grid, right on list). */
+/** Small red star marking a demo tool's card (top-right on grid, right on list). */
 @Composable
 fun SpoofSandboxStar(modifier: Modifier = Modifier) {
     Icon(
         Icons.Rounded.Star,
-        contentDescription = "Spoofed: fake local data",
+        contentDescription = "Toolz Demo Mode: fake local data",
         tint = MaterialTheme.colorScheme.error,
         modifier = modifier
             .size(18.dp)
@@ -78,7 +78,7 @@ fun SpoofSandboxStar(modifier: Modifier = Modifier) {
     )
 }
 
-/** DEV-SPOOF: "this tool's data is fake" — disable the sandbox or open the console. */
+/** DEV-SPOOF: "this tool's data is fake demo data" — exit demo or open the console. */
 @Composable
 fun SpoofQuickFixDialog(
     tool: DevToolId,
@@ -95,17 +95,18 @@ fun SpoofQuickFixDialog(
                 tint = MaterialTheme.colorScheme.error,
             )
         },
-        title = { Text("${tool.title} is fake and spoofed") },
+        title = { Text("Toolz Demo Mode is on for ${tool.title}") },
         text = {
             Text(
-                "This tool's info is fake and spoofed for testing — nothing was " +
-                    "saved, deleted, or sent anywhere. Press here to disable it and " +
-                    "real data returns instantly. Full sliders live in developer options.",
+                "This tool is running on fake demo data so you can showcase Toolz safely — " +
+                    "nothing was saved, deleted, or sent anywhere. Press here to exit demo mode " +
+                    "for this tool and real data returns instantly. All demo sliders live in " +
+                    "developer options.",
             )
         },
         confirmButton = {
             TextButton(onClick = { onDisable(); onDismiss() }) {
-                Text("Disable spoof", fontWeight = FontWeight.Bold)
+                Text("Exit demo", fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
