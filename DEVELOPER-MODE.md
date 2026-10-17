@@ -1,18 +1,19 @@
 # Developer Mode
 
-Internal console for diagnostics + controlled local-only spoofs. Ships in release, gated behind a visible Settings toggle with a warning popup.
+Internal console for diagnostics + controlled local-only spoofs. Ships in release, gated behind a visible Settings toggle with a warning popup. **No telemetry of any kind**: bug reports are built as local text and leave the device only via clipboard / the system share sheet, with the Toolz Discord (`https://discord.gg/aAswRUerwh` — same link as the Settings DISCORD button) as the handoff where the user pastes them.
 
 ## Entry
 
 - Settings → DEVELOPER section (`SettingsScreen.kt`, index 11): master toggle + `Developer console` row → `developer_mode` route (`Screen.DeveloperMode`, wired in `MainActivity.kt` `ToolzNavHost`).
-- Enabling shows a warning dialog (local-only fakes, crash/wipe risks, auto-disable on update). Disabling is instant, no dialog.
+- Enabling shows a warning dialog (local-only fakes, crash/wipe risks, auto-disable on update) — in Settings AND in the console's own power card. Disabling is instant, no dialog.
 - Optional shake-to-open: master ON + toggle ON → accelerometer (2.6g, 2s cooldown) navigates to the console. Zero sensor cost otherwise.
+- The console itself also has a master switch (Home tab) — no Settings round-trip needed.
 
 ## Controlled-spoof contract (the important part)
 
 Spoofs are a **local sandbox, not mocks**:
 
-1. `DeveloperSpoofController` is the only class that reads spoof flags. Master OFF forces every tool to real data.
+1. `DeveloperSpoofController` is the facade tool ViewModels ask; all state is delegated to `SpoofGate` (single hot cache of master + flags + params). Master OFF forces every tool to real data.
 2. Each tool declares a `SpoofNetworkPolicy` (`DevToolId.kt`): `BLOCK_ALL`, `BLOCK_REMOTE_SPECS`, `SENSORS_OFF`, `JOBS_PAUSED`, `LOCAL_ONLY`.
 3. When sandboxed, the real client is **never constructed/called** — fixtures come from RAM (`SpoofParams`, `FakeWhisperSandbox`). Nothing is written to real Room tables.
 4. Every injection is marked `// DEV-SPOOF:` — audit with `grep -rn DEV-SPOOF app/src/main`.
@@ -20,7 +21,7 @@ Spoofs are a **local sandbox, not mocks**:
 
 ### Whisper (exemplar)
 
-`spoof_whisper` + master ON → `WhisperRepository.sendMessage` / `sendEncryptedImage` throw `SpoofSandboxException` **before** touching Supabase; `sendTypingStatus` early-returns. The dev console shows `FakeWhisperSandbox` fixtures (contacts + thread) with an `OFFLINE • NOTHING LEAVES THIS DEVICE` banner. No auth token is read, no realtime channel opens. Turning master OFF discards the thread and re-observes real chats.
+`spoof_whisper` + master ON → `WhisperRepository.sendMessage` / `sendEncryptedImage` throw `SpoofSandboxException` **before** touching Supabase; `sendTypingStatus` early-returns. The console shows `FakeWhisperSandbox` fixtures (contacts + thread, bubbles preview in the configurator) with an `OFFLINE • NOTHING LEAVES THIS DEVICE` banner. Turning master OFF discards the thread and re-observes real chats.
 
 ### Battery (exemplar)
 
@@ -28,20 +29,32 @@ Sandboxed → `BatteryInfoViewModel` skips receiver registration + remote spec f
 
 ## Auto-reset on version change
 
-`SettingsRepository.ensureDeveloperModeVersion()` (called from `MainActivity.onCreate`) disables master + all 18 spoofs + crash/force-offline flags when `VERSION_CODE` changes. Slider values (`SPOOF_PARAMS_JSON`) and the shake toggle survive — they are harmless prefs, not fakes. `resetOnboarding()` also clears dev flags via `resetDeveloperMode()`.
+`SettingsRepository.ensureDeveloperModeVersion()` (called from `MainActivity.onCreate`) disables master + all 18 spoofs + crash/force-offline flags + crash history when `VERSION_CODE` changes. Slider values (`SPOOF_PARAMS_JSON`) and the shake toggle survive — they are harmless prefs, not fakes. `resetDeveloperMode()` behaves the same on demand.
 
-## Console contents
+## Console (Mission Control, 4 tabs)
 
-Status/build (copy/share/bug-template) • 18 spoof toggles + value sliders • Whisper sandbox preview • Crash lab (NPE/ANR/OOM/non-fatal/crash-on-next-launch) • Notification lab (`[SPOOF TEST]`-tagged, 60001+ ID band) • Data lab (logcat viewer, force-offline, mock delay) • Storage/DB inspector (counts only; vault/whisper/key tables redacted) • DataStore inspector (sensitive values redacted) • Navigation lab • UI playground (RTL, font scale, theme force, system dev options link — true layout-bounds need `WRITE_SECURE_SETTINGS`, hence the link) • Language forcer • Endpoint reference (build-time, info only) • Danger zone.
+Fixed top bar: back, live `SPOOF` count chip, **command palette** (`Tune` icon) and **reset**. Tabs: Home / Spoofs / Labs / System.
+
+- **Home**: master power card (+ "LOCAL ONLY • NO TELEMETRY" plate), live telemetry (heap/native/threads/uptime + rolling 48s heap sparkline, `TelemetryCard`), quick actions (copy/share bug report, Discord, all-spoofs-off, refresh storage), active-sandbox list (tap → configurator).
+- **Spoofs**: 2-column tile grid grouped by `DevToolGroup` (Hardware/System-like/Network/App machinery), real icon per tool (`DevToolId.icon`), policy chip, glow border + `SPOOF • LOCAL` chip when armed, own search field. Tap = **bottom-sheet configurator** (`SpoofConfiguratorSheet`) rendered from `SpoofFieldSpec`s in `SpoofToolSpecs.kt` (number sliders / switches / text fields, bounds mirroring `SpoofParams.parse`); all writes are debounced 300ms; "Open tool screen" jumps to the real route. Whisper gets the bubble-thread preview.
+- **Labs**: crash lab (+ **crash history**, last 8 of 20 stored events — DataStore `dev_crash_history_json`, auto-cleared on version bump) • notification lab (`[SPOOF TEST]`-tagged, 60001+ ID band, flood/cancel) • **logcat v2** (`LogcatViewer`: level chips, color-coded lines, live tail 1s — tail auto-stops when the tab or app is no longer visible —, filter, copy/clear; local `logcat -d` reads only) • data lab (verbose, force-offline, mock delay) • deep-link launchpad (searchable, ~37 arg-free routes) • UI playground (segmented buttons: font scale, appearance, language; RTL, perf HUD, endpoints).
+- **System**: status & build (+ copy/share report + shake toggle), storage/DB inspector (counts only; vault/whisper/key tables redacted), DataStore inspector (own search field; sensitive values redacted by `snapshotPrefs()`), **Danger zone with ARM-then-fire** (arm switch first, then all-spoofs-off / reset).
+
+## Bug report & Discord handoff (no telemetry)
+
+- `DeveloperModeViewModel.buildBugReport(info)` → app/device/spoofs/heap/uptime + local crash-lab history. Copyable anywhere in the console.
+- Share = `DevUiOverrider.shareText` (system chooser — the user picks the destination; the app uploads nothing).
+- `DevUiOverrider.openToolzDiscord` opens the same invite the Settings DISCORD button uses (`TOOLZ_DISCORD_URL` = `https://discord.gg/aAswRUerwh`). The user pastes the report there.
 
 ## Testing checklist
 
-- Fresh install: toggle works, warning shows once per enable, console opens.
+- Fresh install: Settings toggle works, warning shows once per enable, console opens; console power card mirrors master.
 - Master OFF mid-spoof → real data, chips gone, fake jobs cancelled.
-- Battery spoof → 7%/overheat fixture + banner; logcat shows `DevSpoof` block lines; no spec fetch.
+- Battery spoof → 7%/overheat fixture + banner; slider in configurator updates the tile summary (debounced, no per-tick DataStore storm).
 - Whisper spoof → send fails closed locally; zero Supabase traffic (verify via logcat + network).
+- Crash lab → event recorded BEFORE the crash, appears in history after relaunch; version bump clears it.
 - Flood → 6 tagged notifications; Cancel clears them.
-- Bump `VERSION_CODE` → master + spoofs reset on next launch.
+- Bump `VERSION_CODE` → master + spoofs + crash history reset on next launch.
 - Export/copy paths contain no vault secrets (redaction lists in `snapshotPrefs()` + table inspector).
 
 ## Watermarks — global overlay (cannot be forgotten)
@@ -63,12 +76,12 @@ Status/build (copy/share/bug-template) • 18 spoof toggles + value sliders • 
 | Network | trigger + monitor guards | `FakeFiber-5G`, slider ping, health 4, VPN on | scans, DNS, ping, traceroute, Shizuku system writes |
 | QR | input prefill | `qrPayload` | — (generator is offline anyway) |
 | Flashlight | `toggleFlashlight` gate + service-state guard | fake SOS toggle | torch hardware, foreground service |
-| Music/Downloader/Cleaner/Vault/Clipboard/Tasks/Timers/Update/Search/Files | global banner + console sliders | params ready (`musicTrack`, `downloadProgress`, `timerSecs`) | VM fixtures queued next |
+| Music/Downloader/Cleaner/Vault/Clipboard/Tasks/Timers/Update/Search/Files | global banner + configurator sliders | params ready (`musicTrack`, `downloadProgress`, `timerSecs`) | VM fixtures queued next |
 
-## Console (redesigned)
+## File map (console)
 
-3 tabs (Spoofs / Labs / System), M3 Expressive `ListItem` + `Switch` rows with live fixture summaries, per-tool sandbox chips in the top bar, debounced sliders (write per drag tick — acceptable; a 300ms debounce is queued polish), `SelectionContainer` on the prefs dump, no hand-rolled rows left.
-
-## Custom photo icon (App Skin → Use photo)
-
-`CustomIconManager` center-crops + EXIF-rotates + downscales to a 512px PNG in app files (location stripped by re-encode). `ToolzMark` renders it for `IconCatalog.CUSTOM_ID`; widgets and pinned shortcuts use the photo. The launcher tile keeps the nearest built-in alias (manifest aliases are fixed at build time — stated in the UI), plus a `ShortcutManager` pinned shortcut carries the exact bitmap to the Home screen.
+- `ui/screens/developer/DeveloperModeScreen.kt` — 4-tab console (the only screen file).
+- `ui/screens/developer/DeveloperModeViewModel.kt` — flows/actions; telemetry tick + heap history, crash history, logcat tail, bug report builder.
+- `ui/screens/developer/SpoofToolSpecs.kt` — per-tool icon, fixture summary, group, open route, editable field specs.
+- `ui/screens/developer/components/` — `TelemetryCard`, `SpoofTileGrid`, `SpoofConfiguratorSheet`, `LogcatViewer`, `CrashHistoryCard`, `CommandPalette`, `DevWidgets`, `SpoofChip`, `RouteSpoofBanner`.
+- `data/developer/` — `DevToolId`, `SpoofParams`, `SpoofGate` (state), `DeveloperSpoofController` (facade), `DevUiOverrider`, `ShakeDetector`, `FakeWhisperSandbox`.

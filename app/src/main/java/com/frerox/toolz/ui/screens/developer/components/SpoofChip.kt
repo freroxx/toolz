@@ -5,6 +5,7 @@
 package com.frerox.toolz.ui.screens.developer.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -19,7 +20,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -64,29 +64,35 @@ fun SpoofBanner(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.9f))
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .let { m -> if (onOpenControls != null) m.clickable(onClick = onOpenControls) else m }
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.92f))
+            .padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Icon(
             Icons.Rounded.Science,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onErrorContainer,
-            modifier = Modifier.size(20.dp),
+            modifier = Modifier.size(15.dp),
         )
         Text(
             text,
             modifier = Modifier.weight(1f),
-            style = MaterialTheme.typography.labelMedium,
+            style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onErrorContainer,
+            maxLines = 1,
         )
         if (onOpenControls != null) {
-            TextButton(onClick = onOpenControls) {
-                Text("CONTROLS", fontWeight = FontWeight.Black, fontSize = 11.sp)
-            }
+            Text(
+                "CONTROLS →",
+                fontWeight = FontWeight.Black,
+                fontSize = 10.sp,
+                letterSpacing = 1.sp,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
         }
     }
 }

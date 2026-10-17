@@ -1,5 +1,10 @@
 /*
  * Copyright (C) 2026 Toolz Contributors
+ *
+ * Developer console ViewModel. Everything here stays LOCAL: logs are read
+ * from local logcat, the bug report is built as text and only leaves the
+ * device via the system share sheet / clipboard when the user chooses.
+ * There is no telemetry of any kind.
  */
 
 package com.frerox.toolz.ui.screens.developer
@@ -17,12 +22,14 @@ import com.frerox.toolz.BuildConfig
 import com.frerox.toolz.data.AppDatabase
 import com.frerox.toolz.data.developer.DevToolId
 import com.frerox.toolz.data.developer.DeveloperSpoofController
+import com.frerox.toolz.data.developer.SpoofGrid
 import com.frerox.toolz.data.developer.SpoofParams
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.util.NotificationHelper
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -32,8 +39,10 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import javax.inject.Inject
 
 data class DevAppInfo(
@@ -44,9 +53,17 @@ data class DevAppInfo(
     val heapMb: String = "",
     val nativeHeapMb: String = "",
     val threads: Int = 0,
+    val heapUsedFraction: Float = 0f,
 )
 
 data class DevTableCount(val name: String, val rows: Int)
+
+/** One crash-lab event. Diagnostics only — stored in DataStore, never uploaded. */
+data class CrashLabEvent(
+    val type: String,
+    val atMs: Long,
+    val note: String = "",
+)
 
 data class DevStorageInfo(
     val cacheBytes: Long = 0L,
@@ -55,8 +72,8 @@ data class DevStorageInfo(
     fun format(bytes: Long): String = when {
         bytes < 1024 -> "${bytes}B"
         bytes < 1024 * 1024 -> "${bytes / 1024}KB"
-        bytes < 1024 * 1024 * 1024 -> "${"%.1f".format(bytes / (1024f * 1024f))}MB"
-        else -> "${"%.2f".format(bytes / (1024f * 1024f * 1024f))}GB"
+        bytes < 1024 * 1024 * 1024 -> "%.1f".format(bytes / (1024f * 1024f)) + "MB"
+        else -> "%.2f".format(bytes / (1024f * 1024f * 1024f)) + "GB"
     }
 }
 
@@ -70,7 +87,12 @@ class DeveloperModeViewModel @Inject constructor(
 
     val devModeEnabled = repository.developerModeEnabled
     val allSpoofFlags = repository.allSpoofFlags
-    val spoofSnapshot: StateFlow<Map<String, Boolean>> = repository.allSpoofFlags
+
+    /** Effective sandbox state per tool (master ON + flag ON), hot. */
+    val spoofSnapshot: StateFlow<Map<DevToolId, Boolean>> = combine(
+        repository.developerModeEnabled,
+        repository.allSpoofFlags,
+    ) { master, flags -> SpoofGrid(master, flags) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
     val activeSandboxCount = spoofController.activeSandboxCount
     val devVerboseLogging = repository.devVerboseLogging
@@ -85,6 +107,25 @@ class DeveloperModeViewModel @Inject constructor(
         .map { SpoofParams.parse(it) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), SpoofParams())
 
+    // ---- Crash lab history (local DataStore, auto-cleared on version bump) ----
+    val crashHistory: StateFlow<List<CrashLabEvent>> = repository.devCrashHistoryJson
+        .map(::parseCrashHistory)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private fun parseCrashHistory(raw: String): List<CrashLabEvent> = try {
+        val arr = JSONArray(raw)
+        (0 until arr.length()).map { i ->
+            val o = arr.getJSONObject(i)
+            CrashLabEvent(
+                type = o.optString("type", "?"),
+                atMs = o.optLong("atMs", 0L),
+                note = o.optString("note", ""),
+            )
+        }
+    } catch (_: Exception) {
+        emptyList()
+    }
+
     private val _searchQuery = MutableStateFlow("")
     val searchQuery = _searchQuery.asStateFlow()
     fun onSearchQueryChange(q: String) { _searchQuery.value = q }
@@ -95,6 +136,26 @@ class DeveloperModeViewModel @Inject constructor(
     private val _logLines = MutableStateFlow<List<String>>(emptyList())
     val logLines = _logLines.asStateFlow()
 
+    private val _logcatTail = MutableStateFlow(false)
+    val logcatTail = _logcatTail.asStateFlow()
+
+    private var tailJob: Job? = null
+
+    private fun startTail() {
+        tailJob?.cancel()
+        tailJob = viewModelScope.launch {
+            while (isActive) {
+                withContext(Dispatchers.IO) { fetchLogcat() }
+                delay(1000)
+            }
+        }
+    }
+
+    fun setLogcatTail(enabled: Boolean) {
+        _logcatTail.value = enabled
+        if (enabled) startTail() else tailJob?.cancel()
+    }
+
     private val _tableCounts = MutableStateFlow<List<DevTableCount>>(emptyList())
     val tableCounts = _tableCounts.asStateFlow()
 
@@ -104,7 +165,10 @@ class DeveloperModeViewModel @Inject constructor(
     private val _prefsSnapshot = MutableStateFlow<Map<String, String>>(emptyMap())
     val prefsSnapshot = _prefsSnapshot.asStateFlow()
 
+    // ---- Live telemetry (1s tick; history feeds the sparkline) ----
     private val _liveTick = MutableStateFlow(0L)
+    private val _heapHistory = MutableStateFlow<List<Float>>(emptyList())
+    val heapHistory: StateFlow<List<Float>> = _heapHistory.asStateFlow()
     val appInfo: StateFlow<DevAppInfo> = _liveTick
         .map { collectAppInfo() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), collectAppInfo())
@@ -114,18 +178,24 @@ class DeveloperModeViewModel @Inject constructor(
             while (true) {
                 delay(1000)
                 _liveTick.value = android.os.SystemClock.elapsedRealtime()
+                val runtime = Runtime.getRuntime()
+                val fraction = (runtime.totalMemory() - runtime.freeMemory()).toFloat() /
+                    runtime.maxMemory().toFloat().coerceAtLeast(1f)
+                _heapHistory.value = (_heapHistory.value + fraction).takeLast(48)
             }
         }
     }
 
     private fun collectAppInfo(): DevAppInfo {
         val runtime = Runtime.getRuntime()
-        val usedMb = (runtime.totalMemory() - runtime.freeMemory()) / (1024 * 1024)
+        val used = runtime.totalMemory() - runtime.freeMemory()
+        val max = runtime.maxMemory()
         return DevAppInfo(
             uptimeMs = android.os.SystemClock.elapsedRealtime(),
-            heapMb = "${usedMb}MB / ${runtime.maxMemory() / (1024 * 1024)}MB",
+            heapMb = "${used / (1024 * 1024)}MB / ${max / (1024 * 1024)}MB",
             nativeHeapMb = "${Debug.getNativeHeapAllocatedSize() / (1024 * 1024)}MB",
             threads = Thread.activeCount(),
+            heapUsedFraction = (used.toFloat() / max.toFloat().coerceAtLeast(1f)).coerceIn(0f, 1f),
         )
     }
 
@@ -165,28 +235,27 @@ class DeveloperModeViewModel @Inject constructor(
         } catch (_: Exception) { }
     }
 
-    fun copyAppInfo(info: DevAppInfo) {
-        copyText(
-            "App info",
-            "Toolz ${info.versionName} (${info.versionCode})\n" +
-                "pkg=${info.packageName}\nuptime=${info.uptimeMs}ms\n" +
-                "heap=${info.heapMb}\nnative=${info.nativeHeapMb}\nthreads=${info.threads}"
-        )
+    fun buildBugReport(info: DevAppInfo): String {
+        val active = try {
+            spoofSnapshot.value.filter { it.value }.keys.joinToString(", ") { it.title }.ifBlank { "none" }
+        } catch (_: Exception) { "unknown" }
+        val history = runCatching { crashHistory.value }.getOrDefault(emptyList())
+        val crashSection = if (history.isEmpty()) "none" else history.joinToString("\n") { "- ${it.type} @ ${it.atMs}" }
+        return "## Toolz bug report\n" +
+            "- App: Toolz ${info.versionName} (${info.versionCode})\n" +
+            "- Device: ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} (SDK ${android.os.Build.VERSION.SDK_INT})\n" +
+            "- Active dev spoofs: $active\n" +
+            "- Heap: ${info.heapMb} | Native: ${info.nativeHeapMb} | Threads: ${info.threads}\n" +
+            "- Uptime: ${info.uptimeMs / 1000}s\n" +
+            "- Crash-lab history (test only): \n$crashSection\n\n" +
+            "### Steps\n1. \n2. \n3. \n\n### Expected\n\n### Actual\n"
     }
 
-    fun copyBugTemplate(info: DevAppInfo) {
-        val active = try {
-            spoofSnapshot.value.filter { it.value }.keys.joinToString(", ").ifBlank { "none" }
-        } catch (_: Exception) { "unknown" }
-        copyText(
-            "Bug template",
-            "## Bug report\n" +
-                "- App: Toolz ${info.versionName} (${info.versionCode})\n" +
-                "- Device: ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} (SDK ${android.os.Build.VERSION.SDK_INT})\n" +
-                "- Dev mode spoofs active: $active\n" +
-                "- Heap: ${info.heapMb} | Uptime: ${info.uptimeMs / 1000}s\n\n" +
-                "### Steps\n1. \n2. \n3. \n\n### Expected\n\n### Actual\n"
-        )
+    fun copyBugReport(info: DevAppInfo) = copyText("Bug report", buildBugReport(info))
+
+    fun shareBugReport(info: DevAppInfo) {
+        com.frerox.toolz.data.developer.DevUiOverrider.shareText(context, "Toolz bug report", buildBugReport(info))
+        _lastAction.value = "Share sheet opened — pick where to paste it"
     }
 
     fun applyLanguage(code: String) {
@@ -327,7 +396,13 @@ class DeveloperModeViewModel @Inject constructor(
     fun triggerCrash(type: String) {
         _lastAction.value = "Crashing: $type"
         viewModelScope.launch {
-            delay(300)
+            // Record BEFORE the crash so the event survives process death.
+            withContext(Dispatchers.IO) {
+                try {
+                    repository.appendDevCrashHistoryEvent(type, System.currentTimeMillis(), note = "crash lab")
+                } catch (_: Exception) { }
+            }
+            delay(200)
             when (type) {
                 "NPE" -> throw NullPointerException("[SPOOF TEST] Developer crash lab NPE")
                 "ANR" -> Thread.sleep(6000)
@@ -340,23 +415,30 @@ class DeveloperModeViewModel @Inject constructor(
         }
     }
 
+    fun clearCrashHistory() = viewModelScope.launch {
+        repository.clearDevCrashHistory()
+        _lastAction.value = "Crash history cleared"
+    }
+
     fun logNonFatal() {
         android.util.Log.e("DevCrashLab", "[SPOOF TEST] non-fatal test exception", IllegalStateException("test"))
         _lastAction.value = "Non-fatal logged to logcat (DevCrashLab)"
     }
 
     fun refreshLogcat() {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val proc = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", "300", "Toolz:D", "DevSpoof:D", "DevCrashLab:D", "*:S"))
-                val lines = proc.inputStream.bufferedReader().readLines().takeLast(300)
-                withContext(Dispatchers.Main) {
-                    _logLines.value = if (lines.isEmpty()) listOf("(logcat empty — verbose logging may be off)") else lines
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    _logLines.value = listOf("(logcat unavailable: ${e.message})")
-                }
+        viewModelScope.launch(Dispatchers.IO) { fetchLogcat() }
+    }
+
+    private suspend fun fetchLogcat() {
+        try {
+            val proc = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", "300", "Toolz:D", "DevSpoof:D", "DevCrashLab:D", "*:S"))
+            val lines = proc.inputStream.bufferedReader().readLines().takeLast(300)
+            withContext(Dispatchers.Main) {
+                _logLines.value = if (lines.isEmpty()) listOf("(logcat empty — verbose logging may be off)") else lines
+            }
+        } catch (e: Exception) {
+            withContext(Dispatchers.Main) {
+                _logLines.value = listOf("(logcat unavailable: ${e.message})")
             }
         }
     }

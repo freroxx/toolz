@@ -692,6 +692,9 @@ class SettingsRepository @Inject constructor(
     private val DEV_FORCE_OFFLINE = booleanPreferencesKey("dev_force_offline")
     private val DEV_CRASH_ON_NEXT_LAUNCH = booleanPreferencesKey("dev_crash_on_next_launch")
     private val DEV_SHAKE_TO_OPEN = booleanPreferencesKey("dev_shake_to_open")
+    // Crash-lab history: [{type,atMs,note}] — diagnostics only, cleared on
+    // version bump together with the other dev flags.
+    private val DEV_CRASH_HISTORY_JSON = stringPreferencesKey("dev_crash_history_json")
     private val SPOOF_PARAMS_JSON = stringPreferencesKey("spoof_params_json")
     private val SPOOF_BATTERY = booleanPreferencesKey("spoof_battery")
     private val SPOOF_DEVICE = booleanPreferencesKey("spoof_device")
@@ -2031,6 +2034,25 @@ class SettingsRepository @Inject constructor(
     suspend fun setDevShakeToOpen(enabled: Boolean) { dataStore.edit { it[DEV_SHAKE_TO_OPEN] = enabled } }
     suspend fun setSpoofParamsJson(json: String) { dataStore.edit { it[SPOOF_PARAMS_JSON] = json.take(20000) } }
 
+    /** Crash-lab history as raw JSON (list of {type,atMs,note}). Never leaves the device. */
+    val devCrashHistoryJson: Flow<String> = dataStore.data.map { prefs -> prefs[DEV_CRASH_HISTORY_JSON] ?: "[]" }
+
+    /** Appends a crash-lab event, keeping at most the last 20 entries. */
+    suspend fun appendDevCrashHistoryEvent(type: String, atMs: Long, note: String) {
+        val rebuilt = org.json.JSONArray()
+        try {
+            val existing = org.json.JSONArray(dataStore.data.map { it[DEV_CRASH_HISTORY_JSON] ?: "[]" }.first())
+            for (i in 0 until existing.length()) rebuilt.put(existing.getJSONObject(i))
+        } catch (_: Exception) { }
+        rebuilt.put(org.json.JSONObject().put("type", type).put("atMs", atMs).put("note", note))
+        while (rebuilt.length() > 20) {
+            try { rebuilt.remove(0) } catch (_: Exception) { break }
+        }
+        dataStore.edit { it[DEV_CRASH_HISTORY_JSON] = rebuilt.toString() }
+    }
+
+    suspend fun clearDevCrashHistory() { dataStore.edit { it[DEV_CRASH_HISTORY_JSON] = "[]" } }
+
     suspend fun setSpoofFlag(prefKey: String, enabled: Boolean) {
         dataStore.edit { it[spoofKeyFor(prefKey)] = enabled }
     }
@@ -2078,6 +2100,7 @@ class SettingsRepository @Inject constructor(
             it[DEVELOPER_MODE_ENABLED] = false
             it[DEV_CRASH_ON_NEXT_LAUNCH] = false
             it[DEV_FORCE_OFFLINE] = false
+            it[DEV_CRASH_HISTORY_JSON] = "[]"
             it[SPOOF_BATTERY] = false
             it[SPOOF_DEVICE] = false
             it[SPOOF_NETWORK] = false
@@ -2105,6 +2128,7 @@ class SettingsRepository @Inject constructor(
             it[DEVELOPER_MODE_ENABLED] = false
             it[DEV_CRASH_ON_NEXT_LAUNCH] = false
             it[DEV_FORCE_OFFLINE] = false
+            it[DEV_CRASH_HISTORY_JSON] = "[]"
         }
         clearAllSpoofs()
     }

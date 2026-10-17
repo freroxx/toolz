@@ -85,4 +85,35 @@ object DevUiOverrider {
             context.resources.displayMetrics.densityDpi
         } catch (_: Exception) { DisplayMetrics.DENSITY_MEDIUM }
     }
+
+    /** Same invite link the Settings screen's DISCORD button uses. */
+    const val TOOLZ_DISCORD_URL = "https://discord.gg/aAswRUerwh"
+
+    fun openToolzDiscord(context: Context) {
+        try {
+            val intent = Intent(Intent.ACTION_VIEW, TOOLZ_DISCORD_URL.toUriSafe() ?: return)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(intent)
+        } catch (_: Exception) { }
+    }
+
+    /**
+     * System share sheet — the ONLY channel a dev report leaves the device.
+     * The user picks the destination; nothing is uploaded automatically.
+     */
+    fun shareText(context: Context, chooserTitle: String, text: String) {
+        try {
+            val intent = Intent(android.content.Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, text)
+            }
+            context.startActivity(
+                Intent.createChooser(intent, chooserTitle).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        } catch (_: Exception) { }
+    }
+
+    private fun String.toUriSafe(): android.net.Uri? = try {
+        android.net.Uri.parse(this)
+    } catch (_: Exception) { null }
 }
