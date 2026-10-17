@@ -7,6 +7,7 @@ import com.frerox.toolz.data.news.NewsRepository
 import com.frerox.toolz.data.settings.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -25,6 +26,10 @@ class NewsViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
     val newsNotificationsEnabled = settingsRepository.newsNotificationsEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+
+    /** Epoch of the last successful sync — powers the honest "Updated X ago" stamp. */
+    val lastSync = settingsRepository.newsLastSync
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
 
     private val _popup = MutableStateFlow<NewsEntity?>(null)
     val popup: StateFlow<NewsEntity?> = _popup.asStateFlow()
@@ -50,12 +55,30 @@ class NewsViewModel @Inject constructor(
     private val _syncing = MutableStateFlow(false)
     val syncing: StateFlow<Boolean> = _syncing.asStateFlow()
 
+    /**
+     * Full-history search results over every cached item; `null` while search
+     * is inactive (query empty AND filter "all"). Non-null results replace the
+     * paged history in the UI so search never silently hides older items.
+     */
+    private val _searchResults = MutableStateFlow<List<NewsEntity>?>(null)
+    val searchResults: StateFlow<List<NewsEntity>?> = _searchResults.asStateFlow()
+
+    private val _searching = MutableStateFlow(false)
+    val searching: StateFlow<Boolean> = _searching.asStateFlow()
+
+    private var searchJob: Job? = null
+
     val seenIds: StateFlow<Set<String>> = settingsRepository.newsSeenIds
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
     private var sessionPopupShown = false
     private var popupJob: Job? = null
     private var historyPage = 0
+
+    // Seen-on-visible batching: cards report visibility; the write is
+    // coalesced so scrolling never thrashes the DataStore JSON setter.
+    private val pendingSeen = mutableSetOf<String>()
+    private var seenJob: Job? = null
 
     fun toggleNews(enabled: Boolean) {
         viewModelScope.launch {
@@ -92,12 +115,15 @@ class NewsViewModel @Inject constructor(
         }
     }
 
-    /** Foreground arrival check: sync, then immediately notify anything new. */
+    /** Foreground arrival check: sync, then immediately notify anything new,
+     * and re-evaluate the popup so critically-new items surface mid-session
+     * even while the user stays parked on the dashboard. */
     fun checkNotifications() {
         viewModelScope.launch {
             try {
                 newsRepository.syncAndNotify()
                 refreshUnread()
+                evaluatePopup()
             } catch (_: Exception) { }
         }
     }
@@ -131,6 +157,55 @@ class NewsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Seen semantics live at the viewport, not the page load: cards report
+     * visibility, batched forces are coalesced (400ms) and unread dots fade
+     * out only for content the user actually scrolled past.
+     */
+    fun markSeenOnVisible(ids: Collection<String>) {
+        if (ids.isEmpty()) return
+        pendingSeen.addAll(ids)
+        seenJob?.cancel()
+        seenJob = viewModelScope.launch {
+            delay(400)
+            val batch = pendingSeen.toList()
+            pendingSeen.clear()
+            if (batch.isEmpty()) return@launch
+            try {
+                newsRepository.markSeen(batch)
+                refreshUnread()
+            } catch (_: Exception) { }
+        }
+    }
+
+    /**
+     * Search runs against the full cached history regardless of how many pages
+     * were loaded, so results are honest; priority filter applies on top.
+     */
+    fun requestSearch(query: String, priority: String) {
+        val trimmed = query.trim()
+        val active = trimmed.isNotEmpty() || priority != "all"
+        if (!active) {
+            searchJob?.cancel()
+            _searchResults.value = null
+            return
+        }
+        searchJob?.cancel()
+        searchJob = viewModelScope.launch {
+            delay(180) // coalesce typing
+            _searching.value = true
+            try {
+                val base = newsRepository.searchHistory(trimmed)
+                _searchResults.value =
+                    if (priority == "all") base else base.filter { it.priority == priority }
+            } catch (_: Exception) {
+                _searchResults.value = emptyList()
+            } finally {
+                _searching.value = false
+            }
+        }
+    }
+
     fun loadHistory(force: Boolean = false) {
         viewModelScope.launch {
             try {
@@ -148,8 +223,6 @@ class NewsViewModel @Inject constructor(
                 _history.value = if (historyPage == 0) items else _history.value + items
                 if (items.size < NewsRepository.HISTORY_PAGE_SIZE) _historyEnd.value = true
                 else historyPage++
-                val seen = _history.value.map { it.id }
-                newsRepository.markSeen(seen)
                 refreshUnread()
             } catch (_: Exception) {
                 _historyError.value = "Couldn't load news."
@@ -172,8 +245,6 @@ class NewsViewModel @Inject constructor(
                 if (items.isNotEmpty()) {
                     historyPage++
                     _history.value = _history.value + items
-                    newsRepository.markSeen(items.map { it.id })
-                    refreshUnread()
                 }
             } catch (_: Exception) {
             } finally {
