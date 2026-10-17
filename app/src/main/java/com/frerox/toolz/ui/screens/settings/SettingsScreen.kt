@@ -1505,7 +1505,7 @@ fun SettingsScreen(
                             if (matches(searchQuery, "developer", "dev", "debug", "spoof", "fake", "test", "sandbox", "console")) {
                                 SettingsToggleItem(
                                     title = "Developer Mode",
-                                    subtitle = if (developerModeEnabled) "ON • $devActiveSpoofs spoof${if (devActiveSpoofs == 1) "" else "s"} active • Tap row to open console" else "Internal tools, diagnostics & local test data",
+                                    subtitle = if (developerModeEnabled) "ON • $devActiveSpoofs spoof${if (devActiveSpoofs == 1) "" else "s"} active • Console unlocked" else "Internal tools & local test data — console stays locked while OFF",
                                     icon = Icons.Rounded.BugReport,
                                     checked = developerModeEnabled,
                                     onCheckedChange = { enabled ->
@@ -1517,15 +1517,17 @@ fun SettingsScreen(
                                         }
                                     }
                                 )
-                                SettingsItem(
-                                    title = "Developer console",
-                                    subtitle = "Crashes, spoofs, logs, deep links — local only",
-                                    icon = Icons.Rounded.Terminal,
-                                    onClick = {
-                                        vibrationManager?.vibrateClick()
-                                        onNavigateToDeveloperMode()
-                                    }
-                                )
+                                if (developerModeEnabled) {
+                                    SettingsItem(
+                                        title = "Developer console",
+                                        subtitle = "Spoofs, labs, logcat, deep links — local only",
+                                        icon = Icons.Rounded.Terminal,
+                                        onClick = {
+                                            vibrationManager?.vibrateClick()
+                                            onNavigateToDeveloperMode()
+                                        }
+                                    )
+                                }
                             }
                         }
                     }

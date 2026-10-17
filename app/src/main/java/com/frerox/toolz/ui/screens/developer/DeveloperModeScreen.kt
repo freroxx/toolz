@@ -43,6 +43,7 @@ import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Forum
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Science
 import androidx.compose.material.icons.rounded.Share
@@ -81,6 +82,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -200,6 +202,23 @@ fun DeveloperModeScreen(
     var showCrashConfirm by remember { mutableStateOf<String?>(null) }
     var dangerArmed by remember { mutableStateOf(false) }
     var showDevEnableNotice by remember { mutableStateOf(false) }
+
+    // Gate: the console is unreachable while the master switch is OFF.
+    // This covers every entry path (Settings, shake, watermark banner tap,
+    // stale back stack). Enabling has to go through the warning dialog.
+    if (!devOn) {
+        DevLockedPanel(
+            onBack = onBack,
+            onEnable = { showDevEnableNotice = true },
+        )
+        if (showDevEnableNotice) {
+            DevEnableNoticeDialog(
+                onConfirm = { viewModel.setDevMode(true) },
+                onDismiss = { showDevEnableNotice = false },
+            )
+        }
+        return
+    }
 
     LaunchedEffect(lastAction) {
         val msg = lastAction ?: return@LaunchedEffect
@@ -387,36 +406,16 @@ fun DeveloperModeScreen(
     }
 
     if (showDevEnableNotice) {
-        AlertDialog(
-            onDismissRequest = { showDevEnableNotice = false },
-            title = { Text("Enable Developer Mode?", fontWeight = FontWeight.Black, letterSpacing = 1.sp) },
-            text = {
-                Text(
-                    "• Internal diagnostics + LOCAL-ONLY spoofs (fake data never leaves the device).\n" +
-                        "• Crash lab, test notifications and data labs can disturb the app until you turn them off.\n" +
-                        "• Auto-disables after every app update.\n\n" +
-                        "No telemetry: bug reports are copied/shared by you only.",
-                    fontSize = 13.sp,
-                )
+        DevEnableNoticeDialog(
+            onConfirm = {
+                vibrationManager?.vibrateLongClick()
+                viewModel.setDevMode(true)
+                showDevEnableNotice = false
             },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        vibrationManager?.vibrateLongClick()
-                        viewModel.setDevMode(true)
-                        showDevEnableNotice = false
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                    shape = RoundedCornerShape(16.dp),
-                ) { Text("ENABLE", fontWeight = FontWeight.Black) }
+            onDismiss = {
+                vibrationManager?.vibrateClick()
+                showDevEnableNotice = false
             },
-            dismissButton = {
-                TextButton(onClick = { vibrationManager?.vibrateClick(); showDevEnableNotice = false }) {
-                    Text("CANCEL", fontWeight = FontWeight.Bold)
-                }
-            },
-            shape = RoundedCornerShape(40.dp),
-            containerColor = MaterialTheme.colorScheme.surface,
         )
     }
 
@@ -999,4 +998,96 @@ private fun SystemTab(
         }
         Spacer(Modifier.height(80.dp))
     }
+}
+
+// ---------- LOCKED (master OFF) + shared enable dialog ----------
+
+/**
+ * Shown instead of the console while the master switch is OFF. The console
+ * cannot be used in this state — no tabs, no labs, no palette.
+ */
+@Composable
+private fun DevLockedPanel(
+    onBack: () -> Unit,
+    onEnable: () -> Unit,
+) {
+    val vibrationManager = LocalVibrationManager.current
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .toolzBackground()
+            .statusBarsPadding()
+            .padding(horizontal = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterVertically),
+    ) {
+        Surface(
+            shape = RoundedCornerShape(28.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        ) {
+            Icon(
+                Icons.Rounded.Lock,
+                contentDescription = "Console locked",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(22.dp).size(40.dp),
+            )
+        }
+        Text(
+            "Console locked",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Black,
+            letterSpacing = 1.sp,
+        )
+        Text(
+            "Developer Mode is OFF. Every spoof flag is inert and every screen shows real data. " +
+                "Turn it on to arm the console — everything stays on this device.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+        Button(
+            onClick = { vibrationManager?.vibrateClick(); onEnable() },
+            shape = RoundedCornerShape(18.dp),
+        ) {
+            Text("TURN ON DEVELOPER MODE", fontWeight = FontWeight.Black, letterSpacing = 0.5.sp)
+        }
+        TextButton(onClick = { vibrationManager?.vibrateClick(); onBack() }) {
+            Text("Back", fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.height(40.dp))
+    }
+}
+
+/** Enable-warning dialog: identical text whether opened from Settings or the locked console. */
+@Composable
+private fun DevEnableNoticeDialog(
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val vibrationManager = LocalVibrationManager.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Enable Developer Mode?", fontWeight = FontWeight.Black, letterSpacing = 1.sp) },
+        text = {
+            Text(
+                "• Internal diagnostics + LOCAL-ONLY spoofs (fake data never leaves the device).\n" +
+                    "• Crash lab, test notifications and data labs can disturb the app until you turn them off.\n" +
+                    "• Auto-disables after every app update.\n\n" +
+                    "No telemetry: bug reports are copied/shared by you only.",
+                fontSize = 13.sp,
+            )
+        },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                shape = RoundedCornerShape(16.dp),
+            ) { Text("ENABLE", fontWeight = FontWeight.Black) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("CANCEL", fontWeight = FontWeight.Bold) }
+        },
+        shape = RoundedCornerShape(40.dp),
+        containerColor = MaterialTheme.colorScheme.surface,
+    )
 }
