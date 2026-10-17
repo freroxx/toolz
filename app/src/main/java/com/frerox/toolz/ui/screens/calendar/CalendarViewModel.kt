@@ -31,6 +31,7 @@ import com.frerox.toolz.util.TaskAlarmScheduler
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import dagger.hilt.android.lifecycle.HiltViewModel
+import com.frerox.toolz.data.developer.FakeTasksSandbox
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -99,10 +100,34 @@ class CalendarViewModel @Inject constructor(
     private val taskAlarmScheduler: TaskAlarmScheduler,
     private val settingsRepository: com.frerox.toolz.data.settings.SettingsRepository,
     private val moshi: Moshi,
+    private val gate: com.frerox.toolz.data.developer.SpoofGate,
 ) : ViewModel() {
 
-    // ── Internal mutable state (pure VM-owned fields) ─────────────────────
+    // DEV-SPOOF: the calendar half of Tasks runs on the RAM fixture — event
+    // and dated-task streams swap at the source; nothing is written to Room
+    // and no reminder alarms are ever scheduled while demo is armed.
+    private val TASKS = com.frerox.toolz.data.developer.DevToolId.TASKS
+    private val gateActive = gate.active(TASKS)
+
     private val _uiState = MutableStateFlow(CalendarUiState())
+
+    /** DEV-SPOOF: event source swap — fixture list keeps expandForUi semantics. */
+    private val eventsSrc: Flow<List<EventEntry>> = combine(
+        repository.getAllEvents(),
+        com.frerox.toolz.data.developer.FakeTasksSandbox.fixtureEvents,
+        gateActive,
+    ) { real, fixture, demo ->
+        if (demo) EventRepository.expandForUi(fixture) else EventRepository.expandForUi(real)
+    }
+
+    /** DEV-SPOOF: dated tasks come from the same fixture the todo board mutates. */
+    private val tasksSrc: Flow<List<TaskEntry>> = combine(
+        repository.getTasksWithDueDate(),
+        com.frerox.toolz.data.developer.FakeTasksSandbox.activeTasks,
+        gateActive,
+    ) { real, fixture, demo ->
+        if (demo) fixture.filter { it.dueDate != null } else real
+    }
 
     // ── AI config flow — loaded once on IO, not re-read on every DB event ─
     /**
@@ -135,8 +160,8 @@ class CalendarViewModel @Inject constructor(
         // FIX (recurrence): expand occurrence copies so yearly/monthly/daily series
         // appear outside their template year. Non-recurring rows pass through
         // untouched; lists key rows by occurrenceKey (see EventRepository).
-        repository.getAllEvents().map { EventRepository.expandForUi(it) },
-        repository.getTasksWithDueDate(),
+        eventsSrc,
+        tasksSrc,
         settingsRepository.offlineModeEnabled,
         _uiState,
         _configFlow,
@@ -252,6 +277,13 @@ class CalendarViewModel @Inject constructor(
             // CAL-P1-02.6: offline gate — never surface raw network errors in offline mode.
             if (_uiState.value.offlineModeEnabled) {
                 handleAiFailure("Offline mode is on — AI parsing isn't available. Add the event manually.")
+                return@launch
+            }
+
+            // DEV-SPOOF: demo never calls a live model — honest refusal, and
+            // the attached image is never uploaded anywhere.
+            if (gate.sandboxed(TASKS)) {
+                handleAiFailure("Demo mode is on — AI parsing needs a live, networked model. Use Add event to put fixture entries on the calendar instead.")
                 return@launch
             }
 
@@ -409,6 +441,20 @@ class CalendarViewModel @Inject constructor(
                 it.copy(errorMessage = "That time is in the past — reminders won't fire. Pick a future time.")
             }
         }
+        // DEV-SPOOF: RAM insert — no Room row, no alarm scheduling.
+        if (gate.sandboxed(TASKS)) {
+            FakeTasksSandbox.addEvent(
+                EventEntry(
+                    title            = title.trim(),
+                    description      = description?.trim(),
+                    timestamp        = timeMillis,
+                    eventType        = type,
+                    subjectColor     = color,
+                    remindersEnabled = false,
+                )
+            )
+            return
+        }
         viewModelScope.launch {
             val event = EventEntry(
                 title            = title.trim(),
@@ -431,6 +477,11 @@ class CalendarViewModel @Inject constructor(
     }
 
     fun updateEvent(event: EventEntry) {
+        // DEV-SPOOF: RAM update — no alarm churn.
+        if (gate.sandboxed(TASKS)) {
+            FakeTasksSandbox.updateEvent(event)
+            return
+        }
         viewModelScope.launch {
             try {
                 repository.updateEvent(event)
@@ -449,6 +500,11 @@ class CalendarViewModel @Inject constructor(
     }
 
     fun toggleEventCompletion(event: EventEntry) {
+        // DEV-SPOOF: RAM toggle — same completion semantics, no alarm churn.
+        if (gate.sandboxed(TASKS)) {
+            FakeTasksSandbox.toggleEventCompletion(event)
+            return
+        }
         viewModelScope.launch {
             try {
                 val updated = event.copy(isCompleted = !event.isCompleted)
@@ -465,6 +521,11 @@ class CalendarViewModel @Inject constructor(
     }
 
     fun toggleTaskCompletion(task: TaskEntry) {
+        // DEV-SPOOF: fixture-only toggle; alarms of the fixture id never existed.
+        if (gate.sandboxed(TASKS)) {
+            FakeTasksSandbox.toggleCompletion(task.id)
+            return
+        }
         viewModelScope.launch {
             val updated = task.copy(
                 isCompleted = !task.isCompleted,
@@ -480,6 +541,11 @@ class CalendarViewModel @Inject constructor(
     }
 
     fun deleteEvent(event: EventEntry) {
+        // DEV-SPOOF: RAM delete — no alarm cancels.
+        if (gate.sandboxed(TASKS)) {
+            FakeTasksSandbox.deleteEvent(event)
+            return
+        }
         viewModelScope.launch {
             try {
                 repository.deleteEvent(event.id)
@@ -497,6 +563,11 @@ class CalendarViewModel @Inject constructor(
      * intact) and reschedules reminders when the event is still future-dated.
      */
     fun restoreEvent(event: EventEntry) {
+        // DEV-SPOOF: RAM restore (same id), no alarm scheduling.
+        if (gate.sandboxed(TASKS)) {
+            FakeTasksSandbox.restoreEvent(event)
+            return
+        }
         viewModelScope.launch {
             try {
                 repository.insertEvent(event)

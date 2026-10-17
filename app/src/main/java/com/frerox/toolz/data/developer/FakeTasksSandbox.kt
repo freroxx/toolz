@@ -17,6 +17,7 @@
 
 package com.frerox.toolz.data.developer
 
+import com.frerox.toolz.data.calendar.EventEntry
 import com.frerox.toolz.data.todo.SubTask
 import com.frerox.toolz.data.todo.TaskEntry
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -44,6 +45,7 @@ object FakeTasksSandbox {
     /** DEV-SPOOF: seeds a believable mixed-backlog board on every demo arm. */
     fun arm() {
         nextId = 1000
+        seedEvents()
         val now = System.currentTimeMillis()
         val day = 24 * 60 * 60 * 1000L
         val hour = 3_600_000L
@@ -149,9 +151,101 @@ object FakeTasksSandbox {
     private fun find(id: Int): TaskEntry? =
         active.value.find { it.id == id } ?: completedToday.value.find { it.id == id }
 
+    // ── Calendar fixture (the Tasks tool's calendar half) ──────────────────
+
+    private val events = MutableStateFlow<List<EventEntry>>(emptyList())
+    val fixtureEvents: StateFlow<List<EventEntry>> = events.asStateFlow()
+
+    private var nextEventId = 2000
+
+    /** DEV-SPOOF: believable calendar around "today" — deadlines, exam, class. */
+    private fun seedEvents() {
+        nextEventId = 2000
+        val now = System.currentTimeMillis()
+        val day = 24 * 60 * 60 * 1000L
+        val hour = 3_600_000L
+
+        fun atDayOffset(offset: Int, hourOfDay: Int): Long {
+            val cal = java.util.Calendar.getInstance().apply {
+                timeInMillis = now + offset * day
+                set(java.util.Calendar.HOUR_OF_DAY, hourOfDay)
+                set(java.util.Calendar.MINUTE, 0)
+                set(java.util.Calendar.SECOND, 0)
+                set(java.util.Calendar.MILLISECOND, 0)
+            }
+            return cal.timeInMillis
+        }
+
+        fun event(
+            title: String, description: String?, ts: Long, type: String,
+            color: String, duration: Int = 60, completed: Boolean = false,
+            recurring: Boolean = false, rule: com.frerox.toolz.data.calendar.Recurrence =
+                com.frerox.toolz.data.calendar.Recurrence.NONE,
+        ) = EventEntry(
+            id = nextEventId++, title = title, description = description,
+            timestamp = ts, eventType = type, subjectColor = color,
+            isRecurring = recurring, recurringRule = rule,
+            isCompleted = completed, remindersEnabled = false,
+            endTimestamp = ts + duration * 60_000L, durationMinutes = duration,
+        )
+
+        events.value = listOf(
+            event(
+                "Atlas Bank — payment deadline", "Card statement, end of cycle.",
+                atDayOffset(2, 9), "DEADLINE", "#F44336",
+            ),
+            event(
+                "Machine Learning lecture", "Hall B · Linear models quiz prep.",
+                atDayOffset(3, 10), "EXAM", "#3F51B5", duration = 90,
+            ),
+            event(
+                "Demo build handoff", "Signed APK to the testers channel.",
+                atDayOffset(-1, 15), "DEADLINE", "#FF9800", completed = true,
+            ),
+            event(
+                "Weekly sync", "Roadmap + issues triage.",
+                atDayOffset(5, 11), "GENERAL", "#9C27B0", duration = 45,
+            ),
+            event(
+                "Gym — strength day", null,
+                atDayOffset(1, 18), "GENERAL", "#4CAF50", duration = 60,
+            ),
+        )
+    }
+
+    /** DEV-SPOOF: RAM insert with a fixture id — no Room, no alarms. */
+    fun addEvent(event: EventEntry) {
+        events.value = events.value + event.copy(id = nextEventId++)
+    }
+
+    fun updateEvent(event: EventEntry) {
+        events.value = events.value.map { if (it.id == event.id) event else it }
+    }
+
+    /** DEV-SPOOF: RAM toggle — completion semantics mirror the real repo. */
+    fun toggleEventCompletion(event: EventEntry) {
+        val fresh = events.value.find { it.id == event.id } ?: return
+        updateEvent(fresh.copy(isCompleted = !fresh.isCompleted))
+    }
+
+    fun deleteEvent(event: EventEntry) {
+        events.value = events.value.filterNot { it.id == event.id }
+    }
+
+    fun restoreEvent(event: EventEntry) {
+        if (events.value.any { it.id >= event.id }) updateSeed(event.id)
+        if (events.value.none { it.id == event.id }) events.value = events.value + event
+    }
+
+    private fun updateSeed(id: Int) {
+        if (id >= nextEventId) nextEventId = id + 1
+    }
+
     fun reset() {
         active.value = emptyList()
         completedToday.value = emptyList()
         nextId = 1000
+        events.value = emptyList()
+        nextEventId = 2000
     }
 }
