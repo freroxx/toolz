@@ -119,14 +119,17 @@ admin live preview, all verified against the renderers):
 - Headings (`##`), **bold**, *italic*, `inline code`, links, images-alt text
 - Bullet, ordered and checkbox lists, blockquotes, fenced code blocks,
   horizontal rules, tables (app + website page)
-- App rendering is the shared `MarkdownContent` (`ui/components/`),
-  popup at 17 sp / 12 dp rhythm, history expanded at 16 sp / 10 dp, links open
-  in the browser, tables keep raw-markdown cells. Headers parse inline
-  markdown like every other block.
+- App rendering is the shared `MarkdownContent` (`ui/components/`), popup at
+  15 sp / 10 dp rhythm, history expanded at 16 sp / 10 dp, links open through
+  `NewsLinks` (exception-isolated browser/share), tables keep raw-markdown
+  cells. Headers parse inline markdown like every other block.
 - Website rendering is the shared `src/components/news/NewsBody.tsx`
   (used by `/news` and the admin preview); home teaser cards use
   `src/lib/stripMarkdown.ts` plain-text fallback (tested in
-  `src/test/news-body.test.ts`)
+  `src/test/news-body.test.tsx`). Link hardening on every renderer surface:
+  `https://`/`mailto:` hrefs are clickable, `toolz://` renders inert
+  ("Opens inside the Toolz app"), and any other scheme (e.g. `javascript:`)
+  renders as plain text — no unsafe href is ever emitted.
 - Raw HTML is never injected on any surface (server strips tags, website uses
   React nodes, Compose has no HTML path)
 
@@ -277,10 +280,15 @@ Public website surface (same feed, `?all=1`, no login):
   (all/critical/feature/fix/promo/info) + RSS button (`/api/news-rss`, autodiscovery
   in `index.html`) + `public/sitemap.xml` + `robots.txt` (admin disallowed),
   10-at-a-time pagination, per-item `#news-<id>` anchors with copy-link +
-  scroll-to-hash deep-link + active highlight + per-anchor OG/title,
-  full cards (image with fallback/alt, advanced markdown
+  scroll-to-hash deep-link + active highlight + per-anchor OG/title — the
+  deep-link effect resets filter/search and paginates until the anchored card
+  is actually in the DOM, so shares never land on a silently missing item
+  (mirrors the app's load-until-found deep-link scroll), priority pills via
+  the shared `src/lib/newsStyle.ts` mapping (same per-priority colors as the
+  app), full cards (image with fallback/alt, advanced markdown
   body, date, CTA), `toolz://` actions render as "in-app only" hints (no broken
-  new-tab), skeleton/empty states, plus a distinct "feed unavailable +
+  new-tab), skeleton/empty states (search-empty copy is distinct from
+  filter-empty), plus a distinct "feed unavailable +
   Retry" state when `unavailable`, Navbar + Footer + download dialog.
 - `src/components/landing/NewsSection.tsx` — home `/#news` teaser: up to 3
   latest per-item deep links (`/news#news-<id>`) + "updated Xm ago" stamp +
@@ -352,33 +360,68 @@ popup, never a crash.
 
 `ui/screens/news/`:
 
+- `NewsTime.kt` — pure time helpers shared by popup + history: `newsDate`
+  (Today/Yesterday labels injected by the UI, `MMM d` this year,
+  `MMM d, yyyy` beyond), `isRecent` (7-day NEW badge, future excluded),
+  `isExpired`, `relativeShort` (`Xm/Xh/Xd`, empty beyond 7 days so callers
+  can fall back to a date string). Covered by `NewsTimeTest` (16 tests).
+- `NewsLinks.kt` — exception-isolated `open` (https + `toolz://` via generic
+  `ACTION_VIEW`) and `share` (title + `WEBSITE_NEWS_URL#news-<id>`); every
+  call site routes through it so a dead browser never crashes the screen.
 - `NewsPopup.kt` — centered expressive card (same language as the PurgeShot /
   Clipboard popups: dim scrim, 36 dp card, drag handle, max 440 × 600 dp with
-  internal scroll, swipe-down + scrim-tap snooze) with a priority tile header
+  internal scroll) with a priority tile header
   (per-priority icon + tinted container: critical/error, feature/primary,
-  fix/tertiary, promo/secondary, info/neutral) + label/date, cropped Coil
-  cover (190 dp, 24 dp corners, hidden on load error), full `MarkdownContent`
-  body at 15 sp, strict button hierarchy (one filled primary CTA with
-  OpenInNew/deep-link ArrowForward icon, optional tonal Later, quiet footer:
-  All news · Share · Website), inline critical-bypass note instead of a hidden
-  dialog. `requiresAction` + `critical` renders the same card without any
-  dismiss path except a de-emphasized Later text button. Dismiss semantics:
-  ✕ = dismiss forever, Later/swipe/scrim = snooze 24h, CTA = open + close.
+  fix/tertiary, promo/secondary, info/neutral — the shared `NewsPriorityChip`
+  composable also renders the small pill on history cards) + label/date,
+  crossfaded Coil cover (190 dp, 24 dp corners, hidden on load error), full
+  `MarkdownContent` body at 15 sp, strict button hierarchy (one filled primary
+  CTA with OpenInNew/deep-link ArrowForward icon, optional tonal Later, quiet
+  footer: All news · Share · Website), inline critical-bypass note instead of
+  a hidden dialog. Modal correctness: the popup hosts LAST in the dashboard
+  Box (above `ToolzFloatingToolbar`, animated with `AnimatedVisibility`
+  fade + spring pop 0.92→1), so its full-screen scrim blocks every tap —
+  scrim-tap snoozes dismissible cards and only swallows input for blocking
+  ones; `BackHandler` snoozes dismissible cards and is swallowed for
+  blocking (`critical` + `requiresAction`). Pull-to-snooze uses a nested
+  scroll connection so it works while the body is scrollable: downward drag
+  past the content's top edge translates the card (spring
+  `DampingRatioMediumBouncy` return), release beyond 132 dp snaps with a
+  haptic and flies out. Dismiss semantics: ✕ = dismiss forever,
+  Later/swipe/scrim/back = snooze 24h, CTA = open + close.
   Action-less items get a filled "Got it" (dismiss, or plain close when
   non-dismissible), so every config has an exit.
 - `ToolzNewsScreen.kt` — backup-style rounded (32 dp) `ExpressiveTopAppBar`
-  with subtitle + refresh action, `toolzBackground`, fading list edges, full
-  history: search field + priority filter chips (parity with `/news`) + Android
-  13+ "Notifications off → Enable" card (one-tap `POST_NOTIFICATIONS` request
-  with settings fallback), `LazyColumn` with keyed cards, 10-by-10 pages, collapsed cards show
-  plain text (`stripMarkdown`, no raw syntax before "Read more"), expanded
-  cards full markdown at 16 sp, natural-ratio images (capped 360 dp, 20 dp
-  corners), Share action (title + `#news-<id>` link), real unread dots via `seenIds`, notification deep-link
-  scroll-to-highlight, syncing indicator + sync-error card with Retry, loading/empty/error states, refresh button.
+  with subtitle + refresh action, `toolzBackground`, fading list edges,
+  full history: search field (clear button, `ImeAction.Search` hides the
+  keyboard) + priority filter chips (parity with `/news`) + Android 13+
+  "Notifications off → Enable" card (one-tap `POST_NOTIFICATIONS` request;
+  after the first denial — when Android stops showing the dialog — the card
+  switches to an always-works `ACTION_APP_NOTIFICATION_SETTINGS` deep link),
+  `LazyColumn` with keyed cards, 10-by-10 pages, pulsing skeleton cards while
+  the first page loads (static under performance mode), collapsed cards show
+  plain text (`stripMarkdown`, no raw syntax before "Read more" — the toggle
+  only appears when `hasVisualOverflow` says the body actually overflows),
+  expanded cards full markdown at 16 sp (state kept in `rememberSaveable`),
+  natural-ratio images (capped 360 dp, 20 dp corners, inert "image failed"
+  fallback), card meta row (unread dot, priority pill, pin, NEW/Expired
+  badges, date), Share action (title + `#news-<id>` link) in a quiet footer
+  row, real unread dots via `seenIds`, notification deep-link
+  scroll-to-highlight (+1 header offset, keeps paging until the target loads,
+  2 s highlight then spring back), DAO-backed full-history search results,
+  syncing/searching indicator + honest sync-error card with Retry + first-run
+  error state, "Updated X ago" freshness stamp from `news_last_sync`,
+  loading/empty/error states, refresh button.
 - `NewsViewModel.kt` — immediate popup on dashboard arrival (no delay),
   critical-overrides-non-critical queue rule (`shouldReplacePopup`),
-  session guard, foreground `checkNotifications` (sync + immediate notify),
-  history paging + `historyError`/`syncing` states, badge counts, settings toggles,
+  session guard, foreground `checkNotifications` (sync + immediate notify +
+  popup re-evaluation), history paging + `historyError`/`syncing` states,
+  `searchResults`/`searching` — `requestSearch` debounces 180 ms against the
+  full Room history via `searchHistory` (LIKE wildcards escaped, 200 cap),
+  priority-filtered on top — `markSeenOnVisible` coalesces viewport reports
+  into one 400 ms batched `markSeen` write (loading a page never marks it
+  seen), `lastSync` for the freshness stamp, badge counts time-valid
+  published items only (expired excluded), settings toggles,
   `syncNow`, `dismissAllNotifications`, `refreshNow`.
 - `NewsPreviews.kt` — `@Preview` history cards + 4 popup variants (standard,
   long-markdown, critical-blocking, dark).
@@ -388,7 +431,9 @@ offline/performance toggles (`DashboardScreen.kt`: `DashboardHeader` +
 threading through `DashboardContent`/`HomeTabContent`, popup host with
 1-per-session guard); Settings → NEWS section (master + notification toggles,
 critical explainer dialog, history entry with unread count, manual sync) and
-an About-card "Toolz News" button (`SettingsScreen.kt`).
+an About-card "Toolz News" button (`SettingsScreen.kt`). All news-owned
+copy across popup/history/settings/dashboard is localized via the `st_News_*`
+block (66 keys in `values`, `values-es`, `values-pt-rBR`, `values-fr`).
 
 ## 8. Notifications and workers
 
@@ -405,7 +450,9 @@ dismissed AND cancels the shade row via the same stable ID.
 `IMPORTANCE_DEFAULT`) and `ID_NEWS_BASE` (8100). Taps deep-link to
 `toolz_news` with `news_id` highlight. Android 13+ `POST_NOTIFICATIONS` is
 requested via the in-app "Notifications off → Enable" card (history screen);
-denial still fails silently by design, with a settings fallback.
+after the first denial (when the system dialog stops appearing) the card
+switches to a direct `ACTION_APP_NOTIFICATION_SETTINGS` deep link, so the
+fallback always works.
 
 ## 9. App wiring
 
@@ -442,13 +489,16 @@ treated as sync failure (cached content kept).
 ## 12. Tests
 
 - Website: `src/test/news-schema.test.ts` (validation, version compare,
-  targeting), `src/test/news-body.test.ts` (`stripMarkdown`),
+  targeting), `src/test/news-body.test.tsx` (`stripMarkdown`, link-scheme
+  hardening — no `javascript:` href, `toolz://` inert — priority chip mapping),
   `src/test/news-verdict.test.ts` (visibility verdicts),
-  `src/test/news-admin-tools.test.ts` (bulk/filter/sort/export/dupes) — `vitest run` green;
-  `tsc -p tsconfig.app.json` and api-file `tsc` clean.
+  `src/test/news-admin-tools.test.ts` (bulk/filter/sort/export/dupes) — `vitest run` 42 green;
+  `tsc --noEmit` clean.
 - Android: `app/src/test/.../news/NewsVersionTest` (ordering, short/pre-release
   equality, eligibility matrix), `NewsDtoTest` (unknown-field tolerance),
-  `NewsPopupQueueTest` (critical-override rule) —
+  `NewsPopupQueueTest` (critical-override rule), `NewsTimeTest` (16 tests:
+  Today/Yesterday/date-fallback rendering, NEW/Expired boundaries,
+  relative-delta floors and 7-day cutoff) —
   `:app:testDebugUnitTest --tests "com.frerox.toolz.news.*"` green, full
   `:app:compileDebugKotlin` green (which also type-checks all UI/nav wiring).
 
@@ -491,26 +541,38 @@ treated as sync failure (cached content kept).
 
 Website (new): `api/news.ts`, `api/news-admin.ts`, `api/news-image.ts`,
 `api/news-version.ts`, `api/news-rss.ts`, `src/lib/news-schema.ts`,
-`src/lib/newsVerdict.ts`, `src/lib/stripMarkdown.ts`, `src/lib/newsAdminTools.ts`,
+`src/lib/newsVerdict.ts`, `src/lib/newsStyle.ts`, `src/lib/stripMarkdown.ts`, `src/lib/newsAdminTools.ts`,
 `src/hooks/useNewsAdmin.ts`, `src/hooks/usePublicNews.ts`,
 `src/components/news-admin/` (8 files: +`NewsTestLab`, +`NewsStatusDashboard`), `src/components/landing/NewsSection.tsx`,
 `src/components/news/NewsBody.tsx`,
-`src/pages/AdminNews.tsx`, `src/pages/News.tsx`, `src/test/` (4 news test files),
+`src/pages/AdminNews.tsx`, `src/pages/News.tsx`, `src/test/` (news test files),
 `NEWS_ADMIN.md`, `public/sitemap.xml`.
 Website (edited): `vercel.json`, `index.html` (RSS autodiscovery), `public/robots.txt` (sitemap + admin disallow), `src/App.tsx`, `src/pages/Index.tsx`,
-`src/components/landing/Navbar.tsx`.
+`src/components/landing/Navbar.tsx`, `src/components/news/NewsBody.tsx`
+(link scheme hardening + inert `toolz://`), `src/pages/News.tsx` +
+`src/components/landing/NewsSection.tsx` (shared priority-pill mapping,
+deep-link filter reset, search-empty copy).
 
 Android (new): `data/news/` (8 files), `di/NewsModule.kt`,
-`ui/screens/news/` (4 files), `worker/NewsCheckWorker.kt`,
-`worker/NewsActionReceiver.kt`, `app/src/test/.../news/` (3 files).
-Android (edited): `MainActivity.kt`, `DashboardScreen.kt`,
-`SettingsScreen.kt`, `LoadingViewModel.kt`, `Screen.kt`,
+`ui/screens/news/` (6 files: `NewsPopup`, `ToolzNewsScreen`,
+`NewsViewModel`, `NewsPreviews`, `NewsTime`, `NewsLinks`),
+`worker/NewsCheckWorker.kt`,
+`worker/NewsActionReceiver.kt`, `app/src/test/.../news/` (4 files incl.
+`NewsTimeTest`).
+Android (edited): `MainActivity.kt`, `DashboardScreen.kt` (popup host
+re-zordered above the floating toolbar + spring entrance, localized news
+badge), `SettingsScreen.kt` (news section + About card localized via
+`st_News_*`), `LoadingViewModel.kt`, `Screen.kt`,
 `SettingsRepository.kt`, `NotificationHelper.kt`, `AndroidManifest.xml`,
-`data/news/NewsRepository.kt` (queue rule, summary, cancel-all),
-`ui/screens/news/NewsViewModel.kt` (critical override, error/sync states),
+`data/news/NewsRepository.kt` (queue rule, summary, cancel-all, DAO-backed
+`searchHistory`, time-valid `unreadCount`),
+`data/news/NewsEntity.kt` (`searchRaw` DAO query with escaped LIKE),
+`ui/screens/news/NewsViewModel.kt` (critical override, error/sync states,
+full-history search, batched seen-on-visible, lastSync),
 `ui/screens/news/NewsPopup.kt` (expressive card redesign),
 `ui/screens/news/ToolzNewsScreen.kt` (error/sync states),
-`data/news/NewsNotifier.kt` (group + summary).
+`data/news/NewsNotifier.kt` (group + summary),
+`res/values*/strings.xml` (66-key `st_News_*` block, 4 locales).
 
 ## 15. Draft announcement — legacy Whisper token migration (publish via `/admin/news`, not in-app seed)
 
