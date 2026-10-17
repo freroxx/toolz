@@ -176,9 +176,7 @@ fun SpoofToolTile(
             ) {
                 if (active && devOn) SpoofChip(label = "SPOOF • LOCAL")
                 Text(
-                    if (active && devOn) "Configure →"
-                    else if (tool.openRoute != null) "Open tool →"
-                    else "",
+                    "Configure →",
                     modifier = Modifier.weight(1f),
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Black,

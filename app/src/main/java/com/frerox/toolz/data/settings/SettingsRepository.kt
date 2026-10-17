@@ -2005,17 +2005,14 @@ class SettingsRepository @Inject constructor(
         )
     }
 
+    /**
+     * One-shot sandbox check (master + single flag) for non-UI callers.
+     * Reads the DataStore snapshot once; returns false on read errors.
+     */
     suspend fun isSandboxNow(prefKey: String): Boolean {
-        var master = false
-        var flag = false
-        dataStore.data.map { it[DEVELOPER_MODE_ENABLED] ?: false }.let {
-            master = try { it.first() } catch (_: Exception) { false }
-        }
-        if (!master) return false
-        dataStore.data.map { it[spoofKeyFor(prefKey)] ?: false }.let {
-            flag = try { it.first() } catch (_: Exception) { false }
-        }
-        return flag
+        val prefs = try { dataStore.data.first() } catch (_: Exception) { return false }
+        if (!(prefs[DEVELOPER_MODE_ENABLED] ?: false)) return false
+        return prefs[spoofKeyFor(prefKey)] ?: false
     }
 
     suspend fun setDeveloperModeEnabled(enabled: Boolean) {

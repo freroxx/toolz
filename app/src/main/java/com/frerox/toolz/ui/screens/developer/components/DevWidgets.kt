@@ -24,9 +24,15 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -34,6 +40,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 
 @Composable
 fun DevCard(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
@@ -103,5 +110,46 @@ fun DevBtn(
         Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp))
         Spacer(Modifier.width(6.dp))
         Text(label, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+    }
+}
+
+/**
+ * Slider that debounces persistence: dragging only updates local state;
+ * the store write happens 300ms after the last change. Used by the
+ * configurator sheets and the Labs "Data lab" card.
+ */
+@Composable
+fun DebouncedSlider(
+    label: String,
+    current: Float,
+    min: Float,
+    max: Float,
+    format: (Float) -> String,
+    enabled: Boolean,
+    onCommit: (Float) -> Unit,
+) {
+    var pending by remember { mutableStateOf<Float?>(null) }
+    LaunchedEffect(pending, current) {
+        val v = pending ?: return@LaunchedEffect
+        delay(300)
+        onCommit(v)
+        pending = null
+    }
+    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(label, modifier = Modifier.weight(1f), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                format(pending ?: current),
+                fontWeight = FontWeight.Black,
+                fontFamily = FontFamily.Monospace,
+                style = MaterialTheme.typography.labelMedium,
+            )
+        }
+        Slider(
+            value = (pending ?: current).coerceIn(min, max),
+            onValueChange = { pending = it },
+            valueRange = min..max,
+            enabled = enabled,
+        )
     }
 }

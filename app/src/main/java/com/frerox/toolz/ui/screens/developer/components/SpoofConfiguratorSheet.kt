@@ -33,7 +33,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -76,42 +75,6 @@ private fun rememberDebounced(
         pending = null
     }
     return (pending ?: current) to { pending = it }
-}
-
-@Composable
-private fun DebouncedSlider(
-    label: String,
-    current: Float,
-    min: Float,
-    max: Float,
-    format: (Float) -> String,
-    enabled: Boolean,
-    onCommit: (Float) -> Unit,
-) {
-    var pending by remember { mutableStateOf<Float?>(null) }
-    LaunchedEffect(pending, current) {
-        val v = pending ?: return@LaunchedEffect
-        delay(300)
-        onCommit(v)
-        pending = null
-    }
-    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(label, modifier = Modifier.weight(1f), fontWeight = FontWeight.Bold, fontSize = 13.sp)
-            Text(
-                format(pending ?: current),
-                fontWeight = FontWeight.Black,
-                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                fontSize = 12.sp,
-            )
-        }
-        Slider(
-            value = (pending ?: current).coerceIn(min, max),
-            onValueChange = { pending = it },
-            valueRange = min..max,
-            enabled = enabled,
-        )
-    }
 }
 
 @Composable

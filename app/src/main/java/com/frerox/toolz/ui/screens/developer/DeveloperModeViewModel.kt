@@ -37,6 +37,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
@@ -103,6 +104,12 @@ class DeveloperModeViewModel @Inject constructor(
     val devShakeToOpen = repository.devShakeToOpen
     val spoofParamsJson = repository.spoofParamsJson
 
+    // ---- UI playground live state (drives the segmented "selected" marks) ----
+    val themeMode: StateFlow<String> = repository.themeMode
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "SYSTEM")
+    val appLanguage: StateFlow<String> = repository.appLanguage
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "en")
+
     val spoofParams: StateFlow<SpoofParams> = repository.spoofParamsJson
         .map { SpoofParams.parse(it) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), SpoofParams())
@@ -165,26 +172,23 @@ class DeveloperModeViewModel @Inject constructor(
     private val _prefsSnapshot = MutableStateFlow<Map<String, String>>(emptyMap())
     val prefsSnapshot = _prefsSnapshot.asStateFlow()
 
-    // ---- Live telemetry (1s tick; history feeds the sparkline) ----
-    private val _liveTick = MutableStateFlow(0L)
+    // ---- Live telemetry: only runs while a collector is actually watching ----
     private val _heapHistory = MutableStateFlow<List<Float>>(emptyList())
     val heapHistory: StateFlow<List<Float>> = _heapHistory.asStateFlow()
-    val appInfo: StateFlow<DevAppInfo> = _liveTick
-        .map { collectAppInfo() }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), collectAppInfo())
 
-    init {
-        viewModelScope.launch {
-            while (true) {
-                delay(1000)
-                _liveTick.value = android.os.SystemClock.elapsedRealtime()
-                val runtime = Runtime.getRuntime()
-                val fraction = (runtime.totalMemory() - runtime.freeMemory()).toFloat() /
-                    runtime.maxMemory().toFloat().coerceAtLeast(1f)
-                _heapHistory.value = (_heapHistory.value + fraction).takeLast(48)
-            }
+    /**
+     * 1s live stats. Implemented as a cold flow so the loop only runs while
+     * the Home tab collects it; it stops (grace 5s) when the tab is left.
+     * Each sample also feeds the rolling heap sparkline.
+     */
+    val appInfo: StateFlow<DevAppInfo> = flow {
+        while (true) {
+            val info = collectAppInfo()
+            _heapHistory.value = (_heapHistory.value + info.heapUsedFraction).takeLast(48)
+            emit(info)
+            delay(1000)
         }
-    }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), collectAppInfo())
 
     private fun collectAppInfo(): DevAppInfo {
         val runtime = Runtime.getRuntime()

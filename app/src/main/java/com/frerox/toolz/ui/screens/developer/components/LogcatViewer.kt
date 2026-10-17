@@ -79,7 +79,6 @@ private fun LogLine(text: String, defaultColor: Color) {
 fun LogcatViewer(
     lines: List<String>,
     tail: Boolean,
-    liveAvailable: Boolean,
     onTail: (Boolean) -> Unit,
     onRefresh: () -> Unit,
     onClear: () -> Unit,
@@ -136,7 +135,7 @@ fun LogcatViewer(
             Spacer(Modifier.width(4.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Live", modifier = Modifier.padding(start = 6.dp, end = 4.dp), fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                Switch(checked = tail, enabled = liveAvailable, onCheckedChange = onTail)
+                Switch(checked = tail, onCheckedChange = onTail)
             }
         }
         Spacer(Modifier.height(8.dp))

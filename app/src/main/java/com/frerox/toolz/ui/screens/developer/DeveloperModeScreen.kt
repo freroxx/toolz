@@ -45,8 +45,10 @@ import androidx.compose.material.icons.rounded.Forum
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.RestartAlt
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Rocket
 import androidx.compose.material.icons.rounded.Science
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.AlertDialog
@@ -112,6 +114,9 @@ import com.frerox.toolz.ui.screens.developer.components.TelemetryCard
 import com.frerox.toolz.ui.screens.developer.components.DevCommand
 import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.ui.theme.toolzBackground
+import com.frerox.toolz.ui.screens.developer.components.DebouncedSlider
+import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 
 private enum class DevTab(val title: String) {
@@ -196,6 +201,12 @@ fun DeveloperModeScreen(
     val crashHistory by viewModel.crashHistory.collectAsState()
 
     val activity = context as? android.app.Activity
+    // UI playground reflects live state: current font scale + forced theme/language.
+    val currentFontScale = remember(activity) {
+        activity?.let { DevUiOverrider.currentFontScale(it) } ?: 1f
+    }
+    val themeMode by viewModel.themeMode.collectAsState()
+    val forcedLanguage by viewModel.appLanguage.collectAsState()
     var rtlOn by remember { mutableStateOf(activity?.let { DevUiOverrider.isRtl(it) } == true) }
 
     var tab by remember { mutableStateOf(DevTab.HOME.ordinal) }
@@ -397,6 +408,9 @@ fun DeveloperModeScreen(
                     crashHistory = crashHistory,
                     activity = activity,
                     rtlOn = rtlOn,
+                    themeMode = themeMode,
+                    forcedLanguage = forcedLanguage,
+                    currentFontScale = currentFontScale,
                     onRtl = {
                         rtlOn = it
                         activity?.let { a -> DevUiOverrider.setRtl(a, it) }
@@ -530,7 +544,7 @@ private fun HomeTab(
                         vibrationManager?.vibrateLongClick()
                         viewModel.clearAllSpoofs()
                     }
-                    DevBtn("Refresh storage", Icons.Rounded.DeleteSweep) { refreshStorage() }
+                    DevBtn("Refresh storage", Icons.Rounded.Refresh) { refreshStorage() }
                 }
                 Spacer(Modifier.height(6.dp))
                 Text(
@@ -689,6 +703,9 @@ private fun LabsTab(
     crashHistory: List<CrashLabEvent>,
     activity: android.app.Activity?,
     rtlOn: Boolean,
+    themeMode: String,
+    forcedLanguage: String,
+    currentFontScale: Float,
     onRtl: (Boolean) -> Unit,
     onOpenRoute: (String) -> Unit,
     showCrashConfirm: (String) -> Unit,
@@ -742,7 +759,7 @@ private fun LabsTab(
                 DevBtn("Cancel dev posts", Icons.Rounded.DeleteSweep) { viewModel.cancelDevNotifications() }
             }
             Spacer(Modifier.height(8.dp))
-            DevBtn("System notification settings", Icons.Rounded.Share) { DevUiOverrider.openAppNotificationSettings(viewModel.appContext()) }
+            DevBtn("System notification settings", Icons.Rounded.Settings) { DevUiOverrider.openAppNotificationSettings(viewModel.appContext()) }
         }
 
         DevCard {
@@ -750,7 +767,6 @@ private fun LabsTab(
             LogcatViewer(
                 lines = logs,
                 tail = logTail,
-                liveAvailable = true,
                 onTail = viewModel::setLogcatTail,
                 onRefresh = { viewModel.refreshLogcat() },
                 onClear = { viewModel.clearLogcat() },
@@ -762,12 +778,15 @@ private fun LabsTab(
             DevCardTitle("Data lab")
             DevToggleLine("Verbose logging", verbose, devOn, viewModel::setVerbose)
             DevToggleLine("Force offline override", forceOffline, devOn, viewModel::setForceOffline)
-            Text("Mock network delay: ${mockDelay}ms", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-            androidx.compose.material3.Slider(
-                value = mockDelay.toFloat(),
-                onValueChange = { viewModel.setMockDelay(it.toInt()) },
-                valueRange = 0f..5000f,
+            Spacer(Modifier.height(4.dp))
+            DebouncedSlider(
+                label = "Mock network delay",
+                current = mockDelay.toFloat(),
+                min = 0f,
+                max = 10_000f,
+                format = { "${it.roundToInt()}ms" },
                 enabled = devOn,
+                onCommit = { viewModel.setMockDelay(it.roundToInt()) },
             )
         }
 
@@ -780,12 +799,12 @@ private fun LabsTab(
             DevCardTitle("UI playground")
             DevToggleLine("Perf HUD overlay flag (applies on restart)", perfHud, devOn, viewModel::setPerfHud)
             DevToggleLine("Force RTL (this Activity, reversible)", rtlOn, devOn && activity != null, onRtl)
-            Text("Font scale (recreates Activity)", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            Text("Font scale (recreates Activity) — current %.2f×".format(currentFontScale), fontWeight = FontWeight.Bold, fontSize = 12.sp)
             Spacer(Modifier.height(6.dp))
             SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                 listOf(0.85f to "S", 1f to "M", 1.3f to "L", 1.6f to "XL").forEachIndexed { i, (scale, label) ->
                     SegmentedButton(
-                        selected = false,
+                        selected = abs(currentFontScale - scale) < 0.01f,
                         onClick = { activity?.let { DevUiOverrider.setFontScale(it, scale) } },
                         shape = SegmentedButtonDefaults.itemShape(index = i, count = 4),
                         enabled = devOn && activity != null,
@@ -798,7 +817,7 @@ private fun LabsTab(
             SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                 listOf("SYSTEM" to "Sys", "LIGHT" to "Light", "DARK" to "Dark").forEachIndexed { i, (mode, label) ->
                     SegmentedButton(
-                        selected = false,
+                        selected = themeMode.equals(mode, ignoreCase = true),
                         onClick = { viewModel.setThemeMode(mode) },
                         shape = SegmentedButtonDefaults.itemShape(index = i, count = 3),
                         enabled = devOn,
@@ -807,7 +826,7 @@ private fun LabsTab(
             }
             Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                DevBtn("System dev options", Icons.Rounded.Share) { DevUiOverrider.openSystemDeveloperOptions(viewModel.appContext()) }
+                DevBtn("System dev options", Icons.Rounded.Settings) { DevUiOverrider.openSystemDeveloperOptions(viewModel.appContext()) }
             }
             Text(
                 "Layout bounds need WRITE_SECURE_SETTINGS — use system dev options.",
@@ -820,7 +839,7 @@ private fun LabsTab(
             SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                 listOf("en" to "EN", "ar" to "AR", "fr" to "FR", "es" to "ES").forEachIndexed { i, (code, label) ->
                     SegmentedButton(
-                        selected = false,
+                        selected = forcedLanguage != "system" && forcedLanguage.equals(code, ignoreCase = true),
                         onClick = { viewModel.applyLanguage(code) },
                         shape = SegmentedButtonDefaults.itemShape(index = i, count = 4),
                         enabled = devOn,
@@ -829,7 +848,11 @@ private fun LabsTab(
             }
             Spacer(Modifier.height(10.dp))
             TextButton(onClick = { viewModel.applyLanguage("system") }) {
-                Text("RESET TO SYSTEM LANGUAGE", fontWeight = FontWeight.Black, fontSize = 12.sp)
+                Text(
+                    if (forcedLanguage == "system") "✓ FOLLOWING SYSTEM LANGUAGE" else "RESET TO SYSTEM LANGUAGE",
+                    fontWeight = FontWeight.Black,
+                    fontSize = 12.sp,
+                )
             }
             DevDivider()
             Text("Endpoints (build-time, info only)", fontWeight = FontWeight.Bold, fontSize = 12.sp)
