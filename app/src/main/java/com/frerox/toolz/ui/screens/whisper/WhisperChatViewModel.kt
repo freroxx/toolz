@@ -70,10 +70,26 @@ class WhisperChatViewModel @Inject constructor(
     // V6-R3 FIX (#3): lets the chat self-heal after connectivity outages instead of
     // requiring exit/re-entry to see new messages.
     private val offlineManager: com.frerox.toolz.util.OfflineManager,
+    // DEV-SPOOF: gates the fully local fixture chat when the sandbox is on.
+    private val gate: com.frerox.toolz.data.developer.SpoofGate,
 ) : ViewModel() {
 
     val otherUserId: String = checkNotNull(savedStateHandle["otherUserId"])
-    val myUserId: String get() = authManager.currentUserId ?: ""
+
+    /** Cheap synchronous sandbox check for the guards below. */
+    val chatSandboxActive: Boolean
+        get() = gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.WHISPER)
+
+    /**
+     * DEV-SPOOF: sandboxed → the whole thread is a RAM fixture; bubbles align
+     * against the fake local account instead of a Supabase id.
+     */
+    val myUserId: String
+        get() = if (chatSandboxActive) {
+            com.frerox.toolz.data.developer.FakeWhisperSandbox.MY_ID
+        } else {
+            authManager.currentUserId ?: ""
+        }
 
     val screenshotBypassEnabled: StateFlow<Boolean> = settingsRepository.whisperScreenshotBypass
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
@@ -85,7 +101,33 @@ class WhisperChatViewModel @Inject constructor(
     }
 
     private val _uiState = MutableStateFlow(WhisperChatUiState())
-    val uiState: StateFlow<WhisperChatUiState> = _uiState.asStateFlow()
+
+    // DEV-SPOOF streams: the fixture thread (null = not sandboxed) and the fake
+    // partner typing ping while a canned auto-reply is being "composed".
+    private val _spoofThread = MutableStateFlow<List<WhisperMessage>?>(null)
+    private val _spoofTyping = MutableStateFlow(false)
+
+    /** DEV-SPOOF: sandboxed → the thread renders from FakeWhisperSandbox locally. */
+    val uiState: StateFlow<WhisperChatUiState> = combine(
+        _uiState.asStateFlow(),
+        _spoofThread,
+        _spoofTyping,
+        gate.active(com.frerox.toolz.data.developer.DevToolId.WHISPER),
+    ) { s, thread, typing, spoofed ->
+        if (!spoofed) return@combine s
+        WhisperChatUiState(
+            otherUser = com.frerox.toolz.data.developer.FakeWhisperSandbox.profileFor(otherUserId),
+            messages = thread ?: emptyList(),
+            isFriendStatusLoaded = true,
+            friendStatus = FriendStatus.ACCEPTED,
+            isPartnerTyping = typing,
+            isPartnerOnline = true,
+            partnerLastSeen = java.time.OffsetDateTime.now().toString(),
+            isSearchActive = s.isSearchActive,
+            searchQuery = s.searchQuery,
+            isMuted = s.isMuted,
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), WhisperChatUiState())
 
     private val _draftText = MutableStateFlow("")
     val draftText: StateFlow<String> = _draftText.asStateFlow()
@@ -292,6 +334,13 @@ class WhisperChatViewModel @Inject constructor(
     }
 
     private fun loadInitialData() {
+        // DEV-SPOOF: sandboxed → profile/friendship/thread all come from fixtures;
+        // no RPC, no Room subscription, no realtime session.
+        if (chatSandboxActive) {
+            _spoofThread.value =
+                com.frerox.toolz.data.developer.FakeWhisperSandbox.threadFor(otherUserId)
+            return
+        }
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
             // Entrance lag fix: messages are the only thing that blocks the list —
@@ -384,6 +433,14 @@ class WhisperChatViewModel @Inject constructor(
     }
 
     fun loadMessages() {
+        // DEV-SPOOF: sandboxed → the fixture thread is the only source.
+        if (chatSandboxActive) {
+            if (_spoofThread.value == null) {
+                _spoofThread.value =
+                    com.frerox.toolz.data.developer.FakeWhisperSandbox.threadFor(otherUserId)
+            }
+            return
+        }
         // 1. Instant loading from Room cache (ciphertext is decrypted by the repository).
         // The live collector must be a SINGLE permanent subscription: re-invoking
         // loadMessages() from failure handlers / undo must never stack a second collector,
@@ -631,6 +688,12 @@ class WhisperChatViewModel @Inject constructor(
 
     fun sendMessage(content: String) {
         if (content.isBlank()) return
+        // DEV-SPOOF: sandboxed → RAM-only thread + canned local auto-reply. Nothing
+        // is encrypted on the wire, queued, or echoed back from any server.
+        if (chatSandboxActive) {
+            sendMessageSandbox(content.trim())
+            return
+        }
         if (uiState.value.isBlockedByOther) {
             _uiState.update { it.copy(error = UiText.StringResource(R.string.st_Whisper_Chat_BlockedByOther)) }
             return
@@ -713,7 +776,50 @@ class WhisperChatViewModel @Inject constructor(
         }
     }
 
+    /** DEV-SPOOF: appends a bubble to the RAM thread and fakes a local peer reply. */
+    private fun sendMessageSandbox(trimmed: String) {
+        _draftText.value = ""
+        appendSpoofMessage(fromMe = true, text = trimmed)
+        // The fixture peer "notices" after a beat, types, then answers locally.
+        viewModelScope.launch {
+            delay(500)
+            _spoofTyping.value = true
+            delay(900)
+            _spoofTyping.value = false
+            appendSpoofReply()
+        }
+    }
+
+    private fun appendSpoofMessage(fromMe: Boolean, text: String) {
+        val myId = com.frerox.toolz.data.developer.FakeWhisperSandbox.MY_ID
+        _spoofThread.update { thread ->
+            thread.orEmpty() + WhisperMessage(
+                id = "spoof-live-${System.currentTimeMillis()}-${text.hashCode()}",
+                senderId = if (fromMe) myId else otherUserId,
+                receiverId = if (fromMe) otherUserId else myId,
+                content = text,
+                isRead = true,
+                createdAt = java.time.OffsetDateTime.now().toString(),
+            )
+        }
+    }
+
+    private fun appendSpoofReply() {
+        val lastMine = _spoofThread.value.orEmpty().lastOrNull {
+            it.senderId == com.frerox.toolz.data.developer.FakeWhisperSandbox.MY_ID
+        }
+        appendSpoofMessage(
+            fromMe = false,
+            text = com.frerox.toolz.data.developer.FakeWhisperSandbox.autoReplyFor(lastMine?.content ?: ""),
+        )
+    }
+
     fun sendImage(imageBytes: ByteArray, mimeType: String, expiresAfterSeconds: Long?) {
+        // DEV-SPOOF: sandboxed → no cipher transport; images are suppressed.
+        if (chatSandboxActive) {
+            android.util.Log.w("DevSpoof", "Whisper sendImage suppressed — sandbox active")
+            return
+        }
         if (uiState.value.isBlockedByMe || uiState.value.isBlockedByOther) return
         viewModelScope.launch {
             _uiState.update { it.copy(isUploadingAttachment = true) }
@@ -1097,6 +1203,8 @@ class WhisperChatViewModel @Inject constructor(
     }
 
     private fun sendTypingSignal(isTyping: Boolean) {
+        // DEV-SPOOF: sandboxed → the fake peer's typing state is local only.
+        if (chatSandboxActive) return
         viewModelScope.launch {
             repository.sendTypingStatus(otherUserId, isTyping)
         }

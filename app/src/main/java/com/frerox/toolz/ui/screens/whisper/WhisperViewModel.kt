@@ -20,6 +20,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.SharingStarted
@@ -48,11 +49,42 @@ class WhisperViewModel @Inject constructor(
     private val keyRotationStore: WhisperKeyRotationStore,
     private val offlineManager: com.frerox.toolz.util.OfflineManager,
     private val pushTokenStore: com.frerox.toolz.push.WhisperPushTokenStore,
+    // DEV-SPOOF: gates auto-auth + full local fixture mode for Whisper.
+    private val gate: com.frerox.toolz.data.developer.SpoofGate,
 ) : ViewModel() {
     private var profileSearchJob: Job? = null
 
     private val _uiState = MutableStateFlow(WhisperUiState())
-    val uiState: StateFlow<WhisperUiState> = _uiState.asStateFlow()
+
+    /** Cheap synchronous check used by sandbox guards below. */
+    val whisperSandboxActive: Boolean
+        get() = gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.WHISPER)
+
+    // Whether the real Supabase-bound session machinery is running right now.
+    private var realSessionLive = false
+
+    /**
+     * DEV-SPOOF: sandboxed Whisper is auto-authenticated as a RAM fixture — no
+     * login, no accounts, no Supabase. Flipping the sandbox off restores the
+     * real auth stream untouched.
+     */
+    val isAuthenticated: StateFlow<Boolean?> = combine(
+        authManager.isAuthenticated,
+        gate.active(com.frerox.toolz.data.developer.DevToolId.WHISPER),
+    ) { auth, spoofed -> spoofed || (auth == true) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** DEV-SPOOF: sandboxed → the whole hub renders from FakeWhisperSandbox. */
+    val uiState: StateFlow<WhisperUiState> = combine(
+        _uiState.asStateFlow(),
+        gate.active(com.frerox.toolz.data.developer.DevToolId.WHISPER),
+    ) { s, spoofed ->
+        if (spoofed) {
+            com.frerox.toolz.data.developer.FakeWhisperSandbox.hubState()
+        } else {
+            s
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), WhisperUiState())
 
     val betaWarningShown: StateFlow<Boolean?> = settingsRepository.whisperBetaWarningShown
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
@@ -104,9 +136,6 @@ class WhisperViewModel @Inject constructor(
         _pickPhotoTrigger.value = 0
     }
 
-    val isAuthenticated: StateFlow<Boolean?> = authManager.isAuthenticated
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
-
     private var messagesJob: Job? = null
     private var friendsJob: Job? = null
     private var muteJob: Job? = null
@@ -125,6 +154,26 @@ class WhisperViewModel @Inject constructor(
 
         viewModelScope.launch {
             isAuthenticated.collect { auth ->
+                // DEV-SPOOF: sandboxed → fixture session only. Never start the real
+                // Supabase machinery (tombstones, prekeys, rpcs, heartbeat, presence);
+                // if it was already running, tear it down on entering the sandbox.
+                if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.WHISPER)) {
+                    if (realSessionLive) {
+                        realSessionLive = false
+                        messagesJob?.cancel()
+                        friendsJob?.cancel()
+                        convInvalidationJob?.cancel()
+                        loadAllJob?.cancel()
+                        stopHeartbeat()
+                        _uiState.update { WhisperUiState() }
+                        android.util.Log.w(
+                            "DevSpoof",
+                            "Whisper sandbox active — real session suspended, fake local account on",
+                        )
+                    }
+                    return@collect
+                }
+                realSessionLive = true
                 if (auth == true) {
                     // Hydrate local tombstones from server so reinstall / new device never resurrects deletes.
                     launch { runCatching { repository.pullRemoteTombstones() }
@@ -322,6 +371,8 @@ class WhisperViewModel @Inject constructor(
     private var loadAllJob: Job? = null
 
     fun loadAll(isRefresh: Boolean = false) {
+        // DEV-SPOOF: sandboxed → fixtures only, no profile RPCs / conversation hubs.
+        if (whisperSandboxActive) return
         // Guard against overlapping loads (e.g. refresh + auth-state re-entry)
         // Refresh must not be dropped if a previous load is still active.
         if (loadAllJob?.isActive == true) {
@@ -494,6 +545,8 @@ class WhisperViewModel @Inject constructor(
     val discoverLoadFailed: StateFlow<Boolean> = _discoverLoadFailed.asStateFlow()
 
     fun loadDiscoverProfiles(page: Int) {
+        // DEV-SPOOF: sandboxed → discover is served by nothing (fixture friends only).
+        if (whisperSandboxActive) return
         // Page 0 is a refresh and must never be blocked by pagination state; only
         // block subsequent pages when already loading or at end.
         if (page != 0 && (_uiState.value.isDiscoverLoadingNext || _uiState.value.hasReachedEndOfDiscover)) return
@@ -528,6 +581,19 @@ class WhisperViewModel @Inject constructor(
     }
 
     fun searchProfiles(query: String) {
+        // DEV-SPOOF: sandboxed → search resolves against the fixture roster only.
+        if (whisperSandboxActive) {
+            val queryLower = query.trim().lowercase()
+            _uiState.update {
+                it.copy(
+                    searchResults = if (query.isBlank()) emptyList() else
+                        com.frerox.toolz.data.developer.FakeWhisperSandbox.friends().filter {
+                            it.username.contains(queryLower) || (it.displayName ?: "").lowercase().contains(queryLower)
+                        }
+                )
+            }
+            return
+        }
         profileSearchJob?.cancel()
         if (query.isBlank()) {
             _uiState.update { it.copy(searchResults = emptyList()) }
@@ -631,6 +697,14 @@ class WhisperViewModel @Inject constructor(
     }
 
     fun deleteAccount(password: String? = null, onComplete: () -> Unit) {
+        // DEV-SPOOF: sandboxed → there is no real account to delete.
+        if (whisperSandboxActive) {
+            _uiState.update {
+                it.copy(infoMessage = UiText.DynamicString("Sandbox active — nothing real to delete."))
+            }
+            onComplete()
+            return
+        }
         viewModelScope.launch {
             authManager.deleteAccount(password)
                 .onSuccess {
@@ -751,6 +825,13 @@ class WhisperViewModel @Inject constructor(
     }
 
     fun signOut(onComplete: () -> Unit = {}) {
+        // DEV-SPOOF: sandboxed → nothing to sign out of; the fixture session stays.
+        if (whisperSandboxActive) {
+            _uiState.update {
+                it.copy(infoMessage = UiText.DynamicString("Sandbox active — the fixture account has no real session to end."))
+            }
+            return
+        }
         // Stop the heartbeat FIRST so a dead session never keeps writing last_seen,
         // then tear down realtime subscriptions so they don't retry against a dead session.
         stopHeartbeat()
