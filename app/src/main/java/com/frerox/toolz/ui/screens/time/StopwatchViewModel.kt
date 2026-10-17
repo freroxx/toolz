@@ -233,6 +233,9 @@ class StopwatchViewModel @Inject constructor(
 
     private fun enterSandboxImmediately() {
         sandboxActiveNow = true
+        // DEV-SPOOF: a queued real Start must not leak into the service when
+        // the sandbox later drops — same hygiene as Timer's pendingAction.
+        pendingToggle = false
         _sandboxState.value = fixturedFromReal()
         try { context.unbindService(connection) } catch (_: Exception) {}
         toolService = null
