@@ -274,10 +274,13 @@ class FlashlightViewModel @Inject constructor(
         _uiState.update { it.copy(mode = mode) }
         saveSetting("flashlight_mode", mode.name)
         repository.setMode(mode)
-        
-        // Sync with service if it's running
-        FlashlightService.getInstance()?.setMode(mode)
-        
+
+        // DEV-SPOOF: never sync a live service in demo mode (the arm already
+        // stopped it — a stray instance must not re-light the torch).
+        if (!gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.SYSTEM)) {
+            FlashlightService.getInstance()?.setMode(mode)
+        }
+
         if (_uiState.value.isOn) {
             startMode()
         }
@@ -288,12 +291,13 @@ class FlashlightViewModel @Inject constructor(
         _uiState.update { it.copy(brightness = valClamped) }
         saveSetting("flashlight_brightness", valClamped)
         repository.setBrightness(valClamped)
-        
-        // Sync with service if it's running
-        FlashlightService.getInstance()?.setBrightness(valClamped)
 
-        if (_uiState.value.isOn) {
-            applyCurrentBrightness()
+        // DEV-SPOOF: no service sync / hardware apply while demo is armed.
+        if (!gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.SYSTEM)) {
+            FlashlightService.getInstance()?.setBrightness(valClamped)
+            if (_uiState.value.isOn) {
+                applyCurrentBrightness()
+            }
         }
     }
 
@@ -363,6 +367,9 @@ class FlashlightViewModel @Inject constructor(
     // ── Private helpers ────────────────────────────────────────────────────
 
     private fun startMode() {
+        // DEV-SPOOF: demo never runs real pulse loops — the fake toggle alone
+        // drives the UI; strobe/SOS remain pure screen cosmetics there.
+        if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.SYSTEM)) return
         modeJob?.cancel()
         modeJob = viewModelScope.launch {
             when (_uiState.value.mode) {
@@ -391,6 +398,9 @@ class FlashlightViewModel @Inject constructor(
      * Falls back to a simple on/off for older APIs or unsupported hardware.
      */
     private fun applyCurrentBrightness() {
+        // DEV-SPOOF: no torch calls while demo mode is armed — mode loops keep
+        // ticking so the UI sequence stays alive, but the camera never lights.
+        if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.SYSTEM)) return
         val id = cameraId ?: return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             _uiState.value.isBrightnessSupported) {
@@ -415,6 +425,8 @@ class FlashlightViewModel @Inject constructor(
 
     /** Low-level boolean torch toggle via [CameraManager.setTorchMode]. */
     private fun setTorchRaw(enabled: Boolean) {
+        // DEV-SPOOF: the physical torch is never touched in demo mode.
+        if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.SYSTEM)) return
         try {
             cameraId?.let { cameraManager.setTorchMode(it, enabled) }
         } catch (e: Exception) {
