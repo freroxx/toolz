@@ -103,7 +103,7 @@ Canonical shape (v1, `schemaVersion: 1`). Server validation lives in
 | `frequency` | `once`/`every_launch`/`daily`/`weekly`/`interval` | Recurrence cap |
 | `intervalHours` | 1–720 | Only for `interval` |
 | `maxImpressions` | 1–100 or null | Total popup count per device (`once` implies 1) |
-| `dismissible` | bool (default true) | ✕ button, scrim/back dismissal, "Later" snooze |
+| `dismissible` | bool (default true) | ✕ button; scrim/back/swipe-down snooze |
 | `showInHistory` | bool (default true) | If false, pruned at expiry instead of kept |
 | `disappearing` | bool (default false) | Auto-deleted from devices at `expiresAt` (popups, notifications AND history) |
 | `requiresAction` | bool | Blocking dialog instead of bottom sheet (critical only) |
@@ -366,8 +366,9 @@ popup, never a crash.
   `isExpired`, `relativeShort` (`Xm/Xh/Xd`, empty beyond 7 days so callers
   can fall back to a date string). Covered by `NewsTimeTest` (16 tests).
 - `NewsLinks.kt` — exception-isolated `open` (https + `toolz://` via generic
-  `ACTION_VIEW`) and `share` (title + `WEBSITE_NEWS_URL#news-<id>`); every
-  call site routes through it so a dead browser never crashes the screen.
+  `ACTION_VIEW`) and `share` (bare `WEBSITE_NEWS_URL#news-<id>` link, no
+  title/subject — paste-anywhere friendly); every call site routes through it
+  so a dead browser never crashes the screen.
 - `NewsPopup.kt` — centered expressive card (same language as the PurgeShot /
   Clipboard popups: dim scrim, 36 dp card, drag handle, max 440 × 600 dp with
   internal scroll) with a priority tile header
@@ -375,26 +376,29 @@ popup, never a crash.
   fix/tertiary, promo/secondary, info/neutral — the shared `NewsPriorityChip`
   composable also renders the small pill on history cards) + label/date,
   crossfaded Coil cover (190 dp, 24 dp corners, hidden on load error), full
-  `MarkdownContent` body at 15 sp, strict button hierarchy (one filled primary
-  CTA with OpenInNew/deep-link ArrowForward icon, optional tonal Later, quiet
-  footer: All news · Share · Website), inline critical-bypass note instead of
-  a hidden dialog. Modal correctness: the popup hosts LAST in the dashboard
-  Box (above `ToolzFloatingToolbar`, animated with `AnimatedVisibility`
-  fade + spring pop 0.92→1), so its full-screen scrim blocks every tap —
-  scrim-tap snoozes dismissible cards and only swallows input for blocking
-  ones; `BackHandler` snoozes dismissible cards and is swallowed for
-  blocking (`critical` + `requiresAction`). Pull-to-snooze uses a nested
-  scroll connection so it works while the body is scrollable: downward drag
-  past the content's top edge translates the card (spring
+  `MarkdownContent` body at 15 sp, strict button hierarchy (exactly one filled
+  primary — the CTA labelled by `actionLabel` with OpenInNew/deep-link
+  ArrowForward icon, or "Got it" when there is no action; no secondary
+  buttons, quiet footer: All news · Share · Website), inline critical-bypass
+  note instead of a hidden dialog. Modal correctness: the popup hosts LAST in
+  the dashboard Box (above `ToolzFloatingToolbar`, animated with
+  `AnimatedVisibility` fade + spring pop 0.92→1), so its full-screen scrim
+  blocks every tap — scrim-tap snoozes dismissible cards and only swallows
+  input for blocking ones; `BackHandler` snoozes dismissible cards and is
+  swallowed for blocking (`critical` + `requiresAction`). Pull-to-snooze uses
+  a nested scroll connection so it works while the body is scrollable:
+  downward drag past the content's top edge translates the card (spring
   `DampingRatioMediumBouncy` return), release beyond 132 dp snaps with a
-  haptic and flies out. Dismiss semantics: ✕ = dismiss forever,
-  Later/swipe/scrim/back = snooze 24h, CTA = open + close.
+  haptic and flies out. The card is exactly centered (`contentAlignment =
+  Alignment.Center` on the drag wrapper). Dismiss semantics: ✕ = dismiss
+  forever, swipe/scrim/back = snooze 24h, CTA = open + close.
   Action-less items get a filled "Got it" (dismiss, or plain close when
   non-dismissible), so every config has an exit.
 - `ToolzNewsScreen.kt` — backup-style rounded (32 dp) `ExpressiveTopAppBar`
   with subtitle + refresh action, `toolzBackground`, fading list edges,
   full history: search field (clear button, `ImeAction.Search` hides the
-  keyboard) + priority filter chips (parity with `/news`) + Android 13+
+  keyboard) + horizontally scrolling priority filter chips (`LazyRow`,
+  parity with `/news`) + Android 13+
   "Notifications off → Enable" card (one-tap `POST_NOTIFICATIONS` request;
   after the first denial — when Android stops showing the dialog — the card
   switches to an always-works `ACTION_APP_NOTIFICATION_SETTINGS` deep link),
