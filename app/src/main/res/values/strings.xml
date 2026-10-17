@@ -4132,7 +4132,6 @@
     <string name="st_News_yesterday">Yesterday</string>
     <string name="st_News_popup_announcement">Announcement: %1$s</string>
     <string name="st_News_popup_got_it">Got it</string>
-    <string name="st_News_popup_later">Later</string>
     <string name="st_News_popup_all_news">All news</string>
     <string name="st_News_popup_website">Website</string>
     <string name="st_News_popup_share_desc">Share announcement</string>

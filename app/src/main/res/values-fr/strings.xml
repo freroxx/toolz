@@ -3910,7 +3910,6 @@ La plupart des optimisations nécessitent Shizuku pour un accès shell privilég
     <string name="st_News_yesterday">Hier</string>
     <string name="st_News_popup_announcement">Annonce : %1$s</string>
     <string name="st_News_popup_got_it">Compris</string>
-    <string name="st_News_popup_later">Plus tard</string>
     <string name="st_News_popup_all_news">Tout voir</string>
     <string name="st_News_popup_website">Site web</string>
     <string name="st_News_popup_share_desc">Partager l\'annonce</string>

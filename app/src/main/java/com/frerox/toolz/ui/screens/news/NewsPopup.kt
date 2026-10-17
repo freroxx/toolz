@@ -36,7 +36,6 @@ import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.LocalOffer
 import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.PushPin
-import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -85,7 +84,6 @@ import com.frerox.toolz.ui.components.ExpressiveCard
 import com.frerox.toolz.ui.components.MarkdownContent
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.components.ToolzExpressiveTextButton
-import com.frerox.toolz.ui.components.ToolzTonalExpressiveButton
 import com.frerox.toolz.ui.components.rememberToolzHapticFeedback
 import kotlinx.coroutines.launch
 
@@ -147,9 +145,9 @@ private const val DRAG_EXIT_DISTANCE_PX = 2400f
  * Toolz News announcement popup — centered expressive card, same language as
  * the PurgeShot and Clipboard popups (scrim + 36dp card + drag handle).
  *
- * Hierarchy is strict: one filled primary action, one tonal "Later", quiet
- * text links in the footer. Dismiss semantics are preserved:
- * X = dismiss forever, Later/swipe/scrim/back = snooze 24h, CTA = open + close.
+ * Hierarchy is strict: one filled primary action, quiet text links in the
+ * footer — no secondary buttons. Dismiss semantics are preserved:
+ * X = dismiss forever, swipe/scrim/back = snooze 24h, CTA = open + close.
  * System back participates: dismissible cards snooze; blocking cards
  * (critical + requiresAction) swallow it. The fullscreen scrim always blocks
  * input below. Pull-to-snooze works even while the body scrolls — a nested
@@ -269,7 +267,8 @@ fun ToolzNewsPopup(
                 .graphicsLayer {
                     translationY = dragOffset.value
                     alpha = (1f - (dragOffset.value / 1400f)).coerceIn(0.55f, 1f)
-                }
+                },
+            contentAlignment = Alignment.Center
         ) {
             ExpressiveCard(
                 onClick = {},
@@ -421,7 +420,9 @@ fun ToolzNewsPopup(
                         }
                     }
 
-                    // Actions: exactly one filled primary, optional tonal Later.
+                    // Actions: one filled primary — the CTA (custom action
+                    // label) or Got it. Snooze lives in the gestures
+                    // (scrim tap, back, pull-down), not in extra buttons.
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         if (hasAction) {
                             val deepLink = item.actionUrl!!.startsWith("toolz://")
@@ -463,30 +464,6 @@ fun ToolzNewsPopup(
                                     fontWeight = FontWeight.Bold,
                                     style = MaterialTheme.typography.labelLarge
                                 )
-                            }
-                        }
-                        if (canSoftClose) {
-                            ToolzTonalExpressiveButton(
-                                onClick = onLater,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(50.dp),
-                                shape = RoundedCornerShape(20.dp)
-                            ) {
-                                Icon(Icons.Rounded.Schedule, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(8.dp))
-                                Text(
-                                    stringResource(R.string.st_News_popup_later),
-                                    fontWeight = FontWeight.Bold,
-                                    style = MaterialTheme.typography.labelLarge
-                                )
-                            }
-                        } else if (blocking) {
-                            ToolzExpressiveTextButton(
-                                onClick = onLater,
-                                modifier = Modifier.align(Alignment.CenterHorizontally)
-                            ) {
-                                Text(stringResource(R.string.st_News_popup_later), fontWeight = FontWeight.SemiBold)
                             }
                         }
                     }

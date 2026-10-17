@@ -3903,7 +3903,6 @@
     <string name="st_News_yesterday">Ontem</string>
     <string name="st_News_popup_announcement">Aviso: %1$s</string>
     <string name="st_News_popup_got_it">Entendi</string>
-    <string name="st_News_popup_later">Mais tarde</string>
     <string name="st_News_popup_all_news">Todas</string>
     <string name="st_News_popup_website">Site</string>
     <string name="st_News_popup_share_desc">Compartilhar aviso</string>
