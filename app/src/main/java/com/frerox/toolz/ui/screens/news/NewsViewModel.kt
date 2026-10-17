@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -19,8 +20,25 @@ import javax.inject.Inject
 @HiltViewModel
 class NewsViewModel @Inject constructor(
     private val newsRepository: NewsRepository,
-    val settingsRepository: SettingsRepository
+    val settingsRepository: SettingsRepository,
+    private val gate: com.frerox.toolz.data.developer.SpoofGate
 ) : ViewModel() {
+
+    // DEV-SPOOF: news demo — the feed, sync, popup, notifications and seen
+    // markers all run against a RAM backlog; the network sync, Room cache and
+    // system notifications are skipped entirely.
+    private val UPDATE_NEWS = com.frerox.toolz.data.developer.DevToolId.UPDATE_NEWS
+    private val gateActive = gate.active(UPDATE_NEWS)
+
+    private val seenIdsDemo = com.frerox.toolz.data.developer.FakeNewsSandbox.seen
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet<String>())
+
+    val seenIds: StateFlow<Set<String>> = combine(
+        settingsRepository.newsSeenIds,
+        seenIdsDemo,
+        gateActive,
+    ) { real, fixtureSeen, demo -> if (demo) fixtureSeen else real }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
     val newsEnabled = settingsRepository.newsEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
@@ -68,9 +86,6 @@ class NewsViewModel @Inject constructor(
 
     private var searchJob: Job? = null
 
-    val seenIds: StateFlow<Set<String>> = settingsRepository.newsSeenIds
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
-
     private var sessionPopupShown = false
     private var popupJob: Job? = null
     private var historyPage = 0
@@ -79,6 +94,23 @@ class NewsViewModel @Inject constructor(
     // coalesced so scrolling never thrashes the DataStore JSON setter.
     private val pendingSeen = mutableSetOf<String>()
     private var seenJob: Job? = null
+
+    init {
+        // DEV-SPOOF: fresh backlog per demo arm; RAM only, nothing persisted.
+        viewModelScope.launch {
+            com.frerox.toolz.data.developer.FakeNewsSandbox.reset()
+            gateActive.collect { demo ->
+                if (demo) {
+                    com.frerox.toolz.data.developer.FakeNewsSandbox.arm()
+                    android.util.Log.w("DevSpoof", "News sandbox armed — RAM editorial backlog")
+                } else {
+                    com.frerox.toolz.data.developer.FakeNewsSandbox.reset()
+                }
+                _unreadCount.value = if (demo) com.frerox.toolz.data.developer.FakeNewsSandbox.unreadCount() else 0
+                _searchResults.value = null
+            }
+        }
+    }
 
     fun toggleNews(enabled: Boolean) {
         viewModelScope.launch {
@@ -99,6 +131,19 @@ class NewsViewModel @Inject constructor(
         popupJob?.cancel()
         popupJob = viewModelScope.launch {
             try {
+                // DEV-SPOOF: the fixture's pinned item is the popup candidate;
+                // nothing is marked shown in the repo.
+                if (gate.sandboxed(UPDATE_NEWS)) {
+                    val candidate = com.frerox.toolz.data.developer.FakeNewsSandbox.all()
+                        .firstOrNull { it.pinned }
+                        ?: com.frerox.toolz.data.developer.FakeNewsSandbox.all().firstOrNull()
+                        ?: return@launch
+                    _popup.value = candidate
+                    _popupVisible.value = true
+                    sessionPopupShown = true
+                    refreshUnread()
+                    return@launch
+                }
                 // No foreground delay: news shows as soon as it reaches the
                 // user, dashboard-only (this host lives in DashboardScreen).
                 val candidate = newsRepository.popupCandidate() ?: return@launch
@@ -121,7 +166,10 @@ class NewsViewModel @Inject constructor(
     fun checkNotifications() {
         viewModelScope.launch {
             try {
-                newsRepository.syncAndNotify()
+                // DEV-SPOOF: no sync, no posted notifications in demo mode.
+                if (!gate.sandboxed(UPDATE_NEWS)) {
+                    newsRepository.syncAndNotify()
+                }
                 refreshUnread()
                 evaluatePopup()
             } catch (_: Exception) { }
@@ -133,6 +181,11 @@ class NewsViewModel @Inject constructor(
     }
 
     fun onPopupLater() {
+        // DEV-SPOOF: no snooze persistence in demo mode.
+        if (gate.sandboxed(UPDATE_NEWS)) {
+            _popupVisible.value = false
+            return
+        }
         viewModelScope.launch {
             try {
                 _popup.value?.id?.let { newsRepository.snooze24h(it) }
@@ -144,14 +197,22 @@ class NewsViewModel @Inject constructor(
     fun onPopupDismiss() {
         viewModelScope.launch {
             try {
-                _popup.value?.id?.let { newsRepository.dismiss(it) }
+                // DEV-SPOOF: dismissal is RAM-only (no impression bookkeeping).
+                if (!gate.sandboxed(UPDATE_NEWS)) {
+                    _popup.value?.id?.let { newsRepository.dismiss(it) }
+                }
+                _popupVisible.value = false
+                refreshUnread()
             } catch (_: Exception) { }
-            _popupVisible.value = false
-            refreshUnread()
         }
     }
 
     fun refreshUnread() {
+        // DEV-SPOOF: unread = fixture minus RAM seen.
+        if (gate.sandboxed(UPDATE_NEWS)) {
+            _unreadCount.value = com.frerox.toolz.data.developer.FakeNewsSandbox.unreadCount()
+            return
+        }
         viewModelScope.launch {
             try { _unreadCount.value = newsRepository.unreadCount() } catch (_: Exception) { }
         }
@@ -164,6 +225,13 @@ class NewsViewModel @Inject constructor(
      */
     fun markSeenOnVisible(ids: Collection<String>) {
         if (ids.isEmpty()) return
+        // DEV-SPOOF: seen tracking in RAM — the DataStore setter and real
+        // unread state are left alone.
+        if (gate.sandboxed(UPDATE_NEWS)) {
+            com.frerox.toolz.data.developer.FakeNewsSandbox.markSeen(ids)
+            refreshUnread()
+            return
+        }
         pendingSeen.addAll(ids)
         seenJob?.cancel()
         seenJob = viewModelScope.launch {
@@ -195,6 +263,12 @@ class NewsViewModel @Inject constructor(
             delay(180) // coalesce typing
             _searching.value = true
             try {
+                // DEV-SPOOF: search the RAM backlog in demo mode.
+                if (gate.sandboxed(UPDATE_NEWS)) {
+                    _searchResults.value =
+                        com.frerox.toolz.data.developer.FakeNewsSandbox.search(trimmed, priority)
+                    return@launch
+                }
                 val base = newsRepository.searchHistory(trimmed)
                 _searchResults.value =
                     if (priority == "all") base else base.filter { it.priority == priority }
@@ -209,6 +283,24 @@ class NewsViewModel @Inject constructor(
     fun loadHistory(force: Boolean = false) {
         viewModelScope.launch {
             try {
+                // DEV-SPOOF: page the RAM backlog, no network, no Room.
+                if (gate.sandboxed(UPDATE_NEWS)) {
+                    _historyError.value = null
+                    if (force) { _syncing.value = true; delay(500); _syncing.value = false }
+                    historyPage = 0
+                    _historyEnd.value = false
+                    _historyLoading.value = true
+                    delay(250)
+                    _history.value = com.frerox.toolz.data.developer.FakeNewsSandbox.all()
+                        .take(NewsRepository.HISTORY_PAGE_SIZE)
+                    if (com.frerox.toolz.data.developer.FakeNewsSandbox.all().size <= NewsRepository.HISTORY_PAGE_SIZE) {
+                        _historyEnd.value = true
+                    } else {
+                        historyPage++
+                    }
+                    refreshUnread()
+                    return@launch
+                }
                 _historyError.value = null
                 if (force) {
                     _syncing.value = true
@@ -237,6 +329,14 @@ class NewsViewModel @Inject constructor(
         if (_historyLoading.value || _historyEnd.value) return
         viewModelScope.launch {
             try {
+                // DEV-SPOOF: RAM backlog pagination ends after page one.
+                if (gate.sandboxed(UPDATE_NEWS)) {
+                    _historyLoading.value = true
+                    delay(250)
+                    _historyLoading.value = false
+                    _historyEnd.value = true
+                    return@launch
+                }
                 _historyLoading.value = true
                 // historyPage always points at the next not-yet-loaded page:
                 // loadHistory() loads page N then advances to N+1.
@@ -257,6 +357,14 @@ class NewsViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 _syncing.value = true
+                // DEV-SPOOF: refresh repages the RAM backlog.
+                if (gate.sandboxed(UPDATE_NEWS)) {
+                    delay(500)
+                    _history.value = com.frerox.toolz.data.developer.FakeNewsSandbox.all()
+                        .take(NewsRepository.HISTORY_PAGE_SIZE)
+                    refreshUnread()
+                    return@launch
+                }
                 newsRepository.syncIfStale(force = true)
                 refreshUnread()
             } catch (_: Exception) { } finally {

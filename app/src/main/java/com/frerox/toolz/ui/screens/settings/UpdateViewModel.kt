@@ -34,10 +34,21 @@ import javax.inject.Inject
 @HiltViewModel
 class UpdateViewModel @Inject constructor(
     private val updateManager: UpdateManager,
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    private val gate: com.frerox.toolz.data.developer.SpoofGate
 ) : ViewModel() {
 
-    val managerState: StateFlow<UpdateManagerState> = updateManager.state
+    // DEV-SPOOF: the whole update lifecycle is simulated in RAM while demo is
+    // armed — no GitHub fetch, no APK download, no install-session touch.
+    private val UPDATE = com.frerox.toolz.data.developer.DevToolId.UPDATE_NEWS
+
+    private val _demoState = kotlinx.coroutines.flow.MutableStateFlow<UpdateManagerState?>(null)
+
+    val managerState: StateFlow<UpdateManagerState> = kotlinx.coroutines.flow.combine(
+        updateManager.state, _demoState, gate.active(UPDATE),
+    ) { real, demo, demoOn ->
+        if (demoOn && demo != null) demo else real
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, UpdateManagerState.Idle)
 
     val preferredAbi: StateFlow<String> = settingsRepository.preferredAbi.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5000), "AUTO"
@@ -61,31 +72,107 @@ class UpdateViewModel @Inject constructor(
 
     fun getDeviceAbi(): String = Build.SUPPORTED_ABIS.firstOrNull() ?: "unknown"
 
+    /** DEV-SPOOF: fixture release the fake lifecycle stages around. */
+    private fun fakeUpdate(): com.frerox.toolz.data.update.PendingUpdate =
+        com.frerox.toolz.data.update.PendingUpdate(
+            version = "9.9.9-demo",
+            versionCode = 999999,
+            changelog = "## Demo release notes\n- Showcase build — no APK was downloaded.\n" +
+                "- Toolz Demo Mode banner removal.\n- Cleaner, vault and news sandboxes.",
+            downloadUrl = "https://fake.local/toolz/demo.apk",
+            sizeBytes = 46_600_000L,
+            sha256 = null,
+            isCritical = false,
+            abi = "universal (demo)",
+            source = "demo-fixture",
+        )
+
     fun checkForUpdates(force: Boolean = true) {
+        // DEV-SPOOF: staged fake check — Checking → Available, no network.
+        if (gate.sandboxed(UPDATE)) {
+            android.util.Log.w("DevSpoof", "Update sandbox check (RAM fixture)")
+            viewModelScope.launch {
+                _demoState.value = UpdateManagerState.Checking
+                kotlinx.coroutines.delay(700)
+                _demoState.value = UpdateManagerState.Available(fakeUpdate())
+            }
+            return
+        }
         viewModelScope.launch { updateManager.check(showNotification = false, force = force) }
     }
 
     fun startDownload(update: PendingUpdate? = null) {
+        // DEV-SPOOF: fake download that climbs to ReadyToInstall in RAM.
+        if (gate.sandboxed(UPDATE)) {
+            val demo = fakeUpdate()
+            viewModelScope.launch {
+                val total = demo.sizeBytes ?: 46_600_000L
+                var downloaded = 0L
+                while (downloaded < total) {
+                    downloaded = (downloaded + total / 18).coerceAtMost(total)
+                    _demoState.value = UpdateManagerState.Downloading(
+                        update = demo,
+                        bytesDownloaded = downloaded,
+                        totalBytes = total,
+                        speedBps = 4_600_000L + (total % 300_000),
+                        progress = (downloaded * 100f / total),
+                    )
+                    kotlinx.coroutines.delay(140)
+                }
+                _demoState.value = UpdateManagerState.ReadyToInstall(demo, java.io.File("/dev/demo.apk"))
+            }
+            return
+        }
         updateManager.download(update, autoInstall = true)
     }
 
-    fun cancelDownload() = updateManager.cancelDownload()
+    fun cancelDownload() {
+        // DEV-SPOOF: cancel re-arms the fake Available card.
+        if (gate.sandboxed(UPDATE)) {
+            _demoState.value = UpdateManagerState.Available(fakeUpdate())
+            return
+        }
+        updateManager.cancelDownload()
+    }
 
-    fun installReady() = updateManager.installReady()
+    fun installReady() {
+        // DEV-SPOOF: installing a demo APK is refused honestly.
+        if (gate.sandboxed(UPDATE)) {
+            _demoState.value = UpdateManagerState.Error(
+                "Demo mode: this release is a local fixture — no APK was downloaded and nothing will be installed.",
+                retryable = false,
+            )
+            return
+        }
+        updateManager.installReady()
+    }
 
-    fun needsInstallPermission(): Boolean = updateManager.needsInstallPermission()
+    fun needsInstallPermission(): Boolean =
+        // DEV-SPOOF: no install permission dance in demo mode.
+        if (gate.sandboxed(UPDATE)) false else updateManager.needsInstallPermission()
 
-    fun openInstallSettings(context: android.content.Context) =
+    fun openInstallSettings(context: android.content.Context) {
+        if (gate.sandboxed(UPDATE)) return
         updateManager.openInstallSettings(context)
+    }
 
-    fun skipVersion(version: String) = updateManager.skipVersion(version)
+    fun skipVersion(version: String) {
+        if (gate.sandboxed(UPDATE)) return
+        updateManager.skipVersion(version)
+    }
 
     fun resetState() {
+        _demoState.value = null
         // Kept for the legacy bottom-sheet dismiss path; manager Idle is sticky-safe.
     }
 
     // Legacy download entry kept for old callers (now routes to the manager).
     fun startDownload(url: String) {
+        // DEV-SPOOF: legacy entry drives the same fake lifecycle.
+        if (gate.sandboxed(UPDATE)) {
+            startDownload(null as PendingUpdate?)
+            return
+        }
         val pending = updateManager.currentPendingOrNull()
         if (pending != null && pending.downloadUrl == url) {
             updateManager.download(pending, autoInstall = true)
