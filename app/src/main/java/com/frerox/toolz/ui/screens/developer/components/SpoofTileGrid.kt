@@ -99,21 +99,21 @@ fun SpoofToolTile(
         Modifier.border(
             width = 1.5.dp,
             color = MaterialTheme.colorScheme.error.copy(alpha = 0.45f + 0.3f * pulse),
-            shape = RoundedCornerShape(22.dp),
+            shape = RoundedCornerShape(24.dp),
         )
     } else {
         Modifier
     }
 
     Card(
-        shape = RoundedCornerShape(22.dp),
+        shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = container),
         modifier = borderMod.semantics { contentDescription = "${tool.title} sandbox tile" },
     ) {
         Column(
             Modifier
                 .clickable(enabled = devOn, onClick = onConfigure)
-                .padding(14.dp),
+                .padding(16.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(

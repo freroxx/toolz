@@ -47,6 +47,7 @@ import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Rocket
+import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Science
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Share
@@ -488,13 +489,26 @@ private fun HomeTab(
     val context = LocalContext.current
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 24.dp, vertical = 14.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 24.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         // Master power
         item {
             DevCard {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = if (devOn) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+                        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                    ) {
+                        Icon(
+                            Icons.Rounded.PowerSettingsNew,
+                            contentDescription = null,
+                            tint = if (devOn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(10.dp).size(22.dp),
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text("Developer Mode", fontWeight = FontWeight.Black, fontSize = 18.sp)
                         Text(
@@ -506,7 +520,7 @@ private fun HomeTab(
                     }
                     Switch(checked = devOn, onCheckedChange = onSetDevMode)
                 }
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(12.dp))
                 Surface(
                     shape = RoundedCornerShape(10.dp),
                     color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f),
@@ -529,24 +543,25 @@ private fun HomeTab(
             DevCard {
                 DevCardTitle("Quick actions")
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    DevBtn("Spoof all", Icons.Rounded.Rocket, enabled = devOn) { onSpoofAll() }
-                    DevBtn("Bug report", Icons.Rounded.BugReport) { viewModel.copyBugReport(info) }
-                    DevBtn("Share", Icons.Rounded.Share) { viewModel.shareBugReport(info) }
+                    DevBtn("Spoof all", Icons.Rounded.Rocket, primary = true, enabled = devOn, modifier = Modifier.weight(1f)) { onSpoofAll() }
+                    DevBtn("Bug report", Icons.Rounded.BugReport, modifier = Modifier.weight(1f)) { viewModel.copyBugReport(info) }
+                    DevBtn("Share", Icons.Rounded.Share, modifier = Modifier.weight(1f)) { viewModel.shareBugReport(info) }
                 }
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    DevBtn("Discord", Icons.Rounded.Forum) { DevUiOverrider.openToolzDiscord(context) }
+                    DevBtn("Discord", Icons.Rounded.Forum, modifier = Modifier.weight(1f)) { DevUiOverrider.openToolzDiscord(context) }
                     DevBtn(
-                        if (activeCount > 0) "All spoofs off ($activeCount)" else "All spoofs off",
+                        if (activeCount > 0) "All off ($activeCount)" else "All off",
                         Icons.Rounded.Science,
                         enabled = devOn && activeCount > 0,
+                        modifier = Modifier.weight(1f),
                     ) {
                         vibrationManager?.vibrateLongClick()
                         viewModel.clearAllSpoofs()
                     }
-                    DevBtn("Refresh storage", Icons.Rounded.Refresh) { refreshStorage() }
+                    DevBtn("Refresh", Icons.Rounded.Refresh, modifier = Modifier.weight(1f)) { refreshStorage() }
                 }
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(10.dp))
                 Text(
                     "Reports never leave this device on their own: copy or share, then paste into the Toolz Discord server.",
                     style = MaterialTheme.typography.bodySmall,
@@ -580,11 +595,21 @@ private fun HomeTab(
                 DevCard {
                     spoofs.filter { it.value }.keys.forEach { tool ->
                         Row(
-                            Modifier.fillMaxWidth().clickable { onOpenConfigurator(tool) }.padding(vertical = 8.dp),
+                            Modifier.fillMaxWidth().clickable { onOpenConfigurator(tool) }.padding(vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Icon(tool.icon, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
-                            Spacer(Modifier.width(10.dp))
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.error.copy(alpha = 0.14f),
+                            ) {
+                                Icon(
+                                    tool.icon,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.padding(8.dp).size(18.dp),
+                                )
+                            }
+                            Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(tool.title, fontWeight = FontWeight.Bold)
                                 Text(
@@ -626,9 +651,9 @@ private fun SpoofsTabRoot(
     LazyVerticalGrid(
         columns = GridCells.Fixed(2),
         modifier = Modifier.fillMaxSize(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 24.dp, vertical = 14.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 24.dp, vertical = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item(span = { GridItemSpan(2) }) {
             OutlinedTextField(
@@ -712,8 +737,8 @@ private fun LabsTab(
     viewModel: DeveloperModeViewModel,
 ) {
     Column(
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 14.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         DevCard {
             DevCardTitle("Crash & error lab")
@@ -924,8 +949,8 @@ private fun SystemTab(
 ) {
     var prefQuery by remember { mutableStateOf("") }
     Column(
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 14.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         DevCard {
             DevCardTitle("Status & build")

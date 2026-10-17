@@ -56,9 +56,15 @@ fun TelemetryCard(
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
-        Text("LIVE TELEMETRY", fontWeight = FontWeight.Black, fontSize = 12.sp, letterSpacing = 1.sp)
+        Text(
+            "LIVE TELEMETRY",
+            fontWeight = FontWeight.Black,
+            fontSize = 13.sp,
+            letterSpacing = 1.5.sp,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
         Row(
-            Modifier.padding(top = 10.dp).fillMaxWidth(),
+            Modifier.padding(top = 12.dp).fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             StatChip("Heap", appInfo.heapMb)

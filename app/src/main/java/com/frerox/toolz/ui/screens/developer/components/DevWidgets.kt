@@ -42,28 +42,43 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 
+/** Spacing scale used across the developer console so every tab stays visually consistent. */
+object DevSpacing {
+    val XS = 4.dp
+    val SM = 8.dp
+    val MD = 12.dp
+    val LG = 16.dp
+    val XL = 24.dp
+}
+
 @Composable
 fun DevCard(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     Card(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
     ) {
-        Column(Modifier.padding(18.dp)) { content() }
+        Column(Modifier.padding(20.dp)) { content() }
     }
 }
 
 @Composable
 fun DevCardTitle(text: String) {
-    Text(text.uppercase(), fontWeight = FontWeight.Black, letterSpacing = 1.sp, fontSize = 12.sp)
-    Spacer(Modifier.height(10.dp))
+    Text(
+        text.uppercase(),
+        fontWeight = FontWeight.Black,
+        letterSpacing = 1.5.sp,
+        fontSize = 13.sp,
+        color = MaterialTheme.colorScheme.onSurface,
+    )
+    Spacer(Modifier.height(12.dp))
 }
 
 @Composable
 fun DevDivider() {
-    Spacer(Modifier.height(10.dp))
+    Spacer(Modifier.height(12.dp))
     Box(Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)))
-    Spacer(Modifier.height(10.dp))
+    Spacer(Modifier.height(12.dp))
 }
 
 @Composable
@@ -82,7 +97,7 @@ fun DevToggleLine(
     onChange: (Boolean) -> Unit,
     subtitle: String? = null,
 ) {
-    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(title, fontWeight = FontWeight.Bold)
             subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -92,23 +107,39 @@ fun DevToggleLine(
     }
 }
 
+/**
+ * Console button. [primary] renders the filled hero style (e.g. "Spoof all"),
+ * [danger] the error style; default is the softer filled-tonal look.
+ */
 @Composable
 fun DevBtn(
     label: String,
     icon: ImageVector,
     danger: Boolean = false,
+    primary: Boolean = false,
     enabled: Boolean = true,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
     Button(
         onClick = onClick,
         enabled = enabled,
-        colors = if (danger) ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-        else ButtonDefaults.buttonColors(),
-        shape = RoundedCornerShape(14.dp),
+        modifier = modifier,
+        colors = when {
+            danger -> ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.error,
+                contentColor = MaterialTheme.colorScheme.onError,
+            )
+            primary -> ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+            )
+            else -> ButtonDefaults.buttonColors()
+        },
+        shape = RoundedCornerShape(18.dp),
     ) {
         Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp))
-        Spacer(Modifier.width(6.dp))
+        Spacer(Modifier.width(8.dp))
         Text(label, fontWeight = FontWeight.Bold, fontSize = 12.sp)
     }
 }
