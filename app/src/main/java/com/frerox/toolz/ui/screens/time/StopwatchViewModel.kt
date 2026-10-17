@@ -312,9 +312,13 @@ class StopwatchViewModel @Inject constructor(
      * Gated on running with 500ms debounce + 200 cap inside the service.
      */
     fun lap() {
-        // DEV-SPOOF: sandboxed → laps accumulate in RAM with the 200 cap.
+        // DEV-SPOOF: sandboxed → laps accumulate in RAM with the 200 cap,
+        // mirroring ToolService.addStopwatchLap: paused or zero-elapsed laps
+        // are rejected, same 500ms debounce (nothing list-shaped is persisted).
         if (stopwatchSandboxActive) {
-            val s = _sandboxState.value ?: StopwatchState(isBound = true, isLoading = false)
+            val s = _sandboxState.value ?: fixturedFromReal()
+            if (!s.isRunning || s.elapsedTime <= 0L) return
+            if (s.lastLapAt > 0L && s.elapsedTime - s.lastLapAt < 500L) return
             val capped = s.laps.size >= SettingsRepository.STOPWATCH_MAX_LAPS
             _sandboxState.value =
                 if (capped) {
