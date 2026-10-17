@@ -69,6 +69,7 @@ import kotlin.math.min
 class BackgroundRemoverViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val okHttpClient: OkHttpClient,
+    private val gate: com.frerox.toolz.data.developer.SpoofGate,
 ) : ViewModel() {
 
     private val downloadManager = ModelDownloadManager(context, okHttpClient)
@@ -134,6 +135,20 @@ class BackgroundRemoverViewModel @Inject constructor(
     }
 
     fun deleteModel(model: BackgroundModel) {
+        // DEV-SPOOF: demo "deletes" the RAM mark only — no real file is removed
+        // (there is none to begin with: downloads are fake in demo).
+        if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.FILES)) {
+            _uiState.update {
+                it.copy(
+                    downloadedIds = it.downloadedIds - model.id,
+                    isModelDownloaded = if (it.selectedModel == model) false else it.isModelDownloaded,
+                    downloadingId = null,
+                    downloadProgress = 0f,
+                    stage = BgStage.IDLE,
+                )
+            }
+            return
+        }
         downloadManager.delete(model)
         if (_uiState.value.selectedModel == model) {
             closeBackends()
@@ -176,6 +191,42 @@ class BackgroundRemoverViewModel @Inject constructor(
         allowMetered: Boolean = false,
         proNonCommercialConsentAccepted: Boolean = false,
     ) {
+        // DEV-SPOOF: demo download — staged progress, RAM "installed" mark;
+        // no OkHttp request, no consent persist, no file on disk. Inference
+        // stays disabled (see processImage) so nothing silently pretends.
+        if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.FILES)) {
+            android.util.Log.w("DevSpoof", "BackgroundRemover sandbox: fake model download")
+            val bytes = model.expectedSizeBytes.takeIf { it > 0 } ?: 96_000_000L
+            activeJob?.cancel()
+            activeJob = viewModelScope.launch {
+                _uiState.update {
+                    it.copy(
+                        stage = BgStage.DOWNLOADING,
+                        downloadingId = model.id,
+                        downloadedBytes = 0L,
+                        totalBytes = bytes,
+                        downloadProgress = 0f,
+                        downloadSpeedBps = 14_000_000L,
+                        failure = null,
+                    )
+                }
+                for (p in 1..10) {
+                    kotlinx.coroutines.delay(180)
+                    _uiState.update {
+                        it.copy(downloadedBytes = bytes * p / 10, downloadProgress = p / 10f)
+                    }
+                }
+                _uiState.update {
+                    it.copy(
+                        stage = BgStage.IDLE,
+                        downloadingId = null,
+                        downloadedIds = it.downloadedIds + model.id,
+                        isModelDownloaded = true,
+                    )
+                }
+            }
+            return
+        }
         activeJob?.cancel()
         activeJob = viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -490,6 +541,17 @@ class BackgroundRemoverViewModel @Inject constructor(
     }
 
     private suspend fun processImage(bitmap: Bitmap) {
+        // DEV-SPOOF: demo never builds an ONNX session — a fabricated mask would
+        // silently lie about the work done, so the honest staged refusal runs.
+        if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.FILES)) {
+            kotlinx.coroutines.delay(600)
+            fail(
+                "Demo mode is on — ONNX inference runs no model and touches no weights: " +
+                    "the picture stays as it is. Disable demo mode to remove backgrounds for real.",
+                null,
+            )
+            return
+        }
         if (!ensureBackendReady()) {
             if (_uiState.value.stage != BgStage.FAILED) {
                 fail(context.getString(R.string.st_BackgroundRemover_EngineNotReady), RetryAction.OPEN_HUB)

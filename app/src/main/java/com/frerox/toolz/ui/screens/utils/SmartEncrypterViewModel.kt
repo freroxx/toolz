@@ -96,7 +96,8 @@ data class EncrypterUiState(
 @HiltViewModel
 class SmartEncrypterViewModel @Inject constructor(
     private val cryptoDao: CryptoDao,
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    private val gate: com.frerox.toolz.data.developer.SpoofGate
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(EncrypterUiState())
@@ -456,6 +457,8 @@ class SmartEncrypterViewModel @Inject constructor(
     }
 
     fun deleteHistoryEntry(entry: CryptoHistoryEntry) {
+        // DEV-SPOOF: demo never deletes the user's real history rows.
+        if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.FILES)) return
         viewModelScope.launch {
             cryptoDao.deleteEntry(entry)
         }
@@ -476,6 +479,8 @@ class SmartEncrypterViewModel @Inject constructor(
     }
 
     fun clearHistory() {
+        // DEV-SPOOF: demo never wipes the user's real history rows.
+        if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.FILES)) return
         viewModelScope.launch {
             cryptoDao.clearHistory()
         }
@@ -518,13 +523,17 @@ class SmartEncrypterViewModel @Inject constructor(
                     else -> "ENCRYPT"
                 }
                 
-                cryptoDao.insertEntry(CryptoHistoryEntry(
-                    input = state.inputText,
-                    result = result,
-                    algorithm = state.selectedAlgorithm.name,
-                    type = operationType,
-                    isSuccess = true
-                ))
+                // DEV-SPOOF: demo runs the (purely local) transform but keeps
+                // no history — the Room table stays untouched.
+                if (!gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.FILES)) {
+                    cryptoDao.insertEntry(CryptoHistoryEntry(
+                        input = state.inputText,
+                        result = result,
+                        algorithm = state.selectedAlgorithm.name,
+                        type = operationType,
+                        isSuccess = true
+                    ))
+                }
                 _uiState.update {
                     it.copy(
                         resultText = result,
@@ -532,7 +541,7 @@ class SmartEncrypterViewModel @Inject constructor(
                         error = null
                     )
                 }
-                if (!state.isLiveEnabled) startAutoClearTimer()
+                if (!state.isLiveEnabled && !gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.FILES)) startAutoClearTimer()
                 generateQr()
             } else {
                 _uiState.update {
@@ -580,7 +589,9 @@ class SmartEncrypterViewModel @Inject constructor(
                     else -> "DECRYPT"
                 }
 
-                cryptoDao.insertEntry(CryptoHistoryEntry(
+                // DEV-SPOOF: demo runs the local transform but keeps no history.
+                val demoGated = gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.FILES)
+                if (!demoGated) cryptoDao.insertEntry(CryptoHistoryEntry(
                     input = state.inputText,
                     result = result,
                     algorithm = state.selectedAlgorithm.name,
@@ -594,7 +605,7 @@ class SmartEncrypterViewModel @Inject constructor(
                         error = null
                     )
                 }
-                if (!state.isLiveEnabled) startAutoClearTimer()
+                if (!state.isLiveEnabled && !demoGated) startAutoClearTimer()
                 generateQr()
             } else {
                 _uiState.update {
@@ -624,6 +635,35 @@ class SmartEncrypterViewModel @Inject constructor(
         val uri = state.selectedFileUri ?: return
         val operation = state.fileOperationIntent ?: return
 
+        // DEV-SPOOF: demo stages a believable file pass but writes nothing to
+        // /Downloads/Toolz and touches no real file.
+        if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.FILES)) {
+            if (state.password.isBlank()) {
+                _uiState.update { it.copy(error = "Password required for file processing") }
+                return
+            }
+            android.util.Log.w("DevSpoof", "SmartEncrypter sandbox: simulated file pass")
+            fileProcessJob?.cancel()
+            fileProcessJob = viewModelScope.launch {
+                for (i in 1..10) {
+                    kotlinx.coroutines.delay(160)
+                    _uiState.update {
+                        it.copy(
+                            isProcessingFile = true,
+                            fileProcessingProgress = i / 10f,
+                            fileProcessingStatus = if (i < 10) "Processing (${i * 10}%)" else "Simulated (demo)",
+                        )
+                    }
+                }
+                _uiState.update {
+                    it.copy(
+                        isProcessingFile = false,
+                        fileProcessingStatus = "Demo mode: nothing was written to storage.",
+                    )
+                }
+            }
+            return
+        }
         if (state.password.isBlank()) {
             _uiState.update { it.copy(error = "Password required for file processing") }
             return

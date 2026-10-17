@@ -43,6 +43,7 @@ enum class ConversionMode { SINGLE, BATCH }
 @HiltViewModel
 class FileConverterViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val gate: com.frerox.toolz.data.developer.SpoofGate,
 ) : ViewModel() {
 
     private val prefs = context.getSharedPreferences("file_converter_prefs", Context.MODE_PRIVATE)
@@ -147,6 +148,28 @@ class FileConverterViewModel @Inject constructor(
             )
         }
 
+        // DEV-SPOOF: demo conversion — RAM progress walk + demo output paths;
+        // FileConversionService is never started and no file is written.
+        if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.FILES)) {
+            android.util.Log.w("DevSpoof", "FileConverter sandbox: fake conversion, no service")
+            val outPath = "/storage/emulated/0/Toolz/demo/demo-converted-1.${type.extension}"
+            viewModelScope.launch {
+                for (p in 10..100 step 10) {
+                    kotlinx.coroutines.delay(140)
+                    _uiState.update { it.copy(progress = p, queuePos = 1) }
+                }
+                _uiState.update {
+                    it.copy(
+                        isConverting      = false,
+                        conversionSuccess = true,
+                        progress          = 100,
+                        outputFiles       = listOf(outPath),
+                    )
+                }
+            }
+            return
+        }
+
         val intent = Intent(context, FileConversionService::class.java).apply {
             putParcelableArrayListExtra("input_uris", ArrayList(uris))
             putExtra("conversion_type", type.name)
@@ -171,6 +194,11 @@ class FileConverterViewModel @Inject constructor(
     }
 
     fun cancelConversion() {
+        // DEV-SPOOF: demo never started a service — drop the RAM walk only.
+        if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.FILES)) {
+            _uiState.update { it.copy(isConverting = false, progress = 0, error = null) }
+            return
+        }
         context.stopService(Intent(context, FileConversionService::class.java))
         _uiState.update {
             it.copy(isConverting = false, progress = 0, error = "Conversion cancelled")
@@ -252,11 +280,15 @@ class FileConverterViewModel @Inject constructor(
     }
 
     fun clearHistory() {
+        // DEV-SPOOF: demo keeps the user's real conversion history intact.
+        if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.FILES)) return
         prefs.edit().remove("recent_conversions").apply()
         _uiState.update { it.copy(recentConversions = emptyList()) }
     }
 
     fun removeHistoryItem(recent: RecentConversion) {
+        // DEV-SPOOF: demo keeps the user's real conversion history intact.
+        if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.FILES)) return
         val updated = _uiState.value.recentConversions - recent
         _uiState.update { it.copy(recentConversions = updated) }
         saveHistory(updated)

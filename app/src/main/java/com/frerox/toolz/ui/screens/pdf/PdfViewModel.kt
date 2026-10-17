@@ -115,8 +115,13 @@ class PdfViewModel @Inject constructor(
     private val dataStore: DataStore<Preferences>,
     private val ocrProcessor: FormulaOcrProcessor,
     private val settingsRepository: SettingsRepository,
-    private val moshi: Moshi
+    private val moshi: Moshi,
+    private val gate: com.frerox.toolz.data.developer.SpoofGate
 ) : ViewModel() {
+
+    // DEV-SPOOF: reading real PDFs is safe and stays enabled, but demo never
+    // imports, renames, pins or deletes anything, and AI calls are refused.
+    private val FILES = com.frerox.toolz.data.developer.DevToolId.FILES
 
     private val _uiState = MutableStateFlow<PdfUiState>(PdfUiState.Loading)
     val uiState: StateFlow<PdfUiState> = _uiState.asStateFlow()
@@ -384,6 +389,8 @@ class PdfViewModel @Inject constructor(
     val isSummarizing: StateFlow<Boolean> = _isSummarizing.asStateFlow()
 
     fun summarizePdf(text: String) {
+        // DEV-SPOOF: demo never calls the summarizer (model compute suppressed).
+        if (gate.sandboxed(FILES)) return
         viewModelScope.launch {
             _isSummarizing.value = true
             _pdfSummary.value = ocrProcessor.summarizePdf(text)
@@ -406,6 +413,8 @@ class PdfViewModel @Inject constructor(
 
     /** Summarise the whole document (embedded text). Null result = AI unavailable. */
     fun summarizeDocument() {
+        // DEV-SPOOF: demo never calls the AI for summaries/enhancing.
+        if (gate.sandboxed(FILES)) return
         val text = fullDocumentText()
         if (text.isBlank()) return
         summarizePdf(text)
@@ -843,6 +852,8 @@ class PdfViewModel @Inject constructor(
     }
 
     fun togglePin(uri: String) {
+        // DEV-SPOOF: demo leaves the user's real pin rows alone.
+        if (gate.sandboxed(FILES)) return
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val current = metadataDao.getMetadata(uri)
@@ -853,6 +864,8 @@ class PdfViewModel @Inject constructor(
     }
 
     fun deleteFile(file: PdfFile) {
+        // DEV-SPOOF: demo deletes no real PDF and no metadata row.
+        if (gate.sandboxed(FILES)) return
         viewModelScope.launch {
             val ok = try { repository.deletePdf(file.uri) } catch (_: Exception) { false }
             if (ok) {
@@ -867,6 +880,8 @@ class PdfViewModel @Inject constructor(
     }
 
     fun renameFile(file: PdfFile, newName: String) {
+        // DEV-SPOOF: demo renames no real file.
+        if (gate.sandboxed(FILES)) return
         viewModelScope.launch {
             val ok = try { repository.renamePdf(file.uri, newName) } catch (_: Exception) { false }
             if (ok) loadPdfFiles()
