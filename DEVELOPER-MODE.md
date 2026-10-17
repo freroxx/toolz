@@ -72,25 +72,33 @@ Fixed top bar: back, live `SPOOF` count chip, **command palette** (`Tune` icon) 
 - `SandboxWatermarkHost(tool)` is available for inline placement; Battery additionally keeps its inline banner.
 - Audit rule: `grep -rn DEV-SPOOF app/src/main` must hit every tool VM + `routeToDevTool` must cover every tool route.
 
+## Permission skips (sandboxed screens never prompt)
+
+- `ui/screens/developer/components/SpoofSandboxState.kt` exposes `rememberSandboxActive(tool)` (Hilt `SpoofGateEntryPoint`, no VM surgery needed) so composable screens can drop permission gates while their sandbox is on.
+- Sandbox-first screens implemented so far: Music (audio placeholder skipped — the fake library needs no real files), QR scanner (camera prompt + analyzer binding skipped, fixture payload card shown), Whisper (auth/onboarding never shown).
+- Contract: the skip is screen-local; flipping the sandbox off restores the real permission flow untouched.
+
 ## Sandbox coverage (all enforced, all local-only)
 
 | Tool | Hook | Fixture | Blocked |
 |---|---|---|---|
 | Battery | VM gate + receiver skip | `SpoofParams` level/temp/charging | remote spec fetch |
-| Whisper | repo send/image/typing gates | `FakeWhisperSandbox` thread | Supabase, realtime, push |
-| Steps | `uiState` map | slider steps + derived kcal/km | UI overridden (service untouched) |
-| Sensors (compass/bubble/altimeter/speed/sound/light) | listener unregister + event guards | `compassDeg/soundDb/lightLux/speedKmh/altitudeM` | accel, baro, GPS, mic, light sensor |
+| Whisper | auto-auth + VM/chat fixture swap (`FakeWhisperSandbox.hubState()/threadFor()`) | fixture account, contacts, threads, canned auto-replies | login/accounts, Supabase, realtime, push, tombstone/prekey/heartbeat hydration, image sends |
+| Steps | `gate.active(STEPS)` walking-clock ticker | slider steps + `SpoofSim.addedSteps` accrued cadence | real step sensor (Room untouched) |
+| Sensors (compass/bubble/altimeter/speed/sound/light) | listener unregister + event guards | `SpoofSim` drive cycle, dB, lux, tilt, altitude+pressure streams | accel, baro, GPS, mic, light sensor |
+| Music | `FakeMusicSandbox` + full transport intercept | 7-track `spoof://` library, ticker/visualizer, queue/favs in RAM | MediaStore scan, Room, MediaController binding, audio permission |
+| Clipboard | `FakeClipboardSandbox` + entries swap | 30 typed clips (OTP/links/code…), capture gate=fake Shizuku | device clipboard read, capture service, Room, AI summarize |
+| Timers | fixture countdown/counter + service detach (timer & stopwatch) | 3s loop timer, RAM stopwatch + laps (200 cap) | ToolService bind/start, AlarmManager, notifications |
+| QR | scanner `rememberSandboxActive` bypass | fake WIFI: payload card, camera idle | camera permission prompt, analyzer binding |
 | Device info | `refresh`/`executeSearch` gates | flagship-almost-full fixture | spec API, disk rescan |
-| Network | trigger + monitor guards | `FakeFiber-5G`, slider ping, health 4, VPN on | scans, DNS, ping, traceroute, Shizuku system writes |
-| QR | input prefill | `qrPayload` | — (generator is offline anyway) |
-| Flashlight | `toggleFlashlight` gate + service-state guard | fake SOS toggle | torch hardware, foreground service |
-| Music/Downloader/Cleaner/Vault/Clipboard/Tasks/Timers/Update/Search/Files | global banner + configurator sliders | params ready (`musicTrack`, `downloadProgress`, `timerSecs`) | VM fixtures queued next |
+| Network | trigger + monitor guards | `SpoofSim` ping/RSSI drift ×2 sites, FakeFiber-5G | scans, DNS, ping, traceroute, Shizuku system writes |
+| Downloader/Cleaner/Vault/Tasks/Update/Search/Files/Flashlight | global banner + configurator sliders | params ready (`downloadProgress`, `cleanerGbs`…) | VM fixtures queued next |
 
 ## File map (console)
 
 - `ui/screens/developer/DeveloperModeScreen.kt` — 4-tab console (the only screen file), incl. the locked panel reachable when master is OFF and the `spoofAllAndRelaunch` wiring.
 - `ui/screens/developer/DeveloperModeViewModel.kt` — flows/actions; lazy telemetry (cold flow, only runs while watched) + heap history, crash history, logcat tail, bug report builder, `spoofAll()`.
 - `ui/screens/developer/SpoofToolSpecs.kt` — per-tool icon, fixture summary, group, open route, editable field specs.
-- `ui/screens/developer/components/` — `DevWidgets` (DevCard/DevCardTitle/DevBtn/DevToggleLine/DevDivider/DevKv, `DevSpacing` scale, shared `DebouncedSlider`), `TelemetryCard`, `SpoofTileGrid`, `SpoofConfiguratorSheet`, `LogcatViewer`, `CrashHistoryCard`, `CommandPalette`, `SpoofChip`, `RouteSpoofBanner`.
+- `ui/screens/developer/components/` — `DevWidgets` (DevCard/DevCardTitle/DevBtn/DevToggleLine/DevDivider/DevKv, `DevSpacing` scale, shared `DebouncedSlider`), `TelemetryCard`, `SpoofTileGrid`, `SpoofConfiguratorSheet`, `LogcatViewer`, `CrashHistoryCard`, `CommandPalette`, `SpoofChip`, `RouteSpoofBanner`, `SpoofSandboxState` (`rememberSandboxActive`).
 - Design language: M3 Expressive — 28dp cards / 24dp tiles with 16–20dp content padding, 24dp screen gutters, title-style uppercase section headers; all spacing comes from the `DevSpacing` scale so the tabs stay visually consistent.
-- `data/developer/` — `DevToolId`, `SpoofParams`, `SpoofGate` (state), `DeveloperSpoofController` (facade), `DevUiOverrider`, `ShakeDetector`, `FakeWhisperSandbox`.
+- `data/developer/` — `DevToolId`, `SpoofParams`, `SpoofSim` (deterministic live streams), `SpoofGate` (state), `DeveloperSpoofController` (facade), `DevUiOverrider`, `ShakeDetector`, `FakeWhisperSandbox`, `FakeMusicSandbox`, `FakeClipboardSandbox`.
