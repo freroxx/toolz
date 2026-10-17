@@ -53,7 +53,13 @@ class MediaDownloaderViewModel @Inject constructor(
     private val repository: MediaDownloaderRepository,
     private val catalogRepository: CatalogRepository,
     private val dataStore: DataStore<Preferences>,
+    private val gate: com.frerox.toolz.data.developer.SpoofGate,
 ) : ViewModel() {
+
+    // DEV-SPOOF: the downloader demo fakes the whole extract result from the
+    // pasted URL — no API call, no worker enqueued, no file written. History
+    // rows live in RAM only while demo is armed.
+    private val DOWNLOADER = com.frerox.toolz.data.developer.DevToolId.DOWNLOADER
 
     companion object {
         private val PLATFORMS_KEY = stringSetPreferencesKey("media_downloader_platforms")
@@ -186,6 +192,35 @@ class MediaDownloaderViewModel @Inject constructor(
                 dataStore.data.map { prefs -> decodeHistory(prefs[HISTORY_KEY]) }
                     .collect { _history.value = it }
             } catch (_: Exception) { }
+        }
+        // DEV-SPOOF: per demo arm, swap the history rail to RAM fixture rows;
+        // on disarm the DataStore feed takes over again.
+        viewModelScope.launch {
+            gate.active(DOWNLOADER).collect { demo ->
+                if (demo) {
+                    _history.value = listOf(
+                        HistoryEntry(
+                            url = "https://video.demo.example/sunset-drone-cut",
+                            title = "Sunset drone cut · 4K (demo)",
+                            thumbnailUrl = null,
+                            platform = MediaDownloaderRepository.Platform.YOUTUBE,
+                        ),
+                        HistoryEntry(
+                            url = "https://social.demo.example/w/pottery-timelapse",
+                            title = "Pottery timelapse · TikTok (demo)",
+                            thumbnailUrl = null,
+                            platform = MediaDownloaderRepository.Platform.TIKTOK,
+                        ),
+                        HistoryEntry(
+                            url = "https://social.demo.example/p/desk-setup",
+                            title = "Desk setup photo dump (demo)",
+                            thumbnailUrl = null,
+                            platform = MediaDownloaderRepository.Platform.INSTAGRAM,
+                        ),
+                    )
+                    android.util.Log.w("DevSpoof", "MediaDownloader sandbox armed — RAM history, workers disabled")
+                }
+            }
         }
         viewModelScope.launch {
             try {
@@ -370,6 +405,8 @@ class MediaDownloaderViewModel @Inject constructor(
 
     fun clearHistory() {
         _history.value = emptyList()
+        // DEV-SPOOF: demo history is RAM-only; the DataStore stays intact.
+        if (gate.sandboxed(DOWNLOADER)) return
         viewModelScope.launch {
             try {
                 dataStore.edit { prefs -> prefs.remove(HISTORY_KEY) }
@@ -382,6 +419,8 @@ class MediaDownloaderViewModel @Inject constructor(
         val next = _history.value.filterNot { it.url == url }
         if (next.size == _history.value.size) return
         _history.value = next
+        // DEV-SPOOF: demo history is RAM-only; the DataStore stays intact.
+        if (gate.sandboxed(DOWNLOADER)) return
         viewModelScope.launch {
             try {
                 dataStore.edit { prefs -> prefs[HISTORY_KEY] = encodeHistory(next) }
@@ -398,12 +437,24 @@ class MediaDownloaderViewModel @Inject constructor(
     private fun recordHistory(entry: HistoryEntry) {
         val next = (_history.value.filterNot { it.url == entry.url } + entry).takeLast(HISTORY_MAX)
         _history.value = next
+        // DEV-SPOOF: demo history rows are RAM-only; nothing persisted.
+        if (gate.sandboxed(DOWNLOADER)) return
         viewModelScope.launch {
             try {
                 dataStore.edit { prefs -> prefs[HISTORY_KEY] = encodeHistory(next) }
             } catch (_: Exception) {
             }
         }
+    }
+
+    /** DEV-SPOOF: friendly fabricated title for a demo extract result. */
+    private fun demoTitleFor(raw: String, platform: MediaDownloaderRepository.Platform): String {
+        val slug = raw.substringAfterLast('/')
+            .substringBefore('?')
+            .replace('-', ' ').replace('_', ' ')
+            .trim()
+        val head = slug.ifBlank { "shared media clip" }
+        return "${head.lowercase().replaceFirstChar { it.uppercase() }} · ${platform.name.lowercase().replaceFirstChar { it.uppercase() }} (demo)"
     }
 
     private fun encodeHistory(entries: List<HistoryEntry>): String {
@@ -755,6 +806,8 @@ class MediaDownloaderViewModel @Inject constructor(
     }
 
     fun cancelDownload(id: java.util.UUID) {
+        // DEV-SPOOF: demo touches no WorkManager state.
+        if (gate.sandboxed(DOWNLOADER)) return
         try {
             WorkManager.getInstance(appContext).cancelWorkById(id)
         } catch (_: Exception) { }
@@ -936,6 +989,41 @@ class MediaDownloaderViewModel @Inject constructor(
             return
         }
         extractJob?.cancel()
+        // DEV-SPOOF: demo extract — fabricates options straight from the URL
+        // shape; the extraction API is never called.
+        if (gate.sandboxed(DOWNLOADER)) {
+            android.util.Log.w("DevSpoof", "MediaDownloader sandbox extract (RAM fixture)")
+            extractJob = viewModelScope.launch {
+                _ui.value = _ui.value.copy(
+                    extracting = true, error = null, remote = null, blockedMessage = null,
+                    localTitle = null, localThumbnail = null, localSourceUrl = null,
+                    localHeights = emptyList(), probingLocal = false, options = emptyList(),
+                    selectedId = "best", downloadEnqueued = null,
+                )
+                kotlinx.coroutines.delay(700)
+                val mode = effectiveMode(detected)
+                val platform = detected ?: MediaDownloaderRepository.Platform.YOUTUBE
+                val heights = listOf(1080, 720, 480)
+                val opts = buildLocalOptions(heights, mode, platform)
+                _ui.value = _ui.value.copy(
+                    extracting = false,
+                    localTitle = demoTitleFor(raw, platform),
+                    localSourceUrl = raw,
+                    localHeights = heights,
+                    options = opts,
+                    selectedId = defaultSelection(platform, mode, opts, preferredId = "720p"),
+                )
+                recordHistory(
+                    HistoryEntry(
+                        url = raw,
+                        title = demoTitleFor(raw, platform),
+                        thumbnailUrl = null,
+                        platform = platform,
+                    ),
+                )
+            }
+            return
+        }
         extractJob = viewModelScope.launch {
             _ui.value = _ui.value.copy(
                 extracting = true, error = null, remote = null, blockedMessage = null,
@@ -1214,6 +1302,15 @@ class MediaDownloaderViewModel @Inject constructor(
         val opt = s.options.firstOrNull { it.id == s.selectedId } ?: s.options.firstOrNull()
         if (opt == null) {
             _ui.value = s.copy(error = "Nothing to download yet — extract a link first.")
+            return
+        }
+        // DEV-SPOOF: demo download taps are answered honestly — no worker,
+        // no network, no file. The screen still shows the enqueue toast via
+        // downloadEnqueued so the flow feels complete.
+        if (gate.sandboxed(DOWNLOADER)) {
+            _ui.value = _ui.value.copy(
+                downloadEnqueued = "Demo mode: \"${opt.label}\" is simulated — no network was used and no file was written.",
+            )
             return
         }
         // Converter-backed audio: download base audio first, transcode on completion.
