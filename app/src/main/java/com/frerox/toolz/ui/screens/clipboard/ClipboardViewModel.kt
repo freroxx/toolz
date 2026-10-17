@@ -45,11 +45,29 @@ class ClipboardViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val shizukuExecutor: com.frerox.toolz.util.shizuku.ShizukuShellExecutor,
     private val captureProcessor: ClipboardCaptureProcessor,
+    // DEV-SPOOF: gates the RAM-only fake clip history when the sandbox is on.
+    private val gate: com.frerox.toolz.data.developer.SpoofGate,
     val classifier: ClipboardClassifier
 ) : AndroidViewModel(application) {
 
-    val entries: StateFlow<List<ClipboardEntry>> = clipboardDao.getAllEntries()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    /** Cheap synchronous sandbox check for the guards below. */
+    val clipboardSandboxActive: Boolean
+        get() = gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.CLIPBOARD)
+
+    /**
+     * DEV-SPOOF: sandboxed → the list is 30 RAM-only fixtures and the real
+     * Room table is neither read nor written while the flag is on.
+     */
+    val entries: StateFlow<List<ClipboardEntry>> = combine(
+        clipboardDao.getAllEntries(),
+        gate.active(com.frerox.toolz.data.developer.DevToolId.CLIPBOARD),
+    ) { real, spoofed ->
+        if (spoofed) {
+            com.frerox.toolz.data.developer.FakeClipboardSandbox.entries().value
+        } else {
+            real
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val offlineModeEnabled = settingsRepository.offlineModeEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
@@ -113,6 +131,19 @@ class ClipboardViewModel @Inject constructor(
             refreshGate()
             ensureServiceState()
         }
+        // DEV-SPOOF: live switch — entering the sandbox resets the fixtures and
+        // pretends the capture gate is live (Shizuku) without hooking anything
+        // real; leaving restores the true gate evaluation.
+        viewModelScope.launch {
+            gate.active(com.frerox.toolz.data.developer.DevToolId.CLIPBOARD).collect { spoofed ->
+                if (spoofed) {
+                    com.frerox.toolz.data.developer.FakeClipboardSandbox.reset()
+                    _gateStatus.value = ClipboardGate.Status.ACTIVE_SHIZUKU
+                    android.util.Log.w("DevSpoof", "Clipboard sandbox active — 30 RAM clips, capture simulated")
+                }
+                refreshGate()
+            }
+        }
     }
 
     private fun computeGate(monitoring: Boolean): ClipboardGate.Status {
@@ -122,12 +153,21 @@ class ClipboardViewModel @Inject constructor(
     }
 
     fun refreshGate() {
-        _gateStatus.value = computeGate(monitoringEnabled.value)
+        // DEV-SPOOF: sandboxed → the gate pretends to be live while nothing is
+        // actually hooked.
+        _gateStatus.value =
+            if (clipboardSandboxActive) ClipboardGate.Status.ACTIVE_SHIZUKU
+            else computeGate(monitoringEnabled.value)
     }
 
     // ── Settings passthrough ──────────────────────────────────────────────
 
     fun setMonitoringEnabled(enabled: Boolean) {
+        // DEV-SPOOF: sandboxed → the capture pipeline stays simulated.
+        if (clipboardSandboxActive) {
+            viewModelScope.launch { _events.emit("Sandbox: capture monitoring is simulated") }
+            return
+        }
         viewModelScope.launch {
             settingsRepository.setClipboardMonitoringEnabled(enabled)
             // Compute with the explicit value — the StateFlow hasn't re-emitted yet.
@@ -191,6 +231,11 @@ class ClipboardViewModel @Inject constructor(
     // ── Mutations ─────────────────────────────────────────────────────────
 
     fun deleteEntry(entry: ClipboardEntry) {
+        // DEV-SPOOF: sandboxed → the fixture list mutates in RAM, Room untouched.
+        if (clipboardSandboxActive) {
+            com.frerox.toolz.data.developer.FakeClipboardSandbox.delete(entry.id)
+            return
+        }
         viewModelScope.launch {
             lastDeleted = entry
             clipboardDao.delete(entry)
@@ -200,6 +245,11 @@ class ClipboardViewModel @Inject constructor(
 
     fun undoDelete() {
         viewModelScope.launch {
+            if (clipboardSandboxActive) {
+                lastDeleted?.let { com.frerox.toolz.data.developer.FakeClipboardSandbox.insert(it) }
+                lastDeleted = null
+                return@launch
+            }
             val cached = lastDeleted ?: return@launch
             lastDeleted = null
             clipboardDao.insert(
@@ -209,14 +259,29 @@ class ClipboardViewModel @Inject constructor(
     }
 
     fun togglePin(id: Int) {
+        // DEV-SPOOF: sandboxed → pin flips live on the fixture list only.
+        if (clipboardSandboxActive) {
+            com.frerox.toolz.data.developer.FakeClipboardSandbox.togglePin(id)
+            return
+        }
         viewModelScope.launch { clipboardDao.togglePin(id) }
     }
 
     fun clearAll() {
+        // DEV-SPOOF: sandboxed → unpinned fixtures vanish (they're RAM-only).
+        if (clipboardSandboxActive) {
+            com.frerox.toolz.data.developer.FakeClipboardSandbox.clearUnpinned()
+            return
+        }
         viewModelScope.launch { clipboardDao.clearAllUnpinned() }
     }
 
     fun summarizeEntry(entry: ClipboardEntry) {
+        // DEV-SPOOF: sandboxed → no AI provider call; fixtures ship pre-annotated.
+        if (clipboardSandboxActive) {
+            viewModelScope.launch { _events.emit("Sandbox: AI summarization is simulated") }
+            return
+        }
         if (!clipboardAiEnabled.value) return
         viewModelScope.launch {
             _isSummarizing.value = entry.id
@@ -314,6 +379,11 @@ class ClipboardViewModel @Inject constructor(
     }
 
     fun refreshClipboard() {
+        // DEV-SPOOF: sandboxed → the device clipboard is never read.
+        if (clipboardSandboxActive) {
+            viewModelScope.launch { _events.emit("Sandbox: clipboard capture is simulated") }
+            return
+        }
         refreshGate()
         viewModelScope.launch {
             try {

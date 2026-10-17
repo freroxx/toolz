@@ -29,10 +29,15 @@ import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.service.ToolService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -58,12 +63,31 @@ data class StopwatchState(
 
 @HiltViewModel
 class StopwatchViewModel @Inject constructor(
+    // DEV-SPOOF: gates the RAM fixture stopwatch when the sandbox is on.
+    private val gate: com.frerox.toolz.data.developer.SpoofGate,
     @ApplicationContext private val context: Context,
     private val settingsRepository: SettingsRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(StopwatchState())
-    val uiState: StateFlow<StopwatchState> = _uiState.asStateFlow()
+
+    // DEV-SPOOF: fixture stopwatch (null = not sandboxed) — RAM-only elapsed
+    // counter and laps, the ToolService never starts and nothing persists.
+    private val _sandboxState = MutableStateFlow<StopwatchState?>(null)
+    private var sandboxTickJob: Job? = null
+    private var sandboxActiveNow = false
+
+    val stopwatchSandboxActive: Boolean
+        get() = gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.TIMERS)
+
+    /** DEV-SPOOF: sandboxed → the big digits and laps render from fixtures. */
+    val uiState: StateFlow<StopwatchState> = combine(
+        _uiState.asStateFlow(),
+        _sandboxState,
+        gate.active(com.frerox.toolz.data.developer.DevToolId.TIMERS),
+    ) { real, fixture, spoofed ->
+        if (spoofed && fixture != null) fixture else real
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), StopwatchState())
 
     private var toolService: ToolService? = null
     private var isBound = false
@@ -91,8 +115,29 @@ class StopwatchViewModel @Inject constructor(
     }
 
     init {
-        Intent(context, ToolService::class.java).also { intent ->
-            context.bindService(intent, connection, Context.BIND_AUTO_CREATE)
+        // DEV-SPOOF: sandboxed → no ToolService bind/start; fixtures only.
+        if (stopwatchSandboxActive) {
+            enterSandboxImmediately()
+        } else {
+            Intent(context, ToolService::class.java).also { intent ->
+                context.bindService(intent, connection, Context.BIND_AUTO_CREATE)
+            }
+        }
+        // DEV-SPOOF: live switch detach/reattach.
+        viewModelScope.launch {
+            gate.active(com.frerox.toolz.data.developer.DevToolId.TIMERS).collect { spoofed ->
+                if (spoofed && !sandboxActiveNow) {
+                    enterSandboxImmediately()
+                } else if (!spoofed && sandboxActiveNow) {
+                    sandboxActiveNow = false
+                    sandboxTickJob?.cancel()
+                    sandboxTickJob = null
+                    _sandboxState.value = null
+                    Intent(context, ToolService::class.java).also { intent ->
+                        context.bindService(intent, connection, Context.BIND_AUTO_CREATE)
+                    }
+                }
+            }
         }
 
         viewModelScope.launch {
@@ -172,7 +217,54 @@ class StopwatchViewModel @Inject constructor(
         }
     }
 
+    // ── DEV-SPOOF: fixture stopwatch internals ──────────────────────────────
+
+    private fun enterSandboxImmediately() {
+        sandboxActiveNow = true
+        _sandboxState.value = StopwatchState(
+            isBound = true,
+            isLoading = false,
+            showMilliseconds = true,
+        )
+        try { context.unbindService(connection) } catch (_: Exception) {}
+        toolService = null
+        isBound = false
+        startSandboxTicker()
+        android.util.Log.w(
+            "DevSpoof",
+            "Stopwatch sandbox active — RAM elapsed counter, ToolService detached",
+        )
+    }
+
+    private fun startSandboxTicker() {
+        if (sandboxTickJob?.isActive == true) return
+        sandboxTickJob = viewModelScope.launch {
+            while (true) {
+                val s = _sandboxState.value ?: return@launch
+                // Only emits while running — a paused stopwatch stays silent.
+                if (s.isRunning) {
+                    _sandboxState.value = s.copy(elapsedTime = s.elapsedTime + 100L)
+                }
+                delay(100)
+            }
+        }
+    }
+
+    /** DEV-SPOOF: start/pause the RAM counter; never touches the service. */
+    private fun toggleSandbox() {
+        val s = _sandboxState.value ?: StopwatchState(
+            isBound = true,
+            isLoading = false,
+            showMilliseconds = true,
+        )
+        _sandboxState.value = s.copy(isRunning = !s.isRunning, isBound = true, isLoading = false)
+    }
+
+    // ── Facade: Stopwatch commands ──────────────────────────────────────────
+
     fun toggleStartStop() {
+        // DEV-SPOOF: sandboxed → the RAM counter runs; no FGS, no persistence.
+        if (stopwatchSandboxActive) { toggleSandbox(); return }
         val service = toolService
         if (service == null || !isBound) {
             // Never silently drop (S-P0-01): start FGS + queue until bound.
@@ -189,6 +281,11 @@ class StopwatchViewModel @Inject constructor(
     }
 
     fun reset() {
+        // DEV-SPOOF: sandboxed → the fixture zeroes; service untouched.
+        if (stopwatchSandboxActive) {
+            _sandboxState.value = StopwatchState(isBound = true, isLoading = false)
+            return
+        }
         pendingToggle = false
         toolService?.resetStopwatch()
         _uiState.update {
@@ -208,6 +305,18 @@ class StopwatchViewModel @Inject constructor(
      * Gated on running with 500ms debounce + 200 cap inside the service.
      */
     fun lap() {
+        // DEV-SPOOF: sandboxed → laps accumulate in RAM with the 200 cap.
+        if (stopwatchSandboxActive) {
+            val s = _sandboxState.value ?: StopwatchState(isBound = true, isLoading = false)
+            val capped = s.laps.size >= SettingsRepository.STOPWATCH_MAX_LAPS
+            _sandboxState.value =
+                if (capped) {
+                    s.copy(lapCapped = true, lastLapAt = s.elapsedTime)
+                } else {
+                    s.copy(laps = s.laps + s.elapsedTime, lastLapAt = s.elapsedTime, lapCapped = false)
+                }
+            return
+        }
         val service = toolService ?: return
         if (!_uiState.value.isRunning) return
         val recorded = try {

@@ -31,6 +31,7 @@ import com.frerox.toolz.util.NotificationHelper
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -68,11 +69,31 @@ data class TimerState(
 @HiltViewModel
 class TimerViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    // DEV-SPOOF: gates the RAM fixture countdown when the sandbox is on.
+    private val gate: com.frerox.toolz.data.developer.SpoofGate,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(TimerState())
-    val uiState: StateFlow<TimerState> = _uiState.asStateFlow()
+
+    // DEV-SPOOF: fixture countdown (null = not sandboxed). A RAM 3-second
+    // demo that loops "arm → run → ring" with no alarm service, no FGS and
+    // no notifications.
+    private val _sandboxTimer = MutableStateFlow<TimerState?>(null)
+    private var sandboxTickJob: Job? = null
+    private var sandboxActiveNow = false
+
+    val timersSandboxActive: Boolean
+        get() = gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.TIMERS)
+
+    /** DEV-SPOOF: sandboxed → the whole countdown renders from fixtures. */
+    val uiState: StateFlow<TimerState> = combine(
+        _uiState.asStateFlow(),
+        _sandboxTimer,
+        gate.active(com.frerox.toolz.data.developer.DevToolId.TIMERS),
+    ) { real, fixture, spoofed ->
+        if (spoofed && fixture != null) fixture else real
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), TimerState())
 
     private val _userMessage = MutableStateFlow<String?>(null)
     val userMessage: StateFlow<String?> = _userMessage.asStateFlow()
@@ -112,12 +133,36 @@ class TimerViewModel @Inject constructor(
     }
 
     init {
-        // Ensure service exists so onCreate restore runs (never rely on BIND_AUTO_CREATE alone).
-        ensureServiceStarted()
-        Intent(context, ToolService::class.java).also { intent ->
-            try {
-                context.bindService(intent, connection, Context.BIND_AUTO_CREATE)
-            } catch (_: Exception) {}
+        // DEV-SPOOF: sandboxed → never bind or start the real ToolService; the
+        // fixture timer owns the dial. Live-switch detaches/reattaches it.
+        if (timersSandboxActive) {
+            enterSandboxImmediately()
+        } else {
+            ensureServiceStarted()
+            Intent(context, ToolService::class.java).also { intent ->
+                try {
+                    context.bindService(intent, connection, Context.BIND_AUTO_CREATE)
+                } catch (_: Exception) {}
+            }
+        }
+        // DEV-SPOOF: watch the live switch.
+        viewModelScope.launch {
+            gate.active(com.frerox.toolz.data.developer.DevToolId.TIMERS).collect { spoofed ->
+                if (spoofed && !sandboxActiveNow) {
+                    enterSandboxImmediately()
+                } else if (!spoofed && sandboxActiveNow) {
+                    sandboxActiveNow = false
+                    sandboxTickJob?.cancel()
+                    sandboxTickJob = null
+                    _sandboxTimer.value = null
+                    ensureServiceStarted()
+                    Intent(context, ToolService::class.java).also { intent ->
+                        try {
+                            context.bindService(intent, connection, Context.BIND_AUTO_CREATE)
+                        } catch (_: Exception) {}
+                    }
+                }
+            }
         }
 
         // Settings: init-only load + distinctUntilChanged (T-P1-03). Never overwrite
@@ -327,6 +372,19 @@ class TimerViewModel @Inject constructor(
     )
 
     fun onTimeSelectedChange(hours: Int, min: Int, sec: Int, force: Boolean = false) {
+        // DEV-SPOOF: sandboxed → wheels stage on the fixture only.
+        if (timersSandboxActive) {
+            _sandboxTimer.update { cur ->
+                val fixture = cur ?: sandboxFixture()
+                fixture.copy(
+                    selectedHours = hours,
+                    selectedMinutes = min,
+                    selectedSeconds = sec,
+                    remainingTime = fixture.remainingTime.coerceAtLeast(0L),
+                )
+            }
+            return
+        }
         val safeHours = hours.coerceIn(0, 99)
         val safeMinutes = min.coerceIn(0, 59)
         val safeSeconds = sec.coerceIn(0, 59)
@@ -395,10 +453,27 @@ class TimerViewModel @Inject constructor(
 
     /** Compat: legacy min/sec callers (hours = 0). */
     fun onTimeSelectedChange(min: Int, sec: Int, force: Boolean = false) {
+        // DEV-SPOOF: sandboxed → wheels stage on the fixture only.
+        if (timersSandboxActive) {
+            onTimeSelectedChange(hours = 0, min = min, sec = sec, force = force)
+            return
+        }
         onTimeSelectedChange(0, min, sec, force)
     }
 
     fun setTimer(hours: Int, minutes: Int, seconds: Int, force: Boolean = false) {
+        // DEV-SPOOF: sandboxed → restage the fixture duration (1s clamped).
+        if (timersSandboxActive) {
+            val total = (((hours * 3600L) + (minutes * 60L) + seconds).coerceAtLeast(1L))
+                .coerceAtMost(21_600L)
+            _sandboxTimer.value =
+                sandboxFixture(seconds = total / 1000L).copy(
+                    selectedHours = (hours.coerceIn(0, 99)),
+                    selectedMinutes = minutes.coerceIn(0, 59),
+                    selectedSeconds = seconds.coerceIn(0, 59),
+                )
+            return
+        }
         val cur = _uiState.value
         if (cur.isRunning) return
         if (!force && cur.remainingTime > 0L && cur.hasRun && !cur.isRunning && !cur.isRinging) {
@@ -463,10 +538,26 @@ class TimerViewModel @Inject constructor(
 
     /** Compat: legacy min/sec callers (hours = 0). */
     fun setTimer(minutes: Int, seconds: Int, force: Boolean = false) {
+        // DEV-SPOOF: sandboxed → delegate to the fixture restage.
+        if (timersSandboxActive) { setTimer(0, minutes, seconds, force); return }
         setTimer(0, minutes, seconds, force)
     }
 
     fun addTime(millis: Long) {
+        // DEV-SPOOF: sandboxed → extend the fixture countdown only.
+        if (timersSandboxActive) {
+            _sandboxTimer.update { cur ->
+                val fixture = cur ?: sandboxFixture()
+                val initial = ((fixture.initialTime + millis).coerceAtLeast(1000L)).coerceAtMost(21_600_000L)
+                fixture.copy(
+                    initialTime = initial,
+                    remainingTime = (fixture.remainingTime + millis).coerceAtLeast(0L).coerceAtMost(initial),
+                    isFinished = false,
+                    isRinging = false,
+                )
+            }
+            return
+        }
         val state = _uiState.value
         // T-P0-01: startForegroundService BEFORE bind call; never rely on BIND_AUTO_CREATE alone.
         ensureServiceStarted()
@@ -523,7 +614,99 @@ class TimerViewModel @Inject constructor(
         } catch (_: Exception) {}
     }
 
+    // ── DEV-SPOOF: fixture timer internals ─────────────────────────────────
+
+    private fun sandboxFixture(seconds: Long = 3L): TimerState = TimerState(
+        remainingTime = seconds * 1000L,
+        initialTime = seconds * 1000L,
+        isStarted = true,
+        isPaused = false,
+        hasRun = false,
+        selectedMinutes = 0,
+        selectedSeconds = seconds.toInt().coerceIn(0, 59),
+        alarmsEnabled = false, // sandbox: no notification/alarm machinery at all
+    )
+
+    private fun enterSandboxImmediately() {
+        sandboxActiveNow = true
+        _sandboxTimer.value = sandboxFixture()
+        try { context.unbindService(connection) } catch (_: Exception) {}
+        try { context.stopService(Intent(context, ToolService::class.java)) } catch (_: Exception) {}
+        isBound = false
+        toolService = null
+        serviceCollectJob?.cancel()
+        serviceCollectJob = null
+        pendingAction = null
+        startSandboxTicker()
+        android.util.Log.w(
+            "DevSpoof",
+            "Timers sandbox active — 3s fixture loop, ToolService detached (no alarms)",
+        )
+    }
+
+    private fun startSandboxTicker() {
+        if (sandboxTickJob?.isActive == true) return
+        sandboxTickJob = viewModelScope.launch {
+            while (true) {
+                val s = _sandboxTimer.value ?: return@launch
+                when {
+                    s.isRunning && !s.isPaused -> {
+                        val next = (s.remainingTime - 100L).coerceAtLeast(0L)
+                        _sandboxTimer.value =
+                            if (next == 0L) {
+                                // Fake "ring" — visual only, no sound/notification.
+                                s.copy(
+                                    remainingTime = 0L,
+                                    isRunning = false,
+                                    isFinished = true,
+                                    isRinging = true,
+                                )
+                            } else {
+                                s.copy(remainingTime = next)
+                            }
+                    }
+                    s.isRinging -> {
+                        delay(1500)
+                        _sandboxTimer.value = _sandboxTimer.value
+                            ?.copy(isFinished = false, isRinging = false)
+                        delay(250)
+                        _sandboxTimer.value = _sandboxTimer.value
+                            ?.let { cur ->
+                                sandboxFixture(
+                                    seconds = (cur.initialTime / 1000L).coerceAtLeast(1L),
+                                ).copy(isStarted = true)
+                            }
+                    }
+                }
+                delay(100)
+            }
+        }
+    }
+
+    /** DEV-SPOOF: start/pause/dismiss against the RAM fixture only. */
+    private fun toggleSandboxTimer() {
+        val s = _sandboxTimer.value ?: sandboxFixture()
+        _sandboxTimer.value = when {
+            s.isFinished || s.isRinging ->
+                sandboxFixture(seconds = (s.initialTime / 1000L).coerceAtLeast(1L))
+                    .copy(isStarted = true)
+            else -> {
+                val starting = !s.isRunning
+                s.copy(
+                    isRunning = starting,
+                    isPaused = !starting,
+                    isStarted = true,
+                    hasRun = s.hasRun || starting,
+                )
+            }
+        }
+    }
+
+    // ── Facade: Timer commands ──────────────────────────────────────────────
+
     fun toggleStartStop() {
+        // DEV-SPOOF: sandboxed → the fixture loops in RAM; service untouched.
+        if (timersSandboxActive) { toggleSandboxTimer(); return }
         // T-P0-01: foreground-start BEFORE bind call.
         ensureServiceStarted()
         val state = _uiState.value
@@ -637,6 +820,8 @@ class TimerViewModel @Inject constructor(
     }
 
     fun playRingtone() {
+        // DEV-SPOOF: sandboxed → the fake ring is visual only, no audio session.
+        if (timersSandboxActive) return
         // Handled by ToolService
     }
 
@@ -694,6 +879,14 @@ class TimerViewModel @Inject constructor(
     }
 
     fun reset() {
+        // DEV-SPOOF: sandboxed → the fixture re-arms; no service action at all.
+        if (timersSandboxActive) {
+            sandboxTickJob?.cancel()
+            sandboxTickJob = null
+            _sandboxTimer.value = sandboxFixture()
+            startSandboxTicker()
+            return
+        }
         // Robust via service action (works unbound) + binder.
         startServiceAction(ToolService.ACTION_TIMER_STOP)
         try { toolService?.resetTimer() } catch (_: Exception) {}
@@ -718,6 +911,11 @@ class TimerViewModel @Inject constructor(
     }
 
     fun resetToInitial() {
+        // DEV-SPOOF: sandboxed → the fixture re-arms.
+        if (timersSandboxActive) {
+            _sandboxTimer.value = sandboxFixture(seconds = (_sandboxTimer.value?.initialTime ?: 3000L) / 1000L)
+            return
+        }
         val initial = _uiState.value.initialTime
         if (initial <= 0L) {
             reset()
