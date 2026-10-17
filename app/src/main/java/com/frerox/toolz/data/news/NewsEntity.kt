@@ -84,6 +84,14 @@ interface NewsDao {
     @Query("SELECT * FROM news_items WHERE status = 'published' ORDER BY pinned DESC, publishAt DESC")
     suspend fun publishedOrdered(): List<NewsEntity>
 
+    /**
+     * Full-history search backing the search field: covers cached items of any
+     * status (archived/expired live in history), not just the loaded pages.
+     * Wildcards are escaped by the repository before the query runs.
+     */
+    @Query("SELECT * FROM news_items WHERE (LOWER(title) LIKE '%' || LOWER(:q) || '%' ESCAPE '\\' OR LOWER(body) LIKE '%' || LOWER(:q) || '%' ESCAPE '\\') ORDER BY pinned DESC, publishAt DESC LIMIT :limit")
+    suspend fun searchRaw(q: String, limit: Int): List<NewsEntity>
+
     @Query("SELECT id FROM news_items WHERE status = 'published'")
     suspend fun publishedIds(): List<String>
 

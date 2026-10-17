@@ -29,6 +29,8 @@ class NewsRepository @Inject constructor(
         const val SYNC_STALE_MS = 6 * 60 * 60 * 1000L
         const val HISTORY_PAGE_SIZE = 10
         private const val PRUNE_AFTER_MS = 90L * 24 * 60 * 60 * 1000L
+        /** Full-history search result cap (Room query is bounded too). */
+        private const val SEARCH_LIMIT = 200
 
         /**
          * Popup queue rule (pure, unit-tested): 1-per-session for normal items,
@@ -234,18 +236,37 @@ class NewsRepository @Inject constructor(
         } catch (_: Exception) { emptyList() }
     }
 
+    /**
+     * Full-history search across every cached item (not just the loaded pages).
+     * LIKE wildcards in the user input are escaped so "%" and "_" match
+     * literally; priority filtering happens in the ViewModel.
+     */
+    suspend fun searchHistory(query: String): List<NewsEntity> {
+        val trimmed = query.trim()
+        if (trimmed.isEmpty()) return emptyList()
+        return try {
+            val escaped = buildString {
+                for (c in trimmed) {
+                    if (c == '\\' || c == '%' || c == '_') append('\\')
+                    append(c)
+                }
+            }.take(64)
+            newsDao.searchRaw(escaped, SEARCH_LIMIT)
+        } catch (_: Exception) { emptyList() }
+    }
+
     suspend fun historyCount(): Int = try { newsDao.count() } catch (_: Exception) { 0 }
 
+    /**
+     * Unread badge: published items not yet seen, time-valid only (expired and
+     * locally-archived items may still sit in Room; they must not inflate the badge).
+     */
     suspend fun unreadCount(): Int {
         return try {
             val seen = settingsRepository.newsSeenIds.first()
-            if (seen.isEmpty()) {
-                // Fast path: no need to load full rows when nothing is seen.
-                newsDao.publishedIds().size
-            } else {
-                val all = newsDao.publishedOrdered()
-                all.count { it.id !in seen }
-            }
+            val now = System.currentTimeMillis()
+            val all = newsDao.publishedOrdered().filter { timeValid(it, now) }
+            if (seen.isEmpty()) all.size else all.count { it.id !in seen }
         } catch (_: Exception) { 0 }
     }
 
