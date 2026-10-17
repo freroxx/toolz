@@ -47,13 +47,36 @@ class NotificationVaultViewModel @Inject constructor(
     private val repository: NotificationRepository,
     private val settingsRepository: SettingsRepository,
     private val moshi: Moshi,
-    private val shizukuExecutor: com.frerox.toolz.util.shizuku.ShizukuShellExecutor
+    private val shizukuExecutor: com.frerox.toolz.util.shizuku.ShizukuShellExecutor,
+    private val gate: com.frerox.toolz.data.developer.SpoofGate
 ) : ViewModel() {
 
+    // DEV-SPOOF: the vault demo swap — a RAM backlog replaces the Room feed,
+    // Shizuku is faked authorized and listener grants never run.
+    private val NOTIFICATIONS = com.frerox.toolz.data.developer.DevToolId.NOTIFICATIONS
+    private val gateActive = gate.active(NOTIFICATIONS)
+
     private val _shizukuAuthorized = MutableStateFlow(com.frerox.toolz.util.shizuku.ShizukuHelper.isAuthorized())
-    val shizukuAuthorized = _shizukuAuthorized.asStateFlow()
+    val shizukuAuthorized: StateFlow<Boolean> = _shizukuAuthorized
+        .combine(gateActive) { granted, demo -> demo || granted }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    private val fixtureHidden = com.frerox.toolz.data.developer.FakeNotificationSandbox.fixtureHidden
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet<String>())
 
     init {
+        // DEV-SPOOF: fresh backlog per demo arm; fixtures always RAM-only.
+        viewModelScope.launch {
+            com.frerox.toolz.data.developer.FakeNotificationSandbox.reset()
+            gateActive.collect { demo ->
+                if (demo) {
+                    com.frerox.toolz.data.developer.FakeNotificationSandbox.arm()
+                    android.util.Log.w("DevSpoof", "Notification vault sandbox armed — RAM backlog only")
+                } else {
+                    com.frerox.toolz.data.developer.FakeNotificationSandbox.reset()
+                }
+            }
+        }
         // Grant notification listener permission immediately if Shizuku is already authorized.
         // This avoids requiring a navigate-away-and-back to trigger ON_RESUME.
         if (com.frerox.toolz.util.shizuku.ShizukuHelper.isAuthorized()) {
@@ -62,6 +85,11 @@ class NotificationVaultViewModel @Inject constructor(
     }
 
     fun refreshShizukuStatus() {
+        // DEV-SPOOF: demo reports Shizuku authorized without any grant.
+        if (gate.sandboxed(NOTIFICATIONS)) {
+            _shizukuAuthorized.value = true
+            return
+        }
         val authorized = com.frerox.toolz.util.shizuku.ShizukuHelper.isAuthorized()
         _shizukuAuthorized.value = authorized
         if (authorized) {
@@ -70,6 +98,8 @@ class NotificationVaultViewModel @Inject constructor(
     }
 
     private fun grantNotificationPermissionWithShizuku() {
+        // DEV-SPOOF: no `cmd notification allow_listener` shells in demo mode.
+        if (gate.sandboxed(NOTIFICATIONS)) return
         viewModelScope.launch {
             try {
                 val command = "cmd notification allow_listener com.frerox.toolz/com.frerox.toolz.service.NotificationVaultService"
@@ -89,7 +119,13 @@ class NotificationVaultViewModel @Inject constructor(
     private val _selectedDateFilter = MutableStateFlow("Anytime")
     val selectedDateFilter = _selectedDateFilter.asStateFlow()
 
-    val hiddenApps = settingsRepository.hiddenNotificationApps
+    val hiddenApps: StateFlow<Set<String>> = combine(
+        settingsRepository.hiddenNotificationApps,
+        gateActive,
+        fixtureHidden,
+    ) { real, demo, demoSet ->
+        if (demo) demoSet else real
+    }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
 
     val appMappings = settingsRepository.appCategoryMappings
@@ -107,11 +143,26 @@ class NotificationVaultViewModel @Inject constructor(
             .let { listOf("All") + it }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), listOf("All", "Social", "Finance", "Work", "General"))
 
-    val distinctPackages = repository.getDistinctPackages()
+    val distinctPackages: StateFlow<List<String>> = combine(
+        repository.getDistinctPackages(),
+        gateActive,
+        com.frerox.toolz.data.developer.FakeNotificationSandbox.fixtureNotifications,
+    ) { real, demo, fixture ->
+        // DEV-SPOOF: fixture-only package list while demo is armed.
+        if (demo) fixture.distinctBy { it.packageName }.map { it.packageName }
+        else real
+    }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    // DEV-SPOOF: RAM backlog swaps in at the source so every filter/
+    // search/category date logic below runs on the same shapes.
+    private val sourceNotifications: Flow<List<NotificationEntry>> =
+        combine(repository.allNotifications, com.frerox.toolz.data.developer.FakeNotificationSandbox.fixtureNotifications, gateActive) { real, fixture, demo ->
+            if (demo) fixture else real
+        }
+
     val notifications: StateFlow<List<NotificationEntry>> = combine(
-        repository.allNotifications,
+        sourceNotifications,
         _searchQuery,
         _selectedCategory,
         hiddenApps,
@@ -119,12 +170,12 @@ class NotificationVaultViewModel @Inject constructor(
     ) { list, query, category, hidden, dateFilter ->
         val now = System.currentTimeMillis()
         val dayMillis = 24 * 60 * 60 * 1000L
-        
-        list.filter { 
+
+        list.filter {
             !hidden.contains(it.packageName) &&
             (category == "All" || it.category == category) &&
-            (query.isEmpty() || it.appName.contains(query, ignoreCase = true) || 
-             (it.title?.contains(query, ignoreCase = true) == true) || 
+            (query.isEmpty() || it.appName.contains(query, ignoreCase = true) ||
+             (it.title?.contains(query, ignoreCase = true) == true) ||
              (it.text?.contains(query, ignoreCase = true) == true)) &&
             when(dateFilter) {
                 "Today" -> it.timestamp >= now - dayMillis
@@ -148,30 +199,53 @@ class NotificationVaultViewModel @Inject constructor(
     }
 
     fun deleteNotification(id: Long) {
+        // DEV-SPOOF: RAM delete while demo is armed.
+        if (gate.sandboxed(NOTIFICATIONS)) {
+            com.frerox.toolz.data.developer.FakeNotificationSandbox.delete(id)
+            return
+        }
         viewModelScope.launch {
             repository.deleteById(id)
         }
     }
 
     fun clearAll() {
+        if (gate.sandboxed(NOTIFICATIONS)) {
+            com.frerox.toolz.data.developer.FakeNotificationSandbox.clearAll()
+            return
+        }
         viewModelScope.launch {
             repository.deleteAll()
         }
     }
 
     fun hideApp(packageName: String) {
+        if (gate.sandboxed(NOTIFICATIONS)) {
+            com.frerox.toolz.data.developer.FakeNotificationSandbox.hideApp(packageName)
+            return
+        }
         viewModelScope.launch {
             settingsRepository.addHiddenNotificationApp(packageName)
         }
     }
 
     fun unhideApp(packageName: String) {
+        if (gate.sandboxed(NOTIFICATIONS)) {
+            com.frerox.toolz.data.developer.FakeNotificationSandbox.unhideApp(packageName)
+            return
+        }
         viewModelScope.launch {
             settingsRepository.removeHiddenNotificationApp(packageName)
         }
     }
 
     suspend fun getAppDetails(packageName: String): AppDetails {
+        // DEV-SPOOF: counts/last-notif answer from the fixture.
+        if (gate.sandboxed(NOTIFICATIONS)) {
+            val fake = com.frerox.toolz.data.developer.FakeNotificationSandbox
+            val last = fake.lastForPackage(packageName)
+            return AppDetails(last?.appName ?: packageName, packageName, fake.countForPackage(packageName), last)
+        }
         val count = repository.getNotificationCountForPackage(packageName)
         val last = repository.getLastNotificationForPackage(packageName)
         val appName = last?.appName ?: packageName
