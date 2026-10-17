@@ -87,6 +87,7 @@ import androidx.core.net.toUri
 import com.frerox.toolz.ui.screens.focus.CaffeinateViewModel
 import com.frerox.toolz.ui.screens.focus.FocusFlowViewModel
 import com.frerox.toolz.ui.screens.pdf.PdfViewModel
+import com.frerox.toolz.ui.screens.news.ToolzNewsPopup
 import com.frerox.toolz.ui.screens.media.MusicPlayerViewModel
 import com.frerox.toolz.ui.screens.media.isCurrentNoteTrack
 import com.frerox.toolz.ui.screens.media.MusicUiState
@@ -280,19 +281,8 @@ fun DashboardScreen(
             onNewsClick         = { navigate(com.frerox.toolz.ui.navigation.Screen.ToolzNews.route) },
         )
 
-        if (newsPopupVisible && newsPopup != null) {
-            com.frerox.toolz.ui.screens.news.ToolzNewsPopup(
-                item = newsPopup!!,
-                masterNewsEnabled = newsMasterOn,
-                onAction = { newsViewModel.onPopupAction() },
-                onLater = { newsViewModel.onPopupLater() },
-                onDismiss = { newsViewModel.onPopupDismiss() },
-                onViewAll = {
-                    newsViewModel.onPopupAction()
-                    navigate(com.frerox.toolz.ui.navigation.Screen.ToolzNews.route)
-                }
-            )
-        }
+        // (News popup lives above the floating toolbar — see end of this Box —
+        //  so its scrim blocks the toolbar while an announcement is open.)
 
         ToolzFloatingToolbar(
             selectedTab = selectedTab,
@@ -320,6 +310,37 @@ fun DashboardScreen(
             settingsRepository = settingsRepository,
             showToolzPill = showPill
         )
+
+        // News popup hosts LAST (topmost z-order): its scrim blocks the
+        // floating toolbar and tab content while an announcement is open.
+        // Entrance/exit follows the app's house language: fade + spring pop.
+        AnimatedVisibility(
+            visible = newsPopupVisible && newsPopup != null,
+            enter = fadeIn(tween(200)) + scaleIn(
+                initialScale = 0.92f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            ),
+            exit = fadeOut(tween(150)) + scaleOut(
+                targetScale = 0.96f,
+                animationSpec = tween(150)
+            )
+        ) {
+            val popupItem = newsPopup ?: return@AnimatedVisibility
+            ToolzNewsPopup(
+                item = popupItem,
+                masterNewsEnabled = newsMasterOn,
+                onAction = { newsViewModel.onPopupAction() },
+                onLater = { newsViewModel.onPopupLater() },
+                onDismiss = { newsViewModel.onPopupDismiss() },
+                onViewAll = {
+                    newsViewModel.onPopupAction()
+                    navigate(com.frerox.toolz.ui.navigation.Screen.ToolzNews.route)
+                }
+            )
+        }
     }
 }
 
@@ -1328,9 +1349,12 @@ fun DashboardHeader(
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f)),
                     ) {
                         Box(contentAlignment = Alignment.Center) {
+                            val unreadLabel = if (newsUnread > 0) {
+                                stringResource(R.string.st_News_settings_history_with_new, newsUnread)
+                            } else stringResource(R.string.st_News_title)
                             Icon(
                                 Icons.Rounded.Newspaper,
-                                contentDescription = "Toolz News",
+                                contentDescription = unreadLabel,
                                 modifier = Modifier.padding(8.dp).size(16.dp),
                                 tint = if (newsUnread > 0) MaterialTheme.colorScheme.primary
                                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)

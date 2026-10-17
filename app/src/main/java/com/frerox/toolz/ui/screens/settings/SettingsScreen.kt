@@ -1423,7 +1423,7 @@ fun SettingsScreen(
                     // 10b. Section: TOOLZ NEWS
                     StaggeredEntrance(index = 10) {
                         SettingsExpandableSection(
-                            title = "NEWS",
+                            title = stringResource(R.string.st_News_settings_section),
                             icon = Icons.Rounded.Newspaper,
                             isExpanded = expandedSection == "NEWS" || searchQuery.isNotEmpty(),
                             onExpandToggle = {
@@ -1432,16 +1432,17 @@ fun SettingsScreen(
                         ) {
                             if (matches(searchQuery, "news", "announcement", "changelog")) {
                                 SettingsItem(
-                                    title = if (newsUnread > 0) "Toolz News ($newsUnread new)" else "Toolz News",
-                                    subtitle = "Announcements and changelog history",
+                                    title = if (newsUnread > 0) stringResource(R.string.st_News_settings_history_with_new, newsUnread)
+                                            else stringResource(R.string.st_News_settings_history),
+                                    subtitle = stringResource(R.string.st_News_settings_history_sub),
                                     icon = Icons.Rounded.Newspaper,
                                     onClick = onNavigateToNews
                                 )
                             }
                             if (matches(searchQuery, "news", "announcement")) {
                                 SettingsToggleItem(
-                                    title = "Toolz News",
-                                    subtitle = "Show announcement popups (critical always shows)",
+                                    title = stringResource(R.string.st_News_settings_history),
+                                    subtitle = stringResource(R.string.st_News_settings_popup_sub),
                                     icon = Icons.Rounded.Campaign,
                                     checked = newsEnabled,
                                     onCheckedChange = { newsViewModel.toggleNews(it) }
@@ -1449,8 +1450,8 @@ fun SettingsScreen(
                             }
                             if (matches(searchQuery, "news", "notification", "announcement")) {
                                 SettingsToggleItem(
-                                    title = "News notifications",
-                                    subtitle = "Notify when news drops (critical always notifies)",
+                                    title = stringResource(R.string.st_News_settings_notif_title),
+                                    subtitle = stringResource(R.string.st_News_settings_notif_sub),
                                     icon = Icons.Rounded.Notifications,
                                     checked = newsNotificationsEnabled,
                                     onCheckedChange = { newsViewModel.toggleNotifications(it) }
@@ -1458,16 +1459,16 @@ fun SettingsScreen(
                             }
                             if (matches(searchQuery, "news", "critical", "info")) {
                                 SettingsItem(
-                                    title = "Why do critical news always show?",
-                                    subtitle = "Outages and security notices bypass toggles",
+                                    title = stringResource(R.string.st_News_settings_critical_title),
+                                    subtitle = stringResource(R.string.st_News_settings_critical_sub),
                                     icon = Icons.Rounded.Info,
                                     onClick = { showCriticalNewsInfo = true }
                                 )
                             }
                             if (matches(searchQuery, "news", "check", "sync", "refresh")) {
                                 SettingsItem(
-                                    title = "Check for news",
-                                    subtitle = "Sync announcements now",
+                                    title = stringResource(R.string.st_News_refresh),
+                                    subtitle = stringResource(R.string.st_News_settings_check_sub),
                                     icon = Icons.Rounded.Refresh,
                                     onClick = { newsViewModel.syncNow() }
                                 )
@@ -1478,17 +1479,15 @@ fun SettingsScreen(
                     if (showCriticalNewsInfo) {
                         androidx.compose.material3.AlertDialog(
                             onDismissRequest = { showCriticalNewsInfo = false },
-                            title = { androidx.compose.material3.Text("Why am I seeing this?") },
+                            title = { androidx.compose.material3.Text(stringResource(R.string.st_News_settings_dialog_title)) },
                             text = {
                                 androidx.compose.material3.Text(
-                                    "Critical announcements (outages, security notices) always show " +
-                                        "and always notify, even when Toolz News or news notifications " +
-                                        "are turned off — so you never miss something urgent."
+                                    stringResource(R.string.st_News_settings_dialog_body)
                                 )
                             },
                             confirmButton = {
                                 androidx.compose.material3.TextButton(onClick = { showCriticalNewsInfo = false }) {
-                                    androidx.compose.material3.Text("Got it")
+                                    androidx.compose.material3.Text(stringResource(R.string.st_News_popup_got_it))
                                 }
                             }
                         )
@@ -1916,7 +1915,7 @@ fun AboutSection(
             ) {
                 Icon(Icons.Rounded.Newspaper, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(10.dp))
-                Text("Toolz News", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
+                Text(stringResource(R.string.st_News_settings_history), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
             }
         }
     }
