@@ -97,9 +97,9 @@ fun ScannerScreen(
     }
 
     // DEV-SPOOF: QR sandbox keeps the camera/MLKit idle and shows the fake
-    // payload instead — no camera permission prompt, no analyzer binding.
+    // payload instead — no camera permission prompt, no analyzer binding,
+    // even when the permission is already granted (sandbox wins).
     val qrSandboxActive = rememberSandboxActive(com.frerox.toolz.data.developer.DevToolId.QR)
-    val scanActive: Boolean = hasCameraPermission || qrSandboxActive
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -143,8 +143,14 @@ fun ScannerScreen(
         }
     }
 
-    LaunchedEffect(hasCameraPermission) {
-        if (hasCameraPermission) {
+    LaunchedEffect(hasCameraPermission, qrSandboxActive) {
+        // DEV-SPOOF: while the sandbox is on the camera never binds — a
+        // previously bound one unbinds, torch damped (no real hardware use).
+        if (qrSandboxActive) {
+            try { cameraController.unbind() } catch (_: Exception) {}
+            isFlashOn = false
+            cameraController.enableTorch(false)
+        } else if (hasCameraPermission) {
             cameraController.bindToLifecycle(lifecycleOwner)
         }
     }
@@ -191,7 +197,21 @@ fun ScannerScreen(
                 .toolzBackground()
                 .padding(top = padding.calculateTopPadding())
         ) {
-            if (hasCameraPermission) {
+            if (qrSandboxActive) {
+                // DEV-SPOOF: camera stays idle; the sandbox fabricates the scan.
+                // Checked FIRST so a granted permission can't leak real camera
+                // frames while the QR sandbox is armed.
+                Box(modifier = Modifier.fillMaxSize()) {
+                    ScannerOverlay(performanceMode)
+                    ResultCard(
+                        result = "WIFI:T:WPA;S:FakeFiber-5G;P:spoof-status-1234;;",
+                        onClose = { },
+                        onCopy = {
+                            Toast.makeText(context, context.getString(R.string.st_ScannerScreen_3c4d), Toast.LENGTH_SHORT).show()
+                        }
+                    )
+                }
+            } else if (hasCameraPermission) {
                 AndroidView(
                     factory = { ctx ->
                         PreviewView(ctx).apply {
@@ -223,18 +243,6 @@ fun ScannerScreen(
                         onClose = { scanResult = "" },
                         onCopy = {
                             clipboardManager.setText(AnnotatedString(scanResult))
-                            Toast.makeText(context, context.getString(R.string.st_ScannerScreen_3c4d), Toast.LENGTH_SHORT).show()
-                        }
-                    )
-                }
-            } else if (qrSandboxActive) {
-                // DEV-SPOOF: camera stays idle; the sandbox fabricates the scan.
-                Box(modifier = Modifier.fillMaxSize()) {
-                    ScannerOverlay(performanceMode)
-                    ResultCard(
-                        result = "WIFI:T:WPA;S:FakeFiber-5G;P:spoof-status-1234;;",
-                        onClose = { },
-                        onCopy = {
                             Toast.makeText(context, context.getString(R.string.st_ScannerScreen_3c4d), Toast.LENGTH_SHORT).show()
                         }
                     )

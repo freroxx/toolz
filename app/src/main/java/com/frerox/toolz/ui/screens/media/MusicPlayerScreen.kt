@@ -164,6 +164,7 @@ import com.frerox.toolz.ui.screens.media.sections.LibrarySection
 import com.frerox.toolz.ui.screens.media.sections.PlaylistDetailView
 import com.frerox.toolz.ui.screens.media.sections.PlaylistPickerRow
 import com.frerox.toolz.ui.screens.media.sections.TrackList
+import com.frerox.toolz.ui.screens.developer.components.rememberSandboxActive
 import com.frerox.toolz.ui.theme.LocalIsDarkTheme
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
@@ -408,8 +409,10 @@ fun MusicPlayerScreen(
                 // P1-09 fix: music only needs READ_MEDIA_AUDIO; MANAGE_ALL_FILES is optional
                 // for power users. Don't block playback if audio permission is granted.
                 // DEV-SPOOF: sandboxed → skip the permission prompt entirely; the fake
-                // library needs no real audio files.
-                !musicPermission.status.isGranted && !viewModel.isMusicSandboxActive -> {
+                // library needs no real audio files. Reactive hook so a sandbox
+                // flip mid-session re-evaluates the placeholder.
+                !musicPermission.status.isGranted
+                    && !rememberSandboxActive(com.frerox.toolz.data.developer.DevToolId.MUSIC) -> {
                     PermissionPlaceholder(
                         onAllow = { musicPermission.launchPermissionRequest() }
                     )

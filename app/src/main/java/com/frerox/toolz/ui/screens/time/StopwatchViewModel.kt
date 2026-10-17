@@ -285,9 +285,9 @@ class StopwatchViewModel @Inject constructor(
     }
 
     fun reset() {
-        // DEV-SPOOF: sandboxed → the fixture zeroes; service untouched.
+        // DEV-SPOOF: sandboxed → the fixture zeroes (cosmetics preserved); service untouched.
         if (stopwatchSandboxActive) {
-            _sandboxState.value = StopwatchState(isBound = true, isLoading = false)
+            _sandboxState.value = fixturedFromReal()
             return
         }
         pendingToggle = false
