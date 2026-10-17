@@ -104,6 +104,7 @@ import com.frerox.toolz.ui.screens.developer.components.DevCard
 import com.frerox.toolz.ui.screens.developer.components.DevCardTitle
 import com.frerox.toolz.ui.screens.developer.components.DevDivider
 import com.frerox.toolz.ui.screens.developer.components.DevKv
+import com.frerox.toolz.ui.screens.developer.components.DevPulseDot
 import com.frerox.toolz.ui.screens.developer.components.DevSectionHeader
 import com.frerox.toolz.ui.screens.developer.components.DevToggleLine
 import com.frerox.toolz.ui.screens.developer.components.LogcatViewer
@@ -511,12 +512,18 @@ private fun HomeTab(
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text("Developer Mode", fontWeight = FontWeight.Black, fontSize = 18.sp)
-                        Text(
-                            if (devOn) "ON • $activeCount sandbox${if (activeCount == 1) "" else "es"} • all local"
-                            else "OFF — every tool shows real data",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            // Console polish: live beacon — breathes while armed.
+                            DevPulseDot(devOn)
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                if (devOn) "ON • $activeCount sandbox${if (activeCount == 1) "" else "es"} • all local"
+                                else "OFF — every tool shows real data",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
                     }
                     Switch(checked = devOn, onCheckedChange = onSetDevMode)
                 }
@@ -528,7 +535,7 @@ private fun HomeTab(
                     Text(
                         "LOCAL ONLY • NO TELEMETRY • AUTO-OFF ON UPDATE",
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        fontSize = 9.sp,
+                        fontSize = 10.sp,
                         fontWeight = FontWeight.Black,
                         letterSpacing = 1.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -600,12 +607,12 @@ private fun HomeTab(
                         ) {
                             Surface(
                                 shape = RoundedCornerShape(12.dp),
-                                color = MaterialTheme.colorScheme.error.copy(alpha = 0.14f),
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
                             ) {
                                 Icon(
                                     tool.icon,
                                     contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.error,
+                                    tint = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.padding(8.dp).size(18.dp),
                                 )
                             }

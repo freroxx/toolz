@@ -90,15 +90,19 @@ fun SpoofToolTile(
     onConfigure: () -> Unit,
 ) {
     val pulse = rememberPulse(active)
-    val container by animateColorAsState(
-        if (active && devOn) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.55f)
-        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+    // Console polish: "armed" is feature state → primary accent. Red stays
+    // reserved for the real danger zone (System tab), not for healthy sandboxes.
+    // Animation animates the blend; the pulse rides on top as plain alpha.
+    val baseContainer by animateColorAsState(
+        if (active && devOn) MaterialTheme.colorScheme.primary
+        else MaterialTheme.colorScheme.surfaceVariant,
         label = "tile",
     )
+    val containerAlpha = if (active && devOn) 0.12f + 0.05f * pulse else 0.45f
     val borderMod = if (active && devOn) {
         Modifier.border(
             width = 1.5.dp,
-            color = MaterialTheme.colorScheme.error.copy(alpha = 0.45f + 0.3f * pulse),
+            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f + 0.3f * pulse),
             shape = RoundedCornerShape(24.dp),
         )
     } else {
@@ -107,7 +111,9 @@ fun SpoofToolTile(
 
     Card(
         shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = container),
+        colors = CardDefaults.cardColors(
+            containerColor = baseContainer.copy(alpha = containerAlpha),
+        ),
         modifier = borderMod.semantics { contentDescription = "${tool.title} sandbox tile" },
     ) {
         Column(
@@ -118,7 +124,7 @@ fun SpoofToolTile(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
                     shape = RoundedCornerShape(14.dp),
-                    color = if (active && devOn) MaterialTheme.colorScheme.error.copy(alpha = 0.22f)
+                    color = if (active && devOn) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
                     else MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
                     modifier = Modifier.size(40.dp),
                 ) {
@@ -126,8 +132,7 @@ fun SpoofToolTile(
                         Icon(
                             tool.icon,
                             contentDescription = null,
-                            tint = if (active && devOn) MaterialTheme.colorScheme.error
-                            else MaterialTheme.colorScheme.primary,
+                            tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(20.dp),
                         )
                     }
@@ -162,8 +167,8 @@ fun SpoofToolTile(
             ) {
                 Text(
                     tool.networkPolicy.name,
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                    fontSize = 9.sp,
+                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                    fontSize = 10.sp,
                     fontWeight = FontWeight.Black,
                     letterSpacing = 1.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -180,7 +185,7 @@ fun SpoofToolTile(
                     modifier = Modifier.weight(1f),
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Black,
-                    color = if (active && devOn) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                    color = MaterialTheme.colorScheme.primary,
                 )
             }
         }

@@ -7,7 +7,13 @@
 
 package com.frerox.toolz.ui.screens.developer.components
 
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,6 +23,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -54,7 +61,15 @@ object DevSpacing {
 @Composable
 fun DevCard(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     Card(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            // Console polish: a hairline outline so cards read as surfaces on
+            // tinted backgrounds instead of flat grey blurs.
+            .border(
+                1.dp,
+                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                RoundedCornerShape(28.dp),
+            ),
         shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
     ) {
@@ -79,6 +94,35 @@ fun DevDivider() {
     Spacer(Modifier.height(12.dp))
     Box(Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)))
     Spacer(Modifier.height(12.dp))
+}
+
+/**
+ * Tiny live beacon for status lines: a dim grey dot when idle, a breathing
+ * primary dot while the console/sandboxes are armed. Lets Home feel alive
+ * without adding noise.
+ */
+@Composable
+fun DevPulseDot(active: Boolean, modifier: Modifier = Modifier) {
+    if (!active) {
+        Box(
+            modifier = modifier
+                .size(8.dp)
+                .background(MaterialTheme.colorScheme.outlineVariant, CircleShape),
+        )
+        return
+    }
+    val transition = rememberInfiniteTransition(label = "devPulse")
+    val alpha by transition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(850), RepeatMode.Reverse),
+        label = "devPulseAlpha",
+    )
+    Box(
+        modifier = modifier
+            .size(8.dp)
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = alpha), CircleShape),
+    )
 }
 
 @Composable
