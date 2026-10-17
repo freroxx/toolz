@@ -67,6 +67,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.frerox.toolz.ui.screens.developer.components.rememberSandboxActive
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.toolzBackground
 import com.google.zxing.*
@@ -94,6 +95,11 @@ fun ScannerScreen(
             ) == PackageManager.PERMISSION_GRANTED
         )
     }
+
+    // DEV-SPOOF: QR sandbox keeps the camera/MLKit idle and shows the fake
+    // payload instead — no camera permission prompt, no analyzer binding.
+    val qrSandboxActive = rememberSandboxActive(com.frerox.toolz.data.developer.DevToolId.QR)
+    val scanActive: Boolean = hasCameraPermission || qrSandboxActive
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -217,6 +223,18 @@ fun ScannerScreen(
                         onClose = { scanResult = "" },
                         onCopy = {
                             clipboardManager.setText(AnnotatedString(scanResult))
+                            Toast.makeText(context, context.getString(R.string.st_ScannerScreen_3c4d), Toast.LENGTH_SHORT).show()
+                        }
+                    )
+                }
+            } else if (qrSandboxActive) {
+                // DEV-SPOOF: camera stays idle; the sandbox fabricates the scan.
+                Box(modifier = Modifier.fillMaxSize()) {
+                    ScannerOverlay(performanceMode)
+                    ResultCard(
+                        result = "WIFI:T:WPA;S:FakeFiber-5G;P:spoof-status-1234;;",
+                        onClose = { },
+                        onCopy = {
                             Toast.makeText(context, context.getString(R.string.st_ScannerScreen_3c4d), Toast.LENGTH_SHORT).show()
                         }
                     )
