@@ -1,9 +1,13 @@
 package com.frerox.toolz.ui.screens.news
 
-import android.content.Intent
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,7 +22,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -44,10 +47,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,17 +60,25 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.net.toUri
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
+import coil3.request.ImageRequest
+import coil3.request.crossfade
+import com.frerox.toolz.R
 import com.frerox.toolz.data.news.NewsConstants
 import com.frerox.toolz.data.news.NewsEntity
 import com.frerox.toolz.ui.components.ExpressiveCard
@@ -74,37 +87,61 @@ import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.components.ToolzExpressiveTextButton
 import com.frerox.toolz.ui.components.ToolzTonalExpressiveButton
 import com.frerox.toolz.ui.components.rememberToolzHapticFeedback
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.launch
 
-private data class PriorityStyle(
-    val label: String,
+internal data class NewsPriorityStyle(
+    val labelRes: Int,
     val icon: ImageVector,
     val container: Color,
     val content: Color,
 )
 
 @Composable
-private fun priorityStyle(priority: String): PriorityStyle {
+internal fun newsPriorityStyle(priority: String): NewsPriorityStyle {
     val scheme = MaterialTheme.colorScheme
     return when (priority) {
-        "critical" -> PriorityStyle("Critical", Icons.Rounded.Warning, scheme.errorContainer, scheme.onErrorContainer)
-        "feature" -> PriorityStyle("Feature", Icons.Rounded.AutoAwesome, scheme.primaryContainer, scheme.onPrimaryContainer)
-        "fix" -> PriorityStyle("Fix", Icons.Rounded.Build, scheme.tertiaryContainer, scheme.onTertiaryContainer)
-        "promo" -> PriorityStyle("Promo", Icons.Rounded.LocalOffer, scheme.secondaryContainer, scheme.onSecondaryContainer)
-        else -> PriorityStyle("Info", Icons.Rounded.Campaign, scheme.surfaceContainerHighest, scheme.onSurfaceVariant)
+        "critical" -> NewsPriorityStyle(R.string.st_News_priority_critical, Icons.Rounded.Warning, scheme.errorContainer, scheme.onErrorContainer)
+        "feature" -> NewsPriorityStyle(R.string.st_News_priority_feature, Icons.Rounded.AutoAwesome, scheme.primaryContainer, scheme.onPrimaryContainer)
+        "fix" -> NewsPriorityStyle(R.string.st_News_priority_fix, Icons.Rounded.Build, scheme.tertiaryContainer, scheme.onTertiaryContainer)
+        "promo" -> NewsPriorityStyle(R.string.st_News_priority_promo, Icons.Rounded.LocalOffer, scheme.secondaryContainer, scheme.onSecondaryContainer)
+        else -> NewsPriorityStyle(R.string.st_News_priority_info, Icons.Rounded.Campaign, scheme.surfaceContainerHighest, scheme.onSurfaceVariant)
     }
 }
 
-private fun formatNewsPopupDate(publishAt: Long): String {
-    return try {
-        DateTimeFormatter.ofPattern("MMM d, yyyy")
-            .format(Instant.ofEpochMilli(publishAt).atZone(ZoneId.systemDefault()))
-    } catch (_: Exception) {
-        ""
+/** Tinted priority pill shared by the popup header and history cards. */
+@Composable
+internal fun NewsPriorityChip(priority: String, modifier: Modifier = Modifier, small: Boolean = false) {
+    val style = newsPriorityStyle(priority)
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(50),
+        color = style.container
+    ) {
+        Row(
+            modifier = Modifier.padding(
+                horizontal = if (small) 8.dp else 10.dp,
+                vertical = if (small) 3.dp else 5.dp
+            ),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Icon(
+                style.icon,
+                contentDescription = null,
+                tint = style.content,
+                modifier = Modifier.size(if (small) 11.dp else 13.dp)
+            )
+            Text(
+                stringResource(style.labelRes),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = style.content
+            )
+        }
     }
 }
+
+private const val DRAG_EXIT_DISTANCE_PX = 2400f
 
 /**
  * Toolz News announcement popup — centered expressive card, same language as
@@ -112,7 +149,12 @@ private fun formatNewsPopupDate(publishAt: Long): String {
  *
  * Hierarchy is strict: one filled primary action, one tonal "Later", quiet
  * text links in the footer. Dismiss semantics are preserved:
- * X = dismiss forever, Later/swipe/scrim = snooze 24h, CTA = open + close.
+ * X = dismiss forever, Later/swipe/scrim/back = snooze 24h, CTA = open + close.
+ * System back participates: dismissible cards snooze; blocking cards
+ * (critical + requiresAction) swallow it. The fullscreen scrim always blocks
+ * input below. Pull-to-snooze works even while the body scrolls — a nested
+ * scroll connection intercepts only past the content's top edge, and release
+ * settles with a spring or flies out with a haptic.
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -126,73 +168,108 @@ fun ToolzNewsPopup(
 ) {
     val context = LocalContext.current
     val haptic = rememberToolzHapticFeedback()
+    val scope = rememberCoroutineScope()
+    val currentOnLater by rememberUpdatedState(onLater)
     val blocking = item.requiresAction && item.priority == "critical"
     val canSoftClose = item.dismissible && !blocking
-    val style = priorityStyle(item.priority)
-    val date = remember(item.publishAt) { formatNewsPopupDate(item.publishAt) }
+    val style = newsPriorityStyle(item.priority)
+    val now = remember(item.id) { System.currentTimeMillis() }
+    val todayLabel = stringResource(R.string.st_News_today)
+    val yesterdayLabel = stringResource(R.string.st_News_yesterday)
+    val date = remember(item.publishAt, now, todayLabel, yesterdayLabel) {
+        NewsTime.newsDate(item.publishAt, now, todayLabel, yesterdayLabel)
+    }
     var imageState by remember(item.id) { mutableStateOf<AsyncImagePainter.State?>(null) }
     val imageBroken = imageState is AsyncImagePainter.State.Error
     val hasImage = !item.imageUrl.isNullOrBlank() && !imageBroken
     val hasAction = !item.actionUrl.isNullOrBlank()
-    var dragOffsetY by remember { mutableFloatStateOf(0f) }
+    val imageModel = remember(item.imageUrl, item.id) {
+        if (item.imageUrl.isNullOrBlank()) null
+        else ImageRequest.Builder(context)
+            .data(item.imageUrl)
+            .crossfade(true)
+            .build()
+    }
 
-    fun openUrl(url: String) {
-        try {
-            context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()))
-        } catch (_: Exception) {
+    // Pull-down physics: drag translates the card while nested content stays
+    // scrollable; release either springs back to rest or flies out and snoozes.
+    val pullThresholdPx = with(LocalDensity.current) { 132.dp.toPx() }
+    val dragOffset = remember(item.id) { Animatable(0f) }
+    val scrollState = rememberScrollState()
+
+    LaunchedEffect(item.id) { dragOffset.snapTo(0f) }
+
+    val pullConnection = remember(canSoftClose, item.id) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (!canSoftClose || source != NestedScrollSource.UserInput) return Offset.Zero
+                val dy = available.y
+                if (dy <= 0f) return Offset.Zero
+                // Only pull once the inner scroll has nothing behind its top
+                // edge (at rest) — otherwise the content owns the gesture.
+                if (scrollState.value > 0) return Offset.Zero
+                scope.launch { dragOffset.snapTo(dragOffset.value + dy) }
+                return Offset(0f, dy)
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                val pulled = dragOffset.value
+                if (pulled > pullThresholdPx) {
+                    haptic.tick()
+                    dragOffset.animateTo(
+                        DRAG_EXIT_DISTANCE_PX,
+                        tween(160, easing = CubicBezierEasing(0.35f, 0f, 0.85f, 0.2f))
+                    )
+                    currentOnLater()
+                    return available
+                }
+                if (pulled != 0f) {
+                    dragOffset.animateTo(
+                        0f,
+                        spring(
+                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        )
+                    )
+                }
+                return Velocity.Zero
+            }
         }
     }
 
-    fun share() {
-        try {
-            val link = "${NewsConstants.WEBSITE_NEWS_URL}#news-${item.id}"
-            val send = Intent(Intent.ACTION_SEND).apply {
-                type = "text/plain"
-                putExtra(Intent.EXTRA_SUBJECT, item.title)
-                putExtra(Intent.EXTRA_TEXT, "${item.title}\n\n$link")
-            }
-            context.startActivity(Intent.createChooser(send, "Share news"))
-        } catch (_: Exception) {
-        }
+    // Back is part of the modal contract: snooze when allowed; swallowed for
+    // blocking cards so nothing behind the scrim reacts either.
+    BackHandler(enabled = true) {
+        if (canSoftClose) onLater()
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.52f))
-            .semantics { contentDescription = "Announcement: ${item.title}" },
+            .semantics {
+                contentDescription = context.getString(R.string.st_News_popup_announcement, item.title)
+            },
         contentAlignment = Alignment.Center
     ) {
-        // Scrim tap = gentle snooze, never a permanent dismiss.
-        if (canSoftClose) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = onLater
-                    )
-            )
-        }
+        // Scrim tap = gentle snooze for dismissible cards; for blocking cards
+        // it only swallows the tap so the dashboard never reacts underneath.
         Box(
-            modifier = if (canSoftClose) {
-                Modifier
-                    .offset(y = dragOffsetY.dp)
-                    .graphicsLayer {
-                        alpha = (1f - (kotlin.math.abs(dragOffsetY) / 520f)).coerceIn(0.6f, 1f)
-                    }
-                    .pointerInput(Unit) {
-                        detectVerticalDragGestures(
-                            onDragEnd = {
-                                if (kotlin.math.abs(dragOffsetY) > 120) {
-                                    haptic.tick()
-                                    onLater()
-                                } else dragOffsetY = 0f
-                            }
-                        ) { _, dragAmount -> dragOffsetY += dragAmount * 0.55f }
-                    }
-            } else Modifier
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.52f))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = { if (canSoftClose) onLater() }
+                )
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    translationY = dragOffset.value
+                    alpha = (1f - (dragOffset.value / 1400f)).coerceIn(0.55f, 1f)
+                }
         ) {
             ExpressiveCard(
                 onClick = {},
@@ -200,7 +277,8 @@ fun ToolzNewsPopup(
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp)
                     .widthIn(max = 440.dp)
-                    .heightIn(max = 600.dp),
+                    .heightIn(max = 600.dp)
+                    .nestedScroll(pullConnection),
                 shape = RoundedCornerShape(36.dp),
                 containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                 elevation = 0.dp,
@@ -212,7 +290,7 @@ fun ToolzNewsPopup(
                 Column(
                     modifier = Modifier
                         .padding(horizontal = 20.dp, vertical = 16.dp)
-                        .verticalScroll(rememberScrollState()),
+                        .verticalScroll(scrollState),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     Box(
@@ -248,7 +326,7 @@ fun ToolzNewsPopup(
                             verticalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
                             Text(
-                                style.label,
+                                stringResource(style.labelRes),
                                 style = MaterialTheme.typography.labelLarge,
                                 fontWeight = FontWeight.Bold,
                                 color = style.content
@@ -264,7 +342,7 @@ fun ToolzNewsPopup(
                         if (item.pinned) {
                             Icon(
                                 Icons.Rounded.PushPin,
-                                contentDescription = "Pinned announcement",
+                                contentDescription = stringResource(R.string.st_News_popup_pinned_desc),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                                 modifier = Modifier.size(18.dp)
                             )
@@ -276,7 +354,7 @@ fun ToolzNewsPopup(
                             ) {
                                 Icon(
                                     Icons.Rounded.Close,
-                                    contentDescription = "Dismiss announcement",
+                                    contentDescription = stringResource(R.string.st_News_popup_dismiss_desc),
                                     modifier = Modifier.size(18.dp)
                                 )
                             }
@@ -299,8 +377,8 @@ fun ToolzNewsPopup(
                                 .height(190.dp)
                         ) {
                             AsyncImage(
-                                model = item.imageUrl,
-                                contentDescription = item.title,
+                                model = imageModel,
+                                contentDescription = null,
                                 contentScale = ContentScale.Crop,
                                 onState = { imageState = it },
                                 modifier = Modifier
@@ -314,7 +392,7 @@ fun ToolzNewsPopup(
                         markdown = item.body,
                         baseFontSize = 15.sp,
                         verticalArrangement = Arrangement.spacedBy(10.dp),
-                        onLinkClick = ::openUrl
+                        onLinkClick = { url -> NewsLinks.open(context, url) }
                     )
 
                     // Critical bypass, explained inline — no hidden dialog.
@@ -335,7 +413,7 @@ fun ToolzNewsPopup(
                                     modifier = Modifier.size(16.dp)
                                 )
                                 Text(
-                                    "News is off, but critical alerts always come through.",
+                                    stringResource(R.string.st_News_popup_critical_note),
                                     style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.onSecondaryContainer
                                 )
@@ -349,13 +427,12 @@ fun ToolzNewsPopup(
                             val deepLink = item.actionUrl!!.startsWith("toolz://")
                             ToolzExpressiveButton(
                                 onClick = {
-                                    openUrl(item.actionUrl!!)
+                                    NewsLinks.open(context, item.actionUrl)
                                     onAction()
                                 },
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(54.dp)
-                                    .semantics { contentDescription = item.actionLabel?.ifBlank { "Open" } ?: "Open" },
+                                    .height(54.dp),
                                 shape = RoundedCornerShape(20.dp)
                             ) {
                                 Icon(
@@ -365,7 +442,8 @@ fun ToolzNewsPopup(
                                 )
                                 Spacer(Modifier.width(8.dp))
                                 Text(
-                                    item.actionLabel?.ifBlank { "Open" } ?: "Open",
+                                    item.actionLabel?.ifBlank { null }
+                                        ?: context.getString(R.string.st_News_open),
                                     fontWeight = FontWeight.Bold,
                                     style = MaterialTheme.typography.labelLarge
                                 )
@@ -381,7 +459,7 @@ fun ToolzNewsPopup(
                                 Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.width(8.dp))
                                 Text(
-                                    "Got it",
+                                    stringResource(R.string.st_News_popup_got_it),
                                     fontWeight = FontWeight.Bold,
                                     style = MaterialTheme.typography.labelLarge
                                 )
@@ -398,7 +476,7 @@ fun ToolzNewsPopup(
                                 Icon(Icons.Rounded.Schedule, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.width(8.dp))
                                 Text(
-                                    "Later",
+                                    stringResource(R.string.st_News_popup_later),
                                     fontWeight = FontWeight.Bold,
                                     style = MaterialTheme.typography.labelLarge
                                 )
@@ -408,7 +486,7 @@ fun ToolzNewsPopup(
                                 onClick = onLater,
                                 modifier = Modifier.align(Alignment.CenterHorizontally)
                             ) {
-                                Text("Later", fontWeight = FontWeight.SemiBold)
+                                Text(stringResource(R.string.st_News_popup_later), fontWeight = FontWeight.SemiBold)
                             }
                         }
                     }
@@ -424,7 +502,7 @@ fun ToolzNewsPopup(
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         ToolzExpressiveTextButton(onClick = onViewAll) {
-                            Text("All news", fontWeight = FontWeight.SemiBold)
+                            Text(stringResource(R.string.st_News_popup_all_news), fontWeight = FontWeight.SemiBold)
                             Spacer(Modifier.width(4.dp))
                             Icon(
                                 Icons.AutoMirrored.Rounded.ArrowForward,
@@ -433,20 +511,26 @@ fun ToolzNewsPopup(
                             )
                         }
                         Spacer(Modifier.weight(1f))
-                        IconButton(onClick = ::share, modifier = Modifier.size(36.dp)) {
+                        IconButton(
+                            onClick = { NewsLinks.share(context, item) },
+                            modifier = Modifier.size(36.dp)
+                        ) {
                             Icon(
                                 Icons.Rounded.Share,
-                                contentDescription = "Share announcement",
+                                contentDescription = stringResource(R.string.st_News_popup_share_desc),
                                 modifier = Modifier.size(18.dp),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                         ToolzExpressiveTextButton(
                             onClick = {
-                                openUrl("${NewsConstants.WEBSITE_NEWS_URL}#news-${item.id}")
+                                NewsLinks.open(
+                                    context,
+                                    "${NewsConstants.WEBSITE_NEWS_URL}#news-${item.id}"
+                                )
                             }
                         ) {
-                            Text("Website", fontWeight = FontWeight.SemiBold)
+                            Text(stringResource(R.string.st_News_popup_website), fontWeight = FontWeight.SemiBold)
                             Spacer(Modifier.width(4.dp))
                             Icon(
                                 Icons.Rounded.OpenInNew,
