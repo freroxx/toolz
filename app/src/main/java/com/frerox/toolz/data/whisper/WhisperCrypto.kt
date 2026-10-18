@@ -325,9 +325,18 @@ class WhisperCrypto @Inject constructor(
             generator.generateKey()
         }
         val secret = keyStore.getKey(WRAP_ALIAS, null) as javax.crypto.SecretKey
-        val iv = ByteArray(12).also { java.security.SecureRandom().nextBytes(it) }
+        // V6-R8 FIX (field report "Could not protect identity seed"): TEE-backed
+        // keystore keys forbid caller-supplied nonces (keystore2
+        // CALLER_NONCE_PROHIBITED — "NONCE is present, although CALLER_NONCE is
+        // not present"), which runCatching swallowed into a null wrap. The fix
+        // must ALSO retrofit keys already generated with the default policy
+        // (randomized encryption = true), so the nonce is never supplied here —
+        // cipher.init() without a parameters spec lets Keystore generate it and
+        // cipher.iv() hands it back. Wire format (b64(iv‖ct)) is unchanged.
         val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, secret, javax.crypto.spec.GCMParameterSpec(128, iv))
+        cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, secret)
+        val iv = cipher.iv
+            ?: throw IllegalStateException("keystore returned no nonce")
         val ct = cipher.doFinal(plain)
         Base64.encodeToString(iv + ct, Base64.NO_WRAP)
     }.getOrNull()

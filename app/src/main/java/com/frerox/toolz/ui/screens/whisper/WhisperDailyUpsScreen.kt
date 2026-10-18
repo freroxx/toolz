@@ -65,13 +65,13 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -83,8 +83,8 @@ import com.frerox.toolz.ui.theme.toolzBackground
 import kotlinx.coroutines.delay
 import kotlin.math.max
 
-/** Accent for the story ring, progress track and the "new up" badge. */
-private val DailyUpRingAccent = Color(0xFFE9541B)
+// Rings and progress speak in theme tokens only — the rest of the Whisper UI
+// never hardcodes an accent color, and neither do Daily Ups.
 
 /**
  * Entry row on the Whisper Chats tab. Cheap by design: no decrypt, no sync,
@@ -106,7 +106,7 @@ internal fun WhisperDailyUpsEntryRow(onOpen: () -> Unit) {
             Icon(
                 Icons.Rounded.Timer,
                 contentDescription = null,
-                tint = DailyUpRingAccent,
+                tint = MaterialTheme.colorScheme.primary,
             )
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
@@ -203,19 +203,37 @@ fun WhisperDailyUpsScreen(
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            Text(
-                text = stringResource(
-                    R.string.st_Whisper_DailyUp_QuotaLeft,
-                    state.quotaUsed,
-                    WhisperDailyUpsConfig.DAILY_LIMIT,
-                ),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-            )
+            // Quota as a quiet pill: green-ish secondary when there is room,
+            // error tonal once exhausted. The server is the real ceiling; this
+            // is only the honest mirror of it.
+            val quotaLeft = (WhisperDailyUpsConfig.DAILY_LIMIT - state.quotaUsed).coerceAtLeast(0)
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = if (quotaLeft > 0) {
+                    MaterialTheme.colorScheme.secondaryContainer
+                } else {
+                    MaterialTheme.colorScheme.errorContainer
+                },
+                modifier = Modifier.padding(start = 16.dp, bottom = 4.dp),
+            ) {
+                Text(
+                    text = stringResource(
+                        R.string.st_Whisper_DailyUp_QuotaLeft,
+                        quotaLeft,
+                        WhisperDailyUpsConfig.DAILY_LIMIT,
+                    ),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = if (quotaLeft > 0) {
+                        MaterialTheme.colorScheme.onSecondaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onErrorContainer
+                    },
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                )
+            }
             if (state.mine.isEmpty() && state.friends.isEmpty()) {
                 WhisperEmptyState(
-                    icon = Icons.Rounded.Add,
+                    icon = Icons.Rounded.Timer,
                     title = stringResource(R.string.st_Whisper_DailyUp_EmptyTitle),
                     subtitle = stringResource(R.string.st_Whisper_DailyUp_EmptySub),
                 )
@@ -300,20 +318,12 @@ private fun StoryRing(item: WhisperDailyUpsViewModel.StoryItem, onClick: () -> U
         Box(
             modifier = Modifier
                 .size(56.dp)
-                .border(2.dp, DailyUpRingAccent, CircleShape)
+                .border(2.dp, MaterialTheme.colorScheme.primary, CircleShape)
                 .padding(3.dp),
         ) {
             Surface(shape = CircleShape, modifier = Modifier.size(48.dp)) {
                 Box(
-                    modifier = Modifier
-                        .background(
-                            Brush.linearGradient(
-                                listOf(
-                                    MaterialTheme.colorScheme.primaryContainer,
-                                    MaterialTheme.colorScheme.secondaryContainer,
-                                ),
-                            ),
-                        ),
+                    modifier = Modifier.background(MaterialTheme.colorScheme.primaryContainer),
                     contentAlignment = Alignment.Center,
                 ) {
                     // Identity initials: media is decrypt-on-demand and rings stay
@@ -356,19 +366,18 @@ private fun NewUpRing(onClick: () -> Unit) {
         Box(
             modifier = Modifier
                 .size(56.dp)
-                .border(2.dp, DailyUpRingAccent, CircleShape)
+                .border(2.dp, MaterialTheme.colorScheme.primary, CircleShape)
                 .padding(3.dp),
         ) {
             Surface(shape = CircleShape, modifier = Modifier.size(48.dp)) {
                 Box(
-                    modifier = Modifier
-                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    modifier = Modifier.background(MaterialTheme.colorScheme.primary),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
                         Icons.Rounded.Add,
                         contentDescription = stringResource(R.string.st_Whisper_DailyUp_AddCd),
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        tint = MaterialTheme.colorScheme.onPrimary,
                     )
                 }
             }
@@ -491,7 +500,7 @@ private fun StoryViewerOverlay(
                             .background(
                                 when {
                                     i < pagerState.currentPage -> Color.White.copy(alpha = 0.85f)
-                                    i == pagerState.currentPage -> DailyUpRingAccent
+                                    i == pagerState.currentPage -> Color.White
                                     else -> Color.White.copy(alpha = 0.25f)
                                 },
                             ),
@@ -538,10 +547,25 @@ private fun StoryViewerOverlay(
                         }
                     }
                 } else {
-                    ReactionPalette(
-                        currentEmoji = receipts.myReactions[c.storyId].orEmpty(),
-                        onToggle = { emoji, on -> onReact(c.storyId, emoji, on) },
-                    )
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        // Reacting is ONLY honest with this line on screen: an
+                        // emoji also tells the poster their story was viewed,
+                        // even with receipts switched off (§11 server truth).
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.st_Whisper_DailyUp_ReactHint),
+                            color = Color.White.copy(alpha = 0.6f),
+                            style = MaterialTheme.typography.labelMedium,
+                            textAlign = TextAlign.Center,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        ReactionPalette(
+                            currentEmoji = receipts.myReactions[c.storyId].orEmpty(),
+                            onToggle = { emoji, on -> onReact(c.storyId, emoji, on) },
+                        )
+                    }
                 }
             }
         }

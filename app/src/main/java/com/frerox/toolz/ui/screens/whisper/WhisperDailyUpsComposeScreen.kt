@@ -30,7 +30,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.AddPhotoAlternate
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -64,6 +63,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.WhisperDailyUpsConfig
+import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.theme.toolzBackground
 import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.Dispatchers
@@ -167,6 +167,15 @@ fun WhisperDailyUpsComposeScreen(
 
             Spacer(Modifier.height(8.dp))
             ShareButton(state = state, onClick = viewModel::publish)
+            // Disabled buttons that don't explain themselves read like a bug —
+            // this only appears in the one case no other copy covers.
+            if (state.photo != null && !state.friendsLoading && state.friends.isNotEmpty() && state.audienceSize <= 0) {
+                Text(
+                    text = stringResource(R.string.st_Whisper_DailyUp_AudienceWarning),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
             Spacer(Modifier.height(24.dp))
         }
     }
@@ -343,7 +352,7 @@ private fun ShareButton(
         !state.published &&
         state.remaining > 0 &&
         state.audienceSize > 0
-    Button(
+    ToolzExpressiveButton(
         onClick = onClick,
         enabled = enabled,
         modifier = Modifier.fillMaxWidth().height(52.dp),

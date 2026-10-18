@@ -17,17 +17,20 @@
 //      open and realtime already delivers the message.
 //   4. Look up receiver push targets in whisper_push_targets via the service
 //      role key. Group fan-out: invites → the invitee; messages → every member
-//      except the sender (with senderName); join/leave/decline events → owner +
+//      except the sender; join/leave/decline events → owner +
 //      admins (declines owner-only); admin-action events
 //      (remove/promote/demote/rename/picture/settings) → members except actor.
 //   5. Deliver the DATA-ONLY ping — NO content (privacy) — per target kind:
 //      - provider='webpush': RFC 8291-encrypted aes128gcm payload + RFC 8292
 //        VAPID auth (the embedded FCM distributor and other webpush-capable
-//        UnifiedPush distributors). The push service sees an opaque blob.
-//      - provider='plain' : raw wake-ping JSON to the endpoint (ntfy / NextPush
-//        UnifiedPush mode). Same id/name keys the old FCM pings already carried.
-//      Group payloads carry group/actor NAMES (like 1:1 senderName): accepted
-//      and documented in WHISPER.md §11.
+//        UnifiedPush distributors). The push service sees an opaque blob, so
+//        ids AND human names may travel inside.
+//      - provider='plain' : wake-ping JSON to the endpoint (ntfy / NextPush
+//        UnifiedPush mode) with every NAME KEY SCRUBBED (plainTargetBody):
+//        this third party learns ids only and can never correlate user,
+//        group or story names across pings. The client resolves each name
+//        from its local caches (friends list, local group table). Documented
+//        in WHISPER.md §11.
 //   6. Prune targets rejected as invalid/unregistered (HTTP 404/410).
 //
 // Env:
@@ -326,6 +329,7 @@ async function handleGroupPush(
       whisper_group_invite: "true",
       groupId,
       groupName: String(groupName).slice(0, 64),
+      inviterId: invitedBy,
       inviterName: inviterName.slice(0, 64),
     });
   }
@@ -501,6 +505,30 @@ async function deliverToUser(
 }
 
 /**
+ * Name keys whose values never travel to plain (unencrypted) push targets:
+ * ntfy/NextPush are third-party infrastructure, so they learn IDs only —
+ * the client resolves every human-readable name from its local caches.
+ * Webpush targets keep the names: their payload is RFC 8291-encrypted
+ * end-to-end, so the push service sees only opaque bytes.
+ */
+const PLAIN_NAME_KEYS = new Set([
+  "senderName",
+  "groupName",
+  "inviterName",
+  "actorName",
+  "subjectName",
+  "posterName",
+]);
+
+function plainTargetBody(payload: Record<string, string>): string {
+  const scrubbed: Record<string, string> = {};
+  for (const key of Object.keys(payload)) {
+    if (!PLAIN_NAME_KEYS.has(key)) scrubbed[key] = payload[key];
+  }
+  return JSON.stringify(scrubbed);
+}
+
+/**
  * One delivery round over a user's targets; each target gets exactly one
  * attempt, stale endpoints are pruned (404/410 only).
  */
@@ -510,11 +538,12 @@ async function deliver(
   env: GroupPushEnv,
 ): Promise<DeliveryResult> {
   const payloadBytes = new TextEncoder().encode(JSON.stringify(dataPayload));
+  const plainBytes = new TextEncoder().encode(plainTargetBody(dataPayload));
   let sent = 0;
   let pruned = 0;
   for (const target of targets) {
     try {
-      const res = await sendToTarget(target, payloadBytes, env);
+      const res = await sendToTarget(target, payloadBytes, plainBytes, env);
       if (res.ok) {
         sent++;
         continue;
@@ -533,6 +562,7 @@ async function deliver(
 async function sendToTarget(
   target: PushTarget,
   payloadBytes: Uint8Array,
+  plainBytes: Uint8Array,
   env: GroupPushEnv,
 ): Promise<Response> {
   if (target.provider === "webpush") {
@@ -561,7 +591,8 @@ async function sendToTarget(
       signal: AbortSignal.timeout(10_000),
     });
   }
-  // plain (ntfy / NextPush UnifiedPush): body IS the wake-ping JSON.
+  // plain (ntfy / NextPush UnifiedPush): body IS the wake-ping JSON, with
+  // every human-readable name scrubbed — this third party only ever sees IDs.
   return fetch(target.endpoint, {
     method: "POST",
     headers: {
@@ -569,7 +600,7 @@ async function sendToTarget(
       TTL: PUSH_TTL_SECONDS,
       Urgency: "high",
     },
-    body: payloadBytes,
+    body: plainBytes,
     signal: AbortSignal.timeout(10_000),
   });
 }

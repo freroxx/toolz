@@ -4068,6 +4068,8 @@
     <string name="st_Whisper_DailyUp_NoFriends">No friends yet — add some to share Daily Ups.</string>
     <string name="st_Whisper_DailyUp_PostLabel">Share</string>
     <string name="st_Whisper_DailyUp_Posting">Sharing…</string>
+    <string name="st_Whisper_DailyUp_ReactHint">Reacting also tells your friend you saw this.</string>
+    <string name="st_Whisper_DailyUp_AudienceWarning">Everyone is excluded — include at least one friend to share.</string>
     <string name="st_AppSkin_section_title">APP SKIN</string>
     <string name="st_AppSkin_screen_title">App Skin</string>
     <string name="st_AppSkin_screen_subtitle">Icons, colors &amp; community skins</string>

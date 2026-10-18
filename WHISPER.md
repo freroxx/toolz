@@ -1,8 +1,9 @@
 # Whisper Architecture
 
 Friends-only, end-to-end encrypted messenger inside Toolz. Own Supabase backend,
-separate from the rest of the app. This file is verified line-by-line from code;
-every section names the source file.
+separate from the rest of the app. Section names point at the source files that
+implement them; the working tree is truth (this doc is not verified by CI, so
+read claims against code before trusting them).
 
 Contents:
 
@@ -20,6 +21,7 @@ Contents:
 12. File inventory
 13. Groups (Phase 2, ships in 1.1.7)
 14. Daily Ups (stories, ships in the same 1.1.7)
+15. Known limitations (external review, 2026-10)
 
 ## 1. Overview and honesty notes
 
@@ -64,7 +66,7 @@ banned/low-order or all-zero peer points (Tink throws InvalidKeyException;
 mapped to null); callers treat that as an invalid key. Covered by
 `SessionCryptoVectorTest` with RFC 7748 §5.2/§6.1 vectors.
 
-`data/whisper/WhisperCrypto.kt` (953 lines) is the hardware identity:
+`data/whisper/WhisperCrypto.kt` is the hardware identity:
 
 - Active ECDH key on `secp256r1` in AndroidKeyStore. Legacy alias
   `whisper_e2ee_ec_key`, new keys under
@@ -95,7 +97,7 @@ mapped to null); callers treat that as an invalid key. Covered by
 
 ### 2.2 X3DH session establishment
 
-`data/whisper/WhisperSessionFactory.kt` (288 lines):
+`data/whisper/WhisperSessionFactory.kt`:
 
 - Initiator fetches the peer bundle from `whisper-bundle-fetch`, requires the
   `identity_binding` and a signed SPK, and fails hard on a bad signature (shown
@@ -134,7 +136,7 @@ rate-limited to one attempt per 30s per peer (`ratchet.gapHandshake`,
 many messages - starting fresh session, ask peer to resend"; other losses keep
 the placeholder and rely on server catch-up.
 
-`data/whisper/session/WhisperSessionStore.kt` (341 lines) persists one session
+`data/whisper/session/WhisperSessionStore.kt` persists one session
 per peer at `filesDir/whisper_sessions/<sha256(peerId)>.json` plus an in-memory
 map, guarded by a per-peer mutex so two threads never advance one ratchet. It
 also keeps an in-memory-only consecutive establish-failure count per peer
@@ -145,10 +147,10 @@ key and the whole ratchet snapshot are Keystore-wrapped. A corrupt file is
 deleted and treated as no session, which falls back to envelopes plus a fresh
 handshake. Incoming handshakes are accepted on same-session replay or peer
 identity change, otherwise the lower session ID wins so racing initiators
-converge. `WhisperSessionSecretProtector.kt` (36 lines) is the wrap/unwrap seam
+converge. `WhisperSessionSecretProtector.kt` is the wrap/unwrap seam
 (Keystore in production, fake in tests).
 
-`data/whisper/WireProtocol.kt` (379 lines) holds the pure decisions: negotiated
+`data/whisper/WireProtocol.kt` holds the pure decisions: negotiated
 version never above what this build speaks, peer floor is the lowest version the
 peer proved, v3 is used for live sessions or fresh contacts unless the peer
 proved it cannot parse v3 or an establish failed within the last 30 seconds,
@@ -163,12 +165,12 @@ auto-accept), stale sessions tear down only on in-window fresh rows, and after
 fallback blocks ("Handshake repeatedly failed (3x) - blocked insecure fallback,
 retry later", `send.blocked.downgrade_N`) instead of silently downgrading under
 persistent failure. `WhisperProtocolConfig.kt`
-(20 lines) sets live version 2 (envelope fallback), ratchet version 3, ratchet
+ sets live version 2 (envelope fallback), ratchet version 3, ratchet
 enabled.
 
 ### 2.4 Key management
 
-- `WhisperPrekeyManager.kt` (272): publishes the identity binding (X25519
+- `WhisperPrekeyManager.kt`: publishes the identity binding (X25519
   identity key plus P-256 signer) to `profiles`, rotates the signed prekey
   weekly, tops the one-time pool to 50 (persisted cap 120). Private halves are
   Keystore-wrapped and persisted so process death cannot break handshakes.
@@ -178,16 +180,16 @@ enabled.
   peers fetch it via bundle/profile rows and `rotationCertFor` feeds
   `classifyKeyChangeStrict` — counter replay and stale timestamps reject.
   RLS owner-write, authenticated-read.
-- `WhisperKeyTrustStore.kt` (202): TOFU anchors plus user-verified keys in
+- `WhisperKeyTrustStore.kt`: TOFU anchors plus user-verified keys in
   `EncryptedSharedPreferences` (migrated once from the old plaintext file),
   durable fsync writes off the main thread, plus the ROTv2 anti-replay counter
   (`rotation_counter_*` per peer, default 0 — only a cert with a strictly
   greater counter and a fresh timestamp chains).
-- `WhisperKeyRotationStore.kt` (77): 30-day rotation interval with up to 6 hours
+- `WhisperKeyRotationStore.kt`: 30-day rotation interval with up to 6 hours
   of jitter, single source of truth shared with key-change classification.
   Rotation trust is cert-based (`sign(prev,new)` verified against the pin),
   never time-window based; verified safety numbers always re-verify manually.
-- `ProtocolDiagnostics.kt` (66): process-local ring buffer (last 60 events) plus
+- `ProtocolDiagnostics.kt`: process-local ring buffer (last 60 events) plus
   counters. Never carries content, IDs, or key material. Exported only through
   the debug diagnostics button.
 
@@ -199,7 +201,7 @@ enabled.
 | v2 envelope | `messages.content`, `content_iv = NULL` | `{"v":2,"k":[{"kid","iv","ct"}], "ik"?, "x3dh"?}` |
 | v3 ratchet | `messages.content`, `content_iv = "v3"` | `{"v":3,"sid","dh","pn","n","ct", "x3dh"?}` (no `env` on new sends; legacy rows may still carry one for decode) |
 
-`WhisperEnvelope.kt` (133 lines): key IDs are the first 8 hex chars of
+`WhisperEnvelope.kt`: key IDs are the first 8 hex chars of
 SHA-256 of the base64 public key. Senders seal only to the pinned key plus keys
 chaining to it via a valid rotation cert (fail-closed — an unproven server key
 is dropped and the send blocks with a key-change warning); receivers try each
@@ -209,7 +211,7 @@ rides in-band as `ik` so delivery does not depend on a fresh profile row. The
 X3DH header rides as a sibling `x3dh` object on the first session message.
 Detection is prefix-based, so v1 and v2 rows coexist.
 
-`session/WhisperV3Codec.kt` (144 lines): one JSON object per frame, never a
+`session/WhisperV3Codec.kt`: one JSON object per frame, never a
 multi-key envelope. `x3dh` appears only on the first frame. Legacy `env`
 (decode-only) may still ride on pre-Phase-1A rows for backward compat, but only
 for rows created at or before 2026-12-01 (`LEGACY_ENV_CUTOFF_MS`): post-cutoff
@@ -220,12 +222,12 @@ populate it); new sends never populate it, and per-message FS state
 
 ## 4. Images and avatars
 
-- `WhisperImageCipherTransport.kt` (183): ciphertext becomes lossless PNG pixels
+- `WhisperImageCipherTransport.kt`: ciphertext becomes lossless PNG pixels
   (RGB payload, opaque alpha to defeat premultiplication, forced sRGB). v2
   container is magic `WZ1`, version byte 1, CRC32, length, then cipher bytes,
   with a legacy length-only fallback. Caps: 5 MiB cipher bytes, 8 MP decode
   (4 MP on low-RAM devices), bounds pre-pass against dimension bombs.
-- `WhisperEncryptedImageHost.kt` (233): uploads PNG-wrapped bytes through
+- `WhisperEncryptedImageHost.kt`: uploads PNG-wrapped bytes through
   `whisper-image-upload` (bearer token, 15/45 s timeouts, one refresh-and-retry
   on 401) and returns URL plus ID. Deletes go to Supabase `whisper-avatars`
   (path-checked to the caller's own folder, rejects `..`) or to
@@ -233,7 +235,7 @@ populate it); new sends never populate it, and per-message FS state
   query and fragment, allowlist `i.ibb.co`, `ibb.co`, and the project's
   `whisper-avatars` storage path (one redirect followed), cap 7 MiB, and map
   403/404 to an expired-image signal.
-- `EncryptedBlobHost.kt` (57): interface (upload/delete/download) decoupling
+- `EncryptedBlobHost.kt`: interface (upload/delete/download) decoupling
   callers (`WhisperRepository`, `WhisperAvatarLoader` hold the interface
   type) from the ImgBB implementation; R2/B2 is a future impl behind the
   same seam.
@@ -243,7 +245,7 @@ populate it); new sends never populate it, and per-message FS state
   public key can derive the key; the host sees ciphertext only. Hides bytes
   from third-party hosts only, fails closed on mismatch. Never label "encrypted"
   in UI/docs; `strings.xml` carries no avatar-encryption claims (verified).
-- `WhisperAvatarLoader.kt` (142): memory LRU plus in-flight dedupe plus sealed
+- `WhisperAvatarLoader.kt`: memory LRU plus in-flight dedupe plus sealed
   disk cache under `filesDir/whisper_avatars` (SHA-256 of URL, max 64 entries),
   with PNG and double-wrap healing and a generation guard so sign-out cannot
   repopulate the cache mid-flight.
@@ -254,7 +256,7 @@ sealing (`WhisperChatViewModel.compressImageForUpload`). Avatars are cropped to
 
 ## 5. Backend
 
-`supabase/migrations/main-whisper-sql.sql` (3154 lines) is the canonical single
+`supabase/migrations/main-whisper-sql.sql` is the canonical single
 baseline, squashing 18 migrations (policy in `whisper-sql-info.md`; header banner
 lists all 17, `20260820`…`20261005_whisper_signup_discover_hardening.sql`).
 Tables:
@@ -289,30 +291,37 @@ service-role only). Idempotent, safe to rerun.
 
 Edge functions in `supabase/functions/whisper-*/index.ts`:
 
-| Function | Lines | Role |
-|---|---|---|
-| `whisper-attest` | 356 | POST (user JWT) returns the caller's attestation verdict `{ok, mode:"cert"|"integrity"}`; 428 for unofficial builds. Single-file: the `_shared/attest.ts` gate is INLINED (dashboard deploys are single-file), no `_shared` imports. Optional Play Integrity strong path (env-gated, off by default). |
-| `whisper-bundle-fetch` | 280 | POST `{account}` returns identity binding, latest signed SPK, and consumes one OPK. Rejects self-bundles, no-store. Attest-gated (inlined `_shared/attest.ts`). |
-| `whisper-bypass-verify` | 151 | Constant-time screenshot-bypass password check, 5 failures per 15 minutes locks out with 429. |
-| `whisper-delete-account` | 243 | Verifies JWT plus password header plus 5-minute confirmation timestamp, wipes server data before deleting the GoTrue user. |
-| `whisper-image-upload` | 416 | Accepts base64 PNG with the ImgBB key held server-side, returns URL and ID. Attest-gated (inlined `_shared/attest.ts`). |
-| `whisper-image-delete` | 164 | Deletes an ImgBB blob by ID. |
-| `whisper-push-send` | ~300 | Database webhook on message and friend inserts. Skips receivers seen within 60 seconds, then one wake ping per registered target: `provider='webpush'` targets get an RFC 8291-encrypted (aes128gcm) payload with RFC 8292 VAPID auth; `provider='plain'` targets (external distributors) get the raw JSON ping. Prunes dead endpoints on 404/410. Never logs tokens or payloads. Intentionally NOT attest-gated (webhook auth, never sees client headers). |
-| `whisper-signup-gate` | 256 | Pre-auth IP-budgeted signup gate (5/day/IP via `whisper_check_signup_allowed`); server-side IP hash, 429 over quota. Attest-gated (inlined `_shared/attest.ts`). |
-| `whisper-legacy-migrate` | 180 | Service-role legacy token migration (copies the profile to the full-hash user, deletes the legacy GoTrue user, records `whisper_legacy_disabled`). |
+| Function | Role |
+|---|---|
+| `whisper-attest` | POST (user JWT) returns the caller's attestation verdict `{ok, mode:"cert"|"integrity"}`; 428 for unofficial builds. Single-file: the `_shared/attest.ts` gate is INLINED (dashboard deploys are single-file), no `_shared` imports. Optional Play Integrity strong path (env-gated, off by default). |
+| `whisper-bundle-fetch` | POST `{account}` returns identity binding, latest signed SPK, and consumes one OPK. Rejects self-bundles, no-store. Attest-gated (inlined `_shared/attest.ts`). |
+| `whisper-bypass-verify` | Constant-time screenshot-bypass password check, 5 failures per 15 minutes locks out with 429. |
+| `whisper-delete-account` | Verifies JWT plus password header plus 5-minute confirmation timestamp, wipes server data before deleting the GoTrue user. |
+| `whisper-image-upload` | Accepts base64 PNG with the ImgBB key held server-side, returns URL and ID. Attest-gated (inlined `_shared/attest.ts`). |
+| `whisper-image-delete` | Deletes an ImgBB blob by ID. |
+| `whisper-push-send` | Database webhook on message, friend, group-table and story-recipient inserts. Skips receivers seen within 60 seconds, then one wake ping per registered target: `provider='webpush'` targets get an RFC 8291-encrypted (aes128gcm) payload with RFC 8292 VAPID auth (names ride inside the ciphertext); `provider='plain'` targets (external distributors) get a NAME-SCRUBBED JSON ping — IDs and event kinds only, every human-readable name key stripped (see §11). Prunes dead endpoints on 404/410. Never logs tokens or payloads. Intentionally NOT attest-gated (webhook auth, never sees client headers). |
+| `whisper-signup-gate` | Pre-auth IP-budgeted signup gate (5/day/IP via `whisper_check_signup_allowed`); server-side IP hash, 429 over quota. Attest-gated (inlined `_shared/attest.ts`). |
+| `whisper-story-sweep` | Service-role hosted-copy sweeper for expired/deleted Daily Ups (leases via SKIP LOCKED, no pg_cron) — see §14. |
+| `whisper-legacy-migrate` | Service-role legacy token migration (copies the profile to the full-hash user, deletes the legacy GoTrue user, records `whisper_legacy_disabled`). |
 
-Anti-mod gate: every `whisper-*` edge call carries
+Anti-mod gate (a speed bump, NOT a trust boundary — read this twice): every
+`whisper-*` edge call carries
 `X-App-Package` / `X-App-Cert-Sha256` / `X-App-VersionCode`
-headers (`data/whisper/PlayIntegrityAttestor.kt`, 185 lines —
+headers (`data/whisper/PlayIntegrityAttestor.kt` —
 local-only, FOSS-safe: PackageManager signing-cert SHA-256 vs
 `WhisperPinConfig.OFFICIAL_CERT_SHA256`, cached 1h; no Google API,
 no Play Integrity dependency). `supabase/functions/_shared/attest.ts`
-(156 lines) enforces package + cert + version (`MIN_VERSION_CODE`)
+enforces package + cert + version (`MIN_VERSION_CODE`)
 server-side and answers 428 for unofficial builds; it is inlined
 verbatim into `whisper-bundle-fetch` and `whisper-image-upload`
-(single-file dashboard deploys). `PLAY_INTEGRITY_ENABLED` is optional
-and off by default — the FOSS-safe baseline is cert+package+version
-only. `WhisperPinConfig.kt` (98 lines) holds the identity constants
+(single-file dashboard deploys). Honesty, per external review: all of this is
+client-supplied header checking against values an attacker can read from an
+official APK — it stops lazy reuse of the official label, not a determined
+repackager. It is an availability/abuse gate, never an E2EE participant-vetting
+mechanism, and NO security statement in this document depends on it. The only
+cryptographically real path is the OPTIONAL Play Integrity verification
+(`PLAY_INTEGRITY_ENABLED`, off by default — a Google-dependent strong gate that
+cannot ship in the FOSS baseline). `WhisperPinConfig.kt` holds the identity constants
 (`OFFICIAL_PACKAGE=com.frerox.toolz`, `OFFICIAL_CERT_SHA256`
 pinned to the release signing cert (`58A16BCD6E9CEF75706A957B19A15BED19BD47F0B7FDB602364D9EBFC5C369F9` — public value, readable from any official APK; the private key never leaves the release machine), `MIN_VERSION_CODE=17L`, synced with
 `update_manifest.json` `minimumVersionCode`). `update_manifest.json`
@@ -320,21 +329,21 @@ also carries an Ed25519 `signature` over the canonical manifest JSON
 (`UpdateRepository` verifies it fail-closed — the Ed25519 keypair is
 provisioned (pubkey embedded, manifest signed); unverified manifests are
 ignored and the GitHub Release API path is unaffected). Locally, `ui/screens/whisper/WhisperBuildGate.kt`
-(404 lines) gates Whisper access at runtime: release-cert pin,
+ gates Whisper access at runtime: release-cert pin,
 `FLAG_DEBUGGABLE` in a non-debug build, and the version floor
 (max of the signature-verified manifest floor and
 `WhisperPinConfig.MIN_VERSION_CODE`) — blocked builds see a full-screen
 card with the reason and the official download URL, so no chat UI is
 reachable.
 
-`data/whisper/EdgeFunctionClient.kt` (154) is the single hardened transport
+`data/whisper/EdgeFunctionClient.kt` is the single hardened transport
 (Ktor over OkHttp, anonymous/user/explicit-token bearers, mandatory timeouts, no
 body logging). `di/SupabaseModule.kt` falls back to an invalid URL when the
 build has no Supabase credentials, keeping Whisper offline with one log line.
 
 ## 6. Client repository
 
-`data/whisper/WhisperRepository.kt` (3355 lines) orchestrates everything.
+`data/whisper/WhisperRepository.kt` orchestrates everything.
 Constants: 8,192-char message cap, JPEG/PNG/WebP images, disappearing images
 from 60 seconds to 180 days, event dedupe TTL 30 seconds (max 1024 IDs), up to
 6 realtime resubscribes at least 2.5 seconds apart, 8-second typing freshness,
@@ -366,8 +375,8 @@ from 60 seconds to 180 days, event dedupe TTL 30 seconds (max 1024 IDs), up to
   lanes, cached channels with health watching and resubscribe, dedupe IDs,
   poll backoff ladder, sorted-pair conversation keys, last-seen pings mapping
   to online (2 min) / recent (1 h) / offline.
-- Social (`WhisperRepositorySocial.kt`, 467) and profile
-  (`WhisperRepositoryProfile.kt`, 444) splits cover friend requests, blocks
+- Social (`WhisperRepositorySocial.kt`) and profile
+  (`WhisperRepositoryProfile.kt`) splits cover friend requests, blocks
   (client plus DB enforcement), discover paging with quota, hide/mute, typing
   broadcast, profile CRUD,
   username-availability checks (migrating to the quota-guarded RPC),
@@ -384,22 +393,21 @@ from 60 seconds to 180 days, event dedupe TTL 30 seconds (max 1024 IDs), up to
 Supporting stores, all read in full: access-file backup and restore
 (`WhisperAubupManager`, credential-only `WhisperAccessPayload` — username,
 authType, credential, displayName; ratchet/session state is NEVER included,
-verified Phase 1B, no code change), device-only delete-for-me with 24-hour eviction
-(`WhisperDeletedMessagesStore`, 167), auto-returning hidden chats
-(`WhisperHiddenChatsStore`, 99), mute with expiry (`WhisperMutePreferences`,
-129), 30-second clear-chat undo (`WhisperUndoBufferStore`, 104), grouped
-deduplicated suppressed notifications (`WhisperNotificationManager`, 360),
-permanent-vs-transient error mapping for WorkManager (`WhisperErrorMapper`,
-286), sealed PNG disk cache (`WhisperImageDiskCache`, 228), local tombstone
-entity (59), message entity with numeric sort epoch and protocol inference
-(127), message DAO capped at the latest 500 rows (56), ciphertext-only Room
-outbox FIFO capped at 100 oldest-kept with a 200-entry drop ledger plus legacy
-prefs migration (93 + 146), and the immediate network-constrained delivery
-scheduler with 15-second exponential backoff (42).
+verified Phase 1B, no code change), device-only delete-for-me with 24-hour
+eviction (`WhisperDeletedMessagesStore`), auto-returning hidden chats
+(`WhisperHiddenChatsStore`), mute with expiry (`WhisperMutePreferences`),
+30-second clear-chat undo (`WhisperUndoBufferStore`), grouped deduplicated
+suppressed notifications (`WhisperNotificationManager`), permanent-vs-transient
+error mapping for WorkManager (`WhisperErrorMapper`), sealed PNG disk cache
+(`WhisperImageDiskCache`), the local tombstone entity, message entity with
+numeric sort epoch and protocol inference, message DAO capped at the latest
+500 rows, ciphertext-only Room outbox FIFO capped at 100 oldest-kept with a
+200-entry drop ledger plus legacy prefs migration, and the immediate
+network-constrained delivery scheduler with 15-second exponential backoff.
 
 ## 7. Auth
 
-`data/whisper/WhisperAuthManager.kt` (432 lines):
+`data/whisper/WhisperAuthManager.kt`:
 
 - Username path: 3-20 lowercase letters/digits/underscores, password of at least
   10 chars, display name 1-60 chars, mapped to `user@u.whisper.local` through
@@ -429,20 +437,20 @@ scheduler with 15-second exponential backoff (42).
   then local wipe of sessions, Room, trust, outbox, avatars, and push
   registration).
 
-`ui/screens/whisper/WhisperAuthViewModel.kt` (601) drives these flows with
+`ui/screens/whisper/WhisperAuthViewModel.kt` drives these flows with
 clipboard expiry, access-file import, and single-attempt token login.
 
 ## 8. UI and view models
 
 All 19 files under `ui/screens/whisper/`:
 
-- `WhisperViewModel.kt` (910): hub state (conversations, friends, single-source
+- `WhisperViewModel.kt`: hub state (conversations, friends, single-source
   incoming requests, outgoing requests, search, recommended and paged discover,
   mutes, error plus info channel), conversation hide and history clear, block
   and mute toggles, profile update, avatar upload and delete, access-file
   creation, 30-day key rotation heartbeat, account deletion and sign-out with
   full wipe, screenshot-bypass flag, beta and onboarding flags.
-- `WhisperChatViewModel.kt` (1465): per-chat state (message flow capped at 500,
+- `WhisperChatViewModel.kt`: per-chat state (message flow capped at 500,
   friend and block status, typing, online state, last seen, mute, reply target,
   search matches, key trust, upload state, decrypted image bytes, realtime
   status, errors) plus an isolated 30-second undo state that does not recompose
@@ -452,26 +460,24 @@ All 19 files under `ui/screens/whisper/`:
   actions, QR key verification, drafts, realtime reconnect, and visibility
   pausing. History remains readable offline.
 - Screens: hub with chats/friends/requests/discover/profile tabs, unread badges,
-  presence dots, key-change banners, and pull-refresh (`WhisperMainScreen`,
-  1950); row cards (`WhisperMainScreenComponents`, 376) and chat-list
-  message merging (`ChatMessageMerger`, 89); full chat with bubbles,
+  presence dots, key-change banners, and pull-refresh (`WhisperMainScreen`);
+  row cards (`WhisperMainScreenComponents`) and chat-list
+  message merging (`ChatMessageMerger`); full chat with bubbles,
   reply snippets, reactions, in-message search, typing indicator, online header,
   mute/block menus, expiring attachments, tombstone and locked placeholders,
-  the per-message FS lock badge (`message.fsProtected` → Lock/LockOpen
-  icon, `WhisperChatScreen` L1932-1934), and the undo bar
-  (`WhisperChatScreen`, 2573); self profile with editing,
-  avatar picker, fingerprints, rotation, access file, sign-out, deletion, and a
-  debug diagnostics export (`WhisperProfileTab`, 1201); peer profile with QR
-  verification and block/unfriend (562 + 232 + 522); friends-only onboarding
-  explainer (629); username/password plus token auth UI with vault restore,
-  access-file import, token-loss warnings, and the legacy-migration banner
-  (1893); re-auth banner (155);
-  toasts (219); FLAG_SECURE window control (76) with a server-gated screenshot
-  bypass (116); the LOCAL runtime tamper gate (`WhisperBuildGate`, 404 —
-  release-cert pin, non-debug `FLAG_DEBUGGABLE`, version floor; blocked
+  the per-message FS lock badge (`message.fsProtected` → Lock/LockOpen icon,
+  `WhisperChatScreen`), and the undo bar (`WhisperChatScreen`); self profile
+  with editing, avatar picker, fingerprints, rotation, access file, sign-out,
+  deletion, and a debug diagnostics export (`WhisperProfileTab`); peer profile
+  with QR verification and block/unfriend; friends-only onboarding explainer;
+  username/password plus token auth UI with vault restore, access-file import,
+  token-loss warnings, and the legacy-migration banner; re-auth banner;
+  toasts; FLAG_SECURE window control with a server-gated screenshot bypass;
+  the LOCAL runtime tamper gate (`WhisperBuildGate` — release-cert pin,
+  non-debug `FLAG_DEBUGGABLE`, version floor; blocked
   builds get a full-screen card with the reason and the official download
   URL, so no chat UI is reachable); and the bypass verifier mapping Granted/Denied/RateLimited/
-  Unavailable with fail-closed behavior (125).
+  Unavailable with fail-closed behavior.
 
 ## 9. Push, workers, app wiring
 
@@ -541,15 +547,19 @@ reaction/request/receipt presence rows (frames and bodies themselves stay
 opaque — one v3 frame per member, each sealed through that member's 1:1
 session). The push path splits by distributor: the embedded FCM fallback
 receives RFC 8291-encrypted pings (ciphertext only), while an external
-distributor's server (ntfy/NextPush) sees the plaintext wake JSON — sender/
-message IDs and friend
-pings, plus — accepted explicitly for groups — group NAMES, actor/inviter/
-sender/subject names, group IDs and event kinds on group pushes
-(invite/message/join/leave/decline/remove/promote/demote/rename/picture/
-settings fan-out; votes never fan out). Group push bodies never carry message
-text; the names mirror the 1:1 senderName precedent. ImgBB sees opaque PNGs with expiry. Passwords travel only to GoTrue over
-TLS at auth and deletion time; the bypass password goes only to the edge secret
-check.
+distributor's server (ntfy/NextPush) sees a name-SCRUBBED wake JSON —
+external review (2026-10) flagged that names on a plain third-party hop let
+that server correlate who-wrote-where, so every human-readable key
+(senderName, groupName, inviterName, actorName, subjectName, posterName) is
+stripped for `provider='plain'` targets; those pings carry IDs and event kinds
+only, and the CLIENT rebuilds each name on-device (friends cache + local group
+table) before rendering the notification. Webpush targets keep the names —
+their payload is RFC 8291-encrypted end-to-end, so the push service sees only
+opaque bytes (invite payloads additionally carry `inviterId` so the client can
+resolve the inviter without a name key). Group push bodies still never carry
+message text. ImgBB sees opaque PNGs with expiry. Passwords travel only to
+GoTrue over TLS at auth and deletion time; the bypass password goes only to the
+edge secret check.
 
 Daily Ups rows additionally reveal: poster/recipient/viewer/reaction-author IDs
 and timestamps, the `receipts_enabled` flag, the story state machine
@@ -562,48 +572,50 @@ without timeline overlap. Sealed descriptors on recipient rows are opaque
 buckets; stories carry NO delete capability column — the
 `whisper_image_ownership` ledger (unique delete_url, written by the upload
 edge) is what resolves the sweep's deletes. The story push ping carries
-poster ID + NAME and story ID, image- and key-free (same explicit
-name-carrying precedent as group pushes; §14 has the payload).
+poster ID and story ID — and the poster NAME only on encrypted webpush
+targets (plain targets get IDs and resolve the name locally); image- and
+key-free either way (§14 has the payload).
 
 ## 12. File inventory
 
-Client `data/whisper` (45 files): EdgeFunctionClient 154, EncryptedBlobHost 57, PlayIntegrityAttestor
-189, ProtocolDiagnostics 66, WhisperAubupManager 526, WhisperAuthManager 498,
-WhisperAvatarCodec 61, WhisperAvatarLoader 145, WhisperCrypto 953,
-WhisperDailyUpPhotoPreprocessor 200, WhisperDeletedMessagesStore 167,
-WhisperDeliveryScheduler 42,
-WhisperEncryptedImageHost 233, WhisperEnvelope 133, WhisperErrorMapper 313,
-WhisperGroupEntities 112, WhisperGroupNotifications 165, WhisperGroupPolicy 136,
-WhisperGroupReadStore 65,
-WhisperHiddenChatsStore 99, WhisperImageCipherTransport 183,
-WhisperImageDiskCache 228, WhisperImagePreprocess 160,
-WhisperKeyRotationStore 77, WhisperKeyTrustStore
-202, WhisperLocalTombstoneEntity 59, WhisperMessageDao 56, WhisperMessageEntity
-127, WhisperModels 555, WhisperMutePreferences 136, WhisperNotificationManager
-474, WhisperOutboxEntity 104, WhisperOutgoingQueue 146, WhisperPinConfig 91,
-WhisperPrekeyManager 345, WhisperProtocolConfig 20, WhisperRepository 3389,
-WhisperRepositoryGroups 2291, WhisperRepositoryProfile 444, WhisperRepositorySocial 467,
-WhisperRepositoryStories 695, WhisperSessionFactory 297,
-WhisperStoryLocalEntity 66, WhisperUndoBufferStore 104, WireProtocol 402.
-Groups + Daily Ups UI (`ui/screens/whisper`, 10 files): WhisperGroupsSection 869,
-WhisperGroupsViewModel 503, WhisperGroupChatScreen 1380,
-WhisperGroupChatViewModel 480, WhisperGroupInfoScreen 1101,
-WhisperGroupInfoViewModel 372, WhisperDailyUpsScreen 651,
-WhisperDailyUpsViewModel 359, WhisperDailyUpsComposeScreen 406,
-WhisperDailyUpsComposeViewModel 195. Group tests: `WhisperGroupsTest` 36 tests.
-Daily Ups tests: see §10.
+> Line counts are deliberately NOT listed here: they rot on every edit (and
+> sections of older revisions disagreed with each other — one reason this list
+> dropped them). Names and roles stay accurate; the working tree is truth.
 
-Session subdir (4 files): WhisperRatchet 393, WhisperSessionSecretProtector 36,
-WhisperSessionStore 341, WhisperV3Codec 144.
+Client `data/whisper` (45 files + `session/`): EdgeFunctionClient,
+EncryptedBlobHost, PlayIntegrityAttestor, ProtocolDiagnostics, session/
+(WhisperRatchet, WhisperSessionSecretProtector, WhisperSessionStore,
+WhisperV3Codec), WhisperAubupManager, WhisperAuthManager, WhisperAvatarCodec,
+WhisperAvatarLoader, WhisperCrypto, WhisperDailyUpPhotoPreprocessor,
+WhisperDeletedMessagesStore, WhisperDeliveryScheduler,
+WhisperEncryptedImageHost, WhisperEnvelope, WhisperErrorMapper,
+WhisperGroupEntities, WhisperGroupNotifications, WhisperGroupPolicy,
+WhisperGroupReadStore, WhisperHiddenChatsStore, WhisperImageCipherTransport,
+WhisperImageDiskCache, WhisperImagePreprocess, WhisperKeyRotationStore,
+WhisperKeyTrustStore, WhisperLocalTombstoneEntity, WhisperMessageDao,
+WhisperMessageEntity, WhisperModels, WhisperMutePreferences,
+WhisperNotificationManager, WhisperOutboxEntity, WhisperOutgoingQueue,
+WhisperPinConfig, WhisperPrekeyManager, WhisperProtocolConfig,
+WhisperRepository + WhisperRepositoryGroups / WhisperRepositoryProfile /
+WhisperRepositorySocial / WhisperRepositoryStories, WhisperSessionFactory,
+WhisperStoryLocalEntity, WhisperUndoBufferStore, WireProtocol.
 
-Also: `crypto/SessionCrypto` 138, `push/WhisperPushService` 142, UI screens
-(19 files from 76 to 2573 lines, see section 8), workers for delivery (49),
-local cleanup (43), and token clipboard expiry (151), ten edge functions
-(356/285/151/243/164/416/285/619/228/287 lines — the 619 is
-whisper-push-send with its Daily Ups story branch; the 287 is the new
-whisper-story-sweep) plus the inlined `_shared/attest.ts`
-gate (156), and the SQL baseline (groups + Daily Ups sections included,
-idempotent re-runnable).
+Groups + Daily Ups UI (`ui/screens/whisper`): WhisperGroupsSection,
+WhisperGroupsViewModel, WhisperGroupChatScreen, WhisperGroupChatViewModel,
+WhisperGroupInfoScreen, WhisperGroupInfoViewModel, WhisperDailyUpsScreen,
+WhisperDailyUpsViewModel, WhisperDailyUpsComposeScreen,
+WhisperDailyUpsComposeViewModel. Tests: `WhisperGroupsTest` (36 tests), the
+Daily Ups suite in §10.
+
+Also: `crypto/SessionCrypto`, `push/` (WhisperPushNotifier,
+WhisperPushRegistrar, WhisperPushService), the whisper workers
+(WhisperDeliveryWorker, WhisperLocalCleanupWorker, WhisperClipboardClearWorker),
+ten edge functions (whisper-attest, whisper-bundle-fetch,
+whisper-bypass-verify, whisper-delete-account, whisper-image-delete,
+whisper-image-upload, whisper-legacy-migrate, whisper-push-send with the Daily
+Ups story branch, whisper-signup-gate, whisper-story-sweep) plus the inlined
+`_shared/attest.ts` gate, and the SQL baseline (groups + Daily Ups sections
+included, idempotent re-runnable).
 
 ## 13. Groups (Phase 2, ships in 1.1.7)
 
@@ -754,7 +766,10 @@ whisper_story_recipients) →
 whisper-push-send, and NO webhooks on whisper_group_receipts /
 whisper_group_typing / whisper_group_reactions / whisper_group_join_requests /
 whisper_story_views / whisper_story_reactions;
-(2) redeploy whisper-push-send (story branch included); deploy
+(2) redeploy whisper-push-send — REQUIRED this ship even without new story
+machinery: the plain-target name scrub, the `inviterId` invite field, and the
+story branch all live in that function, and an outdated deploy ships name
+leaks to external distributors by omission; deploy
 whisper-story-sweep; (3) re-run the full
 main-whisper-sql.sql (idempotent, additive); (4) publish 1.1.7 APKs + signed
 manifest with floor 18; (5) set edge MIN_VERSION_CODE=18.
@@ -778,7 +793,7 @@ to the friend graph AT POST TIME. Entry: `WhisperDailyUpsConfig.ENABLED`
 §13; the Chats entry row and both nav routes no-op while off and stay true
 after ship because the server floor is 18).
 
-### Photo pipeline (`WhisperDailyUpPhotoPreprocessor`, 200 lines)
+### Photo pipeline (`WhisperDailyUpPhotoPreprocessor`)
 
 `preprocessDailyUpPhoto(context, source, mime)` produces uploadable ciphertext
 or rejects — never falls back to raw input:
@@ -848,7 +863,7 @@ re-queues hosting cleanup. Read helpers `whisper_story_can_read /
 _read_receipts / _is_poster`; RLS mirrors them on every SELECT (state + expiry +
 recipient snapshot + block edges re-checked per query).
 
-### Client plane (`WhisperRepositoryStories` 695 lines, Room v64)
+### Client plane (`WhisperRepositoryStories`, Room v64)
 
 `publishDailyUp`: preprocess → seal → upload (EncryptedBlobHost;
 whisper-image-upload stamps the ownership ledger and asks ImgBB for
@@ -870,7 +885,7 @@ pg_cron is needed.
 
 ### UI
 
-Chats entry row → hub (`WhisperDailyUpsScreen` 651 + VM 359): my-strip with
+Chats entry row → hub (`WhisperDailyUpsScreen`): my-strip with
 `+ New up` ring and Mine stats, friends' rings rendered as INITIALS (the hub
 NEVER decrypts media — identity chips stay business-agnostic), quota chip,
 empty state, in-place full-screen viewer overlay (no third nav route):
@@ -880,7 +895,7 @@ across hub + viewer, `SecureWindow()` on both surfaces. Reactions are one
 toggleable emoji per viewer per story. Mine shows receipts + reaction counts on
 demand (`fetchDailyUpReceipts` — names resolved client-side).
 
-Compose (`WhisperDailyUpsComposeScreen` 406 + VM 195): photo picker with a
+Compose (`WhisperDailyUpsComposeScreen`): photo picker with a
 12 MiB bounded read mirroring the preprocessor, in-memory draft + downsampled
 preview (bytes never touch disk before the pipeline), receipts switch,
 audience = all current friends with per-friend exclusion checkboxes (summary
@@ -893,8 +908,9 @@ progress; retries keep the draft; success returns to the hub.
 (fourth INSERT-only webhook) → looks up the story poster + state → refuses to
 wake devices for anything no longer `published` → data-only ping
 `{whisper_story_new:"true", posterId, posterName, storyId}` — content-free
-media-wise; poster NAME rides exactly like the 1:1/group senderName precedent
-(§11, accepted explicitly). The client renders the ping in
+media-wise; per §11, the poster NAME only rides encrypted webpush targets —
+plain targets get the `plainTargetBody()` scrub (IDs only; the client resolves
+the name from the friend cache). The client renders the ping in
 `WhisperPushNotifier` → `WhisperNotificationManager.showDailyUpNotification`:
 deduplicated per story (a re-fanout can't double-post), silenced by the Master
 Whisper toggle AND the poster's chat mute, tapping opens the Daily Ups hub via
@@ -910,3 +926,50 @@ ownership ledger. Quota is server-enforced; a stale local read can neither
 permit nor deny a publish. Received ups keep their sealed bytes; unlike 1:1
 messages there is no "keep forever" tier — 24 hours is the whole contract, and
 deleted/expired stories prune locally even when the sweep is unreachable.
+
+## 15. Known limitations (external review, 2026-10)
+
+Documented trade-offs surfaced by the October 2026 external review — verified
+against code, deliberately NOT changed unilaterally (each is a product
+decision). Listed so the next reviewer does not rediscover them.
+
+1. **Ratchet gap-loss residual.** All far-future/forged-header
+   `WhisperRatchet` rejects fire BEFORE any state mutation (pinned:
+   `WhisperRatchetSecurityTest` — skipped-limit, forged-header-no-mutation,
+   key-change-fail-closed), so a forged/missing frame never costs honest
+   frames. Residual: a malicious server can still force a GAP-HANDSHAKE
+   re-connection at most once per 30 s per peer (`shouldRefreshOnGap`
+   cooldown) — a bounded availability annoyance, not a confidentiality or
+   message-loss path. Accepted.
+2. **Groups fan-out budget (600 envelopes/day/sender).** `DAILY_ENVELOPE_BUDGET`
+   (client) mirrors the SQL limiter: at 12-member groups that is ~50 sends/day,
+   splitting proportionally in bigger/smaller groups; the sender is refused
+   fail-closed with a quota message beyond that. 1:1 messages are NOT budget
+   limited. Raising the ceiling touches TWO numbers (SQL `v_limit` and the
+   client constant) and is a deliberate product knob, not a bug. Accepted for
+   v1; reconsider if heavy groups hit it in practice.
+3. **Signup gate 5/day/IP.** `whisper_check_signup_allowed` budgets account
+   creation per IP. CGNAT campus/office/carrier networks share thousands of
+   users per IP, so legitimate signups can 429. Mitigations if it bites:
+   allow-list known-good subnets in the edge function or raise the cap —
+   policy decision, left to the operator.
+4. **Group-event signing keys are install-scoped.** The scheduled 30-day
+   rotation (`WhisperKeyRotationStore` heartbeat) rotates ONLY the 1:1
+   envelope identity (X25519 profile public key); the ECDSA cert that signs
+   group admin/member events is regenerated only on reinstall. Consequence:
+   historical group events stay verifiable for every member whose install
+   still lives — the common sync path is unaffected. The narrow failure list:
+   when a group CREATOR reinstalls, their new install can no longer verify the
+   old CREATE event they themselves signed, and the group fails closed for
+   THEM with a dedicated diagnostic card (other members keep working logs).
+   This is fail-closed by design, not a decode hole. A future fix could
+   publish the per-event signer cert (or walk the ROTv2 rotation-cert chain)
+   so old logs verify across reinstalls — designed, deliberately not built
+   for 1.1.7.
+5. **External review before any "secure" marketing.** Whisper must not be
+   publicly promoted as audited/secure until either a third-party security
+   review or a libsignal production-parity audit happens — claimed security
+   without review is exactly the kind of overstatement FOSS gets hammered for.
+   Until then, user-facing copy should say end-to-end encrypted + open
+   description, never "audited".
+
