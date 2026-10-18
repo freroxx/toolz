@@ -1690,6 +1690,9 @@ fun ToolzNavHost(
                     onNavigateToGroup = { groupId ->
                         navController.navigate(Screen.WhisperGroupChat.createRoute(groupId))
                     },
+                    onNavigateToDailyUps = {
+                        navController.navigate(Screen.WhisperDailyUps.route)
+                    },
                     onLoggedOut = {
                         navController.navigate(Screen.WhisperAuth.route) {
                             popUpTo(Screen.Whisper.route) { inclusive = true }
@@ -1725,6 +1728,19 @@ fun ToolzNavHost(
         }
         composable(Screen.WhisperGroupPermissions.route) {
             com.frerox.toolz.ui.screens.whisper.WhisperGroupPermissionsScreen(
+                onNavigateBack = { toolOnBack() },
+            )
+        }
+        composable(Screen.WhisperDailyUps.route) {
+            com.frerox.toolz.ui.screens.whisper.WhisperDailyUpsScreen(
+                onNavigateBack = { toolOnBack() },
+                onNavigateToCompose = {
+                    navController.navigate(Screen.WhisperDailyUpsCompose.route)
+                },
+            )
+        }
+        composable(Screen.WhisperDailyUpsCompose.route) {
+            com.frerox.toolz.ui.screens.whisper.WhisperDailyUpsComposeScreen(
                 onNavigateBack = { toolOnBack() },
             )
         }

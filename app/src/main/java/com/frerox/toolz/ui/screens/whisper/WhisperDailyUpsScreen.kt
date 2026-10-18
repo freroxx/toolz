@@ -1,0 +1,651 @@
+/*
+ * Copyright (C) 2026 Toolz Contributors
+ * GPL-3.0 License
+ */
+
+package com.frerox.toolz.ui.screens.whisper
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Timer
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.frerox.toolz.R
+import com.frerox.toolz.data.whisper.WhisperDailyUpsConfig
+import com.frerox.toolz.ui.theme.toolzBackground
+import kotlinx.coroutines.delay
+import kotlin.math.max
+
+/** Accent for the story ring, progress track and the "new up" badge. */
+private val DailyUpRingAccent = Color(0xFFE9541B)
+
+/**
+ * Entry row on the Whisper Chats tab. Cheap by design: no decrypt, no sync,
+ * no story-server round trip — the hub does all the work when opened.
+ */
+@Composable
+internal fun WhisperDailyUpsEntryRow(onOpen: () -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpen),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Rounded.Timer,
+                contentDescription = null,
+                tint = DailyUpRingAccent,
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.st_Whisper_DailyUp_Title),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = stringResource(R.string.st_Whisper_DailyUp_EntrySub),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Icon(
+                Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * Daily Ups hub: my strip, friends' rings, quota chip — and the full-screen
+ * viewer as an in-place overlay (no extra nav route; the hub owns the
+ * lifecycle so decrypted images and receipt state are shared by both).
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun WhisperDailyUpsScreen(
+    onNavigateBack: () -> Unit,
+    onNavigateToCompose: () -> Unit,
+    viewModel: WhisperDailyUpsViewModel = hiltViewModel(),
+) {
+    if (!WhisperDailyUpsConfig.ENABLED) return
+    SecureWindow()
+
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val viewer by viewModel.viewer.collectAsStateWithLifecycle()
+    val images by viewModel.images.collectAsStateWithLifecycle()
+    val receipts by viewModel.receipts.collectAsStateWithLifecycle()
+    val snackbar = remember { SnackbarHostState() }
+
+    // One shared failure surface: hub + viewer both funnel through [state.error].
+    LaunchedEffect(state.error) {
+        state.error?.let {
+            snackbar.showSnackbar(it)
+            viewModel.clearError()
+        }
+    }
+
+    // Pull-driven feature: entering the hub (every time) reconciles with the
+    // server — deletes, new friend ups, expiry — before anything renders.
+    LaunchedEffect(Unit) { viewModel.refresh() }
+
+    Scaffold(
+        modifier = Modifier.fillMaxSize().toolzBackground(),
+        snackbarHost = { GroupSnackbarHost(state = snackbar) },
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        stringResource(R.string.st_Whisper_DailyUp_Title),
+                        fontWeight = FontWeight.Bold,
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = onNavigateBack) {
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = GroupCd.back())
+                    }
+                },
+                actions = {
+                    if (state.loading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp,
+                        )
+                    } else {
+                        IconButton(onClick = { viewModel.refresh() }) {
+                            Icon(
+                                Icons.Rounded.Refresh,
+                                contentDescription = stringResource(R.string.st_Whisper_DailyUp_RefreshCd),
+                            )
+                        }
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+            )
+        },
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+        ) {
+            Text(
+                text = stringResource(
+                    R.string.st_Whisper_DailyUp_QuotaLeft,
+                    state.quotaUsed,
+                    WhisperDailyUpsConfig.DAILY_LIMIT,
+                ),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+            )
+            if (state.mine.isEmpty() && state.friends.isEmpty()) {
+                WhisperEmptyState(
+                    icon = Icons.Rounded.Add,
+                    title = stringResource(R.string.st_Whisper_DailyUp_EmptyTitle),
+                    subtitle = stringResource(R.string.st_Whisper_DailyUp_EmptySub),
+                )
+            }
+            RingStrip(
+                heading = stringResource(R.string.st_Whisper_DailyUp_Mine),
+                items = state.mine,
+                leadingSlot = { NewUpRing(onClick = onNavigateToCompose) },
+                onOpen = viewModel::openViewer,
+            )
+            if (state.friends.isNotEmpty()) {
+                RingStrip(
+                    heading = stringResource(R.string.st_Whisper_DailyUp_SectionTitle),
+                    items = state.friends,
+                    leadingSlot = null,
+                    onOpen = viewModel::openViewer,
+                )
+            }
+        }
+    }
+
+    AnimatedVisibility(
+        visible = viewer != null,
+        enter = fadeIn(),
+        exit = fadeOut(),
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        val v = viewer ?: return@AnimatedVisibility
+        StoryViewerOverlay(
+            stories = v.stories,
+            index = v.index,
+            images = images,
+            receipts = receipts,
+            ownName = stringResource(R.string.st_Whisper_DailyUp_Mine),
+            onShown = viewModel::onStoryDisplayed,
+            onSeek = viewModel::seekViewer,
+            onClose = viewModel::closeViewer,
+            onReact = viewModel::toggleReaction,
+            onDelete = viewModel::deleteMyStory,
+        )
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Hub parts
+// ────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun RingStrip(
+    heading: String,
+    items: List<WhisperDailyUpsViewModel.StoryItem>,
+    /** The "+" slot rendered FIRST in my strip (friends' strips have none). */
+    leadingSlot: (@Composable () -> Unit)?,
+    onOpen: (String) -> Unit,
+) {
+    if (items.isEmpty() && leadingSlot == null) return
+    SectionHeader(heading)
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        if (leadingSlot != null) {
+            item(key = "daily_up_add_slot") { leadingSlot() }
+        }
+        items(items, key = { "daily_up_${it.storyId}" }) { element ->
+            StoryRing(element, onClick = { onOpen(element.storyId) })
+        }
+    }
+}
+
+@Composable
+private fun StoryRing(item: WhisperDailyUpsViewModel.StoryItem, onClick: () -> Unit) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .width(72.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 4.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(56.dp)
+                .border(2.dp, DailyUpRingAccent, CircleShape)
+                .padding(3.dp),
+        ) {
+            Surface(shape = CircleShape, modifier = Modifier.size(48.dp)) {
+                Box(
+                    modifier = Modifier
+                        .background(
+                            Brush.linearGradient(
+                                listOf(
+                                    MaterialTheme.colorScheme.primaryContainer,
+                                    MaterialTheme.colorScheme.secondaryContainer,
+                                ),
+                            ),
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    // Identity initials: media is decrypt-on-demand and rings stay
+                    // cheap and business-agnostic on purpose (hub never decrypts).
+                    Text(
+                        text = if (item.isMine) stringResource(R.string.st_Whisper_You) else item.ownerName.take(1).uppercase(),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Black,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = if (item.isMine) stringResource(R.string.st_Whisper_DailyUp_Mine) else item.ownerName,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = remainingText(item.remainingMs),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun NewUpRing(onClick: () -> Unit) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .width(72.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 4.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(56.dp)
+                .border(2.dp, DailyUpRingAccent, CircleShape)
+                .padding(3.dp),
+        ) {
+            Surface(shape = CircleShape, modifier = Modifier.size(48.dp)) {
+                Box(
+                    modifier = Modifier
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Rounded.Add,
+                        contentDescription = stringResource(R.string.st_Whisper_DailyUp_AddCd),
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = stringResource(R.string.st_Whisper_DailyUp_NewUp),
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+        )
+    }
+}
+
+/** "22h", "4h 12m", "45m" — a story clock never needs finer granularity. */
+private fun remainingText(ms: Long): String {
+    val minutes = (ms / 60_000L).coerceAtLeast(0L)
+    return when {
+        minutes >= 180L -> "${minutes / 60L}h"
+        minutes >= 60L -> "${minutes / 60L}h ${minutes % 60L}m"
+        else -> "${max(minutes, 1L)}m"
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Full-screen viewer overlay
+// ────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun StoryViewerOverlay(
+    stories: List<WhisperDailyUpsViewModel.StoryItem>,
+    index: Int,
+    images: Map<String, ImageBitmap>,
+    receipts: WhisperDailyUpsViewModel.ReceiptsUi,
+    ownName: String,
+    onShown: (String) -> Unit,
+    onSeek: (Int) -> Unit,
+    onClose: () -> Unit,
+    onReact: (storyId: String, emoji: String, on: Boolean) -> Unit,
+    onDelete: (String) -> Unit,
+) {
+    BackHandler(onBack = onClose)
+    val pagerState = rememberPagerState(initialPage = index, pageCount = { stories.size })
+    var pressed by remember { mutableStateOf(false) }
+    var pendingDeleteId by remember { mutableStateOf<String?>(null) }
+
+    // Follow the ViewModel's index (open-on-ring) and report settled drags back;
+    // both flow into the same state so there is never a two-way fight.
+    LaunchedEffect(index) {
+        snapshotFlow { pagerState.currentPage }.collect { page ->
+            if (page in stories.indices && page != index) onSeek(page)
+        }
+    }
+    LaunchedEffect(index) {
+        if (index in stories.indices && pagerState.currentPage != index) {
+            pagerState.animateScrollToPage(index)
+        }
+    }
+
+    // 7s auto-advance, paused while the reader holds the screen.
+    LaunchedEffect(pagerState.currentPage, pressed) {
+        if (!pressed && stories.isNotEmpty()) {
+            delay(7_000)
+            if (pagerState.currentPage < stories.size - 1) {
+                pagerState.animateScrollToPage(pagerState.currentPage + 1)
+            }
+        }
+    }
+
+    val current = stories.getOrNull(index)
+    // Receipt side-effects fire exactly when the page settles on the story.
+    LaunchedEffect(current?.storyId) {
+        current?.storyId?.let { onShown(it) }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black),
+    ) {
+        HorizontalPager(
+            state = pagerState,
+            pageSpacing = 8.dp,
+            modifier = Modifier.fillMaxSize(),
+            userScrollEnabled = pendingDeleteId == null,
+        ) { page ->
+            val story = stories.getOrNull(page) ?: return@HorizontalPager
+            StoryPage(
+                story = story,
+                image = images[story.storyId],
+                displayName = if (story.isMine) ownName else story.ownerName,
+                pressed = { p -> pressed = p },
+            )
+        }
+
+        // Top chrome: back + one progress-bar segment per story + poster name.
+        Column(
+            modifier = Modifier
+                .statusBarsPadding()
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = onClose) {
+                    Icon(
+                        Icons.AutoMirrored.Rounded.ArrowBack,
+                        contentDescription = GroupCd.back(),
+                        tint = Color.White,
+                    )
+                }
+                stories.forEachIndexed { i, _ ->
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 2.dp)
+                            .height(3.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(
+                                when {
+                                    i < pagerState.currentPage -> Color.White.copy(alpha = 0.85f)
+                                    i == pagerState.currentPage -> DailyUpRingAccent
+                                    else -> Color.White.copy(alpha = 0.25f)
+                                },
+                            ),
+                    )
+                }
+            }
+            current?.let { c ->
+                Text(
+                    text = if (c.isMine) ownName else c.ownerName,
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(top = 8.dp, start = 12.dp),
+                )
+            }
+        }
+
+        // Bottom actions: receipts/delete for mine, reaction palette for friends.
+        current?.let { c ->
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(bottom = 32.dp, start = 16.dp, end = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                if (c.isMine) {
+                    val stats = receipts.ownStats[c.storyId]
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.st_Whisper_DailyUp_ViewsCount, stats?.views ?: 0),
+                            color = Color.White.copy(alpha = 0.85f),
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                        IconButton(onClick = { pendingDeleteId = c.storyId }) {
+                            Icon(
+                                Icons.Rounded.Delete,
+                                contentDescription = stringResource(R.string.st_Whisper_DailyUp_DeleteCd),
+                                tint = Color.White,
+                            )
+                        }
+                    }
+                } else {
+                    ReactionPalette(
+                        currentEmoji = receipts.myReactions[c.storyId].orEmpty(),
+                        onToggle = { emoji, on -> onReact(c.storyId, emoji, on) },
+                    )
+                }
+            }
+        }
+
+        pendingDeleteId?.let { id ->
+            ConfirmDeleteDailyUpDialog(
+                confirm = {
+                    onDelete(id)
+                    pendingDeleteId = null
+                },
+                dismiss = { pendingDeleteId = null },
+            )
+        }
+    }
+}
+
+@Composable
+private fun StoryPage(
+    story: WhisperDailyUpsViewModel.StoryItem,
+    image: ImageBitmap?,
+    displayName: String,
+    pressed: (Boolean) -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(story.storyId) {
+                detectTapGestures(
+                    onPress = {
+                        pressed(true)
+                        runCatching { tryAwaitRelease() }
+                        pressed(false)
+                    },
+                )
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        if (image != null) {
+            Image(
+                bitmap = image,
+                contentDescription = displayName,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            CircularProgressIndicator(color = Color.White)
+        }
+    }
+}
+
+@Composable
+private fun ReactionPalette(
+    currentEmoji: String,
+    onToggle: (String, Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(24.dp))
+            .background(Color.White.copy(alpha = 0.12f))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        WhisperDailyUpsConfig.REACTION_EMOJIS.forEach { emoji ->
+            val active = emoji == currentEmoji
+            val emojiModifier = Modifier
+                .clip(CircleShape)
+                .clickable {
+                    onToggle(emoji, !active)
+                }
+                .then(
+                    if (active) {
+                        Modifier.background(Color.White.copy(alpha = 0.24f))
+                    } else {
+                        Modifier
+                    },
+                )
+                .padding(4.dp)
+            Text(text = emoji, fontSize = 26.sp, modifier = emojiModifier)
+        }
+    }
+}
+
+@Composable
+private fun ConfirmDeleteDailyUpDialog(confirm: () -> Unit, dismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = dismiss,
+        title = { Text(stringResource(R.string.st_Whisper_DailyUp_DeleteLabel)) },
+        text = { Text(stringResource(R.string.st_Whisper_DailyUp_DeleteConfirm)) },
+        confirmButton = {
+            Button(
+                onClick = confirm,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError,
+                ),
+            ) {
+                Text(stringResource(R.string.st_Whisper_DailyUp_DeleteLabel))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = dismiss) {
+                Text(stringResource(android.R.string.cancel))
+            }
+        },
+    )
+}

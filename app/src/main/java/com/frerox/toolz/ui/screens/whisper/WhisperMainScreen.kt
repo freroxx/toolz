@@ -108,6 +108,7 @@ fun WhisperMainScreen(
     onNavigateToChat: (String) -> Unit,
     onNavigateToProfile: (String) -> Unit,
     onNavigateToGroup: (String) -> Unit = {},
+    onNavigateToDailyUps: () -> Unit = {},
     onLoggedOut: () -> Unit,
     viewModel: WhisperViewModel = hiltViewModel(),
 ) {
@@ -358,6 +359,7 @@ fun WhisperMainScreen(
                             onNavigateToChat = onNavigateToChat,
                             onNavigateToProfile = onNavigateToProfile,
                             onNavigateToGroup = onNavigateToGroup,
+                            onNavigateToDailyUps = onNavigateToDailyUps,
                             onLongClickConvo = { selectedConvoForOptions = it },
                             onLongClickFriend = { selectedFriendForOptions = it },
                             onViewAvatarFull = { profileForFullView = it },
@@ -826,6 +828,7 @@ private fun MergedChatsAndFriendsTab(
     onNavigateToChat: (String) -> Unit,
     onNavigateToProfile: (String) -> Unit,
     onNavigateToGroup: (String) -> Unit = {},
+    onNavigateToDailyUps: () -> Unit = {},
     onLongClickConvo: (WhisperConversation) -> Unit,
     onLongClickFriend: (WhisperProfile) -> Unit,
     onViewAvatarFull: (WhisperProfile) -> Unit,
@@ -914,6 +917,12 @@ private fun MergedChatsAndFriendsTab(
         if (com.frerox.toolz.data.whisper.groupsEnabled()) {
             item {
                 WhisperGroupsSection(onNavigateToGroup = onNavigateToGroup)
+            }
+        }
+        // Daily Ups (v1.1.7): entry row; inert while the compile-time flag is off.
+        if (com.frerox.toolz.data.whisper.WhisperDailyUpsConfig.ENABLED) {
+            item {
+                WhisperDailyUpsEntryRow(onOpen = onNavigateToDailyUps)
             }
         }
         // Incoming Friend Requests Banner — pendingIncomingRequests is the single source

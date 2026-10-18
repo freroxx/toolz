@@ -484,6 +484,24 @@ suspend fun WhisperRepository.toggleDailyUpReaction(
 }
 
 /**
+ * MY current reaction per story (RLS: authors read their own row). The
+ * viewer uses this to render the "already reacted" state without exposing
+ * anyone else's rows.
+ */
+suspend fun WhisperRepository.fetchMyDailyUpReactions(
+    storyIds: List<String>,
+): Result<Map<String, String>> = runCatching {
+    requireDailyUpsEnabled()
+    val me = requireStoryMe()
+    if (storyIds.isEmpty()) return@runCatching emptyMap()
+    storyIo(WhisperDailyUpsConfig.SYNC_TIMEOUT_MS) {
+        db.from("whisper_story_reactions").select {
+            filter { isIn("story_id", storyIds); eq("user_id", me) }
+        }.decodeList<StoryReactionRow>().associate { it.storyId to it.emoji }
+    }
+}
+
+/**
  * Fetches who viewed / reacted to MY stories. Passing someone else's story
  * id simply returns nothing (RLS hides the rows — never an error).
  */
