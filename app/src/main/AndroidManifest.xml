@@ -1324,12 +1324,15 @@
             </intent-filter>
         </activity-alias>
 
-        <!-- V3-FIX (reviewwhisper.md item 6): FCM entry point for Whisper wake pings. -->
+        <!-- FCM → UnifiedPush swap: Whisper wake-ping entry point. The service must
+             be non-exported and serve PUSH_EVENT (UnifiedPush connector contract).
+             The bundled embedded distributor receiver is merged from the AAR's own
+             manifest automatically — no receiver entry needed here. -->
         <service
             android:name=".push.WhisperPushService"
             android:exported="false">
             <intent-filter>
-                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+                <action android:name="org.unifiedpush.android.connector.PUSH_EVENT" />
             </intent-filter>
         </service>
 

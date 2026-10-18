@@ -6,274 +6,208 @@
 package com.frerox.toolz.push
 
 import android.content.Context
-import com.frerox.toolz.data.whisper.WhisperNotificationManager
-import com.google.firebase.messaging.FirebaseMessagingService
-import com.google.firebase.messaging.RemoteMessage
+import android.util.Log
 import dagger.hilt.android.AndroidEntryPoint
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.jan.supabase.SupabaseClient
-import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.auth.auth
+import io.github.jan.supabase.postgrest.postgrest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.launch
-import javax.inject.Singleton
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import org.unifiedpush.android.connector.FailedReason
+import org.unifiedpush.android.connector.PushService
+import org.unifiedpush.android.connector.data.PushEndpoint
+import org.unifiedpush.android.connector.data.PushMessage
 import javax.inject.Inject
+import javax.inject.Singleton
 
 /**
- * V3-FIX (reviewwhisper.md item 6): receives FCM data-only wake pings sent by the
- * `whisper-push-send` Edge Function when a message lands for a user whose realtime
- * socket is dead (app backgrounded/killed).
+ * UnifiedPush push entry point (F-Droid swap for the old FirebaseMessagingService):
+ * receives the data-only wake pings sent by the `whisper-push-send` Edge Function
+ * when a message lands for a user whose realtime socket is dead (app
+ * backgrounded/killed).
+ *
+ * The service is registered against whichever UnifiedPush distributor was chosen
+ * at startup — by default the bundled embedded distributor (zero setup on devices
+ * with Google Play Services or microG), or an external distributor (ntfy,
+ * NextPush, Sunup, ...) the user already has installed — see
+ * [WhisperPushRegistrar].
  *
  * Privacy contract: the payload carries NO message content — only
- * `{whisper_new_message: true, senderId}`. Nothing readable ever transits Google's
- * push transport; the encrypted body stays in Supabase until the app syncs.
+ * `{whisper_new_message: true, senderId, ...}`. WebPush targets (embedded
+ * distributor, Sunup, gCompat-UP, ...) additionally travel as RFC 8291-encrypted
+ * blobs end-to-end; plain targets (ntfy/NextPush) see only the same id/name keys
+ * the old FCM pings already exposed.
  */
 @AndroidEntryPoint
-class WhisperPushService : FirebaseMessagingService() {
+class WhisperPushService : PushService() {
 
-    @Inject lateinit var notificationManager: WhisperNotificationManager
-    @Inject lateinit var supabase: SupabaseClient
-    @Inject lateinit var tokenStore: WhisperPushTokenStore
-    @Inject lateinit var groupNotifPrefs: com.frerox.toolz.data.whisper.WhisperGroupNotifPrefs
-    @Inject lateinit var groupDao: com.frerox.toolz.data.whisper.WhisperGroupDao
+    @Inject lateinit var notifier: WhisperPushNotifier
+    @Inject lateinit var targetStore: WhisperPushTargetStore
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    override fun onNewToken(token: String) {
-        // Fired on install/rotate. If the user isn't signed in yet, the token is parked
-        // and uploaded on the next launch once a session exists (see TokenStore).
-        serviceScope.launch { tokenStore.register(token) }
+    override fun onMessage(message: PushMessage, instance: String) {
+        val json = runCatching { String(message.content, Charsets.UTF_8) }.getOrDefault("")
+        if (json.isBlank()) return
+        // The connector has already decrypted RFC 8291 WebPush payloads when the
+        // distributor provides key sets; plain-distributor payloads arrive as sent.
+        notifier.handlePayload(json)
     }
 
-    override fun onMessageReceived(message: RemoteMessage) {
-        val senderId = message.data["senderId"].orEmpty()
-        val messageId = message.data["messageId"].orEmpty()
+    override fun onNewEndpoint(endpoint: PushEndpoint, instance: String) {
+        if (endpoint.url.isBlank()) return
+        // Fired on install/endpoint rotation. If the user isn't signed in yet, the
+        // endpoint is parked locally and uploaded on the next launch once a session
+        // exists (see WhisperPushTargetStore).
+        serviceScope.launch { runCatching { targetStore.register(endpoint) } }
+    }
 
-        if (message.data["whisper_friend_request"].toBoolean() || message.data["type"] == "friend_request") {
-            if (senderId.isNotEmpty()) {
-                val senderName = message.data["senderName"].takeIf { !it.isNullOrBlank() }
-                    ?: applicationContext.getString(com.frerox.toolz.R.string.st_Whisper_SomeoneDefault)
-                notificationManager.showFriendRequestNotification(
-                    fromId = senderId,
-                    fromName = senderName
-                )
-            }
-            return
-        }
+    override fun onRegistrationFailed(reason: FailedReason, instance: String) {
+        // Transient (NETWORK / VAPID_REQUIRED / ...): WhisperPushRegistrar
+        // re-registers on the next app start; nothing to clean up here.
+        Log.w(TAG, "UnifiedPush registration failed: $reason")
+    }
 
-        // Phase-2 groups: invite / message / event wake pings (data-only, no content).
-        if (message.data["whisper_group_invite"].toBoolean()) {
-            val groupId = message.data["groupId"].orEmpty()
-            val groupName = message.data["groupName"].takeIf { !it.isNullOrBlank() } ?: "Group"
-            val inviterName = message.data["inviterName"].takeIf { !it.isNullOrBlank() }
-                ?: applicationContext.getString(com.frerox.toolz.R.string.st_Whisper_SomeoneDefault)
-            if (groupId.isNotEmpty()) {
-                notificationManager.showGroupInviteNotification(groupId, groupName, inviterName)
-            }
-            return
-        }
-        if (message.data["whisper_group_message"].toBoolean()) {
-            val groupId = message.data["groupId"].orEmpty()
-            val groupName = message.data["groupName"].takeIf { !it.isNullOrBlank() } ?: "Group"
-            val senderName = message.data["senderName"].takeIf { !it.isNullOrBlank() }
-            // Messages are NOT governed by the event toggle (members get message
-            // pings by default); group mute still applies inside the manager.
-            if (groupId.isNotEmpty()) {
-                val text = if (senderName != null) {
-                    applicationContext.getString(
-                        com.frerox.toolz.R.string.st_Whisper_Groups_SenderNewMessage,
-                        senderName,
-                    )
-                } else {
-                    applicationContext.getString(com.frerox.toolz.R.string.st_Whisper_Notif_NewMessage)
-                }
-                notificationManager.showGroupEventNotification(
-                    groupId = groupId,
-                    title = groupName,
-                    text = text,
-                    dedupeKey = "msg:${message.data["clientId"].orEmpty().ifBlank { message.data["messageId"].orEmpty() }}",
-                )
-            }
-            return
-        }
-        if (message.data["whisper_group_event"].toBoolean()) {
-            val groupId = message.data["groupId"].orEmpty()
-            val kind = message.data["kind"].orEmpty()
-            val actorId = message.data["actorId"].orEmpty()
-            val eventId = message.data["eventId"].orEmpty()
-            if (groupId.isNotEmpty() && kind.isNotEmpty()) {
-                // Role + toggle are resolved against the local cache (the server
-                // cannot know our role or our toggle) before anything is shown.
-                // join/leave/decline honor the event toggle; admin-action kinds
-                // (remove/promote/demote/rename/picture/settings) behave like
-                // message pings — mute + open-chat + self only, no toggle.
-                val data = message.data.toMap()
-                serviceScope.launch {
-                    runCatching {
-                        val me = supabase.auth.currentUserOrNull()?.id.orEmpty()
-                        if (actorId.isNotBlank() && actorId == me) return@launch
-                        val group = groupDao.group(groupId)
-                        val members = groupDao.members(groupId)
-                        val myRole = members.firstOrNull { it.memberId == me }?.role
-                        val amOwner = group?.createdBy == me && me.isNotBlank()
-                        val amOwnerOrAdmin = amOwner || myRole == "admin"
-                        val groupName = data["groupName"]?.takeIf { it.isNotBlank() } ?: "Group"
-                        val actorName = data["actorName"]?.takeIf { it.isNotBlank() }
-                            ?: applicationContext.getString(com.frerox.toolz.R.string.st_Whisper_SomeoneDefault)
-                        val subjectId = data["subjectId"].orEmpty()
-                        val subjectName = data["subjectName"]?.takeIf { it.isNotBlank() }
-                            ?: applicationContext.getString(com.frerox.toolz.R.string.st_Whisper_SomeoneDefault)
-                        val adminText: String? = when (kind) {
-                            "remove" -> if (subjectId.isNotBlank() && subjectId == me) {
-                                applicationContext.getString(
-                                    com.frerox.toolz.R.string.st_Whisper_Groups_RemovedYou, groupName,
-                                )
-                            } else {
-                                applicationContext.getString(
-                                    com.frerox.toolz.R.string.st_Whisper_Groups_RemovedOther, subjectName, groupName,
-                                )
-                            }
-                            "promote" -> if (subjectId.isNotBlank() && subjectId == me) {
-                                applicationContext.getString(
-                                    com.frerox.toolz.R.string.st_Whisper_Groups_PromotedYou, groupName,
-                                )
-                            } else {
-                                applicationContext.getString(
-                                    com.frerox.toolz.R.string.st_Whisper_Groups_PromotedOther, subjectName, groupName,
-                                )
-                            }
-                            "demote" -> if (subjectId.isNotBlank() && subjectId == me) {
-                                applicationContext.getString(
-                                    com.frerox.toolz.R.string.st_Whisper_Groups_DemotedYou, groupName,
-                                )
-                            } else {
-                                applicationContext.getString(
-                                    com.frerox.toolz.R.string.st_Whisper_Groups_DemotedOther, subjectName, groupName,
-                                )
-                            }
-                            "rename" -> applicationContext.getString(
-                                com.frerox.toolz.R.string.st_Whisper_Groups_Renamed, actorName,
-                            )
-                            "picture" -> applicationContext.getString(
-                                com.frerox.toolz.R.string.st_Whisper_Groups_PictureUpdated, actorName,
-                            )
-                            "settings" -> applicationContext.getString(
-                                com.frerox.toolz.R.string.st_Whisper_Groups_SettingsUpdated, actorName,
-                            )
-                            else -> null
-                        }
-                        if (adminText != null) {
-                            notificationManager.showGroupEventNotification(
-                                groupId = groupId,
-                                title = groupName,
-                                text = adminText,
-                                dedupeKey = "evt:$eventId",
-                            )
-                            return@launch
-                        }
-                        val scope = when (kind) {
-                            "join" -> com.frerox.toolz.data.whisper.GroupNotifScope.JOIN
-                            "leave" -> com.frerox.toolz.data.whisper.GroupNotifScope.LEAVE
-                            "decline" -> com.frerox.toolz.data.whisper.GroupNotifScope.DECLINE
-                            else -> return@launch
-                        }
-                        val toggleOn = groupNotifPrefs.isEnabled(groupId, amOwnerOrAdmin)
-                        if (!com.frerox.toolz.data.whisper.shouldNotifyGroupEvent(scope, actorId, me, amOwner, toggleOn)) return@launch
-                        val text = when (kind) {
-                            "join" -> com.frerox.toolz.data.whisper.WhisperGroupNotifTemplates.joinText(actorName, groupName)
-                            "leave" -> com.frerox.toolz.data.whisper.WhisperGroupNotifTemplates.leaveText(actorName, groupName)
-                            else -> com.frerox.toolz.data.whisper.WhisperGroupNotifTemplates.declineText(actorName, groupName)
-                        }
-                        notificationManager.showGroupEventNotification(
-                            groupId = groupId,
-                            title = groupName,
-                            text = text,
-                            dedupeKey = "evt:$eventId",
-                        )
-                    }
-                }
-            }
-            return
-        }
-
-        if (!message.data["whisper_new_message"].toBoolean() || senderId.isEmpty()) return
-
-        // Generic, content-free notification — identical body to the in-app realtime
-        // path so lock-screen behavior never leaks text (VISIBILITY_PRIVATE).
-        // FIX: include messageId for dedupe (FCM + realtime), and isRead=false
-        // (edge function only sends on INSERT). Manager handles hidden/muted/dedupe.
-        notificationManager.showMessageNotification(
-            senderId = senderId,
-            senderName = senderId,
-            messageId = messageId.ifBlank { null },
-            isRead = false,
-        )
+    override fun onUnregistered(instance: String) {
+        // Registration revoked (user switched/uninstalled the distributor): stop
+        // sending pings to this endpoint server-side.
+        serviceScope.launch { runCatching { targetStore.clear() } }
     }
 
     override fun onDestroy() {
         serviceScope.coroutineContext.cancelChildren()
         super.onDestroy()
     }
+
+    companion object {
+        private const val TAG = "WhisperPush"
+    }
 }
 
 /**
- * Persists the current FCM registration token to `whisper_fcm_tokens` (RLS-scoped to
- * the signed-in row owner). Handles the "token arrives before login" race by parking
- * it locally and retrying on subsequent launches.
+ * Persists the current UnifiedPush registration to `whisper_push_targets`
+ * (RLS-scoped to the signed-in row owner) so the `whisper-push-send` Edge
+ * Function can reach this device. Handles the "endpoint arrives before login"
+ * race by parking it locally and retrying on subsequent launches.
+ *
+ * A row's `provider` mirrors the WebPush capability of the distributor:
+ * `webpush` (endpoint came with RFC 8291 key sets — server encrypts pings) or
+ * `plain` (endpoint expects the raw payload bytes).
  */
 @Singleton
-class WhisperPushTokenStore @Inject constructor(
+class WhisperPushTargetStore @Inject constructor(
     @ApplicationContext private val context: Context,
     private val supabase: SupabaseClient,
 ) {
     @Serializable
-    private data class TokenRow(
+    private data class TargetRow(
         @SerialName("user_id") val userId: String,
-        @SerialName("token") val token: String,
+        @SerialName("provider") val provider: String,
+        @SerialName("endpoint") val endpoint: String,
+        @SerialName("keys_p256dh") val keysP256dh: String? = null,
+        @SerialName("keys_auth") val keysAuth: String? = null,
     )
 
-    suspend fun register(token: String) {
+    private data class PendingTarget(
+        val provider: String,
+        val url: String,
+        val p256dh: String?,
+        val auth: String?,
+    )
+
+    suspend fun register(endpoint: PushEndpoint) {
+        val url = endpoint.url
+        if (url.isBlank()) return
+        val provider = if (endpoint.pubKeySet != null) PROVIDER_WEBPUSH else PROVIDER_PLAIN
+        val keys = endpoint.pubKeySet
         val userId = supabase.auth.currentUserOrNull()?.id
         if (userId == null) {
-            parkPending(token)
+            parkPending(provider, url, keys?.pubKey, keys?.auth)
             return
         }
         val uploaded = runCatching {
-            // user_id is the table PK, so a plain upsert merges duplicates.
-            supabase.postgrest.from(TOKENS_TABLE).upsert(TokenRow(userId = userId, token = token))
+            // user_id is the table PK: a plain upsert replaces the previous target.
+            supabase.postgrest.from(TARGETS_TABLE).upsert(
+                TargetRow(
+                    userId = userId,
+                    provider = provider,
+                    endpoint = url,
+                    keysP256dh = keys?.pubKey,
+                    keysAuth = keys?.auth,
+                ),
+            )
         }.isSuccess
         if (uploaded) clearPending()
     }
 
-    /** Called once per app start: uploads any token parked before sign-in. */
+    /** Called once per app start: uploads any target parked before sign-in. */
     suspend fun retryPendingIfAny() {
-        val pending = pendingToken() ?: return
-        register(pending)
+        val pending = pendingTarget() ?: return
+        val userId = supabase.auth.currentUserOrNull()?.id ?: return
+        val uploaded = runCatching {
+            supabase.postgrest.from(TARGETS_TABLE).upsert(
+                TargetRow(
+                    userId = userId,
+                    provider = pending.provider,
+                    endpoint = pending.url,
+                    keysP256dh = pending.p256dh,
+                    keysAuth = pending.auth,
+                ),
+            )
+        }.isSuccess
+        if (uploaded) clearPending()
+    }
+
+    /** Registration was revoked (unregistered by the distributor / user action). */
+    suspend fun clear() {
+        clearPending()
+        val userId = supabase.auth.currentUserOrNull()?.id ?: return
+        runCatching {
+            supabase.postgrest.from(TARGETS_TABLE).delete { filter { eq("user_id", userId) } }
+        }
     }
 
     private fun prefs() =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-    private fun parkPending(token: String) {
-        prefs().edit().putString(KEY_PENDING, token).commit()
+    private fun parkPending(provider: String, url: String, p256dh: String?, auth: String?) {
+        prefs().edit()
+            .putString(KEY_PROVIDER, provider)
+            .putString(KEY_URL, url)
+            .putString(KEY_P256DH, p256dh)
+            .putString(KEY_AUTH, auth)
+            .commit()
     }
 
-    private fun pendingToken(): String? =
-        prefs().getString(KEY_PENDING, null)
+    private fun pendingTarget(): PendingTarget? {
+        val url = prefs().getString(KEY_URL, null)
+        if (url.isNullOrBlank()) return null
+        return PendingTarget(
+            provider = prefs().getString(KEY_PROVIDER, null) ?: PROVIDER_PLAIN,
+            url = url,
+            p256dh = prefs().getString(KEY_P256DH, null),
+            auth = prefs().getString(KEY_AUTH, null),
+        )
+    }
 
     private fun clearPending() {
-        prefs().edit().remove(KEY_PENDING).commit()
+        prefs().edit().clear().commit()
     }
 
     private companion object {
         const val PREFS = "whisper_push_pending"
-        const val KEY_PENDING = "pending_token"
-        const val TOKENS_TABLE = "whisper_fcm_tokens"
+        const val KEY_PROVIDER = "pending_provider"
+        const val KEY_URL = "pending_url"
+        const val KEY_P256DH = "pending_p256dh"
+        const val KEY_AUTH = "pending_auth"
+        const val TARGETS_TABLE = "whisper_push_targets"
+        const val PROVIDER_WEBPUSH = "webpush"
+        const val PROVIDER_PLAIN = "plain"
     }
 }

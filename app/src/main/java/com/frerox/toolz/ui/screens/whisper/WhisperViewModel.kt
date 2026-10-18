@@ -48,7 +48,8 @@ class WhisperViewModel @Inject constructor(
     private val prekeyManager: com.frerox.toolz.data.whisper.WhisperPrekeyManager,
     private val keyRotationStore: WhisperKeyRotationStore,
     private val offlineManager: com.frerox.toolz.util.OfflineManager,
-    private val pushTokenStore: com.frerox.toolz.push.WhisperPushTokenStore,
+    private val pushTokenStore: com.frerox.toolz.push.WhisperPushTargetStore,
+    private val pushRegistrar: com.frerox.toolz.push.WhisperPushRegistrar,
     // DEV-SPOOF: gates auto-auth + full local fixture mode for Whisper.
     private val gate: com.frerox.toolz.data.developer.SpoofGate,
 ) : ViewModel() {
@@ -199,10 +200,14 @@ class WhisperViewModel @Inject constructor(
                     subscribeToFriends()
                     startHeartbeat()
                     observeProcessLifecycleForPresence() // V6-R6: instant presence
-                    // Fix: asymmetric FCM — token parked before login was only uploaded
-                    // on next cold start (MainActivity). If userA signed in without
-                    // restarting, B got pushes but A didn't. Flush the parked token now.
-                    viewModelScope.launch { runCatching { pushTokenStore.retryPendingIfAny() } }
+                    // Fix: asymmetric push — a target parked before login was only
+                    // uploaded on next cold start (MainActivity). If userA signed in
+                    // without restarting, B got pushes but A didn't. Re-register the
+                    // UnifiedPush endpoint and flush the parked target now.
+                    viewModelScope.launch {
+                        runCatching { pushRegistrar.ensureRegistered() }
+                        runCatching { pushTokenStore.retryPendingIfAny() }
+                    }
                     // Fix: badge stuck after read — hub cache was 30s and poll backoff
                     // delayed read-flip. Repository now emits on every
                     // invalidateConversationsCache() (mark-read, delete, send) so hub

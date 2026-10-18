@@ -31,7 +31,6 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.google.devtools.ksp)
     alias(libs.plugins.hilt.android)
-    alias(libs.plugins.google.services)
 }
 
 // H-10 FIX (reviewwhisper.md): export Room schemas so every future version bump ships
@@ -67,6 +66,11 @@ android {
         // Media Downloader — toolz-downloadz-api v1 (TikTok, Instagram, YouTube).
         // This is a public base URL; anonymous sessions replace embedded API keys.
         buildConfigField("String", "DOWNLOADZ_API_URL", "\"${localProperties.getProperty("DOWNLOADZ_API_URL", "https://toolz-downloadz-api.vercel.app")}\"")
+        // UnifiedPush VAPID public key (RFC 8292, base64url uncompressed point, 87 chars).
+        // This is the PUBLIC half — safe to commit; the private JWK lives only in the
+        // whisper-push-send Edge Function env (WHISPER_VAPID_JWK). Override in
+        // local.properties to rotate; regenerate with scripts/generate-vapid-keys.sh.
+        buildConfigField("String", "WHISPER_VAPID_PUBLIC_KEY", "\"${localProperties.getProperty("WHISPER_VAPID_PUBLIC_KEY", "BOFnJVEbMTa7oYlXtSI1ZBSeDufH4uTXNCHj9Wl4Aagdi8Lh_fnQcYGVCMqlSOX6WHAT_YBCEfrFbi3XjzBg9YI")}\"")
     }
 
     splits {
@@ -290,9 +294,23 @@ dependencies {
     ksp(libs.androidx.room.compiler)
     ksp(libs.moshi.kotlin.codegen)
 
-    // Firebase Cloud Messaging — Whisper push wake-ups (data-only; no content transits FCM)
-    implementation(platform(libs.firebase.bom))
-    implementation(libs.firebase.messaging)
+    // UnifiedPush — F-Droid-safe Whisper push wake-ups (Apache-2.0, no Firebase SDK).
+    // connector: app-side PushService + registration + RFC 8291 WebPush decryption.
+    // embedded-fcm-distributor: bundled zero-setup distributor speaking WebPush
+    // (RFC 8290/8291/8292) directly to FCM endpoints — Chromium-style, no GMS SDK.
+    // NOTE: the embedded distributor only works on devices with Google Play
+    // Services or microG; devices without them need an external distributor
+    // (ntfy, NextPush, ...) which the same connector code picks automatically.
+    implementation(libs.unifiedpush.connector)
+    implementation(libs.unifiedpush.embedded.fcm.distributor)
+
+    // Tink collision: connector 3.x ships JVM Tink; we already ship tink-android
+    // (Whisper X25519). Module replacement keeps exactly one Tink on the classpath.
+    modules {
+        module("com.google.crypto.tink:tink") {
+            replacedBy("com.google.crypto.tink:tink-android", "use Tink's Android artifact")
+        }
+    }
 
     // Supabase — Whisper messaging
     implementation(platform(libs.supabase.bom))

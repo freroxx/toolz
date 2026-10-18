@@ -170,7 +170,10 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
     lateinit var settingsRepository: SettingsRepository
 
     @Inject
-    lateinit var whisperPushTokenStore: com.frerox.toolz.push.WhisperPushTokenStore
+    lateinit var whisperPushTargetStore: com.frerox.toolz.push.WhisperPushTargetStore
+
+    @Inject
+    lateinit var whisperPushRegistrar: com.frerox.toolz.push.WhisperPushRegistrar
 
     @Inject
     lateinit var vibrationManager: VibrationManager
@@ -200,11 +203,16 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // V3-FIX (reviewwhisper.md item 6): upload any FCM token parked before login.
-        // MUST run AFTER super.onCreate() — Hilt performs field injection there, and
-        // lifecycleScope's Main.immediate dispatcher would otherwise execute this
-        // coroutine body inline before whisperPushTokenStore is assigned (crash).
-        lifecycleScope.launch { whisperPushTokenStore.retryPendingIfAny() }
+        // FCM → UnifiedPush swap: re-register the push endpoint (self-heal, replaces
+        // the old FCM auto-init token refresh) and upload any registration parked
+        // before login. MUST run AFTER super.onCreate() — Hilt performs field
+        // injection there, and lifecycleScope's Main.immediate dispatcher would
+        // otherwise execute this coroutine body inline before the push fields are
+        // assigned (crash).
+        lifecycleScope.launch {
+            whisperPushRegistrar.ensureRegistered()
+            whisperPushTargetStore.retryPendingIfAny()
+        }
         // Widget generated previews (API 35+, rate-limited, non-fatal).
         lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             try {
