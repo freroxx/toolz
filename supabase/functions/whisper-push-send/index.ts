@@ -8,7 +8,9 @@
 //      webhook op on whisper_group_invites / whisper_group_messages /
 //      whisper_group_events, but ONLY type=INSERT is fanned out — a
 //      CANCEL/decline invite DELETE (or a sender message wipe) must never
-//      re-fire the push for the thing just withdrawn.
+//      re-fire the push for the thing just withdrawn. Story path
+//      (handleStoryPush): INSERT on whisper_story_recipients — one
+//      per-recipient fan-out row, one sealed descriptor, one friend.
 //      DASHBOARD CHECKLIST: one webhook per group table, INSERT-only; the
 //      in-code op gate is defense-in-depth, not the primary filter.
 //   3. Skip if the receiver was recently active (< 60 s last_seen_at): their app is
@@ -138,8 +140,11 @@ serve(async (request) => {
 
   if (!senderId || !receiverId || senderId === receiverId) {
     // Webhooks must acknowledge with 2xx or Supabase retries forever.
-    // (Group tables branch below before this guard — they carry no receiver_id.)
-    if (!isGroupTable(table)) return json({ skipped: "not_a_pushable_event" }, 200);
+    // (Group/story tables branch below before this guard — recipients rows
+    // carry no receiver_id; the story's poster is resolved from its parent row.)
+    if (!isGroupTable(table) && !isStoryPushTable(table)) {
+      return json({ skipped: "not_a_pushable_event" }, 200);
+    }
   }
 
   const serviceHeaders = {
@@ -155,6 +160,15 @@ serve(async (request) => {
   if (isGroupTable(table) && record && typeof record === "object") {
     if (op && op !== "INSERT") return json({ skipped: "not_insert_group_event" }, 200);
     return json(await handleGroupPush(record, table, env), 200);
+  }
+
+  // ── Daily Ups: per-recipient story fan-out ──
+  // One recipient row = exactly one friend ping. The sealed descriptor never
+  // travels here; only the poster identity (names already ride group pushes
+  // under the same §11 visibility contract).
+  if (isStoryPushTable(table) && record && typeof record === "object") {
+    if (op && op !== "INSERT") return json({ skipped: "not_insert_story_event" }, 200);
+    return json(await handleStoryPush(record, env), 200);
   }
 
   if (isFriendPush) {
@@ -195,6 +209,11 @@ function isGroupTable(table: string): boolean {
   return table === "whisper_group_invites" ||
     table === "whisper_group_messages" ||
     table === "whisper_group_events";
+}
+
+/** Daily Ups per-recipient fan-out rows (one INSERT = one friend ping). */
+function isStoryPushTable(table: string): boolean {
+  return table === "whisper_story_recipients";
 }
 
 /**
@@ -281,11 +300,13 @@ function eventSubjectId(payload: unknown): string {
  *   senderName, like 1:1);
  * - whisper_group_events INSERT (join/leave/decline) → owner + admins;
  * - whisper_group_events INSERT (remove/promote/demote/rename/picture/
- *   settings) → every member except the actor (remove also reaches the
+ *   settings/policy) → every member except the actor (remove also reaches the
  *   removed subject directly).
  * Other event types (create/invite/cancel) stay in-app only: they spam no
  * channel, and cancel is covered by the invite-row delete the invitee
- * already watches.
+ * already watches. A POLICY change is a kind of settings write — members get
+ * the same data-only ping (kind=policy) so capability updates reach closed
+ * apps, and the client then re-syncs the signed policy on open.
  */
 async function handleGroupPush(
   record: any,
@@ -348,6 +369,7 @@ async function handleGroupPush(
     const PUSHABLE_EVENT_KINDS = new Set([
       "join", "leave", "decline",
       "remove", "promote", "demote", "rename", "picture", "settings",
+      "policy",
     ]);
     if (!PUSHABLE_EVENT_KINDS.has(kind)) {
       return { sent: 0, pruned: 0, skipped: "event_not_pushable" };
@@ -411,6 +433,48 @@ async function handleGroupPush(
     return { sent, pruned };
   }
   return { sent: 0, pruned: 0, skipped: "not_a_pushable_event" };
+}
+
+/**
+ * Daily Ups fan-out. The recipient row names the friend and the story; the
+ * story row names the poster (and its state — a story deleted or expired
+ * between the fan-out insert and this push is skipped, refusing to wake a
+ * device for content that can no longer be read). Data-only payload, same
+ * privacy contract as groups; the push service may correlate that a named
+ * friend posted a Daily Up, never the image or its sealed key material.
+ */
+async function handleStoryPush(
+  record: any,
+  env: GroupPushEnv,
+): Promise<DeliveryResult> {
+  const str = (v: unknown) => (typeof v === "string" ? v : "");
+  const storyId = str(record?.story_id);
+  const recipientId = str(record?.recipient_id);
+  if (!storyId || !recipientId) return { sent: 0, pruned: 0, skipped: "not_a_pushable_event" };
+
+  let storyRows: any[];
+  try {
+    storyRows = await restRows(
+      env,
+      `whisper_stories?id=eq.${encodeURIComponent(storyId)}&select=poster_id,state&limit=1`,
+    );
+  } catch (e) {
+    console.error("story lookup threw", e instanceof Error ? e.message : e);
+    return { sent: 0, pruned: 0, skipped: "story_lookup_failed" };
+  }
+  const posterId = str(storyRows?.[0]?.poster_id);
+  const storyState = str(storyRows?.[0]?.state);
+  // Only a live, published story justifies waking the receiving device.
+  if (!posterId || storyState !== "published") {
+    return { sent: 0, pruned: 0, skipped: "story_not_live" };
+  }
+  const posterName = (await profileName(env, posterId)).slice(0, 64);
+  return deliverToUser(env, recipientId, {
+    whisper_story_new: "true",
+    posterId,
+    posterName,
+    storyId: storyId.slice(0, 64),
+  });
 }
 
 /**

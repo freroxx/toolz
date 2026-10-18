@@ -70,7 +70,7 @@ Non-Whisper migrations (unrelated Supabase features) may still use timestamped f
 
 ## What Is Squashed
 
-`main-whisper-sql.sql` currently squashes **17 migrations verbatim in application order**:
+`main-whisper-sql.sql` currently squashes **35 migrations verbatim in application order**:
 
 | # | File | Purpose |
 |---|------|---------|
@@ -93,6 +93,22 @@ Non-Whisper migrations (unrelated Supabase features) may still use timestamped f
 | 17 | `20261005_whisper_signup_discover_hardening.sql` | Sybil-resistant signup gate (`whisper_signup_quota` + `whisper_check_signup_allowed()` 5/day/IP, anon-callable for the pre-auth edge gate), Discover opt-in (`hide_from_discover` default true for new rows, no backfill), username-oracle contract comments + `lower(username)` index (select policy intentionally kept for public_key discovery), legacy-disable registry (`whisper_legacy_disabled` + `whisper_is_legacy_disabled()`, service-role only) |
 | 18 | `20261006_whisper_rotation_cert_transport.sql` | ROTv2 rotation-cert transport: `profiles.rotation_cert` + `profiles.rotation_counter` (published by the device at protocol-signer rotation, in the same update as `identity_binding`); peers fetch the record per candidate key and verify with `WireProtocol.verifyRotationCert` (ROTv2: monotonic counter + 24h window); no new RLS policies — existing profiles policies are column-agnostic (SELECT via `profiles_select_authenticated`, owner UPDATE via `profiles_update_own`) |
 | 19 | `20261017_whisper_push_targets.sql` | UnifiedPush target registry: `whisper_push_targets` (user ID PK → auth.users cascade; `provider` check `webpush`/`plain`, push endpoint, Web Push `keys_p256dh`/`keys_auth`, `updated_at`), endpoint index, RLS + owner-only policies; drops `whisper_fcm_tokens` |
+| 20 | `20261007_whisper_groups_phase2.sql` | Groups core: `whisper_groups` / `whisper_group_members` / `whisper_group_events` / `whisper_group_messages` + RLS, `whisper_group_rekey()` (≥3 admins), epoch-ratchet trigger, block-aware RLS guard |
+| 21 | `20261007_whisper_groups_payload_text_fix.sql` | Event `payload` column widened to text (UUID payloads longer than 36 chars broke the original varchar) |
+| 22 | `20261010_whisper_groups_invites.sql` | `whisper_group_invites` + join flow: invite INSERT may only pin `user_id` = caller, join RPC consumes invite + page-scoped event backfill for invitees |
+| 23 | `20261010_whisper_groups_invites_fix.sql` | Invite fix: re-invites after decline create a fresh row (idempotent client_id), join requires the caller to be the invitee |
+| 24 | `20261010_whisper_groups_retire_add.sql` | Retires the legacy direct-`add` event: type allowlist drops `add` (dev rows degrade to their verified prefix), ADD halves member leaves |
+| 25 | `20261010_whisper_groups_disband.sql` | Owner disband: `whisper_group_disband()` + DELETE guard (only disband may remove the group row) + disband event allowlist entry |
+| 26 | `20261010_whisper_groups_receipts_typing.sql` | `whisper_group_receipts` + `whisper_group_typing` tables + RLS + realtime + replica identity |
+| 27 | `20261010_whisper_groups_social.sql` | Final event-type allowlist set (all groups types re-asserted idempotently); disband RLS policy |
+| 28 | `20261011_whisper_groups_adminsend_guard.sql` | `admin_send_enabled` mirror trigger: send rows from non-admins are rejected with `42501` when the group flags admin-only send |
+| 29 | `20261011_whisper_groups_msgkind.sql` | `whisper_group_messages.msg_kind` (`text`/`image`/`poll`) — poll bodies and votes ride the same fan-out table |
+| 30 | `20261011_whisper_groups_reactions_requests.sql` | `whisper_group_reactions` (one emoji per member per message) + `whisper_group_join_requests` (member-initiated join asks, owner/admin approval) |
+| 31 | `20261011_whisper_groups_invitee_history.sql` | Page-scoped event backfill for invitees (pre-join history window for new members) |
+| 32 | `20261017_whisper_push_targets.sql` | UnifiedPush target registry: `whisper_push_targets` (`provider` check `webpush`/`plain`, endpoint, Web Push keys), RLS + owner-only policies; drops `whisper_fcm_tokens` |
+| 33 | `20261018_whisper_stories_lifecycle.sql` | Daily Ups lifecycle: `whisper_stories` / `whisper_story_recipients` / `whisper_story_views` / `whisper_story_cleanup` / `whisper_story_publish_quota` (5/day) + server-authoritative 24h lifetime trigger + `whisper_story_can_read()` RLS (state, expiry, blocks, immutable recipient snapshot) + purge coverage |
+| 34 | `20261018_whisper_group_policy_boundary.sql` | Signed POLICY events: type allowlist gains `policy`; owner-only validation trigger (payload shape, capability vocabulary, member-delegable subset, epoch rules) + ownership-rejection triggers (direct `whisper_groups.created_by` changes require a signed policy event) |
+| 35 | `20261018_whisper_stories_actions.sql` | Daily Ups write plane: `whisper_story_reactions` (one toggleable emoji per viewer, single-row PK) + RPCs `whisper_story_publish` (atomic story + audience + quota, idempotent by `client_id`, audience = current accepted friends minus blocks, hosting handle validated against `whisper_image_ownership` for sweep resolution) / `whisper_story_view` / `whisper_story_react` / `whisper_story_delete` + service-role `whisper_story_cleanup_claim` / `whisper_story_cleanup_result` (lease + SKIP LOCKED + backoff ≤ 20) + realtime publication + replica identity |
 
 Each section keeps its original filename banner for `grep` traceability:
 

@@ -1,7 +1,7 @@
 -- ============================================================================
 -- WHISPER — COMBINED BASELINE MIGRATION (single file)
 -- ============================================================================
--- This file replaces the seventeen chronological migrations
+-- This file replaces the thirty-four chronological migrations
 --   20260820_whisper_realtime_hardening.sql        20260826_whisper_bypass_atomic.sql
 --   20260821_whisper_hardening_fixes.sql           20260827_whisper_review_v2_hardening.sql
 --   20260822_whisper_1_0_hardening.sql             20260828_whisper_destructive_rate_limit.sql
@@ -13,10 +13,20 @@
 --   20261004_whisper_remove_presence_typing.sql
 --   20261005_whisper_signup_discover_hardening.sql
 --   20261006_whisper_rotation_cert_transport.sql
+--   20261007_whisper_groups_phase2.sql             20261010_whisper_groups_disband.sql
+--   20261007_whisper_groups_payload_text_fix.sql   20261010_whisper_groups_receipts_typing.sql
+--   20261010_whisper_groups_invites.sql            20261010_whisper_groups_social.sql
+--   20261010_whisper_groups_invites_fix.sql        20261011_whisper_groups_adminsend_guard.sql
+--   20261010_whisper_groups_retire_add.sql         20261011_whisper_groups_msgkind.sql
+--   20261011_whisper_groups_reactions_requests.sql 20261011_whisper_groups_invitee_history.sql
+--   20261017_whisper_push_targets.sql
+--   20261018_whisper_stories_lifecycle.sql         20261018_whisper_stories_actions.sql
+--   20261018_whisper_group_policy_boundary.sql
 -- squashed VERBATIM in application order.
 -- See whisper-sql-info.md — ALL Whisper SQL changes MUST be merged into this single file.
 --
--- IDEMPOTENT (V6-R5 + P6 + 20261003-P1 + 20261004-RM + 20261005-P2 + 20261006-RCT): SAFE TO RE-RUN AT ANY TIME, on any state:
+-- IDEMPOTENT (V6-R5 + P6 + 20261003-P1 + 20261004-RM + 20261005-P2 + 20261006-RCT
+--             + 20261018-GPB + 20261018-DUA): SAFE TO RE-RUN AT ANY TIME, on any state:
 --   * fresh project → builds the full final schema;
 --   * production   → every statement is guarded or replace-compatible;
 --     superseded intermediate function versions were pruned so no replay ever
@@ -3617,3 +3627,612 @@ $$;
 drop trigger if exists trg_group_reject_direct_owner_change on public.whisper_groups;
 create trigger trg_group_reject_direct_owner_change before update on public.whisper_groups
     for each row execute function public.whisper_group_reject_direct_owner_change();
+
+-- ═══════════════ 20261018_whisper_stories_actions.sql ═
+-- Daily Ups write plane.  The lifecycle section above created the tables and
+-- their read-only RLS; this section introduces the ONLY write routes:
+--
+--   whisper_story_publish      — idempotent, atomic (story + audience + quota
+--                                in one transaction), validates the audience
+--                                against CURRENT accepted friendships and the
+--                                block ledger, and stores one sealed descriptor
+--                                per recipient (never a plaintext caption key).
+--   whisper_story_view         — idempotent view receipt, recorded only for
+--                                recipients of a receipts_enabled story.
+--   whisper_story_react        — one toggleable emoji per viewer per story,
+--                                independent of the receipts toggle.
+--   whisper_story_delete       — poster-side delete: flips state to
+--                                'delete_pending' (RLS hides the story the
+--                                same instant) and queues hosting cleanup.
+--   whisper_story_cleanup_*    — service-role lease/retry registry consumed by
+--                                the whisper-story-sweep edge function, which
+--                                resolves the hosted copy through the
+--                                whisper_image_ownership ledger, deletes it, and
+--                                converges the story to state='deleted'
+--                                (≤ 20 attempts).
+--
+-- RECEIPTS OF TRUST: p_host_object_id is the ImgBB delete capability the
+-- upload edge hands back (the client never receives the raw ImgBB image id).
+-- The sweep NEVER GETs a caller-supplied string; it looks the capability up in
+-- whisper_image_ownership (unique delete_url, written server-side at upload)
+-- and GETs the ledger's own delete_url, so a forged meta row can only point at
+-- a capability Supabase itself recorded.  A missing ledger row is a failure
+-- class, not a silent success.
+--
+-- There is deliberately no pg_cron: the publish RPC runs a bounded watchdog
+-- that backfills missing cleanup rows for expired stories, and the sweep edge
+-- function is invoked opportunistically by clients (and can be wired to any
+-- external scheduler later without a schema change).
+--
+-- Server time is authoritative everywhere (the lifetime trigger above rewrites
+-- created_at/expires_at).  A viewer can never be "denied later" inconsistently:
+-- whisper_story_can_read() re-checks state, expiry, blocks and the recipient
+-- snapshot on every read.
+
+-- The poster re-publishing with the same client_id must not widen the audience:
+-- unique (poster_id, client_id) already covers this; nothing else changes shape.
+-- Hosting state stays in whisper_image_ownership (written by the upload edge);
+-- whisper_stories deliberately stores no delete capability column.
+
+-- ── 1. Reactions ────────────────────────────────────────────────────────────
+-- One row per (story, viewer): a viewer holds at most one emoji.  Visible to
+-- the story poster (always — even with view receipts off, per the §11
+-- server-visibility contract) and to the reaction author.  Stored as the
+-- unicode emoji itself; the whitelist is the wire vocabulary.
+
+create table if not exists public.whisper_story_reactions (
+    story_id uuid not null references public.whisper_stories(id) on delete cascade,
+    user_id uuid not null references auth.users(id) on delete cascade,
+    emoji text not null check (emoji in ('👍', '❤️', '😂', '😮', '😢', '🙏')),
+    created_at timestamptz not null default now(),
+    primary key (story_id, user_id)
+);
+
+create index if not exists whisper_story_reactions_story_idx
+    on public.whisper_story_reactions (story_id, created_at);
+
+alter table public.whisper_story_reactions enable row level security;
+
+-- Poster identity is needed for both policies; SECURITY DEFINER keeps the
+-- sub-select out of recursive whisper_stories RLS evaluation.
+create or replace function public.whisper_story_is_poster(p_story_id uuid, p_user_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+    select exists (
+        select 1 from public.whisper_stories s
+         where s.id = p_story_id and s.poster_id = p_user_id
+    );
+$$;
+
+revoke all on function public.whisper_story_is_poster(uuid, uuid) from public, anon;
+grant execute on function public.whisper_story_is_poster(uuid, uuid) to authenticated;
+
+-- Viewers see only their own rows; the poster sees the full tally.
+drop policy if exists "whisper_story_reactions_select_poster_or_author" on public.whisper_story_reactions;
+create policy "whisper_story_reactions_select_poster_or_author"
+    on public.whisper_story_reactions for select to authenticated
+    using (
+        user_id = auth.uid()
+        or public.whisper_story_is_poster(story_id, auth.uid())
+    );
+
+drop policy if exists "whisper_story_reactions_insert_audience" on public.whisper_story_reactions;
+create policy "whisper_story_reactions_insert_audience"
+    on public.whisper_story_reactions for insert to authenticated
+    with check (
+        user_id = auth.uid()
+        and public.whisper_story_can_read(story_id, auth.uid())
+        and not public.whisper_story_is_poster(story_id, auth.uid())
+    );
+
+-- An author may withdraw their emoji but never edit someone else's.
+drop policy if exists "whisper_story_reactions_delete_author" on public.whisper_story_reactions;
+create policy "whisper_story_reactions_delete_author"
+    on public.whisper_story_reactions for delete to authenticated
+    using (user_id = auth.uid());
+
+-- Poster edits (the RPC upserts the emoji in place on a re-choice) — author-only.
+drop policy if exists "whisper_story_reactions_update_author" on public.whisper_story_reactions;
+create policy "whisper_story_reactions_update_author"
+    on public.whisper_story_reactions for update to authenticated
+    using (user_id = auth.uid())
+    with check (user_id = auth.uid());
+
+-- ── 2. Publishing ───────────────────────────────────────────────────────────
+-- p_recipients wire format: [{"r":"<recipient uuid>","d":"<sealed descriptor>"}].
+-- Everything is validated server-side: current accepted friendship, block ledger
+-- in either direction, descriptor size, and the 5-per-UTC-day quota inside the
+-- same transaction as the story + audience rows (a failed quota never strands
+-- rows, and a successful one always counts exactly once).
+
+create or replace function public.whisper_story_publish(
+    p_client_id uuid,
+    p_host_url text,
+    p_host_object_id text,
+    p_receipts_enabled boolean,
+    p_recipients jsonb,
+    p_client_version_code int
+)
+returns public.whisper_stories
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+    v_caller uuid := auth.uid();
+    v_story public.whisper_stories;
+    v_entry jsonb;
+    v_recipient_id uuid;
+    v_descriptor text;
+begin
+    if v_caller is null then
+        raise exception 'authenticated caller required' using errcode = '42501';
+    end if;
+    if p_client_id is null then
+        raise exception 'client_id required' using errcode = '22023';
+    end if;
+    if p_client_version_code is null or p_client_version_code < 18 then
+        raise exception 'stale client version' using errcode = '42501';
+    end if;
+    if p_host_url is null or p_host_url !~ '^https://[[:alnum:]]' or char_length(p_host_url) > 4096 then
+        raise exception 'invalid hosting metadata' using errcode = '22023';
+    end if;
+    -- p_host_object_id is the delete capability the upload edge returned; the
+    -- sweep resolves the real URL through whisper_image_ownership, so this
+    -- column never has to be a trustworthy URL itself — just a bounded handle.
+    if p_host_object_id is null or char_length(p_host_object_id) not between 1 and 512 then
+        raise exception 'invalid hosting metadata' using errcode = '22023';
+    end if;
+    if p_recipients is null
+       or jsonb_typeof(p_recipients) <> 'array'
+       or jsonb_array_length(p_recipients) > 96 then
+        raise exception 'invalid recipients payload' using errcode = '22023';
+    end if;
+
+    -- Idempotency probe: a retry with the same client_id returns the live story
+    -- without re-counting quota and without touching the audience snapshot.
+    select * into v_story
+      from public.whisper_stories
+     where poster_id = v_caller and client_id = p_client_id;
+    if found then
+        return v_story;
+    end if;
+
+    -- Audience validation.  One pass per entry; duplicates collapse later.
+    for v_entry in select * from jsonb_array_elements(p_recipients) loop
+        if jsonb_typeof(v_entry) <> 'object'
+           or not (v_entry ? 'r') or not (v_entry ? 'd') then
+            raise exception 'invalid recipients payload' using errcode = '22023';
+        end if;
+        v_recipient_id := (v_entry ->> 'r')::uuid;
+        v_descriptor := v_entry ->> 'd';
+        if v_recipient_id is null then
+            raise exception 'invalid recipients payload' using errcode = '22023';
+        end if;
+        if char_length(coalesce(v_descriptor, '')) not between 1 and 32768 then
+            raise exception 'invalid recipients payload' using errcode = '22023';
+        end if;
+        if v_recipient_id = v_caller then
+            continue; -- the poster never needs a descriptor to their own copy
+        end if;
+        if not exists (
+            select 1 from public.friends f
+             where ((f.user_a = v_caller and f.user_b = v_recipient_id)
+                 or (f.user_a = v_recipient_id and f.user_b = v_caller))
+               and f.status = 'accepted'
+        ) then
+            raise exception 'story audience must be current friends' using errcode = '42501';
+        end if;
+        if exists (
+            select 1 from public.whisper_blocks wb
+             where (wb.blocker_id = v_caller and wb.blocked_id = v_recipient_id)
+                or (wb.blocker_id = v_recipient_id and wb.blocked_id = v_caller)
+        ) then
+            raise exception 'story audience must be current friends' using errcode = '42501';
+        end if;
+    end loop;
+
+    insert into public.whisper_stories (
+        poster_id, client_id, host_url, host_object_id,
+        receipts_enabled, state
+    ) values (
+        v_caller, p_client_id, p_host_url, p_host_object_id,
+        coalesce(p_receipts_enabled, false), 'published'
+    )
+    on conflict (poster_id, client_id) do nothing
+    returning * into v_story;
+
+    -- Lost a concurrent race: the winner already published this client_id.
+    if not found then
+        select * into v_story from public.whisper_stories
+         where poster_id = v_caller and client_id = p_client_id;
+        return v_story;
+    end if;
+
+    -- Quota: atomic 5-per-UTC-day cap; the check runs on the ROW being updated.
+    insert into public.whisper_story_publish_quota (poster_id, day, successful_count)
+    values (v_caller, (now() at time zone 'utc')::date, 1)
+    on conflict (poster_id, day) do update
+        set successful_count = public.whisper_story_publish_quota.successful_count + 1
+      where public.whisper_story_publish_quota.successful_count < 5;
+    if not found then
+        raise exception 'quota exceeded' using errcode = '42501';
+    end if;
+
+    -- Audience snapshot: first descriptor per recipient wins.
+    insert into public.whisper_story_recipients (story_id, recipient_id, sealed_descriptor)
+    select v_story.id,
+           (entry ->> 'r')::uuid,
+           entry ->> 'd'
+      from jsonb_array_elements(p_recipients) as entry
+     where (entry ->> 'r')::uuid is distinct from v_caller
+    on conflict (story_id, recipient_id) do nothing;
+
+    -- Housekeeping without pg_cron: prune this poster's stale quota rows and
+    -- backfill missing cleanup registrations for expired stories (bounded).
+    delete from public.whisper_story_publish_quota
+     where poster_id = v_caller and day < (now() at time zone 'utc')::date - 8;
+    insert into public.whisper_story_cleanup (story_id, status)
+    select s.id, 'pending'
+      from public.whisper_stories s
+     where s.expires_at < now() - interval '1 hour'
+       and s.state in ('published', 'delete_pending', 'cleanup_failed')
+       and not exists (select 1 from public.whisper_story_cleanup c where c.story_id = s.id)
+     limit 50
+    on conflict (story_id) do nothing;
+
+    return v_story;
+end;
+$$;
+
+create or replace function public.whisper_story_view(
+    p_story_id uuid,
+    p_client_version_code int
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+    v_caller uuid := auth.uid();
+    v_receipts boolean;
+    v_poster uuid;
+begin
+    if v_caller is null then
+        raise exception 'authenticated caller required' using errcode = '42501';
+    end if;
+    if p_client_version_code is null or p_client_version_code < 18 then
+        raise exception 'stale client version' using errcode = '42501';
+    end if;
+    -- can_read() enforces state, expiry, the block ledger and the audience.
+    if not public.whisper_story_can_read(p_story_id, v_caller) then
+        raise exception 'not a member' using errcode = '42501';
+    end if;
+
+    select receipts_enabled, poster_id into v_receipts, v_poster
+      from public.whisper_stories where id = p_story_id;
+    -- The poster opening their own story is not an audience receipt.
+    if v_poster = v_caller then
+        return true;
+    end if;
+    -- Without receipts the view stays private and unrecorded.
+    if not coalesce(v_receipts, false) then
+        return true;
+    end if;
+
+    insert into public.whisper_story_views (story_id, viewer_id)
+    values (p_story_id, v_caller)
+    on conflict (story_id, viewer_id) do nothing;
+
+    return true;
+end;
+$$;
+
+create or replace function public.whisper_story_react(
+    p_story_id uuid,
+    p_emoji text,
+    p_on boolean,
+    p_client_version_code int
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+    v_caller uuid := auth.uid();
+begin
+    if v_caller is null then
+        raise exception 'authenticated caller required' using errcode = '42501';
+    end if;
+    if p_client_version_code is null or p_client_version_code < 18 then
+        raise exception 'stale client version' using errcode = '42501';
+    end if;
+    if p_emoji is null
+       or p_emoji not in ('👍', '❤️', '😂', '😮', '😢', '🙏') then
+        raise exception 'unknown reaction emoji' using errcode = '22023';
+    end if;
+    if not public.whisper_story_can_read(p_story_id, v_caller) then
+        raise exception 'not a member' using errcode = '42501';
+    end if;
+    if public.whisper_story_is_poster(p_story_id, v_caller) then
+        raise exception 'story reactions are for the audience' using errcode = '42501';
+    end if;
+
+    if coalesce(p_on, false) then
+        insert into public.whisper_story_reactions (story_id, user_id, emoji)
+        values (p_story_id, v_caller, p_emoji)
+        on conflict (story_id, user_id)
+        do update set emoji = excluded.emoji;
+    else
+        delete from public.whisper_story_reactions
+         where story_id = p_story_id and user_id = v_caller and emoji = p_emoji;
+    end if;
+    return true;
+end;
+$$;
+
+create or replace function public.whisper_story_delete(p_story_id uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+    v_caller uuid := auth.uid();
+begin
+    if v_caller is null then
+        raise exception 'authenticated caller required' using errcode = '42501';
+    end if;
+    -- Only the poster may delete; everything else is a silent no (encryption
+    -- keys of other stories are, inviolably, none of the caller's business).
+    perform 1 from public.whisper_stories
+     where id = p_story_id and poster_id = v_caller;
+    if not found then
+        return false;
+    end if;
+
+    -- 'delete_pending' already hides the story from every reader (including
+    -- the poster): whisper_story_can_read() requires state = 'published'.
+    update public.whisper_stories
+       set state = 'delete_pending'
+     where id = p_story_id
+       and state in ('published', 'cleanup_failed', 'delete_pending')
+       and deleted_at is null;
+
+    -- (Re)queue hosting cleanup — a poster retry un-sticks a terminal streak.
+    insert into public.whisper_story_cleanup (story_id, status, next_attempt_at)
+    values (p_story_id, 'pending', now())
+    on conflict (story_id) do update
+        set status = 'pending',
+            attempt_count = 0,
+            next_attempt_at = now(),
+            last_failure_class = null,
+            updated_at = now();
+
+    return true;
+end;
+$$;
+
+-- ── 3. Cleanup registry (service-role only) ─────────────────────────────────
+-- whisper-story-sweep leases work with SKIP LOCKED, deletes the hosted copy via
+-- the stored capability URL, and reports one of three outcomes:
+--   ok              → story converges to state='deleted' (+deleted_at).
+--   failure         → status 'retry' with exponential backoff (≤ 20 attempts).
+--   silent abandon  → the 10-minute lease expires and the row becomes due again.
+-- Terminal rows stop being claimed; a poster-side whisper_story_delete retry
+-- resets them (attempt_count back to 0), so nothing is ever permanently stuck.
+
+create or replace function public.whisper_story_cleanup_claim(
+    p_limit int,
+    p_lease_seconds int
+)
+returns table (
+    story_id uuid,
+    host_url text,
+    host_object_id text,
+    attempt_count int,
+    expires_at timestamptz
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+    v_ids uuid[];
+    v_limit int := 10;
+    v_lease interval := interval '10 minutes';
+begin
+    -- The caller is the edge function running under the service role: any
+    -- authenticated human caller must not be able to lease cleanup work.
+    if auth.uid() is not null then
+        raise exception 'service role only' using errcode = '42501';
+    end if;
+    if p_limit is not null and p_limit between 1 and 25 then
+        v_limit := p_limit;
+    end if;
+    if p_lease_seconds is not null and p_lease_seconds between 30 and 1800 then
+        v_lease := make_interval(secs => p_lease_seconds);
+    end if;
+
+    -- Watchdog: register expired-but-unregistered stories so hygiene never
+    -- depends on a scheduler having run before every failure.
+    insert into public.whisper_story_cleanup (story_id, status)
+    select s.id, 'pending'
+      from public.whisper_stories s
+     where s.expires_at < now() - interval '1 hour'
+       and s.state in ('published', 'delete_pending', 'cleanup_failed')
+       and not exists (select 1 from public.whisper_story_cleanup c where c.story_id = s.id)
+     limit 50
+    on conflict (story_id) do nothing;
+
+    -- Lock then lease: the row locks hold for the rest of this transaction,
+    -- so concurrent sweeps serialise here instead of double-deleting.
+    select coalesce(array_agg(due.story_id), '{}') into v_ids
+      from (
+        select d.story_id
+          from public.whisper_story_cleanup d
+          join public.whisper_stories st on st.id = d.story_id
+         where d.status in ('pending', 'retry', 'in_progress')
+           and d.attempt_count < 20
+           and d.next_attempt_at <= now()
+           and (st.state in ('delete_pending', 'cleanup_failed') or st.expires_at <= now())
+         order by d.next_attempt_at
+         for update of d skip locked
+         limit v_limit
+      ) due;
+
+    return query
+    with leased as (
+        update public.whisper_story_cleanup c
+           set status = 'in_progress',
+               attempt_count = c.attempt_count + 1,
+               next_attempt_at = now() + v_lease,
+               updated_at = now()
+         where c.story_id = any(v_ids)
+        returning c.story_id, c.attempt_count
+    )
+    select s.id,
+           s.host_url,
+           s.host_object_id,
+           leased.attempt_count,
+           s.expires_at
+      from leased
+      join public.whisper_stories s on s.id = leased.story_id;
+end;
+$$;
+
+create or replace function public.whisper_story_cleanup_result(
+    p_story_id uuid,
+    p_ok boolean,
+    p_failure_class text
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+    v_attempts int;
+begin
+    if auth.uid() is not null then
+        raise exception 'service role only' using errcode = '42501';
+    end if;
+    if p_story_id is null then
+        return false;
+    end if;
+
+    select attempt_count into v_attempts
+      from public.whisper_story_cleanup
+     where story_id = p_story_id
+     for update;
+    if not found then
+        return false;
+    end if;
+
+    if coalesce(p_ok, false) then
+        update public.whisper_stories
+           set state = 'deleted',
+               deleted_at = now()
+         where id = p_story_id
+           and deleted_at is null;
+        update public.whisper_story_cleanup
+           set status = 'complete',
+               next_attempt_at = now(),
+               last_failure_class = null,
+               updated_at = now()
+         where story_id = p_story_id;
+        -- Prune long-complete rows so the registry stays tiny.
+        delete from public.whisper_story_cleanup
+         where status = 'complete' and updated_at < now() - interval '7 days';
+        return true;
+    end if;
+
+    if coalesce(v_attempts, 0) >= 20 then
+        update public.whisper_story_cleanup
+           set status = 'terminal',
+               last_failure_class = left(coalesce(p_failure_class, 'unknown'), 64),
+               next_attempt_at = now(),
+               updated_at = now()
+         where story_id = p_story_id;
+        return false;
+    end if;
+
+    update public.whisper_story_cleanup
+       set status = 'retry',
+           last_failure_class = left(coalesce(p_failure_class, 'unknown'), 64),
+           next_attempt_at = now()
+               + least(power(2, greatest(coalesce(v_attempts, 1), 1)) * interval '15 minutes',
+                       interval '6 hours'),
+           updated_at = now()
+     where story_id = p_story_id;
+    return false;
+end;
+$$;
+
+-- ── 4. Grants + realtime wiring ─────────────────────────────────────────────
+revoke all on function public.whisper_story_publish(uuid, text, text, boolean, jsonb, int)
+    from public, anon;
+grant execute on function public.whisper_story_publish(uuid, text, text, boolean, jsonb, int)
+    to authenticated;
+
+revoke all on function public.whisper_story_view(uuid, int) from public, anon;
+grant execute on function public.whisper_story_view(uuid, int) to authenticated;
+
+revoke all on function public.whisper_story_react(uuid, text, boolean, int)
+    from public, anon;
+grant execute on function public.whisper_story_react(uuid, text, boolean, int)
+    to authenticated;
+
+revoke all on function public.whisper_story_delete(uuid) from public, anon;
+grant execute on function public.whisper_story_delete(uuid) to authenticated;
+
+revoke all on function public.whisper_story_cleanup_claim(int, int)
+    from public, anon, authenticated;
+grant execute on function public.whisper_story_cleanup_claim(int, int) to service_role;
+
+revoke all on function public.whisper_story_cleanup_result(uuid, boolean, text)
+    from public, anon, authenticated;
+grant execute on function public.whisper_story_cleanup_result(uuid, boolean, text) to service_role;
+
+-- The story plane rides Postgres Changes like groups do: recipients receive
+-- their sealed descriptors (INSERT), the poster receives receipts and reactions,
+-- and replica identity full lets DELETE/UPDATE events carry the old row so the
+-- client can mirror removals without a follow-up SELECT.
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'whisper_stories'
+  ) then
+    alter publication supabase_realtime add table public.whisper_stories;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'whisper_story_recipients'
+  ) then
+    alter publication supabase_realtime add table public.whisper_story_recipients;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'whisper_story_views'
+  ) then
+    alter publication supabase_realtime add table public.whisper_story_views;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'whisper_story_reactions'
+  ) then
+    alter publication supabase_realtime add table public.whisper_story_reactions;
+  end if;
+end $$;
+
+alter table public.whisper_stories replica identity full;
+alter table public.whisper_story_recipients replica identity full;
+alter table public.whisper_story_views replica identity full;
+alter table public.whisper_story_reactions replica identity full;
