@@ -127,6 +127,10 @@ class WhisperRepository @Inject constructor(
     // (master ON), every network entry point below aborts before touching
     // Supabase — sandbox threads are RAM fixtures in FakeWhisperSandbox.
     private val settingsRepository: com.frerox.toolz.data.settings.SettingsRepository,
+    // Phase-2 groups self leg: sender-to-self frames for group history (the edge
+    // refuses self-bundles, so the self leg rides a dedicated per-install
+    // anchor — see [WhisperSelfLegCrypto]).
+    private val selfLeg: WhisperSelfLegCrypto,
 ) {
     internal companion object {
         const val MAX_MESSAGE_CHARS = 8_192
@@ -332,6 +336,42 @@ class WhisperRepository @Inject constructor(
         ProtocolDiagnostics.increment("v3.sealFail")
         android.util.Log.w("WhisperRepo", "v3 seal failed — fail-closed: no silent downgrade here", e)
         null
+    }
+
+    // ── Self-addressed group frames (groups self leg) ─────────────────────────
+    // The sender is always a fan-out target: their own leg comes back to THIS
+    // device and is what renders their own history from the server rows. The
+    // 1:1 ratchet path cannot serve it (the edge refuses self-bundles), so the
+    // self leg rides the dedicated per-install anchor in [WhisperSelfLegCrypto]
+    // — a degenerate one-frame session, re-readable deterministically forever,
+    // keyed to this install's Keystore like every other private half.
+    // Callers must treat null like a failed peer leg; there is no envelope
+    // fallback for group rows (fail-closed fan-out).
+
+    /** Seals a group frame to MYSELF. Returns (v3-frame-json, "v3") like [sealWithRatchet]. */
+    internal suspend fun sealGroupSelfFrame(
+        meId: String,
+        plaintext: String,
+    ): Pair<String, String>? {
+        val out = selfLeg.seal(plaintext.toByteArray(Charsets.UTF_8), meId, adBytes(meId, meId))
+        if (out == null) {
+            ProtocolDiagnostics.increment("v3.selfSealFail")
+            android.util.Log.w("WhisperRepo", "self-leg seal failed — group frame fan-out fails closed")
+            return null
+        }
+        ProtocolDiagnostics.increment("v3.selfSealed")
+        return out.first to IV_V3
+    }
+
+    /** Opens a self-addressed group frame (only sensible for senderId == meId). */
+    internal fun openGroupSelfFrame(meId: String, rawContent: String): String? {
+        val opened = selfLeg.open(rawContent, meId, adBytes(meId, meId))
+        if (opened == null) {
+            ProtocolDiagnostics.increment("v3.selfLocked")
+            return null
+        }
+        ProtocolDiagnostics.increment("v3.selfOpened")
+        return opened.decodeToString()
     }
 
     /** Phase-1A: true once a frame from THIS session opened via the pure ratchet path. */

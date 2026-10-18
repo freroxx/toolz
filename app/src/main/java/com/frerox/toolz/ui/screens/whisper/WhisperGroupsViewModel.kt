@@ -42,6 +42,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -150,6 +151,7 @@ class WhisperGroupsViewModel @Inject constructor(
                 val freshInvites = repository.myGroupInvites().getOrNull().orEmpty()
                 pingNewInvites(freshInvites)
                 lastMemberships = memberships
+                quietResyncAttempts = 0
                 lastFriendNames = friends.associate { it.id to it.effectiveName }
                 lastGroups = fresh
                 watchGroupLogs()
@@ -165,15 +167,34 @@ class WhisperGroupsViewModel @Inject constructor(
                 // Previews + pictures resolve off the main sync path (decrypts).
                 refreshPreviews(fresh)
             }.onFailure { e ->
+                // UX rule (user round): an EMPTY list must never surface the sync
+                // banner — for someone with no groups the honest state is the
+                // friendly "nothing here yet" CTA, not "couldn't sync". Real faults
+                // still surface exactly where they land (chat/hub loads); with
+                // cached groups the cached render already stays error-free.
                 _uiState.update {
-                    it.copy(
-                        invites = invites,
-                        friends = friends,
-                        isLoading = false,
-                        error = if (it.groups.isEmpty()) err(e) else null,
-                    )
+                    it.copy(invites = invites, friends = friends, isLoading = false, error = null)
                 }
+                // One quiet self-heal so an offline app-open converges on its own:
+                // the retry backs off and stops counting fresh failures only.
+                if (e != null) scheduleQuietResync()
             }
+        }
+    }
+
+    private var quietResyncAttempts = 0
+
+    /**
+     * calm-empty companion: after a failed [load], retry with a growing backoff
+     * (30s → 120s cap) until the next success resets the counter. Deliberately
+     * SILENT — the calm empty state stays calm; this only exists so a transient
+     * offline app-open heals itself.
+     */
+    private fun scheduleQuietResync() {
+        quietResyncAttempts++
+        viewModelScope.launch {
+            delay(minOf(30_000L * quietResyncAttempts, 120_000L))
+            load()
         }
     }
 

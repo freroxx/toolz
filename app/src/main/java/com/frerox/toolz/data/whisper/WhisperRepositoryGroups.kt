@@ -1845,7 +1845,11 @@ private suspend fun WhisperRepository.sealAndPublishContent(
     val failed = mutableListOf<String>()
     for (memberId in targets) {
         val frame = buildGroupFrameBody(groupId, m.epoch, System.currentTimeMillis(), frameBody)
-        val sealed = sealWithRatchet(me, memberId, frame)
+        // The self leg cannot ride the 1:1 ratchet path (the edge refuses
+        // self-bundles); it seals through the per-install self-leg anchor so
+        // solo-owner groups and same-device alt-account groups send at all.
+        val sealed = if (memberId == me) sealGroupSelfFrame(me, frame)
+        else sealWithRatchet(me, memberId, frame)
         if (sealed == null) {
             failed.add(memberId)
         } else {
@@ -1959,7 +1963,11 @@ private suspend fun WhisperRepository.fetchGroupMessagesInner(
             val body = decodeGroupRow(row.content) ?: return@mapNotNull null
             if (body.g != groupId || body.e != row.epoch) return@mapNotNull null
             val frame = body.frames[me] ?: return@mapNotNull null
-            val inner = openV3Frame(frame, row.senderId, row.senderId, me) ?: return@mapNotNull null
+            // Own rows open through the self-leg anchor (the ratchet path has no
+            // session with myself — see [WhisperSelfLegCrypto]).
+            val inner = (if (row.senderId == me) openGroupSelfFrame(me, frame)
+            else openV3Frame(frame, row.senderId, row.senderId, me))
+                ?: return@mapNotNull null
             val opened = openGroupFrameBody(groupId, row.epoch, inner) ?: return@mapNotNull null
             val content = parseGroupContentBody(opened)
             WhisperGroupChatMessage(
@@ -2424,7 +2432,9 @@ private suspend fun WhisperRepository.publishPictureFrames(
     val failed = mutableListOf<String>()
     for (memberId in m.members.keys.sorted()) {
         val frame = buildGroupFrameBody(groupId, m.epoch, System.currentTimeMillis(), keyB64)
-        val out = sealWithRatchet(me, memberId, frame)
+        // Self leg for picture-key frames too — same reason as the chat lane.
+        val out = if (memberId == me) sealGroupSelfFrame(me, frame)
+        else sealWithRatchet(me, memberId, frame)
         if (out == null) failed.add(memberId) else frames[memberId] = out.first
     }
     require(failed.isEmpty()) {
@@ -2456,7 +2466,10 @@ private suspend fun WhisperRepository.openGroupPictureInner(groupId: String): Re
     val latest = rows.maxByOrNull { it.seq } ?: return@runCatching null
     val (url, frames) = parseGroupPicturePayload(latest.payload) ?: error("Bad picture data.")
     val frame = frames[me] ?: return@runCatching null
-    val inner = openV3Frame(frame, latest.actor, latest.actor, me) ?: error("Could not open the picture key.")
+    // A picture set by me opens my self-leg frame (no ratchet session with self).
+    val inner = (if (latest.actor == me) openGroupSelfFrame(me, frame)
+    else openV3Frame(frame, latest.actor, latest.actor, me))
+        ?: error("Could not open the picture key.")
     val keyB64 = openGroupFrameBody(groupId, latest.epoch, inner) ?: error("Could not open the picture key.")
     val key = runCatching { java.util.Base64.getDecoder().decode(keyB64) }.getOrNull()
         ?: error("Bad picture key.")

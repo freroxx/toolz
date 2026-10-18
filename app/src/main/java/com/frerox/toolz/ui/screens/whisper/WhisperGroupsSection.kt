@@ -755,7 +755,7 @@ internal fun isGroupJoinIdValid(raw: String): Boolean {
     return id.isNotBlank() && runCatching { java.util.UUID.fromString(id) }.isSuccess
 }
 
-/** Join-by-ID: paste a group id (or scanned QR payload) to request access. */
+/** Join-by-ID: paste a group id (share-sheet payload) to request access. */
 @Composable
 private fun JoinByIdSheet(onDismiss: () -> Unit, onRequest: (String) -> Unit) {
     var id by remember { mutableStateOf("") }
@@ -779,6 +779,14 @@ private fun JoinByIdSheet(onDismiss: () -> Unit, onRequest: (String) -> Unit) {
                     { Text(stringResource(R.string.st_Whisper_Groups_InvalidId)) }
                 } else null,
                 modifier = Modifier.fillMaxWidth(),
+            )
+            // The #1 usability gap of this flow: ids come from ANOTHER member's
+            // group profile (Share → Copy ID). Without this, "Join with ID"
+            // looks like it leads nowhere.
+            Text(
+                stringResource(R.string.st_Whisper_Groups_JoinByIdHelp),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),

@@ -85,18 +85,19 @@ import androidx.compose.material3.Badge
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -140,6 +141,7 @@ import com.frerox.toolz.data.whisper.WhisperRepository
 import com.frerox.toolz.ui.components.ExpressiveCard
 import com.frerox.toolz.ui.components.ExpressiveTypingDots
 import com.frerox.toolz.ui.components.ExpressiveLinearProgressIndicator
+import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.components.ToolzExpressiveIconButton
 import com.frerox.toolz.ui.components.ToolzExpressiveIconToggleButton
@@ -188,51 +190,99 @@ internal fun GroupChatTopBar(
     onBack: () -> Unit,
     onOpenInfo: () -> Unit,
 ) {
-    val scheme = MaterialTheme.colorScheme
-    val colors = TopAppBarDefaults.topAppBarColors(containerColor = scheme.surfaceContainerLow)
+    val haptic = rememberToolzHapticFeedback()
     AnimatedContent(
         targetState = searching,
         transitionSpec = { fadeIn(tween(160)) togetherWith fadeOut(tween(120)) },
         label = "chatTopBar",
     ) { isSearch ->
         if (isSearch) {
-            TopAppBar(
+            // Search state mirrors the 1:1 chat: circular translucent field in
+            // the title slot, filled-circle exit button on the nav slot.
+            ExpressiveTopAppBar(
                 title = {
-                    GroupSearchField(
+                    OutlinedTextField(
                         value = searchQuery,
                         onValueChange = onSearchQueryChange,
-                        placeholder = stringResource(R.string.st_Whisper_Groups_SearchMessagesHint),
-                        autoFocus = true,
+                        placeholder = {
+                            Text(
+                                stringResource(R.string.st_Whisper_Groups_SearchMessagesHint),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                            )
+                        },
+                        singleLine = true,
+                        shape = CircleShape,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 42.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
+                            focusedBorderColor = Color.Transparent,
+                            unfocusedBorderColor = Color.Transparent,
+                        ),
+                        trailingIcon = {
+                            if (searchQuery.isNotEmpty()) {
+                                IconButton(onClick = { onSearchQueryChange("") }) {
+                                    Icon(Icons.Rounded.Close, stringResource(R.string.cd_Whisper_ClearSearch), modifier = Modifier.size(20.dp))
+                                }
+                            }
+                        },
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = onSearchToggle) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = GroupCd.back())
+                    FilledIconButton(
+                        onClick = {
+                            haptic.click()
+                            onSearchToggle()
+                        },
+                        modifier = Modifier.size(40.dp),
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                            contentColor = MaterialTheme.colorScheme.onSurface,
+                        ),
+                        shape = CircleShape,
+                    ) {
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(R.string.cd_Whisper_ExitSearch))
                     }
                 },
-                colors = colors,
             )
         } else {
             var menu by remember { mutableStateOf(false) }
-            TopAppBar(
+            ExpressiveTopAppBar(
                 title = {
                     Row(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(16.dp))
-                            .clickable(onClickLabel = GroupCd.info(), onClick = onOpenInfo)
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable(onClickLabel = GroupCd.info(), onClick = {
+                                haptic.click()
+                                onOpenInfo()
+                            })
                             .padding(horizontal = 4.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        GroupAvatar(name = title, groupId = groupId, size = 40.dp)
-                        Spacer(Modifier.width(12.dp))
+                        GroupAvatar(name = title, groupId = groupId, size = 38.dp)
                         Column {
-                            Text(
-                                title,
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                Text(
+                                    title,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                if (muted) {
+                                    Icon(
+                                        Icons.Rounded.NotificationsOff,
+                                        contentDescription = stringResource(R.string.cd_Whisper_Muted),
+                                        tint = MaterialTheme.colorScheme.outline,
+                                        modifier = Modifier.size(14.dp),
+                                    )
+                                }
+                            }
                             AnimatedContent(
                                 targetState = typing ?: subtitle.orEmpty(),
                                 transitionSpec = { fadeIn(tween(160)) togetherWith fadeOut(tween(120)) },
@@ -241,8 +291,8 @@ internal fun GroupChatTopBar(
                                 if (text.isNotBlank()) {
                                     Text(
                                         text,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = if (typing != null) scheme.primary else scheme.onSurfaceVariant,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (typing != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                         fontWeight = if (typing != null) FontWeight.SemiBold else FontWeight.Normal,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
@@ -253,16 +303,25 @@ internal fun GroupChatTopBar(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = GroupCd.back())
+                    ToolzExpressiveIconButton(onClick = {
+                        haptic.click()
+                        onBack()
+                    }) {
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(R.string.cd_Back))
                     }
                 },
                 actions = {
-                    IconButton(onClick = onSearchToggle) {
+                    ToolzExpressiveIconButton(onClick = {
+                        haptic.click()
+                        onSearchToggle()
+                    }) {
                         Icon(Icons.Rounded.Search, contentDescription = GroupCd.search())
                     }
                     Box {
-                        IconButton(onClick = { menu = true }) {
+                        ToolzExpressiveIconButton(onClick = {
+                            haptic.click()
+                            menu = true
+                        }) {
                             Icon(Icons.Rounded.MoreVert, contentDescription = GroupCd.more())
                         }
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -296,7 +355,6 @@ internal fun GroupChatTopBar(
                         }
                     }
                 },
-                colors = colors,
             )
         }
     }
