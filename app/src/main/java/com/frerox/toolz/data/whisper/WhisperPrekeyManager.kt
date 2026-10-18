@@ -57,6 +57,19 @@ class WhisperPrekeyManager @Inject constructor(
     @Volatile var lastPublishAttemptAtMs: Long = 0L
         private set
 
+    /**
+     * The X509 of the protocol signer last SUCCESSFULLY published to
+     * identity_binding — the prefs write happens only after the profiles
+     * UPDATE returns (§ ensurePublished). Null when no binding publish has
+     * completed on this install yet.
+     *
+     * Group-event publishers must refuse to sign until this matches the
+     * local signer: an event row would otherwise carry an UNPUBLISHED cert
+     * that every verifier (the author on resync included) fails closed —
+     * a self-inflicted log poison the local signature self-check cannot see.
+     */
+    fun publishedSignerCert(): String? = prefs.getString(KEY_PUBLISHED_SIGNER, null)
+
     // V6-R3 FIX (field report "must rotate keys on both devices after restart"):
     // this map used to be RAM-ONLY — every process death lost every SPK/OPK private
     // half, so peers holding an earlier bundle could never complete handshakes (and a

@@ -4289,12 +4289,16 @@ as $$
 declare
     v_signer text := new.identity_binding ->> 'signer';
 begin
+    -- profiles' PK is `id` (the auth uid) — other whisper tables'
+    -- `user_id` naming does NOT exist on profiles. Using new.user_id
+    -- here would throw "record new has no field user_id" on every
+    -- identity publish and brick the write.
     if v_signer is not null and length(v_signer) > 0 and not exists (
         select 1 from public.whisper_group_signer_history h
-        where h.user_id = new.user_id and h.signer_cert = v_signer
+        where h.user_id = new.id and h.signer_cert = v_signer
     ) then
         insert into public.whisper_group_signer_history (user_id, signer_cert)
-        values (new.user_id, v_signer);
+        values (new.id, v_signer);
     end if;
     return new;
 end;
@@ -4308,8 +4312,9 @@ create trigger whisper_archive_group_signer
 
 -- One-time backfill so already-published bindings are archived even if they
 -- are never republished (idempotent; runs on every SQL re-run).
+-- profiles PK: `id` (auth uid). See the trigger note above.
 insert into public.whisper_group_signer_history (user_id, signer_cert)
-select p.user_id, p.identity_binding ->> 'signer'
+select p.id, p.identity_binding ->> 'signer'
 from public.profiles p
 where p.identity_binding ->> 'signer' is not null
 on conflict (user_id, signer_cert) do nothing;

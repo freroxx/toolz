@@ -1331,6 +1331,31 @@ private suspend fun WhisperRepository.publishGroupEvent(
     var attemptSeq = seq
     var attemptEpoch = epoch
     var lastError: Throwable? = null
+    // Third-pass (review): publishedness gate, before any network attempt.
+    // The in-loop self-check proves sig integrity only — the row cert must
+    // additionally be a key the account PUBLISHED (identity_binding, what
+    // the archive trigger records). A keystore repair or a rotation that
+    // crashed between keygen and publish would otherwise let us sign with
+    // an unpublished key: every verifier (the author on resync included)
+    // fails it closed and the log looks poisoned. Heal: one best-effort
+    // republish (ensurePublished rewrites the binding, chained by ROTv2
+    // when the signer changed), then fail closed while still unpublished.
+    // Content-free log.
+    val gateCert = crypto.protocolSigningPublicKeyBase64()
+    if (gateCert != null) {
+        val publishedCert = prekeyManager.publishedSignerCert()
+        if (publishedCert == null || publishedCert != gateCert) {
+            runCatching { prekeyManager.ensurePublished(myId) }
+            val healed = prekeyManager.publishedSignerCert() to crypto.protocolSigningPublicKeyBase64()
+            if (healed.first == null || healed.second == null || healed.first != healed.second) {
+                android.util.Log.e(
+                    "WhisperGroups",
+                    "publish blocked: signer not published (publishedLen=${healed.first?.length ?: -1} localLen=${healed.second?.length ?: -1})",
+                )
+                error("Signing key is not published yet — connect to the internet and reopen Whisper to republish your identity, then try again.")
+            }
+        }
+    }
     repeat(3) { attempt ->
         val signBytes = groupEventSignBytes(groupId, attemptSeq, attemptEpoch, type, actor, payload)
         val sig = crypto.signProtocol(signBytes)
@@ -1348,6 +1373,16 @@ private suspend fun WhisperRepository.publishGroupEvent(
                 "publish self-check failed type=${type.wire} seq=$attemptSeq " +
                     "sha8=${groupSignBytesSha8(signBytes)} sigLen=${sig.length} " +
                     "keyLen=${selfKey?.length ?: -1}",
+            )
+            error("Group event failed its own signature check (local signing key mismatch).")
+        }
+        // The signed cert must still be the one the gate above verified as
+        // published — a mid-publish signer change would create a row with an
+        // unpublished cert (same silent-poison class, caught here instead).
+        if (selfKey != gateCert) {
+            android.util.Log.e(
+                "WhisperGroups",
+                "publish signer changed mid-publish type=${type.wire} seq=$attemptSeq",
             )
             error("Group event failed its own signature check (local signing key mismatch).")
         }
@@ -1416,6 +1451,8 @@ fun mapGroupError(raw: String?): Int? {
             com.frerox.toolz.R.string.st_Whisper_Groups_ErrNotMember
         "could not reach" in msg ->
             com.frerox.toolz.R.string.st_Whisper_Groups_ErrUnreachable
+        "signing key is not published" in msg ->
+            com.frerox.toolz.R.string.st_Whisper_Groups_ErrSignerUnpublished
         "could not start your secure session" in msg ->
             com.frerox.toolz.R.string.st_Whisper_Groups_ErrUnreachable
         "couldn't sync your groups" in msg || "timed out" in msg ->
