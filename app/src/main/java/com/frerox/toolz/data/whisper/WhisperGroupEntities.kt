@@ -65,6 +65,10 @@ data class WhisperGroupEventEntity(
     val actor: String,
     val payload: String,
     val adminSig: String,
+    /** 20261019 reinstall-proof groups: the signer cert on the SERVER row,
+     *  cached so re-verification of the log survives restarts (null for
+     *  rows cached before this column existed). */
+    val signerCert: String?,
     val createdAtMs: Long,
 )
 

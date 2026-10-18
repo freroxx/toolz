@@ -207,6 +207,7 @@ class WhisperSessionFactory @Inject constructor(
             opkPubB64 = bundle.opk?.public_key,
             identityIkB64 = binding.ik,
             signerX509B64 = binding.signer,
+            extraSignerHistoryB64 = bundle.signer_history,
         )
     }.onFailure {
         ProtocolDiagnostics.increment("x3dh.bundleVerifyFail")
@@ -221,7 +222,20 @@ class WhisperSessionFactory @Inject constructor(
         val identityIkB64: String,
         /** Phase-2 groups: the peer's protocol signer (verifies group admin_sig). */
         val signerX509B64: String,
-    )
+        /** Phase-2 (reinstall-proof groups): every signer the peer's account has
+         *  ever published (archive trigger on identity_binding). Group events
+         *  carry the signer cert ON the row and must belong to THIS set —
+         *  current cert first. A reinstall keeps old certs here, so a new
+         *  install still verifies the group's full history (the account, not
+         *  the device, owns the log). Null bundle field ⇒ current only. */
+        val extraSignerHistoryB64: List<String>? = null,
+    ) {
+        /** Current signer first, archived signers after; blank dropped, deduped. */
+        val signerCertsB64: List<String> =
+            (listOf(signerX509B64) + (extraSignerHistoryB64 ?: emptyList()))
+                .filter { it.isNotBlank() }
+                .distinct()
+    }
 
     @Serializable
     internal data class BundleDto(
@@ -234,6 +248,9 @@ class WhisperSessionFactory @Inject constructor(
         // fresh bundle signer to a pinned one.
         @SerialName("rotation_cert") val rotation_cert: String? = null,
         @SerialName("rotation_counter") val rotation_counter: Long? = null,
+        // 20261019 account signer history (reinstall-proof group events):
+        // every signer the ACCOUNT ever published — see VerifiedBundle.
+        @SerialName("signer_history") val signer_history: List<String>? = null,
     )
 
     @Serializable

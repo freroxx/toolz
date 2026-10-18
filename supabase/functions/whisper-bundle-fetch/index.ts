@@ -6,6 +6,8 @@
 // POST { account: "<uuid>" }
 // -> {
 //      identity_binding: {...}|null,
+//      signer_history: [<signer cert b64>...] — every signer the account
+//        ever published (archive trigger); group events verify against it,
 //      spk: { kid, public_key, signature },
 //      opk: { kid, public_key } | null
 //    }
@@ -236,6 +238,18 @@ serve(async (request) => {
       .eq("id", account)
       .single();
 
+    // Every signer this account ever published (20261019 archive
+    // trigger). Group events carry the signer cert ON the row and
+    // verify it against THIS set — that is what lets a reinstall
+    // (new device key, old private key gone) still replay a group's
+    // full history. Public-key material, served like the binding.
+    const { data: histRows } = await admin
+      .from("whisper_group_signer_history")
+      .select("signer_cert")
+      .eq("user_id", account)
+      .order("first_seen", { ascending: false })
+      .limit(20);
+
     // Signed prekey: most recent SPK.
     const { data: spks } = await admin
       .from("whisper_prekeys")
@@ -275,6 +289,7 @@ serve(async (request) => {
       identity_binding: profile?.identity_binding ?? null,
       rotation_cert: profile?.rotation_cert ?? null,
       rotation_counter: profile?.rotation_counter ?? null,
+      signer_history: (histRows ?? []).map((r) => r.signer_cert),
       spk: spks[0],
       opk,
     });

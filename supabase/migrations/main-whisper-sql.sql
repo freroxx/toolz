@@ -4236,3 +4236,86 @@ alter table public.whisper_stories replica identity full;
 alter table public.whisper_story_recipients replica identity full;
 alter table public.whisper_story_views replica identity full;
 alter table public.whisper_story_reactions replica identity full;
+
+
+-- ═══════════════ 20261019_whisper_signer_history.sql ═══════════════
+-- 20261019 — Account-owned signer history (reinstall-proof group events)
+-- WHY (second-pass review, §15.4): group events are signed by the
+--   per-install protocol signer. A reinstall (new phone — ROUTINE) destroys
+--   the old keystore key with no way to sign an ROTv2 chain (the old
+--   private key is gone), so the actor's OLD signatures could never verify
+--   on the new install and the group failed closed FOR THE CREATOR. The
+--   group belongs to the ACCOUNT, not the device, so the trust root for
+--   event verification moves to the account:
+--   - every signer the account ever PUBLISHED is archived server-side
+--     (public-key material only — the same certs whisper-bundle-fetch
+--     already serves), and
+--   - each event row now carries the signer cert that made its admin_sig.
+--   Verification = signature under the row cert, and the row cert must be
+--   a member of the actor's published signer set. The server cannot forge
+--   events (signatures cover the full body and it holds no private keys);
+--   the set pins which keys were ever legitimately the account's.
+-- NOTE: verifier fall-back for rows WITHOUT signer_cert keeps the old
+--   current-bundle-only behavior (pre-1.1.7 rows only — groups were not
+--   publicly shipped before this release).
+
+create table if not exists public.whisper_group_signer_history (
+    user_id     uuid not null references auth.users (id) on delete cascade,
+    signer_cert text not null,
+    first_seen  timestamptz not null default now(),
+    primary key (user_id, signer_cert)
+);
+comment on table public.whisper_group_signer_history is
+  'Every protocol signer the account ever published in identity_binding (archived by trigger). Public-key material only. INSERT-only; clients read their OWN rows; peers read via whisper-bundle-fetch (service role).';
+
+alter table public.whisper_group_signer_history enable row level security;
+drop policy if exists "whisper signer history self read" on public.whisper_group_signer_history;
+create policy "whisper signer history self read"
+    on public.whisper_group_signer_history
+    for select to authenticated
+    using (user_id = auth.uid());
+-- Deliberately NO insert/update/delete policy: rows are written ONLY by the
+-- archive trigger (security definer) or service role. A stolen client
+-- session token cannot mint signer rows directly.
+
+-- Archive on the same client write that publishes a new identity binding.
+-- Covers insert (first publish) and update (rotation / reinstall republish).
+create or replace function public.whisper_archive_group_signer()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+    v_signer text := new.identity_binding ->> 'signer';
+begin
+    if v_signer is not null and length(v_signer) > 0 and not exists (
+        select 1 from public.whisper_group_signer_history h
+        where h.user_id = new.user_id and h.signer_cert = v_signer
+    ) then
+        insert into public.whisper_group_signer_history (user_id, signer_cert)
+        values (new.user_id, v_signer);
+    end if;
+    return new;
+end;
+$$;
+
+drop trigger if exists whisper_archive_group_signer on public.profiles;
+create trigger whisper_archive_group_signer
+    before insert or update of identity_binding
+    on public.profiles
+    for each row execute function public.whisper_archive_group_signer();
+
+-- One-time backfill so already-published bindings are archived even if they
+-- are never republished (idempotent; runs on every SQL re-run).
+insert into public.whisper_group_signer_history (user_id, signer_cert)
+select p.user_id, p.identity_binding ->> 'signer'
+from public.profiles p
+where p.identity_binding ->> 'signer' is not null
+on conflict (user_id, signer_cert) do nothing;
+
+-- The per-event signer: which key made admin_sig, stored ON the row.
+alter table public.whisper_group_events add column if not exists signer_cert text;
+
+-- ═══════════════ end 20261019_whisper_signer_history.sql ═══════════════
+

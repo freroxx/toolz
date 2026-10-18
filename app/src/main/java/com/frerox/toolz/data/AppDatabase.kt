@@ -158,7 +158,12 @@ import com.frerox.toolz.data.purgeshot.PurgeShotEntity
     // descriptors and lifecycle metadata; see MIGRATION_62_63 in DatabaseModule.
     // 64: whisper_outbox.groupMsgKind keeps queued group legs' row kind through
     // retries (see MIGRATION_63_64 in DatabaseModule).
-    version = 64,
+    // Reinstall-proof groups (65): whisper_group_events_local gains nullable
+    // signerCert — the cached copy of the server row's signer cert so the
+    // warm-device log re-verification uses the SAME key the event was
+    // published with (creator reinstall keeps verifying history; see
+    // MIGRATION_64_65 in DatabaseModule). Purely additive.
+    version = 65,
     // H-10 FIX (reviewwhisper.md): schemas are now exported to app/schemas (see
     // build.gradle.kts room.schemaLocation). Every future bump MUST ship a Migration —
     // the DatabaseModule comment documents this contract too.

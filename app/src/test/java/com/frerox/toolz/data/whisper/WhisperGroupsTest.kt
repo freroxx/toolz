@@ -34,9 +34,9 @@ class WhisperGroupsTest {
     /** Stub verifier: only the literal "ok" signature passes. */
     private val verify: (ByteArray, String, String) -> Boolean =
         { _, sig, _ -> sig == "ok" }
-    private val keys: (String) -> String? = { if (it == admin) adminKey else null }
+    private val keys: (String) -> List<String> = { if (it == admin) listOf(adminKey) else emptyList() }
     /** Accepts every actor's key (JOIN/DECLINE self-signatures in tests). */
-    private val keys2all: (String) -> String? = { "KEY" }
+    private val keys2all: (String) -> List<String> = { listOf("KEY") }
 
     private fun ev(
         seq: Long,
@@ -45,9 +45,11 @@ class WhisperGroupsTest {
         actor: String,
         payload: String,
         sig: String = "ok",
+        signerCert: String? = null,
     ) = WhisperGroupEvent(
         id = "ev-$seq", groupId = gid, seq = seq, epoch = epoch,
         type = type, actor = actor, payloadJson = payload, adminSig = sig,
+        signerCert = signerCert,
     )
 
     private fun create() = ev(1, 0, WhisperGroupEventType.CREATE, admin, """{"name":"Crew"}""")
@@ -72,6 +74,38 @@ class WhisperGroupsTest {
     fun `unsigned create fails closed`() {
         try {
             applyEvents(gid, listOf(create().copy(adminSig = "forged")), verify, keys)
+            fail("must throw")
+        } catch (e: IllegalArgumentException) {
+            assertTrue((e.message ?: "").contains("signature"))
+        }
+    }
+
+    @Test
+    fun `row signer cert from published history verifies after reinstall`() {
+        // Creator's device changed (reinstall): the OLD keystore key is gone,
+        // but the account's published signer set still contains it (archive
+        // trigger + bundle signer_history). History signed under the old key
+        // must verify on the new install — the account owns the log.
+        val oldCert = "ADMIN_OLD_X509"
+        val certs: (String) -> List<String> = { uid ->
+            if (uid == admin) listOf("ADMIN_NEW_X509", oldCert) else listOf("KEY")
+        }
+        val log = listOf(create().copy(signerCert = oldCert)) + inviteJoin(2, 0, "u2")
+        val m = applyEvents(gid, log, verify, certs)
+        assertTrue(m.isAdmin(admin))
+        assertTrue(m.isMember("u2"))
+    }
+
+    @Test
+    fun `row signer cert outside the published set fails closed`() {
+        // A cert the actor never published must not verify even though the
+        // server chose to store it on the row — fail-closed against key
+        // substitution by anyone with write access to the rows.
+        val log = listOf(
+            ev(1, 0, WhisperGroupEventType.CREATE, admin, "\"Crew\"", signerCert = "FOREIGN_X509"),
+        )
+        try {
+            applyEvents(gid, log, verify, keys)
             fail("must throw")
         } catch (e: IllegalArgumentException) {
             assertTrue((e.message ?: "").contains("signature"))
@@ -217,7 +251,7 @@ class WhisperGroupsTest {
 
     @Test
     fun `invite join decline cancel lifecycle`() {
-        val keys2: (String) -> String? = { "KEY" }
+        val keys2: (String) -> List<String> = { listOf("KEY") }
         val invited = listOf(
             create(),
             ev(2, 0, WhisperGroupEventType.INVITE, admin, "\"u2\""),
@@ -251,7 +285,7 @@ class WhisperGroupsTest {
 
     @Test
     fun `join without invite fails closed`() {
-        val keys2: (String) -> String? = { "KEY" }
+        val keys2: (String) -> List<String> = { listOf("KEY") }
         try {
             applyEvents(gid, listOf(create(), ev(2, 1, WhisperGroupEventType.JOIN, "u2", "\"\"")), verify, keys2)
             fail("must throw")
@@ -262,7 +296,7 @@ class WhisperGroupsTest {
 
     @Test
     fun `cancel by non-admin fails closed`() {
-        val keys2: (String) -> String? = { "KEY" }
+        val keys2: (String) -> List<String> = { listOf("KEY") }
         val log = listOf(
             create(),
             ev(2, 0, WhisperGroupEventType.INVITE, admin, "\"u2\""),
@@ -279,7 +313,7 @@ class WhisperGroupsTest {
 
     @Test
     fun `picture latest wins and requires admin`() {
-        val keys2: (String) -> String? = { "KEY" }
+        val keys2: (String) -> List<String> = { listOf("KEY") }
         fun pic(url: String) = buildGroupPicturePayload(url, mapOf(admin to "F"))
         val log = listOf(
             create(),
@@ -393,7 +427,7 @@ class WhisperGroupsTest {
 
     @Test
     fun `poisoned log truncates to verified prefix`() {
-        val keys2: (String) -> String? = { "KEY" }
+        val keys2: (String) -> List<String> = { listOf("KEY") }
         val log = listOf(
             create(),
             ev(2, 0, WhisperGroupEventType.INVITE, admin, "\"u2\""),
@@ -419,7 +453,7 @@ class WhisperGroupsTest {
 
     @Test
     fun `bad create still fails everything`() {
-        val keys2: (String) -> String? = { "KEY" }
+        val keys2: (String) -> List<String> = { listOf("KEY") }
         try {
             applyEventsTolerant(
                 gid,

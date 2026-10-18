@@ -109,6 +109,7 @@ Non-Whisper migrations (unrelated Supabase features) may still use timestamped f
 | 33 | `20261018_whisper_stories_lifecycle.sql` | Daily Ups lifecycle: `whisper_stories` / `whisper_story_recipients` / `whisper_story_views` / `whisper_story_cleanup` / `whisper_story_publish_quota` (5/day) + server-authoritative 24h lifetime trigger + `whisper_story_can_read()` RLS (state, expiry, blocks, immutable recipient snapshot) + purge coverage |
 | 34 | `20261018_whisper_group_policy_boundary.sql` | Signed POLICY events: type allowlist gains `policy`; owner-only validation trigger (payload shape, capability vocabulary, member-delegable subset, epoch rules) + ownership-rejection triggers (direct `whisper_groups.created_by` changes require a signed policy event) |
 | 35 | `20261018_whisper_stories_actions.sql` | Daily Ups write plane: `whisper_story_reactions` (one toggleable emoji per viewer, single-row PK) + RPCs `whisper_story_publish` (atomic story + audience + quota, idempotent by `client_id`, audience = current accepted friends minus blocks, hosting handle validated against `whisper_image_ownership` for sweep resolution) / `whisper_story_view` / `whisper_story_react` / `whisper_story_delete` + service-role `whisper_story_cleanup_claim` / `whisper_story_cleanup_result` (lease + SKIP LOCKED + backoff ≤ 20) + realtime publication + replica identity |
+| 36 | `20261019_whisper_signer_history.sql` | Reinstall-proof group events: `whisper_group_signer_history` (every protocol signer the account ever published in `profiles.identity_binding`; PK (user_id, signer_cert); RLS select SELF only, deliberately NO insert/update/delete policies — the archive trigger `whisper_archive_group_signer` (security definer, fires on `before insert or update of identity_binding` on profiles) is the only writer; one-time idempotent backfill of existing bindings) + `whisper_group_events.signer_cert` (nullable; the signer key that made `admin_sig`, published on the row at event time). Trust rule: event signatures verify under the ROW cert, and the row cert must be in the actor's published signer set — a reinstall keeps the old key set-published, so history stays verifiable; foreign certs fail closed |
 
 Each section keeps its original filename banner for `grep` traceability:
 
@@ -375,5 +376,5 @@ And add row 15 to the table in this doc.
 
 ---
 
-**Last updated:** 2026-10-18 — adds Daily Ups lifecycle/RLS and the signed GroupPolicyV1 ownership boundary. Keep this doc and `main-whisper-sql.sql` in sync.
+**Last updated:** 2026-10-18 — adds the reinstall-proof signer history (archive trigger + backfill + per-event `signer_cert`). Keep this doc and `main-whisper-sql.sql` in sync.
 **Maintainer rule:** any change to `main-whisper-sql.sql` must be accompanied by an update to this doc's "What Is Squashed" table if you add a section.

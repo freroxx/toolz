@@ -302,7 +302,7 @@ Edge functions in `supabase/functions/whisper-*/index.ts`:
 | Function | Role |
 |---|---|
 | `whisper-attest` | POST (user JWT) returns the caller's attestation verdict `{ok, mode:"cert"|"integrity"}`; 428 for unofficial builds. Single-file: the `_shared/attest.ts` gate is INLINED (dashboard deploys are single-file), no `_shared` imports. Optional Play Integrity strong path (env-gated, off by default). |
-| `whisper-bundle-fetch` | POST `{account}` returns identity binding, latest signed SPK, and consumes one OPK. Rejects self-bundles, no-store. Attest-gated (inlined `_shared/attest.ts`). |
+| `whisper-bundle-fetch` | POST `{account}` returns identity binding, latest signed SPK, and consumes one OPK; also returns `signer_history` — every signer the account ever published (archive trigger; group events verify against this set, which is what makes a reinstall NOT lock out the log's author). Rejects self-bundles, no-store. Attest-gated (inlined `_shared/attest.ts`). |
 | `whisper-bypass-verify` | Constant-time screenshot-bypass password check, 5 failures per 15 minutes locks out with 429. |
 | `whisper-delete-account` | Verifies JWT plus password header plus 5-minute confirmation timestamp, wipes server data before deleting the GoTrue user. |
 | `whisper-image-upload` | Accepts base64 PNG with the ImgBB key held server-side, returns URL and ID. Attest-gated (inlined `_shared/attest.ts`). |
@@ -612,8 +612,8 @@ Groups + Daily Ups UI (`ui/screens/whisper`): WhisperGroupsSection,
 WhisperGroupsViewModel, WhisperGroupChatScreen, WhisperGroupChatViewModel,
 WhisperGroupInfoScreen, WhisperGroupInfoViewModel, WhisperDailyUpsScreen,
 WhisperDailyUpsViewModel, WhisperDailyUpsComposeScreen,
-WhisperDailyUpsComposeViewModel. Tests: `WhisperGroupsTest` (36 tests), the
-Daily Ups suite in §10.
+WhisperDailyUpsComposeViewModel. Tests: `WhisperGroupsTest` (43 tests, incl.
+the reinstall-proof signer-set cases), the Daily Ups suite in §10.
 
 Also: `crypto/SessionCrypto`, `push/` (WhisperPushNotifier,
 WhisperPushRegistrar, WhisperPushService), the whisper workers
@@ -635,10 +635,10 @@ requires `client_version_code >= 18`, and the ship-day floor flip blocks
 1:1 behavior is unchanged (no shared code path was
 rewritten — four properties were widened private→internal (`outgoingQueue`,
 `deliveryScheduler`, `deletedStore`, `imageDiskCache`), one DAO was added
-to the repository constructor, one field to `VerifiedBundle`; the 1:1 outbox
+to the repository constructor; `VerifiedBundle` fields; the 1:1 outbox
 flush additionally skips `groupId != null` rows, a pure guard).
 
-Transport (`WhisperRepositoryGroups.kt`, ~2300 lines): pairwise fan-out, ≤12
+Transport (`WhisperRepositoryGroups.kt`): pairwise fan-out, ≤12
 members. The sender seals one inner frame per member (self included, so the
 sender's own lines open through the same path) through the unmodified 1:1
 `sealWithRatchet`; groupId + epoch ride inside the AEAD plaintext
@@ -649,9 +649,17 @@ members keep a gap for missed epochs). Membership derives from verified
 admin-signed events only (`applyEvents`, fail-closed: bad sig, non-admin op,
 last-admin removal, over-cap, stale epoch, unordered log, legacy `add`).
 Signatures use the
-admin's protocol signing key (`signProtocol`/`verifyProtocol`), keys fetched
-from verified bundles (TOFU per sync — a post-rotation full re-sync fails
-closed with a clear error; warm caches keep working). Event payloads are TEXT
+admin's protocol signing key (`signProtocol`/`verifyProtocol`). Since the
+20261019 signer-history section, each event row carries the signer cert
+that made its `admin_sig`, and verification accepts a row cert ONLY if it
+is in the actor's PUBLISHED signer set (`whisper_group_signer_history`
+archive trigger, served by `whisper-bundle-fetch.signer_history`; self
+reads its own archive rows over RLS) — so a creator reinstall (new
+device key in the same account set) replays the log it authored before
+the keystore key was destroyed, and a cert the account never published
+fails closed even over a well-formed signature. Rows without a row cert
+(pre-1.1.7 data only) fall back to legacy current-bundle verification.
+Event payloads are TEXT
 (jsonb would normalize key order and break signature round-trips).
 
 Resilience (correctness + resilience passes): a poisoned event no longer
@@ -779,9 +787,15 @@ whisper_story_views / whisper_story_reactions;
 (2) redeploy whisper-push-send — REQUIRED this ship even without new story
 machinery: the plain-target name scrub, the `inviterId` invite field, and the
 story branch all live in that function, and an outdated deploy ships name
-leaks to external distributors by omission; deploy
+leaks to external distributors by omission; ALSO redeploy
+whisper-bundle-fetch — REQUIRED, its new `signer_history` field is what makes
+group verification reinstall-proof (an outdated deploy serves empty history
+and the OLD current-cert-only behavior returns silently);
+deploy
 whisper-story-sweep; (3) re-run the full
-main-whisper-sql.sql (idempotent, additive); (4) publish 1.1.7 APKs + signed
+main-whisper-sql.sql (idempotent, additive — this ship it adds
+whisper_group_signer_history(+ archiving trigger + backfill) and
+whisper_group_events.signer_cert); (4) publish 1.1.7 APKs + signed
 manifest with floor 18; (5) set edge MIN_VERSION_CODE=18.
 
 v1 limits (documented, not bugs): invite mode is fixed at creation;
@@ -972,23 +986,32 @@ calibration knob with an owner (the operator), not a silent default.
    whisper-signup-gate function logs — a cluster of denials at one /24 is the
    signal to allow-list that carrier range (function-side list, no SQL
    change). Nothing to change before ship.
-4. **Group-event signing keys are install-scoped — the one real v1.1.8
-   candidate.** The scheduled 30-day rotation (`WhisperKeyRotationStore`
-   heartbeat) rotates ONLY the 1:1 envelope identity (X25519 profile public
-   key); the ECDSA cert that signs group admin/member events is regenerated
-   only on reinstall. Every LIVE install keeps verifying its history fine —
-   but a group CREATOR who reinstalls (routine: new phone) can no longer
-   verify their own old CREATE event on the new install, and the group fails
-   closed FOR THEM: they keep the diagnostic card, others keep a working
-   group, ownership continuity for the group comes from having promoted a
-   co-admin beforehand. Remedies, in order of size: (a) product-hygiene nudge
-   in group settings — "hand off ownership to a co-admin before reinstalling"
-   (cheap, ships easily); (b) the actual fix: publish the per-event signer
-   cert on event rows and verify each event against ITS OWN cert chained to
-   the current identity (SQL column + write path + per-event verify) —
-   designed, sized as the first post-1.1.7 work item so the failure stops
-   being silent. Neither is folded into 1.1.7 (frozen SQL + crypto surface);
-   flagged loudly so it cannot be forgotten.
+4. **Group-event signing keys and reinstalls — RESOLVED in 1.1.7
+   (account-owned signer history).** The per-install ECDSA cert (Android
+   Keystore; regenerated only on reinstall, the 30-day heartbeat rotates
+   only the 1:1 envelope identity) used to make a group creator's OWN log
+   unverifiable to their replacement device: verification checked every
+   historical event against the actor's CURRENT published cert. Now each
+   event row carries the signer cert that made its signature
+   (`whisper_group_events.signer_cert`, written at publish time after a
+   self-check against that same published key), and an archive trigger on
+   `profiles.identity_binding` records every signer the account ever
+   published (`whisper_group_signer_history`; served via
+   `whisper-bundle-fetch` as `signer_history`). Verification rule:
+   signature under the ROW cert, and the row cert must belong to the
+   actor's published set — so the new device (new key in the same set)
+   replays the full history the OLD device signed. Fail-closed edges:
+   a row cert the account never published is rejected even if its
+   signature would verify; rows without a signer cert (pre-1.1.7 data
+   only — groups were not publicly shipped before this release) fall back
+   to legacy current-cert-only; a failed own-history read degrades to
+   current-only and can never ADD an unpublished key. Honest residual:
+   the set-served trust boundary is the bundle endpoint's, same as 1:1 —
+   an operator-level compromise can present its own keys (true before
+   this change too); signatures over the full event body still prevent
+   content forgeries without private keys. Pinned by
+   `WhisperGroupsTest` (row cert from published history verifies after
+   reinstall; foreign row cert fails closed).
 5. **External review before any "secure" marketing.** Whisper must not be
    publicly promoted as audited/secure until either a third-party security
    review or a libsignal production-parity audit happens — claimed security

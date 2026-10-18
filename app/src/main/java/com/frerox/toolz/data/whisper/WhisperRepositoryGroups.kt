@@ -174,6 +174,10 @@ data class WhisperGroupEvent(
     val actor: String,
     val payloadJson: String,
     val adminSig: String,
+    /** 20261019 (reinstall-proof groups): the signer cert that made
+     *  [adminSig], published ON the row by the actor at event time. null on
+     *  pre-1.1.7 rows — those fall back to the actor's current bundle cert. */
+    val signerCert: String? = null,
 )
 
 /** Current group picture: the URL is server-visible metadata; the image key
@@ -311,7 +315,7 @@ fun applyEvents(
     groupId: String,
     events: List<WhisperGroupEvent>,
     verify: (payload: ByteArray, sigB64: String, signerX509B64: String) -> Boolean,
-    signerKeyOf: (userId: String) -> String?,
+    signerCertsOf: (userId: String) -> List<String>,
 ): WhisperGroupMembership {
     require(events.zipWithNext { a, b -> a.seq < b.seq }.all { it }) { "events not strictly seq-ordered" }
     var epoch = 0L
@@ -336,11 +340,17 @@ fun applyEvents(
         val type = ev.type
         if (type == WhisperGroupEventType.CREATE) {
             require(members.isEmpty()) { "duplicate create" }
-            val signer = signerKeyOf(ev.actor)
             val signBytes = groupEventSignBytes(ev.groupId, ev.seq, ev.epoch, type, ev.actor, ev.payloadJson)
             val published = publishedSha8Of(ev.groupId, ev.seq, type.wire)
                 ?.let { ", published sha8=$it" }.orEmpty()
-            require(signer != null && verify(signBytes, ev.adminSig, signer)) {
+            // Row-cert first (20261019 account signer history): verify under
+            // the cert the event itself published, which must belong to the
+            // creator's published signer set. Without a row cert (legacy
+            // rows) fall back to the actor's current bundle cert only.
+            val verified = ev.signerCert?.let { rowCert ->
+                rowCert in signerCertsOf(ev.actor) && verify(signBytes, ev.adminSig, rowCert)
+            } ?: (signerCertsOf(ev.actor).firstOrNull()?.let { verify(signBytes, ev.adminSig, it) } ?: false)
+            require(verified) {
                 "bad create signature (bytes sha8=${groupSignBytesSha8(signBytes)}$published)"
             }
             members[ev.actor] = WhisperGroupRole.ADMIN
@@ -371,7 +381,7 @@ fun applyEvents(
             // instead of silently resurrecting a privileged direct-add.
             WhisperGroupEventType.ADD -> error("legacy add events are no longer accepted (use invite+join)")
             WhisperGroupEventType.REMOVE -> {
-                require(isAdminSigned(ev, members, verify, signerKeyOf)) { "remove not admin-signed" }
+                require(isAdminSigned(ev, members, verify, signerCertsOf)) { "remove not admin-signed" }
                 require(requireNotNull(policy).allows(ev.actor, members, WhisperGroupCapability.REMOVE_MEMBERS)) {
                     "remove not permitted by policy"
                 }
@@ -394,7 +404,7 @@ fun applyEvents(
                 epoch = ev.epoch
             }
             WhisperGroupEventType.RENAME -> {
-                require(isAdminSigned(ev, members, verify, signerKeyOf)) { "rename not admin-signed" }
+                require(isAdminSigned(ev, members, verify, signerCertsOf)) { "rename not admin-signed" }
                 require(requireNotNull(policy).allows(ev.actor, members, WhisperGroupCapability.EDIT_INFO)) {
                     "rename not permitted by policy"
                 }
@@ -402,7 +412,7 @@ fun applyEvents(
                 epoch = ev.epoch
             }
             WhisperGroupEventType.PROMOTE -> {
-                require(isAdminSigned(ev, members, verify, signerKeyOf)) { "promote not admin-signed" }
+                require(isAdminSigned(ev, members, verify, signerCertsOf)) { "promote not admin-signed" }
                 require(requireNotNull(policy).allows(ev.actor, members, WhisperGroupCapability.PROMOTE_DEMOTE)) {
                     "promote not permitted by policy"
                 }
@@ -412,7 +422,7 @@ fun applyEvents(
                 epoch = ev.epoch
             }
             WhisperGroupEventType.DEMOTE -> {
-                require(isAdminSigned(ev, members, verify, signerKeyOf)) { "demote not admin-signed" }
+                require(isAdminSigned(ev, members, verify, signerCertsOf)) { "demote not admin-signed" }
                 require(requireNotNull(policy).allows(ev.actor, members, WhisperGroupCapability.PROMOTE_DEMOTE)) {
                     "demote not permitted by policy"
                 }
@@ -425,7 +435,7 @@ fun applyEvents(
                 epoch = ev.epoch
             }
             WhisperGroupEventType.SETTINGS -> {
-                require(isAdminSigned(ev, members, verify, signerKeyOf)) { "settings not admin-signed" }
+                require(isAdminSigned(ev, members, verify, signerCertsOf)) { "settings not admin-signed" }
                 require(requireNotNull(policy).allows(ev.actor, members, WhisperGroupCapability.EDIT_INFO)) {
                     "settings not permitted by policy"
                 }
@@ -451,7 +461,7 @@ fun applyEvents(
                 // sends never go stale on a settings change.
             }
             WhisperGroupEventType.INVITE -> {
-                require(isMemberSigned(ev, members, verify, signerKeyOf)) { "invite not signed by inviter" }
+                require(isMemberSigned(ev, members, verify, signerCertsOf)) { "invite not signed by inviter" }
                 require(members[ev.actor] == WhisperGroupRole.ADMIN || !inviteAdminsOnly) {
                     "invite not admin-signed"
                 }
@@ -467,11 +477,7 @@ fun applyEvents(
             WhisperGroupEventType.JOIN -> {
                 require(!members.containsKey(ev.actor)) { "join by existing member" }
                 require(invited.contains(ev.actor)) { "join without invite" }
-                val signer = signerKeyOf(ev.actor)
-                require(signer != null && verify(
-                    groupEventSignBytes(ev.groupId, ev.seq, ev.epoch, ev.type, ev.actor, ev.payloadJson),
-                    ev.adminSig, signer,
-                )) { "join not self-signed" }
+                require(memberSignatureValid(ev, verify, signerCertsOf)) { "join not self-signed" }
                 require(members.size < WhisperGroupsConfig.MAX_MEMBERS) { "group full" }
                 members[ev.actor] = WhisperGroupRole.MEMBER
                 joinEpoch[ev.actor] = ev.epoch
@@ -480,15 +486,11 @@ fun applyEvents(
             }
             WhisperGroupEventType.DECLINE -> {
                 require(invited.contains(ev.actor)) { "decline without invite" }
-                val signer = signerKeyOf(ev.actor)
-                require(signer != null && verify(
-                    groupEventSignBytes(ev.groupId, ev.seq, ev.epoch, ev.type, ev.actor, ev.payloadJson),
-                    ev.adminSig, signer,
-                )) { "decline not self-signed" }
+                require(memberSignatureValid(ev, verify, signerCertsOf)) { "decline not self-signed" }
                 invited.remove(ev.actor)
             }
             WhisperGroupEventType.CANCEL -> {
-                require(isAdminSigned(ev, members, verify, signerKeyOf)) { "cancel not admin-signed" }
+                require(isAdminSigned(ev, members, verify, signerCertsOf)) { "cancel not admin-signed" }
                 require(requireNotNull(policy).allows(ev.actor, members, WhisperGroupCapability.INVITE_MEMBERS)) {
                     "cancel not permitted by policy"
                 }
@@ -500,9 +502,9 @@ fun applyEvents(
                 // Picture follows the edit-permissions flag (rename stays
                 // admin-only: the server groups.name RLS enforces it anyway).
                 if (membersCanEdit) {
-                    require(isMemberSigned(ev, members, verify, signerKeyOf)) { "picture not member-signed" }
+                    require(isMemberSigned(ev, members, verify, signerCertsOf)) { "picture not member-signed" }
                 } else {
-                    require(isAdminSigned(ev, members, verify, signerKeyOf)) { "picture not admin-signed" }
+                    require(isAdminSigned(ev, members, verify, signerCertsOf)) { "picture not admin-signed" }
                 }
                 require(requireNotNull(policy).allows(ev.actor, members, WhisperGroupCapability.EDIT_PICTURE)) {
                     "picture not permitted by policy"
@@ -513,7 +515,7 @@ fun applyEvents(
             WhisperGroupEventType.POLICY -> {
                 val current = requireNotNull(policy) { "policy missing after create" }
                 require(ev.actor == current.ownerId) { "policy not signed by current owner" }
-                require(isAdminSigned(ev, members, verify, signerKeyOf)) { "policy not owner-signed" }
+                require(isAdminSigned(ev, members, verify, signerCertsOf)) { "policy not owner-signed" }
                 val next = parseGroupPolicyPayload(ev.payloadJson) ?: error("bad or unsupported policy payload")
                 next.validateFor(members)
                 policy = next
@@ -555,21 +557,21 @@ fun applyEventsTolerant(
     groupId: String,
     events: List<WhisperGroupEvent>,
     verify: (payload: ByteArray, sigB64: String, signerX509B64: String) -> Boolean,
-    signerKeyOf: (userId: String) -> String?,
+    signerCertsOf: (userId: String) -> List<String>,
 ): WhisperGroupMembership {
     if (events.isEmpty()) error("Group has no history.")
     try {
-        return applyEvents(groupId, events, verify, signerKeyOf)
+        return applyEvents(groupId, events, verify, signerCertsOf)
     } catch (first: RuntimeException) {
         // Linear scan for the first failing prefix. O(k²) signature checks
         // worst case; admin logs are tens of events, never thousands.
         for (k in 1..events.size) {
             val failed = runCatching {
-                applyEvents(groupId, events.subList(0, k), verify, signerKeyOf)
+                applyEvents(groupId, events.subList(0, k), verify, signerCertsOf)
             }.exceptionOrNull()
             if (failed != null) {
                 if (k == 1) throw first
-                val good = applyEvents(groupId, events.subList(0, k - 1), verify, signerKeyOf)
+                val good = applyEvents(groupId, events.subList(0, k - 1), verify, signerCertsOf)
                 android.util.Log.w("WhisperGroups", "log truncated at seq ${events[k - 1].seq}: ${failed.message}")
                 return good.copy(degraded = true, badSeq = events[k - 1].seq)
             }
@@ -582,10 +584,10 @@ private fun isAdminSigned(
     ev: WhisperGroupEvent,
     members: Map<String, WhisperGroupRole>,
     verify: (ByteArray, String, String) -> Boolean,
-    signerKeyOf: (String) -> String?,
+    signerCertsOf: (String) -> List<String>,
 ): Boolean {
     if (members[ev.actor] != WhisperGroupRole.ADMIN) return false
-    return memberSignatureValid(ev, verify, signerKeyOf)
+    return memberSignatureValid(ev, verify, signerCertsOf)
 }
 
 /** Any current member with a valid signature (used for ADD under open invites). */
@@ -593,19 +595,47 @@ private fun isMemberSigned(
     ev: WhisperGroupEvent,
     members: Map<String, WhisperGroupRole>,
     verify: (ByteArray, String, String) -> Boolean,
-    signerKeyOf: (String) -> String?,
+    signerCertsOf: (String) -> List<String>,
 ): Boolean {
     if (!members.containsKey(ev.actor)) return false
-    return memberSignatureValid(ev, verify, signerKeyOf)
+    return memberSignatureValid(ev, verify, signerCertsOf)
 }
 
+/**
+ * Signature check under the ACCOUNT-owned signer model (20261019:
+ * reinstall-proof group events).
+ *
+ * When the row carries [WhisperGroupEvent.signerCert] (all rows written by
+ * 1.1.7+ clients), the event is verified against THAT cert — the key that
+ * actually made [WhisperGroupEvent.adminSig] — and the row cert must belong
+ * to the actor's published signer set (`signerCertsOf`, every signer the
+ * account ever published). A reinstall keeps the old key in the set, so
+ * history signed by a previous device key still verifies; a cert the
+ * account never published is rejected fail-closed even if it would verify.
+ * Rows without a signer cert (pre-1.1.7 dev data only — groups were not
+ * publicly shipped before this release) keep the legacy current-bundle-only
+ * behavior.
+ */
 private fun memberSignatureValid(
     ev: WhisperGroupEvent,
     verify: (ByteArray, String, String) -> Boolean,
-    signerKeyOf: (String) -> String?,
+    signerCertsOf: (String) -> List<String>,
 ): Boolean {
-    val signer = signerKeyOf(ev.actor) ?: return false
-    return verify(groupEventSignBytes(ev.groupId, ev.seq, ev.epoch, ev.type, ev.actor, ev.payloadJson), ev.adminSig, signer)
+    val signBytes = groupEventSignBytes(ev.groupId, ev.seq, ev.epoch, ev.type, ev.actor, ev.payloadJson)
+    ev.signerCert?.let { rowCert ->
+        if (rowCert !in signerCertsOf(ev.actor)) {
+            if (publishedSha8Of(ev.groupId, ev.seq, ev.type.wire) != null) {
+                android.util.Log.w(
+                    "WhisperGroups",
+                    "row signer cert outside published set seq=${ev.seq} type=${ev.type.wire}",
+                )
+            }
+            return false
+        }
+        return verify(signBytes, ev.adminSig, rowCert)
+    }
+    val signer = signerCertsOf(ev.actor).firstOrNull() ?: return false
+    return verify(signBytes, ev.adminSig, signer)
 }
 
 /** REMOVE/PROMOTE/DEMOTE/INVITE/CANCEL carry the subject user id as the raw payload; RENAME carries the name. */
@@ -827,6 +857,7 @@ internal data class GroupEventRow(
     val actor: String,
     val payload: String,
     @SerialName("admin_sig") val adminSig: String,
+    @SerialName("signer_cert") val signerCert: String? = null,
 )
 
 @Serializable
@@ -838,6 +869,10 @@ internal data class GroupEventInsert(
     val actor: String,
     val payload: String,
     @SerialName("admin_sig") val adminSig: String,
+    /** The signer cert for [adminSig] — the same published key the local
+     *  signer self-checks against just above; archived so a reinstall
+     *  (new account device key) can still verify this signature. */
+    @SerialName("signer_cert") val signerCert: String? = null,
     @SerialName("client_version_code") val clientVersionCode: Int,
 )
 
@@ -904,10 +939,36 @@ private fun WhisperRepository.requireMe(): String {
     return me
 }
 
-/** Signer-key lookup (one bundle fetch per actor; pre-fetched before apply). */
-private suspend fun WhisperRepository.signerKeyOf(userId: String): String? {
-    if (userId == myId) return crypto.protocolSigningPublicKeyBase64()
-    return sessionFactory.fetchAndVerifyBundle(userId).getOrNull()?.signerX509B64
+/**
+ * Published-signer set for an actor (one bundle fetch per actor; pre-fetched
+ * before apply). 20261019 account-owned signer history: group events verify
+ * against the cert ON the row, which must belong to THIS set — every signer
+ * the account ever published. A reinstall keeps the old cert published, so
+ * the new device still verifies the log the previous device key signed
+ * (§15.4: the group belongs to the ACCOUNT, not the install).
+ *
+ * SELF reads the own archive rows (RLS: self only). A failed self-read
+ * degrades to current-key-only — it can never ADD a key the account did not
+ * publish. Peers resolve through whisper-bundle-fetch (service role), which
+ * returns `signer_history` alongside the binding.
+ */
+@Serializable
+private data class SignerCertRow(@SerialName("signer_cert") val signerCert: String)
+
+private suspend fun WhisperRepository.signerCertsOf(userId: String): List<String> {
+    if (userId == myId) {
+        val current = crypto.protocolSigningPublicKeyBase64()
+        val archived = runCatching {
+            db.from("whisper_group_signer_history").select {
+                filter { eq("user_id", myId) }
+            }.decodeList<SignerCertRow>()
+        }.getOrElse {
+            android.util.Log.w("WhisperGroups", "own signer-history read failed (${it.message}); current key only")
+            emptyList()
+        }.map { it.signerCert }.filter { it.isNotBlank() }
+        return (listOfNotNull(current) + archived).distinct()
+    }
+    return sessionFactory.fetchAndVerifyBundle(userId).getOrNull()?.signerCertsB64 ?: emptyList()
 }
 
 private fun WhisperRepository.groupVerify(
@@ -928,6 +989,7 @@ private fun GroupEventRow.toModel() = WhisperGroupEvent(
     actor = actor,
     payloadJson = payload,
     adminSig = adminSig,
+    signerCert = signerCert,
 )
 
 /** Fetches + verifies the full event log, persists the cache, returns membership. */
@@ -971,22 +1033,23 @@ private suspend fun WhisperRepository.fetchVerifiedMembershipInner(groupId: Stri
         .distinctBy { it.id }.sortedBy { it.seq }
     if (events.isEmpty()) error("Group has no history.")
     suspend fun verifyAll(log: List<WhisperGroupEvent>): WhisperGroupMembership {
-        // Pre-fetch every distinct actor key (bundle fetch is suspend; the
-        // verifier lambda below is a pure map read — never blocks).
-        val keys = mutableMapOf<String, String?>()
-        log.map { it.actor }.distinct().forEach { uid -> keys[uid] = signerKeyOf(uid) }
+        // Pre-fetch every distinct actor's published signer SET (bundle fetch
+        // is suspend; the verifier lambda below is a pure map read — never
+        // blocks). Reinstall-proof: sets carry past certs, not just current.
+        val keys = mutableMapOf<String, List<String>>()
+        log.map { it.actor }.distinct().forEach { uid -> keys[uid] = signerCertsOf(uid) }
         return applyEventsTolerant(
             groupId = groupId,
             events = log,
             verify = { payload, sig, signer -> groupVerify(payload, sig, signer) },
-            signerKeyOf = { uid -> keys[uid] },
+            signerCertsOf = { uid -> keys[uid].orEmpty() },
         )
     }
-    // A dead CREATE never verifies (fail-closed by design): attribute it so
-    // the message says WHOSE key discontinuity orphaned the group instead of
-    // a bare hash. Self-created + current key ≠ creating key almost always
-    // means reinstall / data-clear / debug↔release switch (AndroidKeyStore
-    // is scoped to the install); peer-created means the creator's key moved.
+    // A dead CREATE never verifies (fail-closed by design): attribute it.
+    // Since 20261019 (account signer history) a REINSTALL no longer lands
+    // here — the new install verifies via the archived signer set. A dead
+    // create now means the row genuinely does not verify: tampered/corrupt
+    // log, or stale pre-update rows whose signer was never archived.
     val me = requireMe()
     suspend fun verifyOrDiagnose(log: List<WhisperGroupEvent>): WhisperGroupMembership {
         try {
@@ -996,12 +1059,14 @@ private suspend fun WhisperRepository.fetchVerifiedMembershipInner(groupId: Stri
             val creator = log.firstOrNull { it.type == WhisperGroupEventType.CREATE }?.actor
             if ("bad create signature" in raw && creator != null) {
                 val why = if (creator == me) {
-                    "your current install cannot verify your own group's creation — " +
-                        "this install's signing key is not the one that created it " +
-                        "(reinstall, data clear, or debug/release switch). Create a fresh group."
+                    "this device cannot verify your own group's creation row — the row " +
+                        "does not check out against your account's published signer set " +
+                        "(corrupt or tampered log, or pre-update data). Pull to re-sync; " +
+                        "if it persists, create a fresh group."
                 } else {
-                    "the group creator's signing key changed since creation " +
-                        "(they reinstalled or switched builds). Ask them to create a fresh group."
+                    "the creator's event rows do not verify against their account's " +
+                        "published signer history (corrupt or tampered log). Pull to " +
+                        "re-sync; if it persists, ask the creator to recreate the group."
                 }
                 error("$raw — $why")
             }
@@ -1034,6 +1099,7 @@ private fun WhisperGroupEventEntity.toModel() = WhisperGroupEvent(
     actor = actor,
     payloadJson = payload,
     adminSig = adminSig,
+    signerCert = signerCert,
 )
 
 suspend fun WhisperRepository.syncGroups(): Result<List<WhisperGroupMembership>> = runCatching {
@@ -1134,6 +1200,7 @@ private suspend fun WhisperRepository.persistGroupCache(
                 actor = it.actor,
                 payload = it.payloadJson,
                 adminSig = it.adminSig,
+                signerCert = it.signerCert,
                 createdAtMs = now,
             )
         },
@@ -1294,6 +1361,7 @@ private suspend fun WhisperRepository.publishGroupEvent(
                     actor = actor,
                     payload = payload,
                     adminSig = sig,
+                    signerCert = selfKey,
                     clientVersionCode = groupClientVersion(),
                 ),
             )
