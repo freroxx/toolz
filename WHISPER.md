@@ -9,14 +9,17 @@ Contents:
 1. Overview and honesty notes
 2. Cryptography
 3. Wire formats
-4. Backend
-5. Client repository
-6. Auth
-7. UI and view models
-8. Push, workers, app wiring
-9. Tests
-10. What the server sees
-11. File inventory
+4. Images and avatars
+5. Backend
+6. Client repository
+7. Auth
+8. UI and view models
+9. Push, workers, app wiring
+10. Tests
+11. What the server sees
+12. File inventory
+13. Groups (Phase 2, ships in 1.1.7)
+14. Daily Ups (stories, ships in the same 1.1.7)
 
 ## 1. Overview and honesty notes
 
@@ -514,6 +517,16 @@ serialization), chat reaction merging, bypass verdicts (blank and oversize
 inputs), image transport (v2 magic, legacy fallback, CRC rejection, pixel cap),
 and crypto AAD (direction binding, fingerprints, null safety).
 
+Daily Ups adds 20 JVM tests (`WhisperStoryDescriptorTest`: roundtrip, wire
+prefix/field contract, default elision, tamper matrix, delete-capability
+placement; `WhisperDailyUpErrorMapperTest`: the full server-literal vocabulary
+plus config parity with the SQL plane — emoji palette and bounds), and the
+instrumented `WhisperDailyUpPhotoPreprocessorTest`: a geotagged,
+device-labeled JPEG publishes as Ready with ZERO GPS/make/model/datetime EXIF
+on the exact publish bytes, the 1920 long edge only shrinks, alpha sources
+re-encode to PNG, and unsupported/empty/garbage sources are rejected —
+device-only, like all Bitmap work.
+
 ## 11. What the server sees
 
 Ciphertext and IV markers, sender and receiver IDs, timestamps, profile fields
@@ -538,14 +551,30 @@ text; the names mirror the 1:1 senderName precedent. ImgBB sees opaque PNGs with
 TLS at auth and deletion time; the bypass password goes only to the edge secret
 check.
 
+Daily Ups rows additionally reveal: poster/recipient/viewer/reaction-author IDs
+and timestamps, the `receipts_enabled` flag, the story state machine
+(published → delete_pending → deleted / cleanup_failed), the poster's 5/UTC-day
+quota counter, and the six-emoji reaction vocabulary. One deliberate, explicit
+exception to "reactions hide when receipts are off": REACTION rows are visible
+to the story poster ALWAYS (even with view receipts off) and to the reaction
+author — the server-side §14 policy keeps a poster's reaction wall working
+without timeline overlap. Sealed descriptors on recipient rows are opaque
+buckets; stories carry NO delete capability column — the
+`whisper_image_ownership` ledger (unique delete_url, written by the upload
+edge) is what resolves the sweep's deletes. The story push ping carries
+poster ID + NAME and story ID, image- and key-free (same explicit
+name-carrying precedent as group pushes; §14 has the payload).
+
 ## 12. File inventory
 
-Client `data/whisper` (41 files): EdgeFunctionClient 154, EncryptedBlobHost 57, PlayIntegrityAttestor
+Client `data/whisper` (45 files): EdgeFunctionClient 154, EncryptedBlobHost 57, PlayIntegrityAttestor
 189, ProtocolDiagnostics 66, WhisperAubupManager 526, WhisperAuthManager 498,
 WhisperAvatarCodec 61, WhisperAvatarLoader 145, WhisperCrypto 953,
-WhisperDeletedMessagesStore 167, WhisperDeliveryScheduler 42,
+WhisperDailyUpPhotoPreprocessor 200, WhisperDeletedMessagesStore 167,
+WhisperDeliveryScheduler 42,
 WhisperEncryptedImageHost 233, WhisperEnvelope 133, WhisperErrorMapper 313,
-WhisperGroupEntities 112, WhisperGroupNotifications 165, WhisperGroupReadStore 65,
+WhisperGroupEntities 112, WhisperGroupNotifications 165, WhisperGroupPolicy 136,
+WhisperGroupReadStore 65,
 WhisperHiddenChatsStore 99, WhisperImageCipherTransport 183,
 WhisperImageDiskCache 228, WhisperImagePreprocess 160,
 WhisperKeyRotationStore 77, WhisperKeyTrustStore
@@ -554,25 +583,32 @@ WhisperKeyRotationStore 77, WhisperKeyTrustStore
 474, WhisperOutboxEntity 104, WhisperOutgoingQueue 146, WhisperPinConfig 91,
 WhisperPrekeyManager 345, WhisperProtocolConfig 20, WhisperRepository 3389,
 WhisperRepositoryGroups 2291, WhisperRepositoryProfile 444, WhisperRepositorySocial 467,
-WhisperSessionFactory 297, WhisperUndoBufferStore 104, WireProtocol 402.
-Group UI (`ui/screens/whisper`, 6 files): WhisperGroupsSection 869,
+WhisperRepositoryStories 695, WhisperSessionFactory 297,
+WhisperStoryLocalEntity 66, WhisperUndoBufferStore 104, WireProtocol 402.
+Groups + Daily Ups UI (`ui/screens/whisper`, 10 files): WhisperGroupsSection 869,
 WhisperGroupsViewModel 503, WhisperGroupChatScreen 1380,
 WhisperGroupChatViewModel 480, WhisperGroupInfoScreen 1101,
-WhisperGroupInfoViewModel 372. Group tests: `WhisperGroupsTest` 36 tests.
+WhisperGroupInfoViewModel 372, WhisperDailyUpsScreen 651,
+WhisperDailyUpsViewModel 359, WhisperDailyUpsComposeScreen 406,
+WhisperDailyUpsComposeViewModel 195. Group tests: `WhisperGroupsTest` 36 tests.
+Daily Ups tests: see §10.
 
 Session subdir (4 files): WhisperRatchet 393, WhisperSessionSecretProtector 36,
 WhisperSessionStore 341, WhisperV3Codec 144.
 
 Also: `crypto/SessionCrypto` 138, `push/WhisperPushService` 142, UI screens
 (19 files from 76 to 2573 lines, see section 8), workers for delivery (49),
-local cleanup (43), and token clipboard expiry (151), nine edge functions
-(280/151/243/416/164/299/356/256/180 lines) plus the inlined `_shared/attest.ts`
-gate (156), and the SQL baseline (groups section included).
+local cleanup (43), and token clipboard expiry (151), ten edge functions
+(356/285/151/243/164/416/285/619/228/287 lines — the 619 is
+whisper-push-send with its Daily Ups story branch; the 287 is the new
+whisper-story-sweep) plus the inlined `_shared/attest.ts`
+gate (156), and the SQL baseline (groups + Daily Ups sections included,
+idempotent re-runnable).
 
-## 13. Groups (Phase 2, v1.1.7 in development)
+## 13. Groups (Phase 2, ships in 1.1.7)
 
-`WhisperGroupsConfig.ENABLED = true` in dev builds (1.1.7 is unshipped, so
-only dev devices carry it); every entry point still requires it, and the
+`WhisperGroupsConfig.ENABLED = true` in dev builds (1.1.7 is unshipped at doc
+time, so only dev devices carry it); every entry point still requires it, and the
 Chats-tab section returns early otherwise. Server-side, every group write
 requires `client_version_code >= 18`, and the ship-day floor flip blocks
 <1.1.7 clients from all of Whisper — so the flag stays true after ship.
@@ -712,11 +748,14 @@ publication. Admin-only groups reject member sends fail-closed client AND
 server side. Chat photos support disappearing timers (1m/1h/1d, same bounds
 as 1:1); expired images render expired and never decrypt.
 
-Dashboard checklist (ship day): (1) three INSERT-only webhooks
-(whisper_group_invites, whisper_group_messages, whisper_group_events) →
+Dashboard checklist (ship day): (1) four INSERT-only webhooks
+(whisper_group_invites, whisper_group_messages, whisper_group_events,
+whisper_story_recipients) →
 whisper-push-send, and NO webhooks on whisper_group_receipts /
-whisper_group_typing / whisper_group_reactions / whisper_group_join_requests;
-(2) redeploy whisper-push-send; (3) re-run the full
+whisper_group_typing / whisper_group_reactions / whisper_group_join_requests /
+whisper_story_views / whisper_story_reactions;
+(2) redeploy whisper-push-send (story branch included); deploy
+whisper-story-sweep; (3) re-run the full
 main-whisper-sql.sql (idempotent, additive); (4) publish 1.1.7 APKs + signed
 manifest with floor 18; (5) set edge MIN_VERSION_CODE=18.
 
@@ -725,6 +764,144 @@ QR/ID join creates a REQUEST (admins approve into an invite — no token-link
 auto-join); voice notes, video, docs, and forwards need new pipelines/tables
 (neither 1:1 nor groups have them); message editing is absent; the group
 outbox drains on app open (the worker lane stays 1:1-only — a blind worker
-replay would burn attempts on stale-epoch rows); a queued vote replays with
-the default kind and may push once; unread @You detection covers the last 20
+replay would burn attempts on stale-epoch rows); a queued vote replays its own
+kind now: the outbox row persists `groupMsgKind` (drain sends kind=vote, no
+misaddressed push; historic rows predating the column fall back to the default
+kind, the old behavior); unread @You detection covers the last 20
 decrypted rows (counts are exact); search decrypts up to 500 rows per query.
+
+## 14. Daily Ups (stories, ships in the same 1.1.7)
+
+24-hour photo "ups" posted to all friends at once, taxed 5 per UTC day and bound
+to the friend graph AT POST TIME. Entry: `WhisperDailyUpsConfig.ENABLED`
+(compile-time flag in `WhisperRepositoryStories`, the same gating pattern as
+§13; the Chats entry row and both nav routes no-op while off and stay true
+after ship because the server floor is 18).
+
+### Photo pipeline (`WhisperDailyUpPhotoPreprocessor`, 200 lines)
+
+`preprocessDailyUpPhoto(context, source, mime)` produces uploadable ciphertext
+or rejects — never falls back to raw input:
+
+-accepts jpeg/png/webp sources ≤ 12 MiB (else `INPUT_TOO_LARGE`/`UNSUPPORTED`);
+-decodes capped at 8 MP (4 MP on low-RAM devices via `ActivityManager`);
+-scales the long edge to 1920, only ever DOWN, aspect preserved;
+-re-encodes JPEG q82 (alpha sources → lossless PNG), capping plain bytes at
+`WhisperImageCipherTransport.MAX_CIPHER_BYTES − 16` (5 MiB; `OUTPUT_TOO_LARGE`);
+-EXIF/GPS strip verified, not assumed: the re-encode drops metadata by
+construction AND the output is reopened and audited against
+`DAILY_UP_EXIF_TAGS` (make/model/dates/GPS lat-lon-alt-timestamps) — any
+survivor is `METADATA_REMAINS` and the headline is never published;
+-seals with `newGroupPictureSeal` (`nonce || ciphertext`), same shape as group
+pictures — the descriptor therefore needs NO IV field.
+
+The instrumented test proves the privacy promise on the exact publish bytes.
+
+### Distribution: descriptors, not ratchet frames
+
+A story is ONE photo + ONE fresh AES-256-GCM key. The descriptor
+`whisper:story:{v,u,k,x,r,a}` — v (version gate; decode rejects explicit
+non-1), u (host URL), k (32-byte base64 AES key, exactly 44 chars or tampered),
+x (server expiry, reject ≤ 0), r (receipts on; omitted = off), a (ImgBB delete
+capability — ONLY in the poster's self-sealed copy) — carries NO story id by
+design: ids always come from rows (server truth). One descriptor is sealed per
+friend with `sealStaticEnvelope` (V2 static envelope over the pinned 1:1 key —
+NEVER Double-Ratchet frames, so posts never touch protocol state;
+`openStaticEnvelope` is likewise stateless). The poster's own copy is
+self-sealed (`crypto.encryptMessage(json, myPub, me, me)` +
+`WhisperEnvelope.encode(..., myPub)`; in-band key opens because there is no
+self pin) and lives in Room with state `own`; viewer rows carry state
+`active` and no capability. The audience snaps at publish: whisper_story_publish
+validates every recipient against the CURRENT accepted-friend graph AND the
+block ledger, so friends added later have no row to read and blocks stop
+further distribution server-side.
+
+### Server plane (`20261018_whisper_stories_actions.sql` in main-whisper-sql.sql)
+
+Tables: `whisper_stories` (poster, per-poster-unique `client_id`, `host_url`,
+`host_object_id`, `receipts_enabled`, state
+published → delete_pending → deleted / cleanup_failed; the
+`whisper_story_enforce_server_expiry` trigger rewrites created_at/expires_at on
+every insert, making the 24-hour lifetime an invariant no caller can bend),
+`whisper_story_recipients` (PK story+recipient, opaque sealed descriptor
+≤ 32768 = `DESCRIPTOR_MAX_CHARS`), `whisper_story_views`,
+`whisper_story_reactions` (PK story+user, one toggleable emoji from the
+whitelist the client renders verbatim),
+`whisper_story_cleanup` (lease registry), `whisper_story_publish_quota`
+(poster+UTC-day, ≤ 5 enforced on the row UPDATE itself).
+
+Write routes (all version-gated ≥ `MIN_VERSION_CODE` 18 = the ship floor):
+`whisper_story_publish(client_id, host_url, host_object_id, receipts_enabled,
+recipients jsonb, version)` — idempotent on client_id (a retry returns the live
+story without re-counting quota or re-shaping the audience), atomic
+(story + audience + quota in ONE transaction), bounded housekeeping inside each
+publish (quota-row prune, cleanup backfill for expired stories). No
+`delete_url` column exists on stories BY DESIGN: `host_object_id` is a ledger
+key the sweep resolves through `whisper_image_ownership` (unique delete_url,
+written by whisper-image-upload at upload time — the client never holds the raw
+ImgBB object id), so a forged row can only point at a capability Supabase
+itself recorded. `whisper_story_view` is receipts-gated and idempotent;
+`whisper_story_react` is receipts-INDEPENDENT (poster sees reactions even when
+view receipts are off — §11), enforces the whitelist + audience-only; 
+`whisper_story_delete` flips state (RLS hides the story the same instant) and
+re-queues hosting cleanup. Read helpers `whisper_story_can_read /
+_read_receipts / _is_poster`; RLS mirrors them on every SELECT (state + expiry +
+recipient snapshot + block edges re-checked per query).
+
+### Client plane (`WhisperRepositoryStories` 695 lines, Room v64)
+
+`publishDailyUp`: preprocess → seal → upload (EncryptedBlobHost;
+whisper-image-upload stamps the ownership ledger and asks ImgBB for
+`expiration=86400` as defense-in-depth behind the server lifecycle) → one
+sealed descriptor leg per friend → `whisper_story_publish` → self-sealed own
+row → opportunistic `kickDailyUpSweep` ping. Fail-closed: every step's failure
+maps through `mapDailyUpError` (vocabulary pinned by tests) and NOTHING partial
+is ever exposed — a failure before the RPC leaves zero server truth. 
+`syncDailyUps` refreshes via an embedded inner-join select on
+whisper_story_recipients (RLS-invisible rows drop out of the join outright) and
+prunes `deleteDue(nowMs, 50)` locally. Local expiry pruning runs without
+network. `dailyUpsPostedToday` reads the quota row as an advisory counter —
+the authoritative cap is the publish transaction. `deleteDailyUp` reads the
+own copy BEFORE the server RPC (torn order would orphan the ack), then
+best-effort host delete + sweep ping: the state flip already hides everything,
+and whisper-story-sweep (service-role lease with SKIP LOCKED, 10-min leases,
+≤ 20 attempts with backoff, retry-classes) converges the hosted copy so no
+pg_cron is needed.
+
+### UI
+
+Chats entry row → hub (`WhisperDailyUpsScreen` 651 + VM 359): my-strip with
+`+ New up` ring and Mine stats, friends' rings rendered as INITIALS (the hub
+NEVER decrypts media — identity chips stay business-agnostic), quota chip,
+empty state, in-place full-screen viewer overlay (no third nav route):
+HorizontalPager, 7-second auto-advance paused while pressed, progress segments,
+decrypt-on-demand images (2 MP display budget), one snackbar failure surface
+across hub + viewer, `SecureWindow()` on both surfaces. Reactions are one
+toggleable emoji per viewer per story. Mine shows receipts + reaction counts on
+demand (`fetchDailyUpReceipts` — names resolved client-side).
+
+Compose (`WhisperDailyUpsComposeScreen` 406 + VM 195): photo picker with a
+12 MiB bounded read mirroring the preprocessor, in-memory draft + downsampled
+preview (bytes never touch disk before the pipeline), receipts switch,
+audience = all current friends with per-friend exclusion checkboxes (summary
+text mirrors the final audience size), quota-aware share button with in-button
+progress; retries keep the draft; success returns to the hub.
+
+### Push
+
+`whisper-push-send` grew a story branch: INSERT on whisper_story_recipients
+(fourth INSERT-only webhook) → looks up the story poster + state → refuses to
+wake devices for anything no longer `published` → data-only ping
+`{whisper_story_new:"true", posterId, posterName, storyId}` — content-free
+media-wise; poster NAME rides exactly like the 1:1/group senderName precedent
+(§11, accepted explicitly).
+
+### Honesty notes
+
+The client-side capability `a` travels in the descriptor and Room rows; a viewer
+who somehow obtained a descriptor with `a` still cannot delete —
+whisper_story_delete authorizes posters only, and the sweep only talks to the
+ownership ledger. Quota is server-enforced; a stale local read can neither
+permit nor deny a publish. Received ups keep their sealed bytes; unlike 1:1
+messages there is no "keep forever" tier — 24 hours is the whole contract, and
+deleted/expired stories prune locally even when the sweep is unreachable.
