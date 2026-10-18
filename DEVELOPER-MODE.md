@@ -115,7 +115,7 @@ Demo mode ships **watermark-free by design**: a banner overlay defeats the point
 | Tasks (calendar) | event + dated-task source swaps (dated tasks ARE the todo fixture) | 5 events around "today" (DEADLINE/EXAM/sync/gym), recurring-rule shape | Room events, event/task reminder alarms, AI prompt pass (honest refusal — no model call, no image upload) |
 | Search | `FakeSearchSandbox` results/history/visits/engine-health swap | query-woven tiles on non-resolving `.demo` domains, seeded history + browser trail, fake engine health | engine HTTP + suggestion API, DNS UDP probes (fake latencies), Room history (RAM); bookmarks/quick-links (user's own rows) protected |
 | Media downloader | extract/download/demo-history branches | option ladder (1080/720/480) fabricated from the URL, RAM history rows | extraction API + catalog prober, WorkManager enqueues, converters, persisted history |
-| Files group (converter/PDF/encrypter/bg-remover) | VM gate | configurator params ready (`downloadProgress`…) | **fixtures queued next** |
+| Files group (converter/PDF/encrypter/bg-remover) | VM gates in all four VMs (`FILES`) | converter: RAM progress walk + type-keyed demo output path; encrypter: genuine local transforms with no history write; bg-remover: faked model download (RAM "installed"), honest inference refusal | converter service + file writes, ONNX model download + inference, /Downloads/Toolz writes, history/pin/delete/rename/AI paths, user's real prefs & rows protected |
 
 ## File map (console)
 
