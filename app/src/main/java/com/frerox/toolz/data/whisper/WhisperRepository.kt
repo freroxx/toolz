@@ -115,7 +115,10 @@ class WhisperRepository @Inject constructor(
     // state, X3DH factory and SPK private halves for responder bootstrap.
     private val sessionStore: com.frerox.toolz.data.whisper.session.WhisperSessionStore,
     internal val sessionFactory: WhisperSessionFactory,
-    private val prekeyManager: WhisperPrekeyManager,
+    // internal (not private): WhisperRepositoryGroups' same-file extensions
+    // (group event publish gate) need the publishedSignerCert() pre-insert
+    // check — same access the internal crypto/sessionFactory get.
+    internal val prekeyManager: WhisperPrekeyManager,
     // Phase-2 groups: local event-log cache DAO (provided by DatabaseModule).
     internal val groupDao: WhisperGroupDao,
     // V6-R7 AVATARS: encrypted-avatar resolver (memory+disk cache) for wipe hooks.

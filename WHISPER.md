@@ -796,7 +796,10 @@ whisper-story-sweep; (3) re-run the full
 main-whisper-sql.sql (idempotent, additive — this ship it adds
 whisper_group_signer_history(+ archiving trigger + backfill) and
 whisper_group_events.signer_cert); (4) publish 1.1.7 APKs + signed
-manifest with floor 18; (5) set edge MIN_VERSION_CODE=18.
+manifest with floor 18; (5) set edge MIN_VERSION_CODE=18; (6) run the
+post-deploy smoke (supabase/POST_DEPLOY_SMOKE.md) — SQL trigger health,
+bundle-fetch `signer_history`, and the plain-push name-scrub, end to
+end; do NOT proceed with the rollout on a failed part.
 
 v1 limits (documented, not bugs): invite mode is fixed at creation;
 QR/ID join creates a REQUEST (admins approve into an invite — no token-link
@@ -997,7 +1000,17 @@ calibration knob with an owner (the operator), not a silent default.
    self-check against that same published key), and an archive trigger on
    `profiles.identity_binding` records every signer the account ever
    published (`whisper_group_signer_history`; served via
-   `whisper-bundle-fetch` as `signer_history`). Verification rule:
+   `whisper-bundle-fetch` as `signer_history`). The publish-time gate
+   (third-pass review) runs BEFORE any insert: it compares the local
+   signer against the prekey manager's record of the last successfully
+   published binding (`publishedSignerCert`, written to prefs only after
+   the profiles UPDATE returns), best-effort re-publishes on mismatch
+   (one `ensurePublished`, ROTv2-chained), and fails closed with a
+   user-actionable error while still unpublished — so a keystore repair
+   or a crashed rotation can never sign an event with an unpublished
+   cert (every verifier, the author on resync included, would reject
+   it). A cheap in-loop guard re-checks mid-retry signer stability.
+   Verification rule:
    signature under the ROW cert, and the row cert must belong to the
    actor's published set — so the new device (new key in the same set)
    replays the full history the OLD device signed. Fail-closed edges:
@@ -1012,6 +1025,12 @@ calibration knob with an owner (the operator), not a silent default.
    content forgeries without private keys. Pinned by
    `WhisperGroupsTest` (row cert from published history verifies after
    reinstall; foreign row cert fails closed).
+   Backfill boundary (review-closed): the archive trigger starts at
+   this ship — a creator who ALREADY reinstalled before 1.1.7 has lost
+   the old install's signer everywhere beyond that (old prefs died
+   with the install; nothing server-side recorded it), so any
+   pre-existing dev/beta group from that window stays unresolvable for
+   its old events. Accepted: groups were not public before this ship.
 5. **External review before any "secure" marketing.** Whisper must not be
    publicly promoted as audited/secure until either a third-party security
    review or a libsignal production-parity audit happens — claimed security
