@@ -119,11 +119,13 @@ sync (on by default, toggle in Settings — see Toolz News section below).
 - Backend: your Supabase project (`SUPABASE_URL`, `SUPABASE_ANON_KEY` from
   `local.properties`) — PostgREST (`profiles`, `messages`, `message_reactions`,
   `friendships`, `whisper_blocks`, `whisper_prekeys`, `whisper_push_targets`,
-  `whisper_typing_signals`, quotas), Realtime (broadcast + postgres changes as
+  `whisper_typing_signals`, `whisper_stories`, `whisper_story_recipients`,
+  `whisper_story_views`, `whisper_story_reactions`,
+  `whisper_story_publish_quota`, quotas), Realtime (broadcast + postgres changes as
   fallback), Storage bucket `whisper-avatars`, Edge Functions
   (`whisper-attest`, `whisper-bundle-fetch`, `whisper-bypass-verify`,
   `whisper-delete-account`, `whisper-image-upload`, `whisper-image-delete`,
-  `whisper-push-send`).
+  `whisper-push-send`, `whisper-story-sweep`).
 - Anti-mod attestation (no personal data): every `whisper-*` edge call
   carries `X-App-Package` (applicationId), `X-App-Cert-Sha256` (SHA-256 of
   the app's signing certificate) and `X-App-VersionCode` headers
@@ -176,6 +178,19 @@ sync (on by default, toggle in Settings — see Toolz News section below).
   2-character minimum query gate.
 - Delete-for-everyone writes a sender-only tombstone that the server content
   guard explicitly allows (all other payload edits stay immutable).
+- Daily Ups (only if you use them): a story is ONE photo — GPS/device EXIF are
+  stripped and the result is re-audited byte-for-byte before anything ships
+  (`WhisperDailyUpPhotoPreprocessor`); the upload goes through the same sealed
+  image host path (ImgBB receives opaque sealed bytes, asked to expire the
+  object after 24 h) and the copy auto-expires server-side (lifetime is
+  rewritten by the database, not by the client). Distribution is one sealed
+  descriptor per friend, addressed only to your CURRENT friends at post time —
+  friends added later never see it, and up to 5 posts per UTC day. Your own
+  delete capability never goes to anyone else. View receipts are optional per
+  post; reaction emojis are visible to the poster even when receipts are off
+  (one emoji per viewer, toggleable). The wake ping for a new up carries
+  `{whisper_story_new, posterId, posterName, storyId}` — the poster's name
+  rides it, like message pings; muted friends' ups are silenced client-side.
 
 ## Privileged access (only when you enable it)
 
