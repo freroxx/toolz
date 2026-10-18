@@ -3512,3 +3512,108 @@ $$;
 
 revoke all on function public.whisper_purge_account_data(uuid) from public, anon, authenticated;
 grant execute on function public.whisper_purge_account_data(uuid) to service_role;
+
+-- ═══════════════ 20261018_whisper_group_policy_boundary.sql ═
+-- GroupPolicyV1 is signed and verified by clients, while this server boundary
+-- makes a modified client unable to directly change ownership. A POLICY row is
+-- accepted only from the current owner and may nominate only an existing admin.
+
+alter table public.whisper_group_events drop constraint if exists whisper_group_events_type_check;
+alter table public.whisper_group_events add constraint whisper_group_events_type_check
+    check (type in ('create', 'remove', 'leave', 'rename', 'promote', 'demote',
+                    'settings', 'invite', 'join', 'decline', 'cancel', 'picture', 'policy'));
+
+create or replace function public.whisper_group_validate_policy_event()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+    v_owner uuid;
+    v_epoch bigint;
+    v_policy jsonb;
+    v_next_owner uuid;
+    v_capability text;
+begin
+    if new.type <> 'policy' then return new; end if;
+    select created_by, epoch into v_owner, v_epoch
+      from public.whisper_groups where id = new.group_id for update;
+    if not found then raise exception 'unknown group' using errcode = '42501'; end if;
+    if new.actor <> auth.uid() or new.actor <> v_owner then
+        raise exception 'only the current owner may publish group policy' using errcode = '42501';
+    end if;
+    begin
+        v_policy := new.payload::jsonb;
+        v_next_owner := (v_policy ->> 'owner')::uuid;
+    exception when others then
+        raise exception 'invalid group policy payload' using errcode = '22023';
+    end;
+    if jsonb_typeof(v_policy) <> 'object'
+       or (select count(*) from jsonb_object_keys(v_policy)) <> 4
+       or not (v_policy ? 'v' and v_policy ? 'owner' and v_policy ? 'admin' and v_policy ? 'member')
+       or v_policy ->> 'v' <> '1'
+       or jsonb_typeof(v_policy -> 'admin') <> 'array'
+       or jsonb_typeof(v_policy -> 'member') <> 'array' then
+        raise exception 'invalid group policy payload' using errcode = '22023';
+    end if;
+    if not exists (
+        select 1 from public.whisper_group_members m
+         where m.group_id = new.group_id and m.user_id = v_next_owner and m.role = 'admin'
+    ) then raise exception 'group policy owner must be a current admin' using errcode = '42501'; end if;
+    for v_capability in
+        select value from jsonb_array_elements_text(v_policy -> 'admin') as caps(value)
+        union all select value from jsonb_array_elements_text(v_policy -> 'member') as caps(value)
+    loop
+        if v_capability not in ('send', 'invite', 'approveJoin', 'remove', 'manageRoles', 'editInfo', 'editPicture', 'createPoll', 'closePoll') then
+            raise exception 'unknown group policy capability' using errcode = '22023';
+        end if;
+    end loop;
+    if exists (
+        select 1 from jsonb_array_elements_text(v_policy -> 'member') as caps(value)
+         where value not in ('send', 'invite', 'editInfo', 'editPicture', 'createPoll')
+    ) then raise exception 'member policy grants a privileged capability' using errcode = '42501'; end if;
+    if v_next_owner <> v_owner and new.epoch <> v_epoch + 1 then
+        raise exception 'ownership transfer requires the next epoch' using errcode = '42501';
+    end if;
+    if v_next_owner = v_owner and new.epoch <> v_epoch then
+        raise exception 'policy-only update must retain the current epoch' using errcode = '42501';
+    end if;
+    return new;
+end;
+$$;
+
+-- This name sorts before the existing epoch-ratchet trigger, so validation sees
+-- the pre-ratchet epoch.
+drop trigger if exists aaa_group_events_policy_validate on public.whisper_group_events;
+create trigger aaa_group_events_policy_validate before insert on public.whisper_group_events
+    for each row execute function public.whisper_group_validate_policy_event();
+
+create or replace function public.whisper_group_apply_policy_owner()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare v_next_owner uuid;
+begin
+    if new.type <> 'policy' then return new; end if;
+    v_next_owner := (new.payload::jsonb ->> 'owner')::uuid;
+    if v_next_owner is distinct from (select created_by from public.whisper_groups where id = new.group_id) then
+        perform set_config('whisper.group_policy_transfer', '1', true);
+        update public.whisper_groups set created_by = v_next_owner where id = new.group_id;
+    end if;
+    return new;
+end;
+$$;
+
+drop trigger if exists trg_group_events_policy_owner on public.whisper_group_events;
+create trigger trg_group_events_policy_owner after insert on public.whisper_group_events
+    for each row execute function public.whisper_group_apply_policy_owner();
+
+create or replace function public.whisper_group_reject_direct_owner_change()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+    if new.created_by is distinct from old.created_by
+       and current_setting('whisper.group_policy_transfer', true) is distinct from '1' then
+        raise exception 'ownership transfer requires a signed policy event' using errcode = '42501';
+    end if;
+    return new;
+end;
+$$;
+
+drop trigger if exists trg_group_reject_direct_owner_change on public.whisper_groups;
+create trigger trg_group_reject_direct_owner_change before update on public.whisper_groups
+    for each row execute function public.whisper_group_reject_direct_owner_change();

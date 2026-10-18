@@ -359,5 +359,5 @@ And add row 15 to the table in this doc.
 
 ---
 
-**Last updated:** 2026-10-06 — squashed to 18 (V6-R5 + P6 + 20261003-P1 + 20261004-RM + 20261005-P2 + 20261006-RCT). Keep this doc and `main-whisper-sql.sql` in sync.
+**Last updated:** 2026-10-18 — adds Daily Ups lifecycle/RLS and the signed GroupPolicyV1 ownership boundary. Keep this doc and `main-whisper-sql.sql` in sync.
 **Maintainer rule:** any change to `main-whisper-sql.sql` must be accompanied by an update to this doc's "What Is Squashed" table if you add a section.

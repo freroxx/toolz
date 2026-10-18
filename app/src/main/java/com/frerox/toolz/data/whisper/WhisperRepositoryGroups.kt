@@ -1578,8 +1578,9 @@ suspend fun WhisperRepository.updateGroupPolicy(
 }
 
 /**
- * Hands ownership to another admin (owner-only). Promotes the target first
- * when needed, then moves `created_by` (covered by the admin UPDATE policy).
+ * Hands ownership to another admin through one signed POLICY event.  The
+ * server applies the matching `created_by` update only from that event;
+ * direct owner mutation is intentionally rejected at the SQL boundary.
  */
 suspend fun WhisperRepository.transferGroupOwnership(groupId: String, userId: String): Result<Unit> = runCatching {
     requireGroupsEnabled()
@@ -1590,8 +1591,8 @@ suspend fun WhisperRepository.transferGroupOwnership(groupId: String, userId: St
     if (m.members[userId] != WhisperGroupRole.ADMIN) {
         promoteGroupMember(groupId, userId).getOrThrow()
     }
-    db.from("whisper_groups").update({ set("created_by", userId) }) { filter { eq("id", groupId) } }
-    syncGroup(groupId).getOrThrow()
+    val afterPromotion = syncGroup(groupId).getOrThrow()
+    updateGroupPolicy(groupId, afterPromotion.policy.copy(ownerId = userId)).getOrThrow()
 }
 
 suspend fun WhisperRepository.renameGroup(groupId: String, name: String): Result<Unit> = runCatching {
