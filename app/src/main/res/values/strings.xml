@@ -4269,4 +4269,11 @@
         <item quantity="one">%1$d note in trash</item>
         <item quantity="other">%1$d notes in trash</item>
     </plurals>
+    <!-- AI Note Tools: no provider key yet -->
+    <string name="st_NotepadScreen_nokey161">No API key set</string>
+    <string name="st_NotepadScreen_nokeyb162">Connect an AI provider key in the AI assistant\'s settings to use AI Note Tools.</string>
+    <string name="st_NotepadScreen_nokeyopen163">Open AI assistant</string>
+    <string name="st_NotepadScreen_nokeychk164">Check again</string>
+    <!-- Card-size sheet: reasons for locked options -->
+    <string name="st_NotepadScreen_attlock165">Attached content always keeps the card at full size.</string>
 </resources>

@@ -170,6 +170,11 @@ class NotepadViewModel @Inject constructor(
     private val _availableModels = MutableStateFlow<List<String>>(emptyList())
     val availableModels: StateFlow<List<String>> = _availableModels.asStateFlow()
 
+    /** True when at least one provider has a key — the same condition the
+     *  AI assistant's model list uses. AI Note Tools refuses to run without. */
+    private val _aiKeyAvailable = MutableStateFlow(true)
+    val aiKeyAvailable: StateFlow<Boolean> = _aiKeyAvailable.asStateFlow()
+
     private val _isFocusMode = MutableStateFlow(false)
     val isFocusMode: StateFlow<Boolean> = _isFocusMode.asStateFlow()
 
@@ -182,6 +187,7 @@ class NotepadViewModel @Inject constructor(
     init {
         loadPdfs()
         loadAvailableModels()
+        refreshAiKeyState()
         healAllLegacyColumns()
     }
 
@@ -375,6 +381,34 @@ class NotepadViewModel @Inject constructor(
                 noteDao.insertNote(note.copy(cardSize = cardSize, updatedAt = System.currentTimeMillis()))
             } catch (e: Exception) {
                 Log.e(TAG, "updateNoteCardSize failed", e)
+            }
+        }
+    }
+
+    /** Re-read the provider catalog's key state (cheap settings lookup). */
+    fun refreshAiKeyState() {
+        viewModelScope.launch {
+            _aiKeyAvailable.value = AiSettingsHelper.providers.any { provider ->
+                aiSettingsManager.resolveApiKey(provider).source != ApiKeySource.NONE
+            }
+        }
+    }
+
+    /**
+     * Graceful auto-color: the screen schedules a themed color ~1s after a
+     * note is created. Only applies while the note still has no color (0) —
+     * a manual pick made meanwhile always wins.
+     */
+    fun assignAutoColor(noteId: Int, color: Int) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                noteDao.getNoteById(noteId)
+                    ?.takeIf { it.color == 0 }
+                    ?.let { note ->
+                        noteDao.insertNote(note.copy(color = color, updatedAt = System.currentTimeMillis()))
+                    }
+            } catch (e: Exception) {
+                Log.e(TAG, "assignAutoColor failed", e)
             }
         }
     }

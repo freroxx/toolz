@@ -4040,4 +4040,11 @@
         <item quantity="one">%1$d nota na lixeira</item>
         <item quantity="other">%1$d notas na lixeira</item>
     </plurals>
+    <!-- Ferramentas de IA das notas: ainda sem chave -->
+    <string name="st_NotepadScreen_nokey161">Nenhuma chave de API definida</string>
+    <string name="st_NotepadScreen_nokeyb162">Configure uma chave de IA nas configurações do assistente de IA para usar as ferramentas de IA das notas.</string>
+    <string name="st_NotepadScreen_nokeyopen163">Abrir assistente de IA</string>
+    <string name="st_NotepadScreen_nokeychk164">Verificar novamente</string>
+    <!-- Painel de tamanho: motivo das opções desativadas -->
+    <string name="st_NotepadScreen_attlock165">O conteúdo anexado sempre mantém o cartão em tamanho completo.</string>
 </resources>

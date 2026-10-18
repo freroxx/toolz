@@ -146,6 +146,9 @@ private data class NoteCardStyle(
     val minHeight: Dp,
     val imageHeight: Dp,
     val shape: RoundedCornerShape,
+    val compact: Boolean = false, // small cards: tighter type, 1-line title
+    val titleLines: Int = 2,
+    val contentLines: Int = 6,
 )
 
 // ─────────────────────────────────────────────────────────────
@@ -210,9 +213,14 @@ private fun NoteCardOptionsSheet(
 
             Spacer(Modifier.height(4.dp))
 
+            val hasAttachment = note.attachedAudioUri != null ||
+                note.attachedPdfUri != null ||
+                note.attachedImageUri != null
+
             // Size options
             sizeOptions.forEach { (value, label, desc) ->
                 val selected = note.cardSize.uppercase() == value
+                val locked   = hasAttachment && value != NOTE_CARD_SIZE_LARGE
                 val scale by animateFloatAsState(
                     targetValue   = if (selected) 1f else 0.98f,
                     animationSpec = spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMediumLow),
@@ -223,12 +231,27 @@ private fun NoteCardOptionsSheet(
                         .fillMaxWidth()
                         .graphicsLayer { scaleX = scale; scaleY = scale }
                         .bouncyClick(scaleDown = 0.97f) {
-                            haptic.click()
-                            onSizeSelected(value)
+                            if (!locked) {
+                                haptic.click()
+                                onSizeSelected(value)
+                            }
                         },
                     shape  = LargeExpressiveShape,
-                    color  = onColor.copy(if (selected) 0.22f else 0.12f),
-                    border = BorderStroke(1.5.dp, onColor.copy(if (selected) 0.4f else 0.18f)),
+                    color  = when {
+                        selected -> onColor.copy(0.22f)
+                        locked   -> onColor.copy(0.05f)
+                        else     -> onColor.copy(0.12f)
+                    },
+                    border = BorderStroke(
+                        1.5.dp,
+                        onColor.copy(
+                            when {
+                                selected -> 0.4f
+                                locked   -> 0.08f
+                                else     -> 0.18f
+                            },
+                        ),
+                    ),
                 ) {
                     Row(
                         Modifier.padding(horizontal = 18.dp, vertical = 15.dp),
@@ -240,12 +263,12 @@ private fun NoteCardOptionsSheet(
                                 label,
                                 style      = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Black,
-                                color      = onColor,
+                                color      = onColor.copy(if (locked) 0.35f else 1f),
                             )
                             Text(
                                 desc,
                                 style  = MaterialTheme.typography.bodySmall,
-                                color  = onColor.copy(0.7f),
+                                color  = onColor.copy(if (locked) 0.4f else 0.7f),
                             )
                         }
                         AnimatedVisibility(
@@ -262,6 +285,25 @@ private fun NoteCardOptionsSheet(
                             }
                         }
                     }
+                }
+            }
+
+            if (hasAttachment) {
+                // Explain WHY the compact options are grayed out.
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Icon(
+                        Icons.Rounded.Attachment, null,
+                        Modifier.size(14.dp),
+                        tint = onColor.copy(0.55f),
+                    )
+                    Text(
+                        stringResource(R.string.st_NotepadScreen_attlock165),
+                        style  = MaterialTheme.typography.labelSmall,
+                        color  = onColor.copy(0.55f),
+                    )
                 }
             }
 
@@ -351,27 +393,66 @@ private fun resolveNoteCardStyle(note: Note, imageHint: ImageLayoutHint?): NoteC
         note.attachedPdfUri   != null -> RoundedCornerShape(24.dp)
         else                          -> RoundedCornerShape(32.dp)
     }
+    // Attached audio/PDF/image always renders full width: the compact
+    // single-column layouts squash the player and the preview rows.
+    val hasAttachment = note.attachedAudioUri != null ||
+        note.attachedPdfUri != null ||
+        note.attachedImageUri != null
+    if (hasAttachment) {
+        return NoteCardStyle(
+            span        = 2,
+            minHeight   = 240.dp,
+            imageHeight = if (imageHint?.isLandscape == true) 230.dp else 176.dp,
+            shape       = baseShape,
+        )
+    }
     return when (requestedSize) {
-        NOTE_CARD_SIZE_SMALL  -> NoteCardStyle(1, 180.dp, 112.dp, baseShape)
-        NOTE_CARD_SIZE_MEDIUM -> NoteCardStyle(1, 228.dp, 148.dp, baseShape)
+        // Small is genuinely compact: tighter paddings and type, one-line
+        // title, short date, three preview lines.
+        NOTE_CARD_SIZE_SMALL -> NoteCardStyle(
+            1, 128.dp, 80.dp, baseShape,
+            compact = true, titleLines = 1, contentLines = 3,
+        )
+        NOTE_CARD_SIZE_MEDIUM -> NoteCardStyle(1, 208.dp, 140.dp, baseShape)
         NOTE_CARD_SIZE_LARGE  -> NoteCardStyle(
             span        = 2,
             minHeight   = 260.dp,
             imageHeight = if (imageHint?.isLandscape == true) 230.dp else 200.dp,
             shape       = baseShape,
         )
-        else -> when {
-            note.attachedAudioUri != null ->
-                NoteCardStyle(2, 240.dp, 160.dp, baseShape)
-            note.attachedImageUri != null && (imageHint?.isLandscape == true || imageHint?.isLarge == true) ->
-                NoteCardStyle(2, 246.dp, if (imageHint.isLandscape) 230.dp else 200.dp, baseShape)
-            note.attachedPdfUri != null ->
-                NoteCardStyle(1, 220.dp, 108.dp, baseShape)
-            note.content.length > 240 ->
-                NoteCardStyle(2, 230.dp, 140.dp, baseShape)
-            else ->
-                NoteCardStyle(1, 200.dp, 132.dp, baseShape)
+        // Auto: expand to full width only when content needs the room.
+        else -> if (note.content.length > 240) {
+            NoteCardStyle(2, 230.dp, 164.dp, baseShape)
+        } else {
+            NoteCardStyle(1, 208.dp, 140.dp, baseShape)
         }
+    }
+}
+
+/**
+ * Auto-color candidates derived from the current theme skin: each accent hue
+ * (primary/secondary/tertiary) yields three soft tonal variants. Tone stays
+ * high, so the note typography's black text always reads — and every result
+ * visibly belongs to the app's active palette.
+ */
+private fun buildThemeNotePool(colorScheme: ColorScheme): List<Int> {
+    fun tone(base: Color, hueShift: Float, satScale: Float, value: Float): Int {
+        val hsv = FloatArray(3)
+        android.graphics.Color.colorToHSV(base.toArgb(), hsv)
+        hsv[0] = (hsv[0] + hueShift + 360f) % 360f
+        hsv[1] = (hsv[1] * satScale).coerceIn(0.30f, 1f)
+        hsv[2] = value
+        return android.graphics.Color.HSVToColor(hsv)
+    }
+    val accents = listOf(colorScheme.primary, colorScheme.secondary, colorScheme.tertiary)
+    val shifts  = listOf(0f, 10f, -12f)
+    return accents.flatMapIndexed { index, base ->
+        val shift = shifts[index]
+        listOf(
+            tone(base, shift,       0.52f, 0.92f),
+            tone(base, shift + 8f,  0.70f, 0.88f),
+            tone(base, shift - 10f, 0.40f, 0.94f),
+        )
     }
 }
 
@@ -386,6 +467,7 @@ fun NotepadScreen(
     onBack        : () -> Unit,
     onPlayAudio   : (String) -> Unit,
     onViewPdf     : (String, Int) -> Unit,
+    onOpenAiAssistant: () -> Unit = {},
     initialNoteId : Int? = null,
     musicViewModel: MusicPlayerViewModel = hiltViewModel(),
 ) {
@@ -463,6 +545,28 @@ fun NotepadScreen(
     }
     val imageHints             = rememberImageLayoutHints(notes)
     val allowEntranceAnimation = !performanceMode && notes.size <= 18
+
+    // ── Auto-color: fresh notes keep the neutral surface for a beat, then
+    // fade into a random color derived from the active theme skin. The VM
+    // only assigns while the note is still unset, so a manual pick wins. ──
+    val colorScheme = MaterialTheme.colorScheme
+    val autoColorPool = remember(colorScheme) { buildThemeNotePool(colorScheme) }
+    val pendingAutoColorIds = remember { mutableStateListOf<Int>() }
+    LaunchedEffect(pendingAutoColorIds.size) {
+        val id = pendingAutoColorIds.firstOrNull() ?: return@LaunchedEffect
+        delay(1100) // one breath on the neutral surface, then the fade starts
+        viewModel.assignAutoColor(id, autoColorPool.random())
+        pendingAutoColorIds.remove(id)
+    }
+    val scheduleAutoColor: (Int) -> Unit = { id -> pendingAutoColorIds.add(id) }
+
+    // Selection UX: the moment every item is deselected, collapse back to
+    // the idle toolbar instead of leaving an empty selection bar around.
+    LaunchedEffect(actionState, selectedNoteIds.size) {
+        if (actionState == NotepadActionState.SELECTION && selectedNoteIds.isEmpty()) {
+            actionState = NotepadActionState.TOOLBAR
+        }
+    }
 
     // Entrance animations
     val topBarEntrance by animateFloatAsState(
@@ -664,6 +768,8 @@ fun NotepadScreen(
                 onViewPdf = onViewPdf,
                 viewedNoteId = viewedNoteId,
                 onNoteOptionsRequest = { noteOptionsId = it },
+                onOpenAiAssistant = onOpenAiAssistant,
+                onAutoColor = scheduleAutoColor,
                 offlineMode = offlineMode,
                 aiToolsEnabled = notepadAiEnabled
             )
@@ -1132,8 +1238,13 @@ fun NotepadScreen(
                         }
                 ) {
                     viewedNote?.let { note ->
-                        val noteColor = if (note.color == 0) MaterialTheme.colorScheme.surfaceContainerHighest else Color(note.color)
-                        val onColor = if (note.color == 0) MaterialTheme.colorScheme.onSurface else noteContentColor(noteColor)
+                        // Animated so a scheduled auto-color fades in here too.
+                        val noteColor = animateColorAsState(
+                            targetValue = noteSurfaceColor(note.color, MaterialTheme.colorScheme.surfaceContainerHighest),
+                            animationSpec = tween(650),
+                            label = "viewerCardColor",
+                        ).value
+                        val onColor = noteContentColor(noteColor)
                         
         Surface(
             modifier = Modifier
@@ -1366,6 +1477,7 @@ fun NotepadScreen(
                                             viewModel.updateNoteCardSize(created, note.cardSize)
                                         }
                                     }
+                                    if (note.color == 0) scheduleAutoColor(newId)
                                 } catch (_: Exception) { }
                             }
                         }
@@ -1494,7 +1606,9 @@ private fun NoteCard(
     onViewPdf             : () -> Unit,
     modifier              : Modifier = Modifier,
 ) {
-    val noteColor    = Color(note.color)
+    // 0 = legacy "unset" (was transparent black → the "black card"). Resolve
+    // to an opaque theme surface; the auto-color then fades in over it.
+    val noteColor    = noteSurfaceColor(note.color, MaterialTheme.colorScheme.surfaceContainerHighest)
     val onColor      = noteContentColor(noteColor)
     val performanceMode = LocalPerformanceMode.current
 
@@ -1517,9 +1631,25 @@ private fun NoteCard(
 
     val wordCount = remember(note.content) { com.frerox.toolz.data.notepad.NoteText.wordCount(note.content) }
 
+    // Small cards are genuinely compact: tighter paddings and type, a short
+    // date, and no footer delete (the options sheet still offers it).
+    val compact    = cardStyle.compact
+    val padH       = if (compact) 14.dp else 18.dp
+    val padTop     = if (compact) 12.dp else 16.dp
+    val actionSize = if (compact) 38.dp else 48.dp
+    val actionIcon = if (compact) 15.dp else 17.dp
+
+    // One formatter per card, keyed by pattern + timestamp (no per-frame allocs).
+    val dateLabel = remember(note.timestamp, compact) {
+        val pattern = if (compact) "MMM d" else "MMMM d"
+        SimpleDateFormat(pattern, Locale.getDefault())
+            .format(Date(note.timestamp))
+            .uppercase(Locale.ROOT)
+    }
+
     val deleteColor by animateColorAsState(
         targetValue = if (isDeleting) Color.Red.copy(0.6f) else noteColor,
-        animationSpec = tween(300),
+        animationSpec = tween(650), // long enough to carry the auto-color fade in
         label = "deleteColor"
     )
 
@@ -1578,7 +1708,7 @@ private fun NoteCard(
                                 )
                         )
 
-                        Column(Modifier.padding(start = 18.dp, end = 18.dp, top = 16.dp)) {
+                        Column(Modifier.padding(start = padH, end = padH, top = padTop)) {
 
                     // ── Title + pin indicator ───────────────────────────
                     Row(
@@ -1587,11 +1717,15 @@ private fun NoteCard(
                     ) {
                             Text(
                                 note.title.ifEmpty { stringResource(R.string.st_NotepadScreen_u28) },
-                                style      = MaterialTheme.typography.titleLarge,
+                                style = if (compact) {
+                                    MaterialTheme.typography.titleMedium
+                                } else {
+                                    MaterialTheme.typography.titleLarge
+                                },
                                 fontWeight = FontWeight.ExtraBold,
                                 color      = onColor,
                                 modifier   = Modifier.weight(1f),
-                                maxLines   = 2,
+                                maxLines   = if (compact) 1 else 2,
                                 overflow   = TextOverflow.Ellipsis,
                             )
                         if (note.isPinned) {
@@ -1616,7 +1750,7 @@ private fun NoteCard(
                         Spacer(Modifier.height(10.dp))
                         Box(
                             Modifier
-                                .heightIn(max = 120.dp)
+                                .heightIn(max = if (compact) 78.dp else 120.dp)
                                 .fadingEdges(bottom = 6.dp)
                         ) {
                             Text(
@@ -1629,7 +1763,7 @@ private fun NoteCard(
                                     letterSpacing = 0.1.sp,
                                 ),
                                 color    = onColor.copy(0.68f),
-                                maxLines = 6,
+                                maxLines = cardStyle.contentLines,
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }
@@ -1655,7 +1789,7 @@ private fun NoteCard(
                 // ── Zone B: attachment actions (own taps, never the viewer) ──
                 if (note.attachedPdfUri != null || note.attachedAudioUri != null) {
                     Column(
-                        Modifier.padding(start = 18.dp, end = 18.dp, top = 14.dp),
+                        Modifier.padding(start = padH, end = padH, top = padTop),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         note.attachedPdfUri?.let { uri ->
@@ -1691,7 +1825,14 @@ private fun NoteCard(
                 }
 
                 // ── Footer ──────────────────────────────────────────
-                Column(Modifier.padding(start = 18.dp, end = 18.dp, top = 16.dp, bottom = 16.dp)) {
+                Column(
+                    Modifier.padding(
+                        start = padH,
+                        end = padH,
+                        top = padTop,
+                        bottom = if (compact) 12.dp else 16.dp,
+                    )
+                ) {
                     HorizontalDivider(
                         color     = onColor.copy(0.07f),
                         thickness = 0.5.dp,
@@ -1717,17 +1858,15 @@ private fun NoteCard(
                                     modifier = Modifier.weight(1f)
                                 ) {
                                     Text(
-                                        SimpleDateFormat("MMMM d", Locale.getDefault())
-                                            .format(Date(note.timestamp))
-                                            .uppercase(java.util.Locale.ROOT),
+                                        dateLabel,
                                         style         = MaterialTheme.typography.labelSmall,
                                         fontWeight    = FontWeight.ExtraBold,
                                         color         = onColor.copy(0.5f),
-                                        letterSpacing = 0.8.sp,
+                                        letterSpacing = if (compact) 0.4.sp else 0.8.sp,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                     )
-                                    if (wordCount > 0) {
+                                    if (wordCount > 0 && !compact) {
                                         Text(
                                             pluralStringResource(R.plurals.st_NotepadScreen_words61, wordCount, wordCount),
                                             style         = MaterialTheme.typography.labelSmall,
@@ -1752,12 +1891,13 @@ private fun NoteCard(
                             }
                         }
 
-                        // Pin + delete: independent targets, siblings of every
-                        // viewer-opening zone — they can never open the viewer.
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // Pin (+ delete on roomy cards): independent targets,
+                        // siblings of every viewer-opening zone — they can
+                        // never open the viewer.
+                        Row(horizontalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 8.dp)) {
                             ToolzExpressiveIconButton(
                                 onClick = onTogglePin,
-                                modifier = Modifier.size(48.dp),
+                                modifier = Modifier.size(actionSize),
                                 colors = IconButtonDefaults.filledIconButtonColors(
                                     containerColor = if (note.isPinned) onColor.copy(0.18f) else onColor.copy(0.08f),
                                     contentColor = onColor.copy(if (note.isPinned) 0.95f else 0.45f)
@@ -1765,18 +1905,22 @@ private fun NoteCard(
                             ) {
                                 Icon(
                                     Icons.Rounded.PushPin, contentDescription = if (note.isPinned) stringResource(R.string.st_NotepadScreen_cdunpin63) else stringResource(R.string.st_NotepadScreen_cdpin62),
-                                    Modifier.size(17.dp).graphicsLayer { rotationZ = if (note.isPinned) -20f else 0f }
+                                    Modifier.size(actionIcon).graphicsLayer { rotationZ = if (note.isPinned) -20f else 0f }
                                 )
                             }
-                            ToolzExpressiveIconButton(
-                                onClick = onDelete,
-                                modifier = Modifier.size(48.dp),
-                                colors = IconButtonDefaults.filledIconButtonColors(
-                                    containerColor = onColor.copy(0.08f),
-                                    contentColor = onColor.copy(0.45f)
-                                )
-                            ) {
-                                Icon(Icons.Rounded.Delete, contentDescription = stringResource(R.string.st_NotepadScreen_cddel64), Modifier.size(17.dp))
+                            // Compact cards drop the footer delete: the
+                            // options sheet, selection state and trash cover it.
+                            if (!compact) {
+                                ToolzExpressiveIconButton(
+                                    onClick = onDelete,
+                                    modifier = Modifier.size(actionSize),
+                                    colors = IconButtonDefaults.filledIconButtonColors(
+                                        containerColor = onColor.copy(0.08f),
+                                        contentColor = onColor.copy(0.45f)
+                                    )
+                                ) {
+                                    Icon(Icons.Rounded.Delete, contentDescription = stringResource(R.string.st_NotepadScreen_cddel64), Modifier.size(actionIcon))
+                                }
                             }
                         }
                     }
@@ -3065,6 +3209,8 @@ private fun NotepadActionComponent(
     onNoteOptionsRequest: (Int) -> Unit = {},
     offlineMode: Boolean = false,
     aiToolsEnabled: Boolean = true,
+    onOpenAiAssistant: () -> Unit = {},
+    onAutoColor: (Int) -> Unit = {},
 ) {
     val haptic = rememberToolzHapticFeedback()
     val performanceMode = LocalPerformanceMode.current
@@ -3307,14 +3453,15 @@ private fun NotepadActionComponent(
                         onFullScreen = {
                             onStateChange(NotepadActionState.FULL_EDITOR)
                         },
-                        onSave = {
+                        onSave = { draft ->
                             viewModel.addNote(
-                                title = it.title,
-                                content = it.content,
-                                color = it.color,
-                                fontSize = it.fontSize,
-                                isBold = it.isBold,
-                                isItalic = it.isItalic
+                                title = draft.title,
+                                content = draft.content,
+                                color = draft.color,
+                                fontSize = draft.fontSize,
+                                isBold = draft.isBold,
+                                isItalic = draft.isItalic,
+                                onInserted = { id -> if (draft.color == 0) onAutoColor(id) },
                             )
                             onDraftChange(null)
                             onStateChange(NotepadActionState.TOOLBAR)
@@ -3338,6 +3485,7 @@ private fun NotepadActionComponent(
                         onImagePickRequest = onImagePickRequest,
                         newImageUri = newImageUri,
                         onImageConsumed = onImageConsumed,
+                        onAutoColor = onAutoColor,
                         onViewPdf = onViewPdf
                     )
                 }
@@ -3348,6 +3496,7 @@ private fun NotepadActionComponent(
                         notes = notes,
                         selectedNotes = selectedNotes,
                         initialNote = initialDraft,
+                        onOpenAiAssistant = onOpenAiAssistant,
                         onDismiss = { 
                             if (selectedNotes.isNotEmpty()) onStateChange(NotepadActionState.SELECTION)
                             else if (viewedNoteId != null) onStateChange(NotepadActionState.VIEWER)
@@ -3365,11 +3514,13 @@ private fun NotepadActionComponent(
                     )
                 }
                 NotepadActionState.VIEWER -> {
-                    // Exactly ONE 3-dots button (explicit below). trailingContent
-                    // is null so the toolbar never adds its own overflow icon.
+                    // One real M3 pill: all actions live inside the same
+                    // floating bar, so the divider reads as a separator
+                    // instead of floating between scattered chips.
                     ToolzHorizontalFloatingToolbar(
                         expanded = true,
-                        containerColor = Color.Transparent,
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        contentColor = MaterialTheme.colorScheme.onSurface,
                         content = {
                             if (aiToolsEnabled && !offlineMode) {
                                 ToolzExpressiveIconButton(
@@ -3378,14 +3529,13 @@ private fun NotepadActionComponent(
                                         onStateChange(NotepadActionState.AI_TOOLS)
                                     },
                                     shapes = IconButtonDefaults.shapes(),
-                                    colors = IconButtonDefaults.filledIconButtonColors(
-                                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(0.4f),
+                                    colors = IconButtonDefaults.iconButtonColors(
                                         contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 ) {
                                     Icon(Icons.Rounded.AutoAwesome, contentDescription = stringResource(R.string.st_NotepadScreen_cdait76))
                                 }
-                                Spacer(Modifier.width(8.dp))
+                                Spacer(Modifier.width(6.dp))
                             }
                             ToolzExpressiveIconButton(
                                 onClick = {
@@ -3393,33 +3543,31 @@ private fun NotepadActionComponent(
                                     onStateChange(NotepadActionState.FULL_EDITOR)
                                 },
                                 shapes = IconButtonDefaults.shapes(),
-                                colors = IconButtonDefaults.filledIconButtonColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(0.4f),
+                                colors = IconButtonDefaults.iconButtonColors(
                                     contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             ) {
                                 Icon(Icons.Rounded.Edit, contentDescription = stringResource(R.string.st_NotepadScreen_cdedit73))
                             }
-                            Spacer(Modifier.width(8.dp))
+                            Spacer(Modifier.width(6.dp))
                             ToolzExpressiveIconButton(
                                 onClick = {
                                     haptic.tick()
                                     viewedNoteId?.let { onNoteOptionsRequest(it) }
                                 },
                                 shapes = IconButtonDefaults.shapes(),
-                                colors = IconButtonDefaults.filledIconButtonColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(0.4f),
+                                colors = IconButtonDefaults.iconButtonColors(
                                     contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             ) {
                                 Icon(Icons.Rounded.MoreVert, contentDescription = stringResource(R.string.st_NotepadScreen_cdopt74))
                             }
-                            Spacer(Modifier.width(8.dp))
+                            Spacer(Modifier.width(6.dp))
                             VerticalDivider(
-                                modifier = Modifier.height(24.dp),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.2f)
+                                modifier = Modifier.height(22.dp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.3f)
                             )
-                            Spacer(Modifier.width(8.dp))
+                            Spacer(Modifier.width(6.dp))
                             ToolzExpressiveIconButton(
                                 onClick = {
                                     haptic.longClick()
@@ -3427,14 +3575,13 @@ private fun NotepadActionComponent(
                                     onStateChange(NotepadActionState.TOOLBAR)
                                 },
                                 shapes = IconButtonDefaults.shapes(),
-                                colors = IconButtonDefaults.filledIconButtonColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(0.4f),
+                                colors = IconButtonDefaults.iconButtonColors(
                                     contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             ) {
                                 Icon(Icons.Rounded.Delete, contentDescription = stringResource(R.string.st_NotepadScreen_cddel64))
                             }
-                            Spacer(Modifier.width(8.dp))
+                            Spacer(Modifier.width(6.dp))
                             ToolzExpressiveIconButton(
                                 onClick = {
                                     haptic.click()
@@ -3442,8 +3589,7 @@ private fun NotepadActionComponent(
                                     onDraftChange(null) // Clear viewed note id
                                 },
                                 shapes = IconButtonDefaults.shapes(),
-                                colors = IconButtonDefaults.filledIconButtonColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(0.4f),
+                                colors = IconButtonDefaults.iconButtonColors(
                                     contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             ) {
@@ -3470,6 +3616,7 @@ private fun FullExpressiveEditor(
     onImagePickRequest: () -> Unit = {},
     newImageUri: Uri? = null,
     onImageConsumed: () -> Unit = {},
+    onAutoColor: (Int) -> Unit = {},
     musicViewModel: MusicPlayerViewModel = hiltViewModel(),
 ) {
     val haptic = rememberToolzHapticFeedback()
@@ -3552,8 +3699,13 @@ private fun FullExpressiveEditor(
         }
     }
 
-    val noteColor = if (currentNote.color == 0) MaterialTheme.colorScheme.surfaceContainerHigh else Color(currentNote.color)
-    val onColor = if (currentNote.color == 0) MaterialTheme.colorScheme.onSurface else noteContentColor(noteColor)
+    // Animated: auto-colors and manual picks fade instead of snapping.
+    val noteColor = animateColorAsState(
+        targetValue = noteSurfaceColor(currentNote.color, MaterialTheme.colorScheme.surfaceContainerHigh),
+        animationSpec = tween(650),
+        label = "editorCardColor",
+    ).value
+    val onColor = noteContentColor(noteColor)
 
     val words = remember(currentNote.content) { com.frerox.toolz.data.notepad.NoteText.wordCount(currentNote.content) }
     val chars = currentNote.content.length
@@ -3675,7 +3827,8 @@ private fun FullExpressiveEditor(
                                     attachedPdfUri = currentNote.attachedPdfUri,
                                     attachedAudioUri = currentNote.attachedAudioUri,
                                     attachedAudioName = currentNote.attachedAudioName,
-                                    attachedImageUri = currentNote.attachedImageUri
+                                    attachedImageUri = currentNote.attachedImageUri,
+                                    onInserted = { id -> if (currentNote.color == 0) onAutoColor(id) },
                                 )
                             } else {
                                 viewModel.updateNote(currentNote.copy(timestamp = System.currentTimeMillis()))
@@ -4259,6 +4412,61 @@ private fun QuickEditor(
     }
 }
 
+/** Shown inside AI Note Tools when no provider key exists yet. */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
+@Composable
+private fun NoApiKeyState(
+    onOpenAssistant: () -> Unit,
+    onRetry: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 28.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.errorContainer.copy(0.35f),
+        ) {
+            Icon(
+                Icons.Rounded.KeyOff, null,
+                Modifier.padding(18.dp).size(40.dp),
+                tint = MaterialTheme.colorScheme.error,
+            )
+        }
+        Text(
+            stringResource(R.string.st_NotepadScreen_nokey161),
+            style      = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Black,
+            textAlign  = TextAlign.Center,
+        )
+        Text(
+            stringResource(R.string.st_NotepadScreen_nokeyb162),
+            style  = MaterialTheme.typography.bodySmall,
+            color  = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+        ToolzExpressiveButton(
+            onClick = onOpenAssistant,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(
+                stringResource(R.string.st_NotepadScreen_nokeyopen163),
+                fontWeight = FontWeight.Bold,
+            )
+        }
+        TextButton(onClick = onRetry) {
+            Text(
+                stringResource(R.string.st_NotepadScreen_nokeychk164),
+                style  = MaterialTheme.typography.labelLarge,
+                color  = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
 @Composable
 private fun AiToolsPopup(
@@ -4270,6 +4478,7 @@ private fun AiToolsPopup(
     onDismiss: () -> Unit,
     onGenerate: (AiGeneratedNote?) -> Unit,
     onEdit: (Note, AiGeneratedNote?) -> Unit,
+    onOpenAiAssistant: () -> Unit = {},
 ) {
     val haptic = rememberToolzHapticFeedback()
     val scope = rememberCoroutineScope()
@@ -4335,6 +4544,21 @@ private fun AiToolsPopup(
             aiMode = 1 // Default to edit
             step = 0 
         }
+    }
+
+    // ── No API key: refuse to run until one is set at the AI assistant ──
+    val aiKeyAvailable by viewModel.aiKeyAvailable.collectAsStateWithLifecycle()
+    // Re-check here: the user may have added a key since the popup last opened.
+    LaunchedEffect(Unit) { viewModel.refreshAiKeyState() }
+    if (!aiKeyAvailable) {
+        NoApiKeyState(
+            onOpenAssistant = {
+                onDismiss()
+                onOpenAiAssistant()
+            },
+            onRetry = { viewModel.refreshAiKeyState() },
+        )
+        return
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {

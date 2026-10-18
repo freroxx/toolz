@@ -4046,4 +4046,11 @@
         <item quantity="one">%1$d nota en la papelera</item>
         <item quantity="other">%1$d notas en la papelera</item>
     </plurals>
+    <!-- AI Note Tools: still no service key -->
+    <string name="st_NotepadScreen_nokey161">Sin clave de API</string>
+    <string name="st_NotepadScreen_nokeyb162">Configura una clave de IA en los ajustes del asistente IA para usar las herramientas IA de notas.</string>
+    <string name="st_NotepadScreen_nokeyopen163">Abrir asistente IA</string>
+    <string name="st_NotepadScreen_nokeychk164">Comprobar de nuevo</string>
+    <!-- Size panel: reason for disabled options -->
+    <string name="st_NotepadScreen_attlock165">El contenido adjunto siempre mantiene la tarjeta a tamaño completo.</string>
 </resources>

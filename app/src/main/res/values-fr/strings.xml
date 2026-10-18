@@ -4047,4 +4047,11 @@ La plupart des optimisations nécessitent Shizuku pour un accès shell privilég
         <item quantity="one">%1$d note dans la corbeille</item>
         <item quantity="other">%1$d notes dans la corbeille</item>
     </plurals>
+    <!-- Outils IA des notes : pas encore de clé -->
+    <string name="st_NotepadScreen_nokey161">Aucune clé API définie</string>
+    <string name="st_NotepadScreen_nokeyb162">Configurez une clé de fournisseur IA dans les réglages de l\'assistant IA pour utiliser les outils IA des notes.</string>
+    <string name="st_NotepadScreen_nokeyopen163">Ouvrir l\'assistant IA</string>
+    <string name="st_NotepadScreen_nokeychk164">Vérifier à nouveau</string>
+    <!-- Feuille de taille : raison des options désactivées -->
+    <string name="st_NotepadScreen_attlock165">Le contenu joint garde toujours la carte à taille réelle.</string>
 </resources>

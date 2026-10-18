@@ -1519,6 +1519,11 @@ fun ToolzNavHost(
             NotepadScreen(
                 viewModel = hiltViewModel(),
                 onBack = { toolOnBack() },
+                onOpenAiAssistant = {
+                    navController.navigate(Screen.AiAssistant.createRoute()) {
+                        launchSingleTop = true
+                    }
+                },
                 onPlayAudio = { uri ->
                     // Inline playback: toggle from here, never navigate away from Notes.
                     // Note attachments loop the single track (repeat-one), not the queue.
