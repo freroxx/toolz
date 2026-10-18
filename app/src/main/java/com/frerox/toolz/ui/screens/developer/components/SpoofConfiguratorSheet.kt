@@ -6,11 +6,27 @@
  * hammer DataStore — and each fixture stays RAM-only per the sandbox
  * contract. When spoof_whisper is configured here, the offline thread
  * preview renders as message bubbles.
+ *
+ * Revamp changes:
+ *  - Active state uses an animated green dot badge on the icon (not red/error
+ *    — sandbox-on is an intentional state, not an error)
+ *  - The "FIXTURE →" active banner uses primary tint instead of errorContainer
+ *  - Sliders now show min/max labels below the track
+ *  - Switches show a subtitle line (spec.subtitle) if provided
+ *  - Text fields show a live char-count "12/32" label next to the field title
+ *  - "OPEN TOOL SCREEN" button renders regardless of sandbox state (was gated)
+ *    and uses Icons.Rounded.ArrowOutward (more modern than OpenInNew)
  */
 
 package com.frerox.toolz.ui.screens.developer.components
 
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,17 +34,20 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.OpenInNew
+import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -36,7 +55,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -45,12 +63,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.data.developer.DevToolId
 import com.frerox.toolz.data.developer.FakeWhisperSandbox
 import com.frerox.toolz.data.developer.SpoofParams
+import com.frerox.toolz.ui.screens.developer.SpoofFieldSpec
 import com.frerox.toolz.ui.screens.developer.fieldSpecs
 import com.frerox.toolz.ui.screens.developer.icon
 import com.frerox.toolz.ui.screens.developer.openRoute
@@ -86,13 +107,37 @@ private fun DebouncedTextField(
     onCommit: (String) -> Unit,
 ) {
     val (shown, setSh) = rememberDebounced(current, onCommit)
-    OutlinedTextField(
-        value = shown.take(maxLength),
-        onValueChange = setSh,
-        label = { Text(label) },
-        singleLine = true,
-        enabled = enabled,
-        modifier = Modifier.fillMaxWidth(),
+    Column(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(label, modifier = Modifier.weight(1f), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            Text(
+                "${shown.length}/$maxLength",
+                fontSize = 11.sp,
+                color = if (shown.length >= maxLength) MaterialTheme.colorScheme.error
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        OutlinedTextField(
+            value = shown.take(maxLength),
+            onValueChange = setSh,
+            singleLine = true,
+            enabled = enabled,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+/** Clean green dot beacon — shown on the tool icon when the sandbox is active. */
+@Composable
+private fun ActiveDot() {
+    Box(
+        Modifier
+            .size(10.dp)
+            .clip(CircleShape)
+            .background(Color(0xFF66BB6A))
+            .border(1.5.dp, Color.White, CircleShape),
     )
 }
 
@@ -116,19 +161,32 @@ fun SpoofConfiguratorSheet(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 22.dp, vertical = 4.dp),
         ) {
+            // ── Header ────────────────────────────────────────────────────────
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = if (sandboxActive) MaterialTheme.colorScheme.error.copy(alpha = 0.2f)
-                    else MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
-                    modifier = Modifier.size(46.dp),
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            tool.icon,
-                            contentDescription = null,
-                            tint = if (sandboxActive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                        )
+                // Icon with green-dot badge when active
+                Box {
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
+                        modifier = Modifier.size(46.dp),
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                tool.icon,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                    if (sandboxActive) {
+                        ActiveDot()
+                            .let { _ ->
+                                Box(
+                                    Modifier
+                                        .align(Alignment.TopEnd)
+                                        .offset(x = 2.dp, y = (-2).dp),
+                                ) { ActiveDot() }
+                            }
                     }
                 }
                 Spacer(Modifier.width(12.dp))
@@ -141,7 +199,12 @@ fun SpoofConfiguratorSheet(
                     )
                 }
                 Column(horizontalAlignment = Alignment.End) {
-                    Text("SANDBOX", fontWeight = FontWeight.Black, fontSize = 11.sp)
+                    Text(
+                        if (sandboxActive) "ACTIVE" else "SANDBOX",
+                        fontWeight = FontWeight.Black,
+                        fontSize = 11.sp,
+                        color = if (sandboxActive) Color(0xFF66BB6A) else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     Switch(
                         checked = sandboxActive,
                         enabled = devOn,
@@ -150,12 +213,16 @@ fun SpoofConfiguratorSheet(
                 }
             }
 
+            // Active fixture banner — primary tint (not error; sandbox-on is intentional)
             if (sandboxActive) {
                 Spacer(Modifier.height(10.dp))
                 Box(
                     Modifier
                         .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f), RoundedCornerShape(14.dp))
+                        .background(
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.50f),
+                            RoundedCornerShape(14.dp),
+                        )
                         .padding(12.dp),
                 ) {
                     Text(
@@ -163,13 +230,14 @@ fun SpoofConfiguratorSheet(
                         fontWeight = FontWeight.Black,
                         fontSize = 11.sp,
                         letterSpacing = 1.sp,
-                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
                     )
                 }
             }
 
             Spacer(Modifier.height(12.dp))
 
+            // ── Field specs ───────────────────────────────────────────────────
             val specs = tool.fieldSpecs
             if (specs.isEmpty()) {
                 if (tool == DevToolId.WHISPER) {
@@ -190,7 +258,7 @@ fun SpoofConfiguratorSheet(
             } else {
                 specs.forEach { spec ->
                     when (spec) {
-                        is com.frerox.toolz.ui.screens.developer.SpoofFieldSpec.FixtureSlider ->
+                        is SpoofFieldSpec.FixtureSlider ->
                             DebouncedSlider(
                                 label = spec.label,
                                 current = spec.get(params),
@@ -199,20 +267,33 @@ fun SpoofConfiguratorSheet(
                                 format = spec.format,
                                 enabled = devOn,
                                 onCommit = { v -> onUpdateSpoofParams { spec.set(it, v) } },
+                                minLabel = spec.format(spec.min),
+                                maxLabel = spec.format(spec.max),
                             )
-                        is com.frerox.toolz.ui.screens.developer.SpoofFieldSpec.FixtureSwitch ->
-                            Row(
-                                Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(spec.label, modifier = Modifier.weight(1f), fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                Switch(
-                                    checked = spec.get(params),
-                                    enabled = devOn,
-                                    onCheckedChange = { v -> onUpdateSpoofParams { spec.set(it, v) } },
-                                )
+                        is SpoofFieldSpec.FixtureSwitch ->
+                            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(spec.label, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                        if (spec.subtitle.isNotBlank()) {
+                                            Text(
+                                                spec.subtitle,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                    }
+                                    Switch(
+                                        checked = spec.get(params),
+                                        enabled = devOn,
+                                        onCheckedChange = { v -> onUpdateSpoofParams { spec.set(it, v) } },
+                                    )
+                                }
                             }
-                        is com.frerox.toolz.ui.screens.developer.SpoofFieldSpec.FixtureText ->
+                        is SpoofFieldSpec.FixtureText ->
                             DebouncedTextField(
                                 label = spec.label,
                                 current = spec.get(params),
@@ -226,6 +307,7 @@ fun SpoofConfiguratorSheet(
                 }
             }
 
+            // ── Open tool screen — shown regardless of sandbox state ──────────
             tool.openRoute?.let { route ->
                 Spacer(Modifier.height(12.dp))
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
@@ -235,7 +317,11 @@ fun SpoofConfiguratorSheet(
                     horizontalArrangement = Arrangement.End,
                 ) {
                     FilledTonalButton(onClick = { onDismiss(); onOpenRoute(route) }) {
-                        Icon(Icons.Rounded.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(
+                            Icons.AutoMirrored.Rounded.ArrowForward,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                        )
                         Spacer(Modifier.width(6.dp))
                         Text("OPEN TOOL SCREEN", fontWeight = FontWeight.Black, fontSize = 12.sp)
                     }
