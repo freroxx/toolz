@@ -361,6 +361,16 @@ object DatabaseModule {
         }
     }
 
+    // Daily Ups v1.1.7 63->64: whisper_outbox.groupMsgKind (nullable TEXT,
+    // DEFAULT NULL) so queued group fan-out legs keep their row kind
+    // (chat/poll/vote) through a retry instead of replaying as chat.
+    // Purely additive; every existing row migrates untouched.
+    internal val MIGRATION_63_64 = object : Migration(63, 64) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE whisper_outbox ADD COLUMN groupMsgKind TEXT DEFAULT NULL")
+        }
+    }
+
     // Notepad V3 60->61: createdAt/updatedAt + query indices; attachment
     // metadata + lookup indices. Purely additive, backfills from timestamp.
     private val MIGRATION_60_61 = object : Migration(60, 61) {
@@ -406,7 +416,7 @@ object DatabaseModule {
         .openHelperFactory(factory)
         // V2-FIX (reviewwhisper.md) H-10: explicit migrations only — every version bump
         // must ship one (see AppDatabase comment).
-        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56, MIGRATION_56_57, MIGRATION_57_58, MIGRATION_58_59, MIGRATION_59_60, MIGRATION_60_61, MIGRATION_61_62, MIGRATION_62_63)
+        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56, MIGRATION_56_57, MIGRATION_57_58, MIGRATION_58_59, MIGRATION_59_60, MIGRATION_60_61, MIGRATION_61_62, MIGRATION_62_63, MIGRATION_63_64)
         .fallbackToDestructiveMigrationOnDowngrade()
         // NOTE: Add explicit Migration objects here when schema changes. Schemas are now
         // EXPORTED to app/schemas (H-10 fix) so diffs are reviewable — never re-introduce
@@ -470,7 +480,7 @@ object DatabaseModule {
                 // Fresh builder avoids leaking the first helper's connection.
                 return Room.databaseBuilder(context, AppDatabase::class.java, dbName)
                     .openHelperFactory(factory)
-        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56, MIGRATION_56_57, MIGRATION_57_58, MIGRATION_58_59, MIGRATION_59_60, MIGRATION_60_61, MIGRATION_61_62, MIGRATION_62_63)
+        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56, MIGRATION_56_57, MIGRATION_57_58, MIGRATION_58_59, MIGRATION_59_60, MIGRATION_60_61, MIGRATION_61_62, MIGRATION_62_63, MIGRATION_63_64)
                     .fallbackToDestructiveMigrationOnDowngrade()
                     .build()
             }

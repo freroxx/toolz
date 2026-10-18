@@ -156,7 +156,9 @@ import com.frerox.toolz.data.purgeshot.PurgeShotEntity
     // beyond the nullable outbox column.
     // Daily Ups (63): whisper_story_local stores only opaque, session-sealed
     // descriptors and lifecycle metadata; see MIGRATION_62_63 in DatabaseModule.
-    version = 63,
+    // 64: whisper_outbox.groupMsgKind keeps queued group legs' row kind through
+    // retries (see MIGRATION_63_64 in DatabaseModule).
+    version = 64,
     // H-10 FIX (reviewwhisper.md): schemas are now exported to app/schemas (see
     // build.gradle.kts room.schemaLocation). Every future bump MUST ship a Migration —
     // the DatabaseModule comment documents this contract too.

@@ -1356,6 +1356,16 @@ fun mapGroupError(raw: String?): Int? {
             com.frerox.toolz.R.string.st_Whisper_Groups_ErrQueued
         "only admins can send" in msg ->
             com.frerox.toolz.R.string.st_Whisper_Groups_ErrAdminOnly
+        // POLICY-event failures: the same vocabulary the client throws and the
+        // server trigger rejection bubbles through PostgREST verbatim.
+        "only the group owner" in msg || "policy not signed by current owner" in msg ||
+            "policy not owner-signed" in msg ->
+            com.frerox.toolz.R.string.st_Whisper_Groups_ErrOwnerOnly
+        "not permitted by policy" in msg ->
+            com.frerox.toolz.R.string.st_Whisper_Groups_ErrPolicyDeny
+        "bad or unsupported policy payload" in msg || "privileged capability" in msg ||
+            "group policy owner" in msg ->
+            com.frerox.toolz.R.string.st_Whisper_Groups_ErrPolicyBad
         "last admin cannot leave" in msg || "cannot demote the last admin" in msg ||
             "cannot remove the last admin" in msg ->
             com.frerox.toolz.R.string.st_Whisper_Groups_ErrLastAdmin
@@ -1794,6 +1804,7 @@ private suspend fun WhisperRepository.sealAndPublishContent(
             createdAt = java.time.Instant.now().toString(),
             attempts = 0,
             groupId = groupId,
+            groupMsgKind = msgKind,
         ),
     )
     deliveryScheduler.scheduleNow()
@@ -2357,8 +2368,9 @@ private suspend fun WhisperRepository.openGroupPictureInner(groupId: String): Re
 // loads (app-open driven); the worker lane stays 1:1-only by design —
 // extending WhisperDeliveryWorker to group legs is deferred (drain needs the
 // verified log + ratchet sessions; a blind worker replay would burn attempts
-// on stale-epoch rows). Queued votes replay as plain rows (kind defaults to
-// chat server-side); the single extra push on a queued vote is accepted.
+// on stale-epoch rows). Queued legs replay their persisted row kind
+// (groupMsgKind) — votes stay votes, polls stay polls; only picture legs
+// re-run the full upload pipeline.
 
 private val groupFlushMutex = kotlinx.coroutines.sync.Mutex()
 
@@ -2404,6 +2416,7 @@ suspend fun WhisperRepository.flushGroupOutbox(): Int {
                             contentIv = queued.contentIv,
                             epoch = epoch,
                             clientVersionCode = groupClientVersion(),
+                            msgKind = queued.groupMsgKind ?: "chat",
                         ),
                     )
                 }

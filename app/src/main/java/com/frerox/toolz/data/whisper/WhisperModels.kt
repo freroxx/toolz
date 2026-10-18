@@ -321,6 +321,12 @@ data class WhisperQueuedMessage(
     val attempts: Int = 0,
     /** Phase-2 groups: set when this entry is one fan-out leg of a group send. Null = 1:1. */
     val groupId: String? = null,
+    /**
+     * Phase-3: row classification for queued group legs (chat/poll/vote).
+     * Without it the drain replays every leg as kind=chat — a queued poll
+     * would come back mislabeled. Null for 1:1 rows; V3-GK in MIGRATION_63_64.
+     */
+    val groupMsgKind: String? = null,
 )
 
 /** Encrypted-image metadata. This envelope itself is sent as an encrypted Whisper message. */

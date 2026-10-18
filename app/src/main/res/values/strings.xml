@@ -4022,7 +4022,25 @@
     <string name="st_Whisper_Groups_ErrPolicyDeny">You can\'t do that here — the owner restricted this action.</string>
     <string name="st_Whisper_Groups_ErrPolicyBad">This permission set isn\'t valid for the group.</string>
 
-        <string name="st_AppSkin_section_title">APP SKIN</string>
+    <!-- ═══════════════ Daily Ups (v1.1.7) ═══════════════ -->
+    <string name="st_Whisper_DailyUp_Title">Daily Ups</string>
+    <string name="st_Whisper_DailyUp_ErrQuota">You\'ve shared your 5 Daily Ups for today. Come back tomorrow.</string>
+    <string name="st_Whisper_DailyUp_ErrNotFriend">Only current friends can receive a Daily Up.</string>
+    <string name="st_Whisper_DailyUp_ErrAudience">That would reach too many friends — trim your audience.</string>
+    <string name="st_Whisper_DailyUp_ErrVersion">Update the app to share Daily Ups.</string>
+    <string name="st_Whisper_DailyUp_ErrReaction">That reaction isn\'t available.</string>
+    <string name="st_Whisper_DailyUp_ErrUnsupported">Choose a JPEG, PNG or WebP photo.</string>
+    <string name="st_Whisper_DailyUp_ErrTooBig">That photo is too large — pick a smaller one.</string>
+    <string name="st_Whisper_DailyUp_ErrDecode">Couldn\'t read that photo.</string>
+    <string name="st_Whisper_DailyUp_ErrMetadata">That photo\'s data couldn\'t be cleared — choose a different one.</string>
+    <string name="st_Whisper_DailyUp_ErrLocked">This Daily Up is locked — it can\'t be opened here.</string>
+    <string name="st_Whisper_DailyUp_ErrCorrupt">This Daily Up is damaged.</string>
+    <string name="st_Whisper_DailyUp_ErrExpired">This Daily Up has expired.</string>
+    <string name="st_Whisper_DailyUp_ErrUpload">Upload failed — check your connection and retry.</string>
+    <string name="st_Whisper_DailyUp_ErrUnreachable">Couldn\'t seal the Daily Up for every friend — nothing was shared. Try again.</string>
+    <string name="st_Whisper_DailyUp_ErrAuth">Sign in to use Daily Ups.</string>
+    <string name="st_Whisper_DailyUp_ErrSync">Daily Ups unavailable — check your connection and retry.</string>
+    <string name="st_AppSkin_section_title">APP SKIN</string>
     <string name="st_AppSkin_screen_title">App Skin</string>
     <string name="st_AppSkin_screen_subtitle">Icons, colors &amp; community skins</string>
     <string name="st_AppSkin_open_title">App Skin &amp; icons</string>

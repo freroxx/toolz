@@ -50,6 +50,12 @@ data class WhisperOutboxEntity(
      * no @ColumnInfo needed for a null default).
      */
     val groupId: String? = null,
+    /**
+     * Phase-3: row kind carried through the queue (chat/poll/vote) so the
+     * group drain replays the right class instead of the chat default.
+     * Nullable + DEFAULT NULL in MIGRATION_63_64.
+     */
+    val groupMsgKind: String? = null,
 ) {
     fun toQueued(): WhisperQueuedMessage = WhisperQueuedMessage(
         clientId = clientId,
@@ -61,6 +67,7 @@ data class WhisperOutboxEntity(
         createdAt = createdAt,
         attempts = attempts,
         groupId = groupId,
+        groupMsgKind = groupMsgKind,
     )
 
     companion object {
@@ -76,6 +83,7 @@ data class WhisperOutboxEntity(
                 enqueuedAtMs = enqueuedAtMs,
                 attempts = q.attempts,
                 groupId = q.groupId,
+                groupMsgKind = q.groupMsgKind,
             )
     }
 }

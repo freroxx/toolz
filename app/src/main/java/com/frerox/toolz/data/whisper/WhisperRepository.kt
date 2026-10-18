@@ -75,12 +75,17 @@ class WhisperRepository @Inject constructor(
     internal val supabase: SupabaseClient,
     // V3-FIX (task F): app context lets the image decode path honor the device pixel
     // budget (maxPixelsForDevice) — previously this class had no Context injection.
-    @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
+    // Phase-3 Daily Ups: widened private→internal — the story publish pipeline runs
+    // the same pixel-budgeted preprocessor on this context.
+    @dagger.hilt.android.qualifiers.ApplicationContext internal val appContext: android.content.Context,
     internal val crypto: WhisperCrypto,
     // DI seam: interface-typed so an env-switched implementation (staging/test
     // host) can be bound to EncryptedBlobHost via a Hilt @Binds module —
     // WhisperEncryptedImageHost remains the production impl.
     internal val encryptedImageHost: EncryptedBlobHost,
+    // Daily Ups (Phase-3): attest-gated edge calls — the ONLY use today is the
+    // opportunistic whisper-story-sweep ping that converges story cleanup.
+    internal val edgeFunctions: EdgeFunctionClient,
     // Phase-2 groups parity slice: widened private→internal (same precedent)
     // for group delete-for-me tombstones + lazy group-image disk cache.
     internal val deletedStore: WhisperDeletedMessagesStore,
@@ -92,7 +97,9 @@ class WhisperRepository @Inject constructor(
     private val messageDao: WhisperMessageDao,
     // Daily Ups descriptors are opaque at rest but still account-scoped state: a
     // sign-out or account deletion must never leave them available to the next user.
-    private val storyLocalDao: WhisperStoryLocalDao,
+    // Phase-3 Daily Ups parity slice: widened private→internal (same precedent as
+    // crypto/encryptedImageHost above) so WhisperRepositoryStories owns its DAO legs.
+    internal val storyLocalDao: WhisperStoryLocalDao,
     private val keyTrustStore: WhisperKeyTrustStore,
     private val hiddenChatsStore: WhisperHiddenChatsStore,
     private val mutePrefs: WhisperMutePreferences,
@@ -625,6 +632,54 @@ class WhisperRepository @Inject constructor(
         }
         if (entries.isEmpty()) return null
         return WhisperEnvelope.encode(entries, crypto.getPublicKeyBase64())
+    }
+
+    /**
+     * Daily Ups (Phase-3): static-envelope sealing for story descriptors.
+     *
+     * Reuses the chat send path verbatim (pinned-key chain filter + rotation
+     * certs) but as a STANDALONE expression: a story descriptor is sealed
+     * exactly ONCE per recipient and never rides a Double Ratchet session, so
+     * publishing cannot establish, advance or disturb any session state.
+     * Null means "no trusted key for this recipient" — callers fail closed.
+     */
+    internal suspend fun sealStaticEnvelope(content: String, toUserId: String): String? =
+        buildEnvelopeString(
+            content = content,
+            receiverId = toUserId,
+            receiverPubKey = null,
+            senderId = myId,
+        )
+
+    /**
+     * Daily Ups: opens a static envelope WITHOUT touching protocol state — no
+     * ratchet sessions, no pin adoption, no self-heal, no memo cache. Trials,
+     * most-likely-first: the envelope's in-band sender key (the poster sealed
+     * with their current key and it always rides in ik), then the pinned key.
+     * AEAD decides; a copy that opens under the wrong candidate is impossible
+     * (GCM tags bind sender/receiver AAD semantics through encryptMessage).
+     */
+    internal fun openStaticEnvelope(content: String, fromUserId: String): String? {
+        val entries = WhisperEnvelope.decode(content) ?: return null
+        val candidates = buildList {
+            add(WhisperEnvelope.inBandSenderKey(content))
+            add(runCatching { keyTrustStore.knownKey(fromUserId) }.getOrNull())
+        }.filterNotNull().distinct()
+        if (candidates.isEmpty()) return null
+        for ((_, ivB64, ctB64) in entries) {
+            for (pub in candidates) {
+                val plain = crypto.decryptMessage(
+                    cipherText = ctB64,
+                    ivBase64 = ivB64,
+                    peerPublicKeyBase64 = pub,
+                    senderId = fromUserId,
+                    receiverId = myId,
+                    messageCreatedAtEpochMs = Long.MAX_VALUE,
+                )
+                if (plain != null) return plain
+            }
+        }
+        return null
     }
 
     /**
