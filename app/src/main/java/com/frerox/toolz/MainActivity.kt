@@ -1718,6 +1718,14 @@ fun ToolzNavHost(
         composable(Screen.WhisperGroupInfo.route) {
             WhisperGroupInfoScreen(
                 onNavigateBack = { toolOnBack() },
+                onNavigateToPermissions = { groupId ->
+                    navController.navigate(Screen.WhisperGroupPermissions.createRoute(groupId))
+                },
+            )
+        }
+        composable(Screen.WhisperGroupPermissions.route) {
+            com.frerox.toolz.ui.screens.whisper.WhisperGroupPermissionsScreen(
+                onNavigateBack = { toolOnBack() },
             )
         }
 

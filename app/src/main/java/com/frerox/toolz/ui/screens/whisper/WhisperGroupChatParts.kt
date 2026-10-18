@@ -1573,24 +1573,35 @@ internal fun MessageInfoSheet(seen: List<Pair<String, String>>, onDismiss: () ->
 }
 
 @Composable
-internal fun AttachSheet(onPhoto: () -> Unit, onPoll: () -> Unit, onDismiss: () -> Unit) {
+internal fun AttachSheet(
+    onPhoto: () -> Unit,
+    onPoll: () -> Unit,
+    onDismiss: () -> Unit,
+    /** Capability gates: the composer only reaches here when send is allowed. */
+    showPhoto: Boolean = true,
+    showPoll: Boolean = true,
+) {
     GroupSheet(onDismiss = onDismiss) { close ->
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            AttachTile(
-                icon = Icons.Rounded.AddPhotoAlternate,
-                label = stringResource(R.string.st_Whisper_Groups_Photo),
-                modifier = Modifier.weight(1f),
-                onClick = { close(); onPhoto() },
-            )
-            AttachTile(
-                icon = Icons.Rounded.BarChart,
-                label = stringResource(R.string.st_Whisper_Groups_CreatePoll),
-                modifier = Modifier.weight(1f),
-                onClick = { close(); onPoll() },
-            )
+            if (showPhoto) {
+                AttachTile(
+                    icon = Icons.Rounded.AddPhotoAlternate,
+                    label = stringResource(R.string.st_Whisper_Groups_Photo),
+                    modifier = Modifier.weight(1f),
+                    onClick = { close(); onPhoto() },
+                )
+            }
+            if (showPoll) {
+                AttachTile(
+                    icon = Icons.Rounded.BarChart,
+                    label = stringResource(R.string.st_Whisper_Groups_CreatePoll),
+                    modifier = Modifier.weight(1f),
+                    onClick = { close(); onPoll() },
+                )
+            }
         }
         Spacer(Modifier.height(12.dp))
     }

@@ -430,8 +430,9 @@ internal fun PendingInviteRow(
 @Composable
 internal fun MemberActionsSheet(
     member: WhisperGroupInfoViewModel.MemberEntry,
-    iAmAdmin: Boolean,
+    canManageRoles: Boolean,
     canDemote: Boolean,
+    canRemove: Boolean,
     canTransfer: Boolean,
     onDismiss: () -> Unit,
     onPromote: () -> Unit,
@@ -460,7 +461,7 @@ internal fun MemberActionsSheet(
             }
             if (member.role == "admin") AdminBadge()
         }
-        if (iAmAdmin && member.role != "admin") {
+        if (canManageRoles && member.role != "admin") {
             GroupActionRow(
                 icon = Icons.Rounded.Star,
                 label = stringResource(R.string.st_Whisper_Groups_MakeAdmin),
@@ -481,7 +482,7 @@ internal fun MemberActionsSheet(
                 onClick = { onMakeOwner(); close() },
             )
         }
-        if (iAmAdmin) {
+        if (canRemove) {
             GroupActionRow(
                 icon = Icons.Rounded.PersonRemove,
                 label = stringResource(R.string.st_Whisper_Groups_Remove),

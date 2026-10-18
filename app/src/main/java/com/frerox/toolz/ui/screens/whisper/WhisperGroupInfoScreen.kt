@@ -21,8 +21,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.ManageAccounts
 import androidx.compose.material.icons.rounded.DeleteForever
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Lock
@@ -57,6 +59,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.R
+import com.frerox.toolz.data.whisper.WhisperGroupCapability
 import com.frerox.toolz.data.whisper.groupsEnabled
 import com.frerox.toolz.ui.components.ExpressiveLinearProgressIndicator
 import com.frerox.toolz.ui.theme.toolzBackground
@@ -64,12 +67,14 @@ import kotlinx.coroutines.launch
 
 /**
  * Group info: profile header, quick actions, settings, requests, members,
- * invites and the danger zone. Owner = first admin (creation order); admins
- * manage members, rename and settings; everyone gets mute + leave.
+ * invites and the danger zone. Authorization comes from the reconstructed
+ * POLICY state (the owner delegates capabilities per role); the owner also
+ * gets the who-can-do-what editor. Everyone gets mute + leave.
  */
 @Composable
 fun WhisperGroupInfoScreen(
     onNavigateBack: () -> Unit,
+    onNavigateToPermissions: (String) -> Unit,
     viewModel: WhisperGroupInfoViewModel = hiltViewModel(),
 ) {
     if (!groupsEnabled()) return
@@ -93,9 +98,18 @@ fun WhisperGroupInfoScreen(
     }
 
     val membership = state.membership
-    val iAmAdmin = membership?.isAdmin(state.myId) == true
-    val canInvite = membership?.canInvite(state.myId) == true
-    val canEditInfo = iAmAdmin || membership?.membersCanEdit == true
+    val me = state.myId
+    // Authorization is the reconstructed POLICY state, not a role check: the
+    // owner delegates capabilities per role in Who-can-do-what, and the derived
+    // compat policy keeps legacy CREATE-only groups behaving exactly as before.
+    val amOwner = state.amOwner
+    val amAdmin = membership?.isAdmin(me) == true
+    val canInvite = membership?.canInvite(me) == true
+    val canManageRoles = membership?.allows(me, WhisperGroupCapability.PROMOTE_DEMOTE) == true
+    val canRemoveMembers = membership?.allows(me, WhisperGroupCapability.REMOVE_MEMBERS) == true
+    val canApproveRequests = membership?.allows(me, WhisperGroupCapability.APPROVE_JOIN_REQUESTS) == true
+    val canEditInfo = membership?.allows(me, WhisperGroupCapability.EDIT_INFO) == true
+    val canEditPicture = membership?.allows(me, WhisperGroupCapability.EDIT_PICTURE) == true
     val groupName = membership?.name?.ifBlank { "Group" } ?: "Group"
     val adminCount = membership?.members?.count { it.value.wire == "admin" } ?: 0
 
@@ -155,10 +169,10 @@ fun WhisperGroupInfoScreen(
                         name = groupName,
                         groupId = viewModel.groupId,
                         pictureBytes = state.pictureBytes,
-                        canChangePicture = canEditInfo,
+                        canChangePicture = canEditPicture,
                         onPickPicture = { bytes, mime -> viewModel.setPicture(bytes, mime) },
                         onPictureError = notify,
-                        canRename = iAmAdmin,
+                        canRename = canEditInfo,
                         onRename = { showRename = true },
                         memberCount = state.members.size,
                         inviteLabel = stringResource(
@@ -212,7 +226,10 @@ fun WhisperGroupInfoScreen(
 
                 // ── Settings (connected list) ────────────────────────────────
                 val canEditDesc = canEditInfo
-                val settingsCount = 1 + (if (iAmAdmin) 2 else 0) + (if (canEditDesc) 1 else 0)
+                // Toggles write a signed SETTINGS event the server validates
+                // against policy.allows(EDIT_INFO) — same gate as the apply path.
+                val canToggleSettings = canEditInfo
+                val settingsCount = 1 + (if (canToggleSettings) 2 else 0) + (if (canEditDesc) 1 else 0)
                 item(key = "settings_label") {
                     GroupSectionLabel(stringResource(R.string.st_Whisper_Groups_Settings))
                 }
@@ -224,7 +241,7 @@ fun WhisperGroupInfoScreen(
                         supporting = stringResource(
                             when {
                                 !state.notifOn -> R.string.st_Whisper_Groups_NotifToggleOff
-                                iAmAdmin || state.amOwner -> R.string.st_Whisper_Groups_NotifScopeOwner
+                                amAdmin || amOwner -> R.string.st_Whisper_Groups_NotifScopeOwner
                                 else -> R.string.st_Whisper_Groups_NotifScopeMember
                             },
                         ),
@@ -232,7 +249,7 @@ fun WhisperGroupInfoScreen(
                         onToggle = { viewModel.toggleNotif() },
                     )
                 }
-                if (iAmAdmin) {
+                if (canToggleSettings) {
                     item(key = "set_send") {
                         SettingSwitchRow(
                             shape = segmentShape(1, settingsCount),
@@ -279,8 +296,32 @@ fun WhisperGroupInfoScreen(
                     }
                 }
 
-                // ── Join requests (admins) ───────────────────────────────────
-                if (iAmAdmin && state.requests.isNotEmpty()) {
+                // ── Who-can-do-what (owner-only editor) ──────────────────────
+                if (amOwner) {
+                    item(key = "perm_row") {
+                        GroupListRow(
+                            shape = segmentShape(0, 1),
+                            onClick = { onNavigateToPermissions(viewModel.groupId) },
+                            leading = {
+                                Icon(
+                                    Icons.Rounded.ManageAccounts, contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            },
+                            title = stringResource(R.string.st_Whisper_Groups_Permissions),
+                            supporting = stringResource(R.string.st_Whisper_Groups_PermissionsDesc),
+                            trailing = {
+                                Icon(
+                                    Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            },
+                        )
+                    }
+                }
+
+                // ── Join requests (policy-gated) ─────────────────────────────
+                if (canApproveRequests && state.requests.isNotEmpty()) {
                     item(key = "req_label") {
                         GroupSectionLabel(
                             stringResource(R.string.st_Whisper_Groups_Requests),
@@ -343,8 +384,8 @@ fun WhisperGroupInfoScreen(
                     )
                 }
 
-                // ── Outstanding invites (admins) ─────────────────────────────
-                if (iAmAdmin && state.pending.isNotEmpty()) {
+                // ── Outstanding invites (only someone who may invite) ────────
+                if (canInvite && state.pending.isNotEmpty()) {
                     item(key = "pending_label") {
                         GroupSectionLabel(
                             stringResource(R.string.st_Whisper_Groups_InvitedLabel),
@@ -464,9 +505,10 @@ fun WhisperGroupInfoScreen(
     memberSheet?.let { member ->
         MemberActionsSheet(
             member = member,
-            iAmAdmin = iAmAdmin,
-            canDemote = iAmAdmin && member.role == "admin" && adminCount > 1,
-            canTransfer = state.amOwner,
+            canManageRoles = canManageRoles,
+            canDemote = canManageRoles && member.role == "admin" && adminCount > 1,
+            canRemove = canRemoveMembers,
+            canTransfer = amOwner,
             onDismiss = { memberSheet = null },
             onPromote = { viewModel.promoteMember(member.userId) },
             onDemote = { viewModel.demoteMember(member.userId) },

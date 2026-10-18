@@ -33,7 +33,8 @@ fun routeToDevTool(route: String?): DevToolId? {
         "timer", "stopwatch", "pomodoro" -> DevToolId.TIMERS
         "update", "toolz_news" -> DevToolId.UPDATE_NEWS
         "whisper", "whisper_chat", "whisper_group_chat",
-        "whisper_group_info", "whisper_profile" -> DevToolId.WHISPER
+        "whisper_group_info", "whisper_group_permissions",
+        "whisper_profile" -> DevToolId.WHISPER
         "search", "browser", "tab_management",
         "site_permissions", "ad_block_settings", "next_dns_setup" -> DevToolId.SEARCH
         "file_converter", "pdf_reader", "smart_encrypter",
