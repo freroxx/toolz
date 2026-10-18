@@ -49,6 +49,7 @@ sealed class SpoofFieldSpec {
         override val label: String,
         val get: (SpoofParams) -> Boolean,
         val set: (SpoofParams, Boolean) -> SpoofParams,
+        val subtitle: String = "",
     ) : SpoofFieldSpec()
 
     data class FixtureSlider(
