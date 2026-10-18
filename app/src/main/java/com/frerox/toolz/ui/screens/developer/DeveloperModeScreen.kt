@@ -1,23 +1,28 @@
 /*
  * Copyright (C) 2026 Toolz Contributors
  *
- * Developer console — "Mission Control" redesign:
- *   Home   → master power, live telemetry, quick actions, bug report path
- *   Spoofs → tile grid per tool + data-driven bottom-sheet configurators
- *   Labs   → crash lab (+ history), logcat v2, notifications, deep links, UI
- *   System → status, storage/DB, DataStore inspector, armed danger zone
+ * Developer options screen: clean, reliable, professional internal engineering console.
  *
- * Every toggle here is local-only (see DEVELOPER-MODE.md). No telemetry:
- * bug reports leave the device ONLY via copy/share + the Toolz Discord.
+ * Organized into 3 primary tabs:
+ *   1. Mocks & Sandboxes — per-tool local mock sandbox controls and parameters
+ *   2. Diagnostics & Logs — real PID-filtered logcat, crash tests, notification tests, memory stats
+ *   3. Storage & Routes   — storage stats, database table counts, DataStore inspector, deep link launcher
+ *
+ * Zero telemetry: all diagnostics stay strictly local on device.
  */
 
 package com.frerox.toolz.ui.screens.developer
 
+import android.app.Activity
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -42,30 +47,36 @@ import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.DeleteSweep
-import androidx.compose.material.icons.rounded.Forum
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Lock
-import androidx.compose.material.icons.rounded.RestartAlt
-import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Rocket
+import androidx.compose.material.icons.rounded.Notifications
+import androidx.compose.material.icons.rounded.NotificationsOff
+import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.PowerSettingsNew
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Science
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -78,14 +89,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -101,79 +113,74 @@ import com.frerox.toolz.data.developer.SpoofParams
 import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.screens.developer.components.CommandPalette
 import com.frerox.toolz.ui.screens.developer.components.CrashHistoryCard
-import com.frerox.toolz.ui.screens.developer.components.DevBtn
-import com.frerox.toolz.ui.screens.developer.components.DevCard
-import com.frerox.toolz.ui.screens.developer.components.DevCardTitle
-import com.frerox.toolz.ui.screens.developer.components.DevDivider
-import com.frerox.toolz.ui.screens.developer.components.DevKv
-import com.frerox.toolz.ui.screens.developer.components.DevPulseDot
+import com.frerox.toolz.ui.screens.developer.components.DevCommand
+import com.frerox.toolz.ui.screens.developer.components.DevMonoBox
 import com.frerox.toolz.ui.screens.developer.components.DevSectionHeader
-import com.frerox.toolz.ui.screens.developer.components.DevToggleLine
 import com.frerox.toolz.ui.screens.developer.components.LogcatViewer
 import com.frerox.toolz.ui.screens.developer.components.SpoofChip
-import com.frerox.toolz.ui.screens.developer.components.SpoofToolTile
 import com.frerox.toolz.ui.screens.developer.components.SpoofConfiguratorSheet
+import com.frerox.toolz.ui.screens.developer.components.SpoofToolTile
 import com.frerox.toolz.ui.screens.developer.components.WhisperPreviewCard
-import com.frerox.toolz.ui.screens.developer.components.TelemetryCard
-import com.frerox.toolz.ui.screens.developer.components.DevCommand
 import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.ui.theme.toolzBackground
-import com.frerox.toolz.ui.screens.developer.components.DebouncedSlider
-import kotlin.math.abs
-import kotlin.math.roundToInt
-import kotlinx.coroutines.launch
 
 private enum class DevTab(val title: String) {
-    HOME("Home"),
-    SPOOFS("Demo Mode"),
-    LABS("Labs"),
-    SYSTEM("System"),
+    MOCKS("Sandboxes"),
+    DIAGNOSTICS("Diagnostics"),
+    STORAGE("Storage"),
 }
 
-/** Deep-link launchpad: every arg-free route in the app, searchable. */
-private val DevRoutes: List<Pair<String, String>> = listOf(
-    "dashboard" to "Home dashboard",
-    "settings" to "Settings",
-    "app_skin" to "App Skin",
-    "icon_catalog" to "Icon Catalog",
-    "update" to "Update check",
-    "toolz_news" to "Toolz News",
-    "battery_info" to "Battery info",
-    "device_info" to "Device info",
-    "network_power_suite" to "Network power suite",
-    "wifi_tweaks" to "Wi-Fi tweaks",
-    "step_counter" to "Step counter",
-    "step_trends" to "Step trends",
-    "compass" to "Compass",
-    "bubble_level" to "Bubble level",
-    "speedometer" to "Speedometer",
-    "altimeter" to "Altimeter",
-    "light_meter" to "Light meter",
-    "sound_meter" to "Sound meter",
-    "flashlight" to "Flashlight",
-    "screen_light" to "Screen light",
-    "caffeinate" to "Caffeinate",
-    "purge_shot" to "PurgeShot",
-    "timer" to "Timer",
-    "stopwatch" to "Stopwatch",
-    "pomodoro" to "Pomodoro",
-    "todo" to "Todo",
-    "calendar" to "Calendar",
-    "notepad" to "Notepad",
-    "clipboard" to "Clipboard",
-    "notification_vault" to "Notification vault",
-    "qr_generator" to "QR generator",
-    "media_downloader" to "Media downloader",
-    "music_player" to "Music player",
-    "file_cleaner" to "File cleaner",
-    "file_converter" to "File converter",
-    "whisper" to "Whisper (real)",
-    "focus_flow" to "Focus Flow",
-    "smart_search" to "Smart search",
+private data class DevRoute(val route: String, val label: String, val category: String)
+
+private val DevRoutes: List<DevRoute> = listOf(
+    // System
+    DevRoute("dashboard", "Home Dashboard", "System"),
+    DevRoute("settings", "Settings", "System"),
+    DevRoute("app_skin", "App Skin", "System"),
+    DevRoute("icon_catalog", "Icon Catalog", "System"),
+    DevRoute("update", "Update Checker", "System"),
+    DevRoute("toolz_news", "Toolz News", "System"),
+    // Hardware & Sensors
+    DevRoute("battery_info", "Battery Info", "Hardware"),
+    DevRoute("device_info", "Device Info", "Hardware"),
+    DevRoute("network_power_suite", "Network Power Suite", "Hardware"),
+    DevRoute("wifi_tweaks", "Wi-Fi Tweaks", "Hardware"),
+    DevRoute("step_counter", "Step Counter", "Hardware"),
+    DevRoute("step_trends", "Step Trends", "Hardware"),
+    DevRoute("compass", "Compass", "Hardware"),
+    DevRoute("bubble_level", "Bubble Level", "Hardware"),
+    DevRoute("speedometer", "Speedometer", "Hardware"),
+    DevRoute("altimeter", "Altimeter", "Hardware"),
+    DevRoute("light_meter", "Light Meter", "Hardware"),
+    DevRoute("sound_meter", "Sound Meter", "Hardware"),
+    DevRoute("flashlight", "Flashlight", "Hardware"),
+    DevRoute("screen_light", "Screen Light", "Hardware"),
+    DevRoute("caffeinate", "Caffeinate", "Hardware"),
+    DevRoute("purge_shot", "PurgeShot", "Hardware"),
+    // Time & Productivity
+    DevRoute("timer", "Timer", "Time"),
+    DevRoute("stopwatch", "Stopwatch", "Time"),
+    DevRoute("pomodoro", "Pomodoro", "Time"),
+    DevRoute("todo", "Todo", "Time"),
+    DevRoute("calendar", "Calendar", "Time"),
+    DevRoute("notepad", "Notepad", "Time"),
+    // Apps
+    DevRoute("clipboard", "Clipboard Manager", "Apps"),
+    DevRoute("notification_vault", "Notification Vault", "Apps"),
+    DevRoute("qr_generator", "QR Generator", "Apps"),
+    DevRoute("media_downloader", "Media Downloader", "Apps"),
+    DevRoute("music_player", "Music Player", "Apps"),
+    DevRoute("file_cleaner", "File Cleaner", "Apps"),
+    DevRoute("file_converter", "File Converter", "Apps"),
+    DevRoute("whisper", "Whisper", "Apps"),
+    DevRoute("focus_flow", "Focus Flow", "Apps"),
+    DevRoute("smart_search", "Smart Search", "Apps"),
 )
 
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class,
-    androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(
+    androidx.compose.material3.ExperimentalMaterial3Api::class,
+    androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class,
+)
 @Composable
 fun DeveloperModeScreen(
     onBack: () -> Unit,
@@ -182,15 +189,12 @@ fun DeveloperModeScreen(
 ) {
     val vibrationManager = LocalVibrationManager.current
     val context = LocalContext.current
+    val activity = context as? Activity
     val snackbar = remember { SnackbarHostState() }
 
     val devOn by viewModel.devModeEnabled.collectAsState(initial = false)
     val spoofs by viewModel.spoofSnapshot.collectAsState(initial = emptyMap())
     val activeCount by viewModel.activeSandboxCount.collectAsState(initial = 0)
-    val verbose by viewModel.devVerboseLogging.collectAsState(initial = false)
-    val mockDelay by viewModel.devMockDelayMs.collectAsState(initial = 0)
-    val perfHud by viewModel.devPerfHud.collectAsState(initial = false)
-    val forceOffline by viewModel.devForceOffline.collectAsState(initial = false)
     val crashNext by viewModel.devCrashOnNextLaunch.collectAsState(initial = false)
     val logs by viewModel.logLines.collectAsState()
     val logTail by viewModel.logcatTail.collectAsState()
@@ -201,40 +205,17 @@ fun DeveloperModeScreen(
     val storage by viewModel.storageInfo.collectAsState()
     val prefsDump by viewModel.prefsSnapshot.collectAsState()
     val info by viewModel.appInfo.collectAsState()
-    val heapHistory by viewModel.heapHistory.collectAsState()
     val crashHistory by viewModel.crashHistory.collectAsState()
 
-    val activity = context as? android.app.Activity
-    // UI playground reflects live state: current font scale + forced theme/language.
-    val currentFontScale = remember(activity) {
-        activity?.let { DevUiOverrider.currentFontScale(it) } ?: 1f
-    }
-    val themeMode by viewModel.themeMode.collectAsState()
-    val forcedLanguage by viewModel.appLanguage.collectAsState()
-    var rtlOn by remember { mutableStateOf(activity?.let { DevUiOverrider.isRtl(it) } == true) }
-
-    var tab by remember { mutableStateOf(DevTab.HOME.ordinal) }
+    var selectedTab by remember { mutableIntStateOf(DevTab.MOCKS.ordinal) }
     var paletteOpen by remember { mutableStateOf(false) }
     var configuratorFor by remember { mutableStateOf<DevToolId?>(null) }
     var showResetDialog by remember { mutableStateOf(false) }
+    var showClearDbDialog by remember { mutableStateOf(false) }
     var showCrashConfirm by remember { mutableStateOf<String?>(null) }
-    var dangerArmed by remember { mutableStateOf(false) }
     var showDevEnableNotice by remember { mutableStateOf(false) }
 
-    // "Spoof all" hero action: arms master + all 18 flags, then recreates the
-    // Activity so the app relaunches straight into full Spoofed mode.
-    val scope = rememberCoroutineScope()
-    val spoofAllAndRelaunch: () -> Unit = {
-        vibrationManager?.vibrateLongClick()
-        scope.launch {
-            viewModel.spoofAll()
-            try { activity?.recreate() } catch (_: Exception) { }
-        }
-    }
-
     // Gate: the console is unreachable while the master switch is OFF.
-    // This covers every entry path (Settings, shake, watermark banner tap,
-    // stale back stack). Enabling has to go through the warning dialog.
     if (!devOn) {
         DevLockedPanel(
             onBack = onBack,
@@ -255,17 +236,29 @@ fun DeveloperModeScreen(
         viewModel.consumeAction()
     }
 
-    // Stop the 1s logcat tail when this tab or the app is no longer visible.
-    LaunchedEffect(tab) {
-        if (DevTab.entries[tab] != DevTab.LABS) viewModel.setLogcatTail(false)
+    // Start or stop live logcat streaming based on active tab
+    LaunchedEffect(selectedTab) {
+        if (DevTab.entries[selectedTab] == DevTab.DIAGNOSTICS) {
+            viewModel.setLogcatTail(true)
+            viewModel.refreshLogcat()
+        } else {
+            viewModel.setLogcatTail(false)
+        }
+    }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        if (DevTab.entries[selectedTab] == DevTab.DIAGNOSTICS) {
+            viewModel.setLogcatTail(true)
+            viewModel.refreshLogcat()
+        }
     }
     LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) { viewModel.setLogcatTail(false) }
 
+    // Reset confirmation dialog
     if (showResetDialog) {
         AlertDialog(
             onDismissRequest = { showResetDialog = false },
-            title = { Text("Reset developer mode?", fontWeight = FontWeight.Black) },
-            text = { Text("Turns master OFF and clears all 18 demo flags, crash history included. Slider values are kept. Real data returns instantly.") },
+            title = { Text("Reset Developer Settings?", fontWeight = FontWeight.Bold) },
+            text = { Text("This turns Developer Mode OFF and resets all tool sandboxes and test crash history.") },
             confirmButton = {
                 Button(
                     onClick = {
@@ -274,85 +267,96 @@ fun DeveloperModeScreen(
                         showResetDialog = false
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                ) { Text("RESET", fontWeight = FontWeight.Black) }
+                ) { Text("Reset") }
             },
             dismissButton = { TextButton(onClick = { showResetDialog = false }) { Text("Cancel") } },
-            shape = RoundedCornerShape(28.dp),
         )
     }
 
+    // Clear Database confirmation dialog
+    if (showClearDbDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearDbDialog = false },
+            title = { Text("Clear All Database Tables?", fontWeight = FontWeight.Bold) },
+            text = { Text("This will permanently clear all rows in all SQLite database tables across all tools. This cannot be undone.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        vibrationManager?.vibrateLongClick()
+                        viewModel.clearDatabase()
+                        showClearDbDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                ) { Text("Clear All Data") }
+            },
+            dismissButton = { TextButton(onClick = { showClearDbDialog = false }) { Text("Cancel") } },
+        )
+    }
+
+    // Crash confirmation dialog
     showCrashConfirm?.let { type ->
         AlertDialog(
             onDismissRequest = { showCrashConfirm = null },
-            title = { Text("Crash the app?", fontWeight = FontWeight.Black) },
-            text = { Text("This will crash with $type NOW and record the test event locally. Unsaved work may be lost.") },
+            title = { Text("Simulate $type Crash?", fontWeight = FontWeight.Bold) },
+            text = { Text("This will trigger a real unhandled exception on the main thread now to test crash handling.") },
             confirmButton = {
                 Button(
-                    onClick = { viewModel.triggerCrash(type); showCrashConfirm = null },
+                    onClick = {
+                        viewModel.triggerCrash(type)
+                        showCrashConfirm = null
+                    },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                ) { Text("CRASH", fontWeight = FontWeight.Black) }
+                ) { Text("Crash Now") }
             },
             dismissButton = { TextButton(onClick = { showCrashConfirm = null }) { Text("Cancel") } },
-            shape = RoundedCornerShape(28.dp),
         )
     }
 
     val commands = buildList {
-        add(DevCommand("Toggle master ${if (devOn) "off" else "on"}", "Developer mode switch") { viewModel.setDevMode(!devOn) })
-        add(DevCommand("Demo all + relaunch", "${DevToolId.entries.size} tool sandboxes armed, app relaunches") { spoofAllAndRelaunch() })
-        add(DevCommand("Turn all demos off", "Real data everywhere") { viewModel.clearAllSpoofs() })
-        if (!devOn) add(DevCommand("Enable developer mode", "Show warning first") { showDevEnableNotice = true })
-        add(DevCommand("Copy bug report", "Local text report") { viewModel.copyBugReport(info) })
-        add(DevCommand("Share bug report", "System share sheet — you paste it") { viewModel.shareBugReport(info) })
-        add(DevCommand("Open Toolz Discord", "Paste the report there") { DevUiOverrider.openToolzDiscord(context) })
-        add(DevCommand("Refresh logcat", "Read last 300 lines") { viewModel.refreshLogcat() })
-        add(DevCommand("Clear logcat", "logcat -c (local)") { viewModel.clearLogcat() })
-        add(DevCommand("Fire alarm notification", "[DEMO TEST] tagged") {
-            viewModel.sendSpoofNotification(com.frerox.toolz.util.NotificationHelper.CHANNEL_TOOL_ALARM, "Alarm", "Test from palette", 60109)
-        })
-        add(DevCommand("Flood x6 notifications", "Stress test") { viewModel.floodNotifications() })
-        add(DevCommand("Cancel dev notifications", "Removes [DEMO TEST] posts") { viewModel.cancelDevNotifications() })
-        add(DevCommand("Clear cache", "App cache dir only") { viewModel.clearCache() })
-        add(DevCommand("Dump prefs", "Sensitive values redacted") { viewModel.refreshPrefs() })
-        add(DevCommand("Open system dev options", "Android settings") { DevUiOverrider.openSystemDeveloperOptions(context) })
-        add(DevCommand("Force RTL on", "Current activity") { rtlOn = true; activity?.let { DevUiOverrider.setRtl(it, true) } })
-        add(DevCommand("Turn RTL off", "Current activity") { rtlOn = false; activity?.let { DevUiOverrider.setRtl(it, false) } })
-        add(DevCommand("Crash: NPE", "Lab test", danger = true) { showCrashConfirm = "NPE" })
-        add(DevCommand("Crash: ANR 6s", "Lab test", danger = true) { showCrashConfirm = "ANR" })
-        add(DevCommand("Crash: OOM", "Lab test", danger = true) { showCrashConfirm = "OOM" })
-        add(DevCommand("Reset developer mode", "Master off + demos off", danger = true) { showResetDialog = true })
+        add(DevCommand("Toggle Developer Mode", "Switch developer mode master on/off") { viewModel.setDevMode(!devOn) })
+        add(DevCommand("Enable all 18 tool sandboxes", "Mock all tools with fixture data") { viewModel.spoofAll() })
+        add(DevCommand("Disable all tool sandboxes", "Restore live hardware and network data") { viewModel.clearAllSpoofs() })
+        add(DevCommand("Toggle Shizuku privileged logcat", "Switch between ADB shell and standard logcat") { viewModel.setForceShizukuLogcat(!viewModel.forceShizukuLogcat.value) })
+        add(DevCommand("Authorize Shizuku", "Request privileged shell permission for logcat and system tools") { viewModel.requestShizukuPermission() })
+        add(DevCommand("Emit test log", "Add instant test log entry to stream") { viewModel.sendTestLog() })
+        add(DevCommand("Clear logcat stream", "Clear in-memory and system logcat buffer") { viewModel.clearLogcat() })
+        add(DevCommand("Copy diagnostic report", "App version, device specs, memory, uptime") { viewModel.copyBugReport(info) })
+        add(DevCommand("Share diagnostic report", "Share via system chooser") { viewModel.shareBugReport(info) })
+        add(DevCommand("Restart app", "Relaunch fresh application process") { viewModel.restartApp(activity) })
+        add(DevCommand("Clear app cache", "Free temporary files in cache directory") { viewModel.clearCache() })
+        add(DevCommand("Reset onboarding state", "Show welcome screen on next launch") { viewModel.resetOnboarding() })
+        add(DevCommand("Clear all database tables", "Purge all Room database tables", danger = true) { showClearDbDialog = true })
+        add(DevCommand("Open system developer options", "Android system settings") { DevUiOverrider.openSystemDeveloperOptions(context) })
+        add(DevCommand("Open notification settings", "Android notification channels") { DevUiOverrider.openAppNotificationSettings(context) })
+        add(DevCommand("Test: NullPointerException", "Crash test", danger = true) { showCrashConfirm = "NPE" })
+        add(DevCommand("Test: IllegalStateException", "Crash test", danger = true) { showCrashConfirm = "IllegalState" })
+        add(DevCommand("Test: 10s ANR", "Freeze main thread for 10s", danger = true) { showCrashConfirm = "ANR" })
+        add(DevCommand("Reset developer mode", "Master off + sandboxes cleared", danger = true) { showResetDialog = true })
     }
 
     Scaffold(
         topBar = {
             ExpressiveTopAppBar(
-                title = "Developer Mode",
-                subtitle = if (devOn) "ON • $activeCount sandbox${if (activeCount == 1) "" else "es"} • local only"
-                else "Handle with care",
+                title = "Developer Options",
+                subtitle = if (devOn) "Active · $activeCount mock sandbox${if (activeCount == 1) "" else "es"}" else "Disabled",
                 navigationIcon = {
-                    IconButton(
-                        onClick = { vibrationManager?.vibrateClick(); onBack() },
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-                    ) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back") }
+                    IconButton(onClick = { vibrationManager?.vibrateClick(); onBack() }) {
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                    }
                 },
                 actions = {
                     if (devOn && activeCount > 0) {
-                        SpoofChip(modifier = Modifier.padding(end = 4.dp), label = "$activeCount DEMO")
+                        SpoofChip(modifier = Modifier.padding(end = 4.dp), label = "$activeCount ACTIVE")
                     }
-                    IconButton(
-                        onClick = { vibrationManager?.vibrateClick(); paletteOpen = true },
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp))
-                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
-                    ) { Icon(Icons.Rounded.Tune, contentDescription = "Command palette") }
-                    IconButton(
-                        onClick = { vibrationManager?.vibrateClick(); showResetDialog = true },
-                        modifier = Modifier.padding(end = 8.dp, start = 0.dp).clip(RoundedCornerShape(16.dp))
-                            .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f)),
-                    ) { Icon(Icons.Rounded.RestartAlt, contentDescription = "Reset", tint = MaterialTheme.colorScheme.error) }
+                    IconButton(onClick = { vibrationManager?.vibrateClick(); paletteOpen = true }) {
+                        Icon(Icons.Rounded.Tune, contentDescription = "Command palette")
+                    }
+                    IconButton(onClick = { vibrationManager?.vibrateClick(); showResetDialog = true }) {
+                        Icon(Icons.Rounded.RestartAlt, contentDescription = "Reset all")
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
-                largeFlexible = true,
+                largeFlexible = false,
                 modifier = Modifier.statusBarsPadding(),
             )
         },
@@ -361,97 +365,124 @@ fun DeveloperModeScreen(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
     ) { padding ->
         Column(Modifier.fillMaxSize().toolzBackground().padding(top = padding.calculateTopPadding())) {
-            PrimaryTabRow(selectedTabIndex = tab, modifier = Modifier.padding(horizontal = 24.dp)) {
+            // Master Switch Banner Card
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (devOn) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                    else MaterialTheme.colorScheme.surfaceContainerHigh,
+                ),
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (devOn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier.size(36.dp),
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Rounded.PowerSettingsNew,
+                                    contentDescription = null,
+                                    tint = if (devOn) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Developer Mode", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                            Text(
+                                if (devOn) "Mock sandboxes intercept hardware & network APIs"
+                                else "All tools use real hardware & live network APIs",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = devOn,
+                            onCheckedChange = { viewModel.setDevMode(it) },
+                        )
+                    }
+
+                    if (devOn) {
+                        Spacer(Modifier.height(12.dp))
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                        Spacer(Modifier.height(10.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilledTonalButton(
+                                onClick = { viewModel.spoofAll() },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(12.dp),
+                            ) {
+                                Text("Enable All Mocks", fontSize = 12.sp)
+                            }
+                            OutlinedButton(
+                                onClick = { viewModel.clearAllSpoofs() },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(12.dp),
+                            ) {
+                                Text("Disable All", fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Tabs
+            PrimaryTabRow(
+                selectedTabIndex = selectedTab,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            ) {
                 DevTab.entries.forEachIndexed { i, t ->
                     Tab(
-                        selected = tab == i,
-                        onClick = { vibrationManager?.vibrateClick(); tab = i },
-                        text = { Text(t.title, fontWeight = FontWeight.Black) },
+                        selected = selectedTab == i,
+                        onClick = { vibrationManager?.vibrateClick(); selectedTab = i },
+                        text = {
+                            Text(
+                                t.title,
+                                fontWeight = if (selectedTab == i) FontWeight.Bold else FontWeight.Medium,
+                                fontSize = 14.sp,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                        },
                     )
                 }
             }
 
-            when (DevTab.entries[tab]) {
-                DevTab.HOME -> HomeTab(
+            // Tab Content
+            when (DevTab.entries[selectedTab]) {
+                DevTab.MOCKS -> MocksTabContent(
                     devOn = devOn,
                     spoofs = spoofs,
-                    activeCount = activeCount,
+                    params = params,
+                    viewModel = viewModel,
+                    onOpenConfigurator = { configuratorFor = it },
+                    onOpenRoute = onOpenRoute,
+                )
+                DevTab.DIAGNOSTICS -> DiagnosticsTabContent(
                     info = info,
-                    heapHistory = heapHistory,
-                    params = params,
-                    onSetDevMode = { enabled ->
-                        if (enabled) showDevEnableNotice = true else viewModel.setDevMode(false)
-                    },
-                    onOpenConfigurator = { configuratorFor = it },
-                    onOpenSpoofs = { tab = 1 },
-                    refreshStorage = {
-                        viewModel.refreshStorageInfo()
-                        viewModel.refreshTableCounts()
-                    },
-                    onSpoofAll = spoofAllAndRelaunch,
-                    viewModel = viewModel,
-                )
-                DevTab.SPOOFS -> SpoofsTabRoot(
-                    devOn = devOn,
-                    spoofs = spoofs,
-                    params = params,
-                    viewModel = viewModel,
-                    onOpenConfigurator = { configuratorFor = it },
-                    onSetSpoof = viewModel::setSpoof,
-                    onSpoofAll = spoofAllAndRelaunch,
-                )
-                DevTab.LABS -> LabsTab(
-                    devOn = devOn,
-                    verbose = verbose,
-                    mockDelay = mockDelay,
-                    perfHud = perfHud,
-                    forceOffline = forceOffline,
-                    crashNext = crashNext,
                     logs = logs,
                     logTail = logTail,
+                    crashNext = crashNext,
                     crashHistory = crashHistory,
-                    activity = activity,
-                    rtlOn = rtlOn,
-                    themeMode = themeMode,
-                    forcedLanguage = forcedLanguage,
-                    currentFontScale = currentFontScale,
-                    onRtl = {
-                        rtlOn = it
-                        activity?.let { a -> DevUiOverrider.setRtl(a, it) }
-                    },
-                    onOpenRoute = onOpenRoute,
-                    showCrashConfirm = { showCrashConfirm = it },
                     viewModel = viewModel,
+                    onCrashConfirm = { showCrashConfirm = it },
                 )
-                DevTab.SYSTEM -> SystemTab(
+                DevTab.STORAGE -> StorageTabContent(
                     devOn = devOn,
-                    spoofOn = spoofs,
-                    info = info,
-                    shakeToOpen = shakeToOpen,
-                    tables = tables,
                     storage = storage,
+                    tables = tables,
                     prefsDump = prefsDump,
-                    dangerArmed = dangerArmed,
-                    onArm = { dangerArmed = it },
-                    onReset = { showResetDialog = true },
+                    shakeToOpen = shakeToOpen,
                     viewModel = viewModel,
+                    onOpenRoute = onOpenRoute,
+                    onClearDbClick = { showClearDbDialog = true },
                 )
             }
         }
-    }
-
-    if (showDevEnableNotice) {
-        DevEnableNoticeDialog(
-            onConfirm = {
-                vibrationManager?.vibrateLongClick()
-                viewModel.setDevMode(true)
-                showDevEnableNotice = false
-            },
-            onDismiss = {
-                vibrationManager?.vibrateClick()
-                showDevEnableNotice = false
-            },
-        )
     }
 
     CommandPalette(visible = paletteOpen, commands = commands, onDismiss = { paletteOpen = false })
@@ -471,607 +502,644 @@ fun DeveloperModeScreen(
     )
 }
 
-// ---------- HOME ----------
+// ─────────────────────────────────────────────────────────────────────────────
+// TAB 1: MOCKS & SANDBOXES
+// ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun HomeTab(
+private fun MocksTabContent(
     devOn: Boolean,
     spoofs: Map<DevToolId, Boolean>,
-    activeCount: Int,
-    info: DevAppInfo,
-    heapHistory: List<Float>,
     params: SpoofParams,
-    onSetDevMode: (Boolean) -> Unit,
-    onOpenConfigurator: (DevToolId) -> Unit,
-    onOpenSpoofs: () -> Unit,
-    refreshStorage: () -> Unit,
-    onSpoofAll: () -> Unit,
     viewModel: DeveloperModeViewModel,
+    onOpenConfigurator: (DevToolId) -> Unit,
+    onOpenRoute: (String) -> Unit,
 ) {
-    val vibrationManager = LocalVibrationManager.current
-    val context = LocalContext.current
-    LazyColumn(
+    val query by viewModel.searchQuery.collectAsState()
+    var selectedGroup by remember { mutableStateOf<DevToolGroup?>(null) }
+
+    val filteredTools = remember(query, selectedGroup) {
+        DevToolId.entries.filter { tool ->
+            val matchesQuery = query.isBlank() || tool.title.contains(query, ignoreCase = true) || tool.prefKey.contains(query, ignoreCase = true)
+            val matchesGroup = selectedGroup == null || tool.group == selectedGroup
+            matchesQuery && matchesGroup
+        }
+    }
+
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(minSize = 320.dp),
         modifier = Modifier.fillMaxSize(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 24.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        // Master power
-        item {
-            DevCard {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Surface(
-                        shape = RoundedCornerShape(16.dp),
-                        color = if (devOn) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
-                        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                    ) {
-                        Icon(
-                            Icons.Rounded.PowerSettingsNew,
-                            contentDescription = null,
-                            tint = if (devOn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(10.dp).size(22.dp),
-                        )
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("Developer Mode", fontWeight = FontWeight.Black, fontSize = 18.sp)
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            // Console polish: live beacon — breathes while armed.
-                            DevPulseDot(devOn)
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                if (devOn) "ON • $activeCount sandbox${if (activeCount == 1) "" else "es"} • all local"
-                                else "OFF — every tool shows real data",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.weight(1f),
-                            )
+        // Quick Presets Row
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Presets:",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                FilterChip(
+                    selected = false,
+                    onClick = { viewModel.applyPreset(DemoPreset.SHOWCASE) },
+                    label = { Text("Showcase", fontSize = 12.sp) },
+                )
+                FilterChip(
+                    selected = false,
+                    onClick = { viewModel.applyPreset(DemoPreset.EDGE_CASES) },
+                    label = { Text("Edge Cases", fontSize = 12.sp) },
+                )
+                FilterChip(
+                    selected = false,
+                    onClick = { viewModel.applyPreset(DemoPreset.TRAVEL) },
+                    label = { Text("Travel", fontSize = 12.sp) },
+                )
+                FilterChip(
+                    selected = false,
+                    onClick = { viewModel.clearAllSpoofs() },
+                    label = { Text("Reset to Live", fontSize = 12.sp) },
+                )
+            }
+        }
+
+        // Search & Filter
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            OutlinedTextField(
+                value = query,
+                onValueChange = viewModel::onSearchQueryChange,
+                placeholder = { Text("Search tool sandboxes…", fontSize = 13.sp) },
+                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, modifier = Modifier.size(20.dp)) },
+                trailingIcon = {
+                    if (query.isNotEmpty()) {
+                        IconButton(onClick = { viewModel.onSearchQueryChange("") }) {
+                            Icon(Icons.Rounded.Close, contentDescription = "Clear", modifier = Modifier.size(18.dp))
                         }
                     }
-                    Switch(checked = devOn, onCheckedChange = onSetDevMode)
+                },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+            )
+        }
+
+        // Group Filter Chips
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                FilterChip(
+                    selected = selectedGroup == null,
+                    onClick = { selectedGroup = null },
+                    label = { Text("All (${DevToolId.entries.size})") },
+                )
+                DevToolGroup.entries.forEach { group ->
+                    val count = DevToolId.entries.count { it.group == group }
+                    FilterChip(
+                        selected = selectedGroup == group,
+                        onClick = { selectedGroup = if (selectedGroup == group) null else group },
+                        label = { Text("${group.title} ($count)") },
+                    )
                 }
-                Spacer(Modifier.height(12.dp))
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f),
+            }
+        }
+
+        // Tool Tiles
+        items(filteredTools, key = { it.prefKey }) { tool ->
+            SpoofToolTile(
+                tool = tool,
+                params = params,
+                active = spoofs[tool] == true,
+                devOn = devOn,
+                onToggle = { viewModel.setSpoof(tool, it) },
+                onConfigure = { onOpenConfigurator(tool) },
+                onLaunchScreen = onOpenRoute,
+            )
+        }
+
+        if (filteredTools.isEmpty()) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(32.dp),
+                    contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        "LOCAL ONLY • NO TELEMETRY • AUTO-OFF ON UPDATE",
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Black,
-                        letterSpacing = 1.sp,
+                        "No tool sandboxes match \"$query\".",
+                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
         }
-        // Live telemetry
-        item { DevCard { TelemetryCard(info, heapHistory) } }
-        // Quick actions
-        item {
-            DevCard {
-                DevCardTitle("Quick actions")
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    DevBtn("Demo all", Icons.Rounded.Rocket, primary = true, enabled = devOn, modifier = Modifier.weight(1f)) { onSpoofAll() }
-                    DevBtn("Bug report", Icons.Rounded.BugReport, modifier = Modifier.weight(1f)) { viewModel.copyBugReport(info) }
-                    DevBtn("Share", Icons.Rounded.Share, modifier = Modifier.weight(1f)) { viewModel.shareBugReport(info) }
-                }
-                Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    DevBtn("Discord", Icons.Rounded.Forum, modifier = Modifier.weight(1f)) { DevUiOverrider.openToolzDiscord(context) }
-                    DevBtn(
-                        if (activeCount > 0) "All off ($activeCount)" else "All off",
-                        Icons.Rounded.Science,
-                        enabled = devOn && activeCount > 0,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        vibrationManager?.vibrateLongClick()
-                        viewModel.clearAllSpoofs()
-                    }
-                    DevBtn("Refresh", Icons.Rounded.Refresh, modifier = Modifier.weight(1f)) { refreshStorage() }
-                }
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    "Reports never leave this device on their own: copy or share, then paste into the Toolz Discord server.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-        // Active sandboxes
-        item { DevSectionHeader("Active sandboxes") }
-        if (activeCount == 0) {
-            item {
-                DevCard {
-                    Column {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Rounded.Info, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(10.dp))
-                            Text(
-                                "No sandbox active — every screen is real data.",
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
-                        Spacer(Modifier.height(6.dp))
-                        TextButton(onClick = onOpenSpoofs) {
-                            Text("OPEN DEMO TAB →", fontWeight = FontWeight.Black, fontSize = 12.sp)
-                        }
-                    }
-                }
-            }
-        } else {
-            item {
-                DevCard {
-                    spoofs.filter { it.value }.keys.forEach { tool ->
-                        Row(
-                            Modifier.fillMaxWidth().clickable { onOpenConfigurator(tool) }.padding(vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
-                            ) {
-                                Icon(
-                                    tool.icon,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.padding(8.dp).size(18.dp),
-                                )
-                            }
-                            Spacer(Modifier.width(12.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(tool.title, fontWeight = FontWeight.Bold)
-                                Text(
-                                    "DEMO • ${spoofFixtureSummary(tool, params)}",
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            SpoofChip(label = "OPEN")
-                        }
-                    }
-                }
-            }
-        }
-        item { Spacer(Modifier.height(80.dp)) }
+
+        item(span = { GridItemSpan(maxLineSpan) }) { Spacer(Modifier.height(60.dp)) }
     }
 }
 
-// ---------- SPOOFS ----------
+// ─────────────────────────────────────────────────────────────────────────────
+// TAB 2: DIAGNOSTICS & LOGS
+// ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun SpoofsTabRoot(
-    devOn: Boolean,
-    spoofs: Map<DevToolId, Boolean>,
-    params: SpoofParams,
-    viewModel: DeveloperModeViewModel,
-    onOpenConfigurator: (DevToolId) -> Unit,
-    onSetSpoof: (DevToolId, Boolean) -> Unit,
-    onSpoofAll: () -> Unit,
-) {
-    val query by viewModel.searchQuery.collectAsState()
-    val tools = remember(query) {
-        DevToolId.entries.filter {
-            query.isBlank() || it.title.contains(query, true) || it.prefKey.contains(query, true)
-        }
-    }
-    val activeCount = spoofs.values.count { it }
-
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(2),
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 24.dp, vertical = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        item(span = { GridItemSpan(2) }) {
-            OutlinedTextField(
-                value = query,
-                onValueChange = viewModel::onSearchQueryChange,
-                placeholder = { Text("Search tools…", fontSize = 13.sp) },
-                leadingIcon = {
-                    Icon(
-                        Icons.Rounded.Search,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(20.dp),
-                    )
-                },
-                trailingIcon = {
-                    if (query.isNotEmpty()) {
-                        IconButton(onClick = { viewModel.onSearchQueryChange("") }) {
-                            Icon(
-                                Icons.Rounded.Close,
-                                contentDescription = "Clear search",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(18.dp),
-                            )
-                        }
-                    }
-                },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-        item(span = { GridItemSpan(2) }) {
-            DevCard {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Sandboxes", fontWeight = FontWeight.Black)
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            // Live beacon: breathes while spoofs are armed.
-                            DevPulseDot(devOn && activeCount > 0)
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                if (!devOn) "Master OFF — everything shows real data"
-                                else if (activeCount == 0) "None active — tap a tile to configure"
-                                else "$activeCount active — tap a tile to configure its fixtures",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = if (devOn && activeCount > 0) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
-                    }
-                    TextButton(enabled = devOn, onClick = onSpoofAll) {
-                        Text("DEMO ALL", fontWeight = FontWeight.Black, fontSize = 12.sp)
-                    }
-                    TextButton(enabled = devOn && activeCount > 0, onClick = { viewModel.clearAllSpoofs() }) {
-                        Text("TURN ALL OFF", fontWeight = FontWeight.Black, fontSize = 12.sp)
-                    }
-                }
-            }
-        }
-        DevToolGroup.entries.forEach { group ->
-            val groupTools = tools.filter { it.group == group }
-            if (groupTools.isEmpty()) return@forEach
-            item(span = { GridItemSpan(2) }, key = "h_${group.name}") {
-                DevSectionHeader(group.title)
-            }
-            items(groupTools, key = { it.prefKey }) { tool ->
-                SpoofToolTile(
-                    tool = tool,
-                    params = params,
-                    active = spoofs[tool] == true,
-                    devOn = devOn,
-                    onToggle = { onSetSpoof(tool, it) },
-                    onConfigure = { onOpenConfigurator(tool) },
-                )
-            }
-        }
-        if (tools.isEmpty()) {
-            item(span = { GridItemSpan(2) }) {
-                Text("No tools match \"$query\".", modifier = Modifier.padding(8.dp))
-            }
-        }
-        item(span = { GridItemSpan(2) }) { DevSectionHeader("Whisper sandbox preview") }
-        item(span = { GridItemSpan(2) }) { WhisperPreviewCard() }
-        item(span = { GridItemSpan(2) }) { Spacer(Modifier.height(80.dp)) }
-    }
-}
-
-// ---------- LABS ----------
-
-@Composable
-private fun LabsTab(
-    devOn: Boolean,
-    verbose: Boolean,
-    mockDelay: Int,
-    perfHud: Boolean,
-    forceOffline: Boolean,
-    crashNext: Boolean,
+private fun DiagnosticsTabContent(
+    info: DevAppInfo,
     logs: List<String>,
     logTail: Boolean,
+    crashNext: Boolean,
     crashHistory: List<CrashLabEvent>,
-    activity: android.app.Activity?,
-    rtlOn: Boolean,
-    themeMode: String,
-    forcedLanguage: String,
-    currentFontScale: Float,
-    onRtl: (Boolean) -> Unit,
-    onOpenRoute: (String) -> Unit,
-    showCrashConfirm: (String) -> Unit,
     viewModel: DeveloperModeViewModel,
+    onCrashConfirm: (String) -> Unit,
 ) {
-    Column(
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 16.dp),
+    val context = LocalContext.current
+    val areNotificationsEnabled = remember { viewModel.areNotificationsEnabled() }
+    val shizukuActive by viewModel.shizukuActive.collectAsState()
+    val forceShizuku by viewModel.forceShizukuLogcat.collectAsState()
+    val logcatScope by viewModel.logcatScope.collectAsState()
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        DevCard {
-            DevCardTitle("Crash & error lab")
-            Text("Each action is local and recorded into local test history.", style = MaterialTheme.typography.bodySmall)
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                DevBtn("NPE", Icons.Rounded.BugReport) { showCrashConfirm("NPE") }
-                DevBtn("ANR 6s", Icons.Rounded.BugReport) { showCrashConfirm("ANR") }
-                DevBtn("OOM", Icons.Rounded.BugReport) { showCrashConfirm("OOM") }
-            }
-            Spacer(Modifier.height(8.dp))
-            DevBtn("Log non-fatal test exception", Icons.Rounded.BugReport) { viewModel.logNonFatal() }
-            Spacer(Modifier.height(4.dp))
-            DevToggleLine("Crash on next launch", crashNext, devOn, viewModel::setCrashOnNextLaunch, "Cleared after update")
-            DevDivider()
-            CrashHistoryCard(events = crashHistory, onClear = { viewModel.clearCrashHistory() })
-        }
-
-        DevCard {
-            DevCardTitle("Notification lab ([DEMO TEST])")
-            Text("Posted to real channels for look/sound checks; tagged, IDs 60001+.", style = MaterialTheme.typography.bodySmall)
-            Spacer(Modifier.height(8.dp))
-            listOf(
-                com.frerox.toolz.util.NotificationHelper.CHANNEL_TOOL_ALARM to "Alarm",
-                com.frerox.toolz.util.NotificationHelper.CHANNEL_TOOL_ACTIVE to "Active tool",
-                com.frerox.toolz.util.NotificationHelper.CHANNEL_STEP_COUNTER to "Steps",
-                com.frerox.toolz.util.NotificationHelper.CHANNEL_TASK_REMINDERS to "Task",
-                com.frerox.toolz.util.NotificationHelper.CHANNEL_BACKUPS to "Backup",
-                com.frerox.toolz.util.NotificationHelper.CHANNEL_TOOLZ_NEWS to "News",
-            ).forEachIndexed { i, (ch, label) ->
-                Row(
-                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                        .clickable(enabled = devOn) { viewModel.sendSpoofNotification(ch, label, "Tap to dismiss — no side effects", 60101 + i) }
-                        .padding(vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("Fire: $label", modifier = Modifier.weight(1f), fontWeight = FontWeight.Bold)
-                    Text(ch, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
-                }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                DevBtn("Flood x6", Icons.Rounded.BugReport) { viewModel.floodNotifications() }
-                DevBtn("Cancel dev posts", Icons.Rounded.DeleteSweep) { viewModel.cancelDevNotifications() }
-            }
-            Spacer(Modifier.height(8.dp))
-            DevBtn("System notification settings", Icons.Rounded.Settings) { DevUiOverrider.openAppNotificationSettings(viewModel.appContext()) }
-        }
-
-        DevCard {
-            DevCardTitle("Logcat v2 (local)")
-            LogcatViewer(
-                lines = logs,
-                tail = logTail,
-                onTail = viewModel::setLogcatTail,
-                onRefresh = { viewModel.refreshLogcat() },
-                onClear = { viewModel.clearLogcat() },
-                onCopyAll = { viewModel.copyText("Logcat", logs.joinToString("\n")) },
-            )
-        }
-
-        DevCard {
-            DevCardTitle("Data lab")
-            DevToggleLine("Verbose logging", verbose, devOn, viewModel::setVerbose)
-            DevToggleLine("Force offline override", forceOffline, devOn, viewModel::setForceOffline)
-            Spacer(Modifier.height(4.dp))
-            DebouncedSlider(
-                label = "Mock network delay",
-                current = mockDelay.toFloat(),
-                min = 0f,
-                max = 10_000f,
-                format = { "${it.roundToInt()}ms" },
-                enabled = devOn,
-                onCommit = { viewModel.setMockDelay(it.roundToInt()) },
-            )
-        }
-
-        DevCard {
-            DevCardTitle("Deep-link launchpad")
-            LaunchpadSearch(devOn, onOpenRoute)
-        }
-
-        DevCard {
-            DevCardTitle("UI playground")
-            DevToggleLine("Perf HUD overlay flag (applies on restart)", perfHud, devOn, viewModel::setPerfHud)
-            DevToggleLine("Force RTL (this Activity, reversible)", rtlOn, devOn && activity != null, onRtl)
-            Text("Font scale (recreates Activity) — current %.2f×".format(currentFontScale), fontWeight = FontWeight.Bold, fontSize = 12.sp)
-            Spacer(Modifier.height(6.dp))
-            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                listOf(0.85f to "S", 1f to "M", 1.3f to "L", 1.6f to "XL").forEachIndexed { i, (scale, label) ->
-                    SegmentedButton(
-                        selected = abs(currentFontScale - scale) < 0.01f,
-                        onClick = { activity?.let { DevUiOverrider.setFontScale(it, scale) } },
-                        shape = SegmentedButtonDefaults.itemShape(index = i, count = 4),
-                        enabled = devOn && activity != null,
-                    ) { Text(label, fontWeight = FontWeight.Black) }
-                }
-            }
-            Spacer(Modifier.height(10.dp))
-            Text("Force appearance", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-            Spacer(Modifier.height(6.dp))
-            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                listOf("SYSTEM" to "Sys", "LIGHT" to "Light", "DARK" to "Dark").forEachIndexed { i, (mode, label) ->
-                    SegmentedButton(
-                        selected = themeMode.equals(mode, ignoreCase = true),
-                        onClick = { viewModel.setThemeMode(mode) },
-                        shape = SegmentedButtonDefaults.itemShape(index = i, count = 3),
-                        enabled = devOn,
-                    ) { Text(label, fontWeight = FontWeight.Black) }
-                }
-            }
-            Spacer(Modifier.height(10.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                DevBtn("System dev options", Icons.Rounded.Settings) { DevUiOverrider.openSystemDeveloperOptions(viewModel.appContext()) }
-            }
-            Text(
-                "Layout bounds need WRITE_SECURE_SETTINGS — use system dev options.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            DevDivider()
-            Text("Language forcer", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-            Spacer(Modifier.height(6.dp))
-            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                listOf("en" to "EN", "ar" to "AR", "fr" to "FR", "es" to "ES").forEachIndexed { i, (code, label) ->
-                    SegmentedButton(
-                        selected = forcedLanguage != "system" && forcedLanguage.equals(code, ignoreCase = true),
-                        onClick = { viewModel.applyLanguage(code) },
-                        shape = SegmentedButtonDefaults.itemShape(index = i, count = 4),
-                        enabled = devOn,
-                    ) { Text(label, fontWeight = FontWeight.Black) }
-                }
-            }
-            Spacer(Modifier.height(10.dp))
-            TextButton(onClick = { viewModel.applyLanguage("system") }) {
-                Text(
-                    if (forcedLanguage == "system") "✓ FOLLOWING SYSTEM LANGUAGE" else "RESET TO SYSTEM LANGUAGE",
-                    fontWeight = FontWeight.Black,
-                    fontSize = 12.sp,
-                )
-            }
-            DevDivider()
-            Text("Endpoints (build-time, info only)", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-            listOf(
-                "Anthropic" to "https://api.anthropic.com/",
-                "Lyrics" to "https://lrclib.net/api/",
-                "Toolz backend" to "https://toolz-app.vercel.app/",
-                "Supabase" to "BuildConfig.SUPABASE_URL",
-            ).forEach { (name, url) ->
-                Row(
-                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                        .clickable { viewModel.copyText(name, url) }.padding(vertical = 6.dp),
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(name, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                        Text(url, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
-                    }
-                    Icon(Icons.Rounded.ContentCopy, contentDescription = null, modifier = Modifier.size(14.dp))
-                }
-            }
-        }
-        Spacer(Modifier.height(80.dp))
-    }
-}
-
-@Composable
-private fun LaunchpadSearch(devOn: Boolean, onOpenRoute: (String) -> Unit) {
-    var query by remember { mutableStateOf("") }
-    OutlinedTextField(
-        value = query,
-        onValueChange = { query = it },
-        placeholder = { Text("Search routes…", fontSize = 13.sp) },
-        singleLine = true,
-        modifier = Modifier.fillMaxWidth(),
-    )
-    Spacer(Modifier.height(6.dp))
-    val routes = DevRoutes.filter { query.isBlank() || it.first.contains(query, true) || it.second.contains(query, true) }
-    if (routes.isEmpty()) {
-        Text("No route matches \"$query\".", style = MaterialTheme.typography.bodySmall)
-    } else {
-        routes.forEach { (route, label) ->
-            Row(
-                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                    .clickable(enabled = devOn) { onOpenRoute(route) }.padding(vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(label, modifier = Modifier.weight(1f), fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                Text("→ $route", fontSize = 10.sp, fontFamily = FontFamily.Monospace)
-            }
-        }
-    }
-}
-
-// ---------- SYSTEM ----------
-
-@Composable
-private fun SystemTab(
-    devOn: Boolean,
-    spoofOn: Map<DevToolId, Boolean>,
-    info: DevAppInfo,
-    shakeToOpen: Boolean,
-    tables: List<DevTableCount>,
-    storage: DevStorageInfo,
-    prefsDump: Map<String, String>,
-    dangerArmed: Boolean,
-    onArm: (Boolean) -> Unit,
-    onReset: () -> Unit,
-    viewModel: DeveloperModeViewModel,
-) {
-    var prefQuery by remember { mutableStateOf("") }
-    Column(
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        DevCard {
-            DevCardTitle("Status & build")
-            DevKv("Version", "${info.versionName} (${info.versionCode})")
-            DevKv("Package", info.packageName)
-            DevKv("Uptime", "${info.uptimeMs / 1000}s")
-            DevKv("Heap", info.heapMb)
-            DevKv("Native heap", info.nativeHeapMb)
-            DevKv("Threads", info.threads.toString())
-            DevKv("Density", "${DevUiOverrider.densityDpi(viewModel.appContext())}dpi")
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                DevBtn("Copy report", Icons.Rounded.ContentCopy) { viewModel.copyBugReport(info) }
-                DevBtn("Share", Icons.Rounded.Share) { viewModel.shareBugReport(info) }
-            }
-            Spacer(Modifier.height(6.dp))
-            DevToggleLine("Shake to open console", shakeToOpen, devOn, viewModel::setShakeToOpen)
-            Text(
-                "Crash history + all dev flags auto-reset on every version bump.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-
-        DevCard {
-            DevCardTitle("Storage & database (read-only)")
-            DevKv("Cache", storage.format(storage.cacheBytes))
-            DevKv("Files", storage.format(storage.filesBytes))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                DevBtn("Refresh", Icons.Rounded.BugReport) {
-                    viewModel.refreshStorageInfo()
-                    viewModel.refreshTableCounts()
-                }
-                DevBtn("Clear cache", Icons.Rounded.DeleteSweep) { viewModel.clearCache() }
-            }
-            Spacer(Modifier.height(8.dp))
-            if (tables.isEmpty()) Text("No counts yet — tap Refresh.", style = MaterialTheme.typography.bodySmall)
-            else tables.forEach { t ->
-                Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
-                        .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.35f))
-                        .padding(horizontal = 8.dp, vertical = 5.dp),
-                ) {
-                    Text(t.name, modifier = Modifier.weight(1f), fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                    Text(if (t.rows < 0) "?" else "${t.rows}", fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                }
-                Spacer(Modifier.height(3.dp))
-            }
-        }
-
-        DevCard {
-            DevCardTitle("DataStore inspector (sensitive redacted)")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                DevBtn("Dump prefs", Icons.Rounded.BugReport) { viewModel.refreshPrefs() }
-                DevBtn("Copy", Icons.Rounded.ContentCopy) {
-                    viewModel.copyText("Prefs", prefsDump.entries.joinToString("\n") { "${it.key}=${it.value}" })
-                }
-            }
-            Spacer(Modifier.height(8.dp))
-            OutlinedTextField(
-                value = prefQuery,
-                onValueChange = { prefQuery = it },
-                placeholder = { Text("Search keys…", fontSize = 13.sp) },
-                singleLine = true,
+        // ── 1. Live Logcat (Real PID / Shizuku logs) ─────────────────────────
+        item {
+            Card(
                 modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(8.dp))
-            val shown = if (prefQuery.isBlank()) prefsDump.entries.toList()
-            else prefsDump.entries.filter { it.key.contains(prefQuery, true) }
-            if (shown.isEmpty()) Text("Empty — tap Dump prefs.", style = MaterialTheme.typography.bodySmall)
-            else Box(
-                modifier = Modifier.fillMaxWidth().height(200.dp)
-                    .clip(RoundedCornerShape(14.dp)).background(Color.Black.copy(alpha = 0.85f)).padding(10.dp),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
             ) {
-                androidx.compose.foundation.text.selection.SelectionContainer {
-                    androidx.compose.foundation.lazy.LazyColumn {
-                        items(shown.take(300).size) { i ->
-                            val (k, v) = shown[i]
+                Column(Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "Logcat",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 16.sp,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            "PID ${android.os.Process.myPid()}",
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    LogcatViewer(
+                        lines = logs,
+                        tail = logTail,
+                        onTail = viewModel::setLogcatTail,
+                        shizukuActive = shizukuActive,
+                        forceShizuku = forceShizuku,
+                        onToggleForceShizuku = viewModel::setForceShizukuLogcat,
+                        onRequestShizuku = viewModel::requestShizukuPermission,
+                        scope = logcatScope,
+                        onScopeChange = viewModel::setLogcatScope,
+                        onRefresh = { viewModel.refreshLogcat() },
+                        onTestLog = { viewModel.sendTestLog() },
+                        onClear = { viewModel.clearLogcat() },
+                        onCopyAll = { viewModel.copyAllLogs() },
+                        onCopyWarningsAndErrors = { viewModel.copyWarningsAndErrors() },
+                    )
+                }
+            }
+        }
+
+        // ── 2. Device & Memory Health ─────────────────────────────────────────
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "Device Health & Process",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 15.sp,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(onClick = { viewModel.copyBugReport(info) }) {
+                            Icon(Icons.Rounded.ContentCopy, contentDescription = "Copy diagnostics", modifier = Modifier.size(18.dp))
+                        }
+                        IconButton(onClick = { viewModel.shareBugReport(info) }) {
+                            Icon(Icons.Rounded.Share, contentDescription = "Share diagnostics", modifier = Modifier.size(18.dp))
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        DiagStatPill("Heap RAM", info.heapMb, Modifier.weight(1f))
+                        DiagStatPill("Native RAM", info.nativeHeapMb, Modifier.weight(1f))
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        DiagStatPill("Threads", "${info.threads}", Modifier.weight(1f))
+                        DiagStatPill("Uptime", "${info.uptimeMs / 1000}s", Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+
+        // ── Crash & Exception Testing ─────────────────────────────────────────
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("Crash & Stability Testing", fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface)
+                    Text("Simulate unhandled errors on the main thread to test crash recovery.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(10.dp))
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { onCrashConfirm("NPE") },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer),
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                        ) {
+                            Text("NPE", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Button(
+                            onClick = { onCrashConfirm("IllegalState") },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer),
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                        ) {
+                            Text("IllegalState", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { onCrashConfirm("ANR") },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer),
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                        ) {
+                            Text("10s ANR", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Button(
+                            onClick = { onCrashConfirm("OOM") },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer),
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                        ) {
+                            Text("OOM", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = { viewModel.logNonFatal() },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Text("Log Non-Fatal Exception to Logcat", fontSize = 12.sp)
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Crash on next launch", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                            Text("Simulates a crash during Application.onCreate", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(
+                            checked = crashNext,
+                            onCheckedChange = { viewModel.setCrashOnNextLaunch(it) },
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                    Spacer(Modifier.height(8.dp))
+                    CrashHistoryCard(events = crashHistory, onClear = { viewModel.clearCrashHistory() })
+                }
+            }
+        }
+
+        // ── Notification Channel Testing ──────────────────────────────────────
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("Notification Channels", fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface)
+                    Spacer(Modifier.height(8.dp))
+
+                    if (!areNotificationsEnabled) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f),
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                        ) {
+                            Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Rounded.NotificationsOff, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                                Spacer(Modifier.width(10.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text("Notifications are disabled", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
+                                    Text("Android system permission is currently blocked.", style = MaterialTheme.typography.bodySmall)
+                                }
+                                TextButton(onClick = { DevUiOverrider.openAppNotificationSettings(context) }) {
+                                    Text("Enable", fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+
+                    listOf(
+                        com.frerox.toolz.util.NotificationHelper.CHANNEL_TOOL_ALARM to "Alarm Notification",
+                        com.frerox.toolz.util.NotificationHelper.CHANNEL_TOOL_ACTIVE to "Active Tool Foreground",
+                        com.frerox.toolz.util.NotificationHelper.CHANNEL_STEP_COUNTER to "Step Counter Status",
+                        com.frerox.toolz.util.NotificationHelper.CHANNEL_TASK_REMINDERS to "Task Reminder Alert",
+                        com.frerox.toolz.util.NotificationHelper.CHANNEL_BACKUPS to "Backup Progress",
+                        com.frerox.toolz.util.NotificationHelper.CHANNEL_TOOLZ_NEWS to "Toolz News Update",
+                    ).forEachIndexed { i, (channelId, label) ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable {
+                                    viewModel.sendSpoofNotification(
+                                        channelId = channelId,
+                                        title = label,
+                                        body = "Test notification for channel: $channelId",
+                                        id = 60101 + i,
+                                    )
+                                }
+                                .padding(vertical = 8.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Rounded.Notifications, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.width(10.dp))
+                            Text(label, modifier = Modifier.weight(1f), fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                            Text("Send Test →", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = { viewModel.cancelDevNotifications() },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Icon(Icons.Rounded.DeleteSweep, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Clear All Test Notifications", fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+
+        item { Spacer(Modifier.height(60.dp)) }
+    }
+}
+
+@Composable
+private fun DiagStatPill(label: String, value: String, modifier: Modifier = Modifier) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
+        modifier = modifier,
+    ) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Text(label.uppercase(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold, fontSize = 10.sp)
+            Text(value, fontWeight = FontWeight.Bold, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TAB 3: STORAGE & ROUTES
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun StorageTabContent(
+    devOn: Boolean,
+    storage: DevStorageInfo,
+    tables: List<DevTableCount>,
+    prefsDump: Map<String, String>,
+    shakeToOpen: Boolean,
+    viewModel: DeveloperModeViewModel,
+    onOpenRoute: (String) -> Unit,
+    onClearDbClick: () -> Unit,
+) {
+    val context = LocalContext.current
+    var routeQuery by remember { mutableStateOf("") }
+    var prefQuery by remember { mutableStateOf("") }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        // ── Storage & State Tools ─────────────────────────────────────────────
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("Storage & App State", fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface)
+                    Spacer(Modifier.height(10.dp))
+
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        DiagStatPill("App Cache", storage.format(storage.cacheBytes), Modifier.weight(1f))
+                        DiagStatPill("App Files", storage.format(storage.filesBytes), Modifier.weight(1f))
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilledTonalButton(
+                            onClick = { viewModel.clearCache() },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                        ) {
+                            Icon(Icons.Rounded.DeleteSweep, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Clear Cache", fontSize = 12.sp)
+                        }
+                        OutlinedButton(
+                            onClick = { viewModel.resetOnboarding() },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                        ) {
+                            Text("Reset Onboarding", fontSize = 12.sp)
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Button(
+                        onClick = onClearDbClick,
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer),
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Icon(Icons.Rounded.Warning, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Clear All Database Tables", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        // ── Room Database Table Viewer ────────────────────────────────────────
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Room Database", fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+                        IconButton(onClick = { viewModel.refreshTableCounts() }) {
+                            Icon(Icons.Rounded.Refresh, contentDescription = "Refresh", modifier = Modifier.size(18.dp))
+                        }
+                    }
+
+                    if (tables.isEmpty()) {
+                        TextButton(onClick = { viewModel.refreshTableCounts() }) {
+                            Text("Tap to inspect database table row counts")
+                        }
+                    } else {
+                        tables.forEach { table ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp, horizontal = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(table.name, modifier = Modifier.weight(1f), fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                                Text("${table.rows} rows", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── DataStore Preferences Inspector ───────────────────────────────────
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("DataStore Preferences", fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+                        IconButton(onClick = { viewModel.refreshPrefs() }) {
+                            Icon(Icons.Rounded.Refresh, contentDescription = "Refresh", modifier = Modifier.size(18.dp))
+                        }
+                    }
+
+                    if (prefsDump.isEmpty()) {
+                        TextButton(onClick = { viewModel.refreshPrefs() }) {
+                            Text("Tap to read all DataStore preference keys")
+                        }
+                    } else {
+                        OutlinedTextField(
+                            value = prefQuery,
+                            onValueChange = { prefQuery = it },
+                            placeholder = { Text("Search keys…", fontSize = 12.sp) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                        )
+                        Spacer(Modifier.height(8.dp))
+
+                        val filtered = remember(prefsDump, prefQuery) {
+                            if (prefQuery.isBlank()) prefsDump.entries.toList()
+                            else prefsDump.entries.filter { it.key.contains(prefQuery, ignoreCase = true) }
+                        }
+
+                        DevMonoBox(modifier = Modifier.fillMaxWidth().height(220.dp)) {
+                            androidx.compose.foundation.lazy.LazyColumn(modifier = Modifier.fillMaxSize()) {
+                                items(filtered.size) { i ->
+                                    val (k, v) = filtered[i]
+                                    Text(
+                                        "$k = $v",
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 11.sp,
+                                        color = if (k.startsWith("spoof_")) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { viewModel.copyText(k, "$k=$v") }
+                                            .padding(vertical = 2.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Deep Link Screen Launcher ─────────────────────────────────────────
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("Screen Launcher", fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface)
+                    Text("Instant test navigation to any screen in the application.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(10.dp))
+
+                    OutlinedTextField(
+                        value = routeQuery,
+                        onValueChange = { routeQuery = it },
+                        placeholder = { Text("Filter ${DevRoutes.size} routes…", fontSize = 12.sp) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                    )
+                    Spacer(Modifier.height(8.dp))
+
+                    val filteredRoutes = remember(routeQuery) {
+                        if (routeQuery.isBlank()) DevRoutes
+                        else DevRoutes.filter { it.route.contains(routeQuery, ignoreCase = true) || it.label.contains(routeQuery, ignoreCase = true) }
+                    }
+
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        filteredRoutes.take(15).forEach { dr ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable { onOpenRoute(dr.route) }
+                                    .padding(vertical = 8.dp, horizontal = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(dr.label, fontWeight = FontWeight.Medium, fontSize = 13.sp)
+                                    Text(dr.route, fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                Icon(Icons.Rounded.OpenInNew, contentDescription = "Launch", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                        if (filteredRoutes.size > 15) {
                             Text(
-                                "$k=$v",
-                                color = Color(0xFF9EF0B0),
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 10.sp,
-                                softWrap = false,
+                                "+ ${filteredRoutes.size - 15} more routes (type in search box to filter)",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 4.dp),
                             )
                         }
                     }
@@ -1079,46 +1147,64 @@ private fun SystemTab(
             }
         }
 
-        DevCard {
-            DevCardTitle("Danger zone")
-            DevToggleLine(
-                "ARM dangerous actions",
-                dangerArmed,
-                true,
-                onArm,
-                "Buttons below only work while armed",
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                DevBtn(
-                    "Turn off all demos",
-                    Icons.Rounded.Science,
-                    danger = dangerArmed,
-                    enabled = dangerArmed && devOn,
-                ) { viewModel.clearAllSpoofs() }
-                DevBtn(
-                    "Reset dev mode",
-                    Icons.Rounded.RestartAlt,
-                    danger = dangerArmed,
-                    enabled = dangerArmed,
-                ) { onReset() }
+        // ── System Shortcuts & Gestures ───────────────────────────────────────
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("System & Gestures", fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface)
+                    Spacer(Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Shake to open console", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                            Text("2.6g acceleration threshold, zero sensor battery cost when OFF", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(
+                            checked = shakeToOpen,
+                            enabled = devOn,
+                            onCheckedChange = { viewModel.setShakeToOpen(it) },
+                        )
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = { DevUiOverrider.openSystemDeveloperOptions(context) },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Icon(Icons.Rounded.Settings, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Open Android System Developer Options", fontSize = 12.sp)
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    OutlinedButton(
+                        onClick = { DevUiOverrider.openAppNotificationSettings(context) },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Icon(Icons.Rounded.Notifications, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Open App Notification Settings", fontSize = 12.sp)
+                    }
+                }
             }
-            Spacer(Modifier.height(6.dp))
-            Text(
-                "Auto-reset: dev mode + all demo sandboxes + crash history turn OFF on every version bump. Onboarding reset also clears dev flags.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
-        Spacer(Modifier.height(80.dp))
+
+        item { Spacer(Modifier.height(60.dp)) }
     }
 }
 
-// ---------- LOCKED (master OFF) + shared enable dialog ----------
+// ─────────────────────────────────────────────────────────────────────────────
+// LOCKED STATE & DIALOGS
+// ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Shown instead of the console while the master switch is OFF. The console
- * cannot be used in this state — no tabs, no labs, no palette.
- */
 @Composable
 private fun DevLockedPanel(
     onBack: () -> Unit,
@@ -1132,75 +1218,66 @@ private fun DevLockedPanel(
             .statusBarsPadding()
             .padding(horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterVertically),
+        verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
     ) {
         Surface(
-            shape = RoundedCornerShape(28.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHighest,
         ) {
             Icon(
                 Icons.Rounded.Lock,
-                contentDescription = "Console locked",
+                contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(22.dp).size(40.dp),
+                modifier = Modifier.padding(20.dp).size(36.dp),
             )
         }
         Text(
-            "Console locked",
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Black,
-            letterSpacing = 1.sp,
+            "Developer Options Locked",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
         )
         Text(
-            "Developer Mode is OFF. Toolz Demo Mode is unavailable and every screen shows real data. " +
-                "Turn it on to arm the console — everything stays on this device.",
+            "Developer Mode is currently disabled. Enable it to access internal diagnostics, live logcat, memory monitoring, and mock tool sandboxes.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
+        Spacer(Modifier.height(8.dp))
         Button(
             onClick = { vibrationManager?.vibrateClick(); onEnable() },
-            shape = RoundedCornerShape(18.dp),
+            shape = RoundedCornerShape(14.dp),
         ) {
-            Text("TURN ON DEVELOPER MODE", fontWeight = FontWeight.Black, letterSpacing = 0.5.sp)
+            Text("Enable Developer Mode", fontWeight = FontWeight.Bold)
         }
         TextButton(onClick = { vibrationManager?.vibrateClick(); onBack() }) {
-            Text("Back", fontWeight = FontWeight.Bold)
+            Text("Back", fontWeight = FontWeight.Medium)
         }
-        Spacer(Modifier.height(40.dp))
     }
 }
 
-/** Enable-warning dialog: identical text whether opened from Settings or the locked console. */
 @Composable
 private fun DevEnableNoticeDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val vibrationManager = LocalVibrationManager.current
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Enable Developer Mode?", fontWeight = FontWeight.Black, letterSpacing = 1.sp) },
+        title = { Text("Enable Developer Options?", fontWeight = FontWeight.Bold) },
         text = {
             Text(
-                "• Internal diagnostics + Toolz Demo Mode (fake data never leaves the device).\n" +
-                    "• Crash lab, test notifications and data labs can disturb the app until you turn them off.\n" +
-                    "• Auto-disables after every app update.\n\n" +
-                    "No telemetry: bug reports are copied/shared by you only.",
+                "Developer Mode provides diagnostic tools, logcat viewing, and mock tool sandboxes for testing.\n\n" +
+                    "All data and logs stay strictly local on this device. Developer flags automatically reset after app updates.",
                 fontSize = 13.sp,
             )
         },
         confirmButton = {
             Button(
                 onClick = onConfirm,
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                shape = RoundedCornerShape(16.dp),
-            ) { Text("ENABLE", fontWeight = FontWeight.Black) }
+                shape = RoundedCornerShape(12.dp),
+            ) { Text("Enable") }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("CANCEL", fontWeight = FontWeight.Bold) }
+            TextButton(onClick = onDismiss) { Text("Cancel") }
         },
-        shape = RoundedCornerShape(40.dp),
-        containerColor = MaterialTheme.colorScheme.surface,
     )
 }

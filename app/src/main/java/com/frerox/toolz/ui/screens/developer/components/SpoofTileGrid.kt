@@ -1,20 +1,15 @@
 /*
  * Copyright (C) 2026 Toolz Contributors
  *
- * Spoof tab building blocks: one expressive tile per tool (real icon,
- * policy chip, glowing border when sandboxed) plus the section header.
- * Tapping the tile opens its configurator; the trailing switch toggles it.
+ * Spoof tab building blocks: spacious, high-usability sandbox cards.
+ * Provides clear live simulated values, parameter configuration,
+ * and direct one-tap "Launch Screen" navigation to test mock behavior in real time.
  */
 
 package com.frerox.toolz.ui.screens.developer.components
 
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.border
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,20 +23,24 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -54,31 +53,18 @@ import com.frerox.toolz.ui.screens.developer.spoofFixtureSummary
 @Composable
 fun DevSectionHeader(title: String, modifier: Modifier = Modifier) {
     Text(
-        title.uppercase(),
-        modifier = modifier.padding(top = 10.dp, bottom = 6.dp),
-        fontWeight = FontWeight.Black,
-        fontSize = 12.sp,
-        letterSpacing = 1.5.sp,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        title,
+        modifier = modifier.padding(top = 16.dp, bottom = 8.dp),
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 14.sp,
+        color = MaterialTheme.colorScheme.primary,
     )
 }
 
-@Composable
-private fun rememberPulse(active: Boolean): Float {
-    if (!active) return 0f
-    val transition = rememberInfiniteTransition(label = "spoofPulse")
-    val value by transition.animateFloat(
-        initialValue = 0.35f,
-        targetValue = 0.65f,
-        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
-        label = "spoofPulseValue",
-    )
-    return value
-}
+
 
 /**
- * A tool tile. Configuration lives in the bottom sheet; the whole tile
- * presses through to the configurator while the switch flips directly.
+ * A spacious, dashboard-grade tool sandbox card.
  */
 @Composable
 fun SpoofToolTile(
@@ -88,106 +74,101 @@ fun SpoofToolTile(
     devOn: Boolean,
     onToggle: (Boolean) -> Unit,
     onConfigure: () -> Unit,
+    onLaunchScreen: ((String) -> Unit)? = null,
+    modifier: Modifier = Modifier,
 ) {
-    val pulse = rememberPulse(active)
-    // Console polish: "armed" is feature state → primary accent. Red stays
-    // reserved for the real danger zone (System tab), not for healthy sandboxes.
-    // Animation animates the blend; the pulse rides on top as plain alpha.
-    val baseContainer by animateColorAsState(
-        if (active && devOn) MaterialTheme.colorScheme.primary
-        else MaterialTheme.colorScheme.surfaceVariant,
-        label = "tile",
-    )
-    val containerAlpha = if (active && devOn) 0.12f + 0.05f * pulse else 0.45f
-    val borderMod = if (active && devOn) {
-        Modifier.border(
-            width = 1.5.dp,
-            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f + 0.3f * pulse),
-            shape = RoundedCornerShape(24.dp),
-        )
+    val isEnabled = devOn
+    val isMockActive = active && isEnabled
+
+    val cardBorder = if (isMockActive) {
+        BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
     } else {
-        Modifier
+        BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+    }
+
+    val containerColor = if (isMockActive) {
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.14f)
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerLow
     }
 
     Card(
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = baseContainer.copy(alpha = containerAlpha),
-        ),
-        modifier = borderMod.semantics { contentDescription = "${tool.title} sandbox tile" },
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = containerColor),
+        border = cardBorder,
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(enabled = isEnabled, onClick = onConfigure)
+            .semantics { contentDescription = "${tool.title} sandbox card" },
     ) {
-        Column(
-            Modifier
-                .clickable(enabled = devOn, onClick = onConfigure)
-                .padding(16.dp),
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = if (active && devOn) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
-                    else MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
-                    modifier = Modifier.size(40.dp),
-                ) {
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                        Icon(
-                            tool.icon,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = if (isMockActive) MaterialTheme.colorScheme.primaryContainer
+                else MaterialTheme.colorScheme.surfaceContainerHigh,
+                modifier = Modifier.size(40.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                    Icon(
+                        tool.icon,
+                        contentDescription = null,
+                        tint = if (isMockActive) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp),
+                    )
                 }
-                Spacer(Modifier.width(10.dp))
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
                 Text(
                     tool.title,
-                    modifier = Modifier.weight(1f),
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp,
-                    maxLines = 2,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
                 )
-                Switch(
-                    checked = active,
-                    enabled = devOn,
-                    onCheckedChange = onToggle,
-                )
+                if (isMockActive) {
+                    Text(
+                        spoofFixtureSummary(tool, params),
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                    )
+                } else {
+                    Text(
+                        tool.subtitle,
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                }
             }
-            Spacer(Modifier.height(6.dp))
-            Text(
-                if (active && devOn) "DEMO • ${spoofFixtureSummary(tool, params)}"
-                else tool.subtitle,
-                fontSize = 11.sp,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
+            val route = tool.openRoute
+            if (route != null && onLaunchScreen != null) {
+                IconButton(
+                    onClick = { onLaunchScreen(route) },
+                    enabled = isEnabled,
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Rounded.OpenInNew,
+                        contentDescription = "Launch tool",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+            Switch(
+                checked = isMockActive,
+                enabled = isEnabled,
+                onCheckedChange = onToggle,
             )
-            Spacer(Modifier.height(6.dp))
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f),
-            ) {
-                Text(
-                    tool.networkPolicy.name,
-                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 1.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Spacer(Modifier.height(10.dp))
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                if (active && devOn) SpoofChip(label = "DEMO • LOCAL")
-                Text(
-                    "Configure →",
-                    modifier = Modifier.weight(1f),
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Black,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
         }
     }
 }
