@@ -4041,6 +4041,8 @@
     <string name="st_Whisper_DailyUp_ErrAuth">Sign in to use Daily Ups.</string>
     <string name="st_Whisper_DailyUp_ErrSync">Daily Ups unavailable — check your connection and retry.</string>
     <string name="st_Whisper_DailyUp_SectionTitle">Friends</string>
+    <string name="st_Whisper_DailyUp_NotifTitle">New Daily Up</string>
+    <string name="st_Whisper_DailyUp_NotifText">%1$s shared a Daily Up</string>
     <string name="st_Whisper_DailyUp_EntrySub">24-hour photo moments for your friends</string>
     <string name="st_Whisper_DailyUp_Mine">Mine</string>
     <string name="st_Whisper_DailyUp_NewUp">New up</string>

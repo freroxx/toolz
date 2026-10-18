@@ -411,6 +411,48 @@ class WhisperNotificationManager @Inject constructor(
     }
 
     /**
+     * Daily Ups wake ping (content-free by server contract): poster ID + NAME
+     * and story ID only. Dedupes per story (one ping per (story, friend)), so
+     * a fetch-triggered re-fanout can never double-post. Muting a friend
+     * silences their ups too (v1 semantic: one mute switch per person).
+     */
+    fun showDailyUpNotification(posterId: String, posterName: String, storyId: String) {
+        if (!whisperNotificationsEnabled) return
+        if (!WhisperDailyUpsConfig.ENABLED) return
+        if (storyId.isBlank() || posterId.isBlank()) return
+        if (!shouldNotifyForMessage(storyId)) return
+        if (mutePrefs.isMuted(posterId)) return
+        val notifId = senderNotifId("dailyup:$posterId")
+        val deepLinkIntent = Intent(context, MainActivity::class.java).apply {
+            action = "com.frerox.toolz.OPEN_WHISPER_DAILY_UPS"
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            REQUEST_CODE_BASE + (notifId % 900),
+            deepLinkIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_whisper_notif).setColor(com.frerox.toolz.util.NotificationHelper.ACCENT_COLOR).setLargeIcon(com.frerox.toolz.util.NotificationHelper.toolzLargeIcon(context))
+            .setContentTitle(context.getString(R.string.st_Whisper_DailyUp_NotifTitle))
+            .setContentText(context.getString(R.string.st_Whisper_DailyUp_NotifText, posterName))
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setGroup(GROUP_KEY)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .build()
+        try {
+            notifManager.notify(notifId, notification)
+        } catch (e: SecurityException) {
+            Log.e(TAG, "Notification permission not granted: ${e.message}")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error posting notification", e)
+        }
+    }
+
+    /**
      * Phase-2 groups: join/leave/decline event ping for owners/admins/members.
      * Honors the per-group toggle (checked by the caller), the group mute, the
      * open-chat suppression, and FCM+realtime dedupe via [dedupeKey] (event id).

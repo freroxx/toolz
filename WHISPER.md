@@ -894,7 +894,12 @@ progress; retries keep the draft; success returns to the hub.
 wake devices for anything no longer `published` → data-only ping
 `{whisper_story_new:"true", posterId, posterName, storyId}` — content-free
 media-wise; poster NAME rides exactly like the 1:1/group senderName precedent
-(§11, accepted explicitly).
+(§11, accepted explicitly). The client renders the ping in
+`WhisperPushNotifier` → `WhisperNotificationManager.showDailyUpNotification`:
+deduplicated per story (a re-fanout can't double-post), silenced by the Master
+Whisper toggle AND the poster's chat mute, tapping opens the Daily Ups hub via
+the `OPEN_WHISPER_DAILY_UPS` intent; reaction/view events deliberately have NO
+webhook (receipts are read in-app only).
 
 ### Honesty notes
 

@@ -953,6 +953,11 @@ fun ToolzNavHost(
                 android.util.Log.w("MainActivity", "Invalid OPEN_WHISPER_GROUP groupId: $groupId")
             }
         }
+        // 2d. Daily Ups deep link (no extras to validate; the screen is flag-gated).
+        if (latestIntent.action == "com.frerox.toolz.OPEN_WHISPER_DAILY_UPS") {
+            navController.navigate(Screen.WhisperDailyUps.route)
+            return@LaunchedEffect
+        }
 
         // 3. Handle PDF if NOT handled by a specific alias already
         // (If resolvedRoute is PdfReader, we'll handle it here to call openPdf)

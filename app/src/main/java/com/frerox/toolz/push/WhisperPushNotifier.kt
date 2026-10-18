@@ -47,7 +47,7 @@ class WhisperPushNotifier @Inject constructor(
      * Handles one wake-ping. The Edge Function sends a flat JSON object of string
      * values — same keys as the old FCM data map:
      * `whisper_new_message`, `whisper_friend_request`, `whisper_group_invite`,
-     * `whisper_group_message`, `whisper_group_event` (+ ids/names).
+     * `whisper_group_message`, `whisper_group_event`, `whisper_story_new` (+ ids/names).
      */
     fun handlePayload(payloadJson: String) {
         val data = parseFlatPayload(payloadJson)
@@ -61,6 +61,24 @@ class WhisperPushNotifier @Inject constructor(
                 notificationManager.showFriendRequestNotification(
                     fromId = senderId,
                     fromName = senderName,
+                )
+            }
+            return
+        }
+
+        // Daily Ups wake ping (Phase-2 stories, data-only). Story ID names the
+        // story; the NOTIFICATION carries only the poster's name (payload keys
+        // mirror the server contract; see WhisperNotificationManager).
+        if (data["whisper_story_new"].toBoolean()) {
+            val storyId = data["storyId"].orEmpty()
+            val posterId = data["posterId"].orEmpty()
+            if (storyId.isNotEmpty() && posterId.isNotEmpty()) {
+                val posterName = data["posterName"].takeIf { !it.isNullOrBlank() }
+                    ?: appContext.getString(com.frerox.toolz.R.string.st_Whisper_SomeoneDefault)
+                notificationManager.showDailyUpNotification(
+                    posterId = posterId,
+                    posterName = posterName,
+                    storyId = storyId,
                 )
             }
             return
