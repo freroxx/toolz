@@ -118,7 +118,7 @@ sync (on by default, toggle in Settings — see Toolz News section below).
 ### Whisper messaging (only if you sign in)
 - Backend: your Supabase project (`SUPABASE_URL`, `SUPABASE_ANON_KEY` from
   `local.properties`) — PostgREST (`profiles`, `messages`, `message_reactions`,
-  `friendships`, `whisper_blocks`, `whisper_prekeys`, `whisper_fcm_tokens`,
+  `friendships`, `whisper_blocks`, `whisper_prekeys`, `whisper_push_targets`,
   `whisper_typing_signals`, quotas), Realtime (broadcast + postgres changes as
   fallback), Storage bucket `whisper-avatars`, Edge Functions
   (`whisper-attest`, `whisper-bundle-fetch`, `whisper-bypass-verify`,
@@ -136,9 +136,15 @@ sync (on by default, toggle in Settings — see Toolz News section below).
   personal data — package name, cert fingerprint, version code only.
   `whisper-push-send` is a Database Webhook (service-role auth, never sees
   client headers) and is deliberately not gated.
-- Push: Firebase Cloud Messaging data-only wake pings (`WhisperPushService`) carrying
-  only `{whisper_new_message, senderId, messageId}` / friend-request pings — **no
-  message text ever transits FCM**. Tokens stored in `whisper_fcm_tokens`.
+- Push: UnifiedPush wake pings (`WhisperPushService`, no Google dependency in
+  the app itself). With the embedded FCM fallback distributor (requires Google
+  Play Services or microG on-device) the payload is RFC 8291-encrypted
+  (aes128gcm + RFC 8292 VAPID) before it reaches Google's push service — it
+  carries only `{whisper_new_message, senderId, messageId}` / friend-request
+  pings and **no message text ever leaves your encryption**. With an external
+  UnifiedPush distributor (ntfy/NextPush), that distributor's server sees the
+  same content-free wake JSON. Endpoints and Web Push keys stored in
+  `whisper_push_targets`.
 - Images: plaintext is AES-256-GCM sealed on-device, PNG-wrapped
   (`WhisperImageCipherTransport`, magic `WZ1` + CRC32), uploaded via
   `whisper-image-upload` (ImgBB host `i.ibb.co`/`ibb.co`) or Supabase Storage for
@@ -148,7 +154,8 @@ sync (on by default, toggle in Settings — see Toolz News section below).
   AES-256-GCM, `WhisperX3DH-v1` / `WhisperRatchetRoot` info strings, direction-bound
   AAD). **v3 ratchet messages provide per-message forward secrecy; the v2 multi-key
   envelope fallback (static ECDH) does not** — prior wording claiming FS for every
-  message was wrong. Server and FCM see *who* talks to *whom* (usernames/IDs,
+  message was wrong. Server and the push relay see *who* talks to *whom*
+  (usernames/IDs,
   timestamps, ciphertext blobs) but never plaintext. Auth: `username@u.whisper.local`
   + password (≥10 chars), or 64-char hex token → `SHA-256(token)@whisper.toolz.app`.
   Lose the token, lose the account. Delete Account calls `whisper-delete-account`

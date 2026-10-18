@@ -120,7 +120,7 @@ The short version: you sign in with a username + password or a random 64-charact
 - **End-to-end encryption** — P-256 identity + signing keys in AndroidKeyStore, X25519 sessions via X3DH → Double Ratchet, all sealed with AES-256-GCM (direction-bound AAD). New chats try the ratchet first (per-message forward secrecy); proven-v3 peers block insecure fallback with visible warning; new contacts try v3 first, fall back to envelope only while unproven (static ECDH, no FS). Uses custom E2EE, not independently audited. Only v3 ratchet messages have forward secrecy. Keys rotate every 30 days; verify fingerprints in person via QR
 - **No-email sign-in** — two ways in: username + password (≥10 chars, auto-saved to the Toolz Vault), or a random 64-char hex token (`SHA-256(token)@whisper.toolz.app`, hashed on-device before it leaves the phone — the server only ever sees the hash). Save your token — lose it, lose the account
 - **Friend-gated chats** — no messaging until the friend request is accepted; blocks are enforced client + DB-level, both sides know when they're blocked
-- **Realtime delivery** — messages, reactions, typing (8 s fresh), and presence arrive over broadcast channels, with postgres-change polling as the reliable fallback; FCM data-only wake pings (senderId/messageId, no content) cover killed apps
+- **Realtime delivery** — messages, reactions, typing (8 s fresh), and presence arrive over broadcast channels, with postgres-change polling as the reliable fallback; UnifiedPush wake pings (senderId/messageId, no content) cover killed apps
 - **Read receipts & presence** — pending/sent/read states, unread badges, online (≤2 min) / recent / last-seen
 - **Offline-first messaging** — messages sent offline are sealed, stored ciphertext-only in a Room outbox (FIFO ≤100), and auto-flushed by WorkManager when online; chat history stays readable from a ciphertext-only local cache
 - **Replies & reactions** — quote-to-reply with snippets and per-message emoji reactions (optimistic + snapshot reconcile)
@@ -128,7 +128,7 @@ The short version: you sign in with a username + password or a random 64-charact
 - **Delete tools** — delete for everyone (leaves a "Message deleted" tombstone + remote image delete), delete for you (device-only), and clear-chat by time range (24h / 7d / 30d / all / custom) with a 30-second undo
 - **Hide chats** — remove a conversation from the chats tab; it comes back automatically when a new message arrives
 - **Mute & block** — silence a conversation or block a user entirely
-- **In-app notifications** — grouped per conversation, deduplicated across realtime+FCM, suppressed while you're inside that chat or when muted/hidden
+- **In-app notifications** — grouped per conversation, deduplicated across realtime+push, suppressed while you're inside that chat or when muted/hidden
 
 Whisper is early-access software (beta): expect rough edges. It is centralized — the server can see *who* talks to *whom* (usernames/IDs, timestamps, ciphertext blobs) but never plaintext. Uses custom E2EE, not independently audited. Only v3 ratchet messages have forward secrecy; proven-v3 peers block insecure fallback with visible warning. See [`WHISPER.md`](WHISPER.md) + [`PRIVACY.md`](PRIVACY.md) for the full info.
 
@@ -140,6 +140,11 @@ Toolz is distributed through **GitHub Releases**:
 
 - **Releases page:** [github.com/freroxx/toolz/releases](https://github.com/freroxx/toolz/releases)
 - **Current version:** `1.1.7` (in development — latest published release is `1.1.6`)
+
+> **Whisper push requires Google Play Services (or microG) on-device** for the
+> embedded FCM fallback distributor. De-Googled devices can instead run any
+> external UnifiedPush distributor (e.g. [ntfy](https://ntfy.sh) or NextPush) —
+> everything else in Toolz works without either.
 
 ### Choose your architecture:
 
@@ -209,8 +214,10 @@ Verified from `gradle/libs.versions.toml` + `app/build.gradle.kts`
   per-ABI `.so` via splits (~+32 MB arm64-v8a). Models download on demand,
   SHA-256 pinned (see `BR-MODELS.md`)
 - **Backend (Whisper only)** — Supabase BOM 3.7.0
-  (auth-kt/postgrest-kt/realtime-kt/storage-kt), Firebase BOM 34.18.0
-  (`firebase-messaging` data-only wake pings, no content), google-services 4.5.0
+  (auth-kt/postgrest-kt/realtime-kt/storage-kt), UnifiedPush connector 3.3.5 +
+  embedded-fcm-distributor 3.1.0 (wake pings, no content — the embedded FCM
+  fallback requires Google Play Services (or microG) on-device; de-Googled
+  devices can run any external UnifiedPush distributor, e.g. ntfy/NextPush)
 - **System integration** — Shizuku 13.1.5 (optional privileged ops), Biometric
   1.4.0-alpha07 + Autofill, google GenerativeAI 0.9.0 (optional assistant providers)
 
@@ -238,7 +245,7 @@ See `PRIVACY.md` for what actually leaves the device.
 | **Purge Shot** | `BIND_ACCESSIBILITY_SERVICE` (`PurgeShotAccessibilityService`), screenshot observer JobService | Auto-expiring screenshots, triple-redundant queue, undo |
 | **Password Vault** | `USE_BIOMETRIC`, Autofill service (`BIND_AUTOFILL_SERVICE`, `ToolzAutofillService`) | Biometric unlock + credential filling, SQLCipher-backed |
 | **Updates / Sharing** | `REQUEST_INSTALL_PACKAGES`, `QUERY_ALL_PACKAGES` | In-app GitHub Release updates; browser/share intents (`http/https`, `SEND text/plain`, audio/PDF/image/tzbk/enc handlers, `whisper-auth://login`) |
-| **Whisper push** | FCM service (`WhisperPushService`, `MESSAGING_EVENT`) | Data-only wake pings (senderId/messageId, no content) |
+| **Whisper push** | UnifiedPush service (`WhisperPushService`, `org.unifiedpush.android.connector.PUSH_EVENT`) | Wake pings (senderId/messageId, no content); RFC 8291-encrypted via the embedded FCM distributor (needs Play Services/microG) or an external distributor (ntfy/NextPush) |
 | **System extras** | `WRITE_SETTINGS` (Caffeinate screen timeout, manual grant), `BLUETOOTH`/`BLUETOOTH_CONNECT` | Keep-screen-on, device/sensor accessories |
 
 ### Important Notes

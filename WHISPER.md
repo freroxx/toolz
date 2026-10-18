@@ -42,8 +42,10 @@ Three corrections to older docs:
 
 Images are AES-256-GCM sealed on device, wrapped as lossless PNG (`WZ1` header
 with CRC32), and hosted on ImgBB through an edge function. Avatars use Supabase
-Storage or ImgBB with deterministic per-owner keys. Push is FCM data-only
-(sender and message IDs, no content). Local Room caches hold ciphertext only.
+Storage or ImgBB with deterministic per-owner keys. Push is UnifiedPush wake
+pings (sender and message IDs, no content) via the embedded FCM fallback
+(RFC 8291-encrypted — the push service sees only ciphertext) or an external
+distributor such as ntfy/NextPush. Local Room caches hold ciphertext only.
 
 Uses custom E2EE, not independently audited.
 
@@ -258,7 +260,8 @@ sender-authorized delete-for-everyone tombstone exception in the content guard),
 `message_reactions`, `friendships`/`friends` (pending-only transitions,
 block-aware), `profiles` (identity binding, public key, last seen, avatar),
 `whisper_blocks`, `whisper_prekeys` (account, key ID, kind, public key,
-signature), `whisper_fcm_tokens` (user ID primary key), `whisper_typing_signals`
+signature), `whisper_push_targets` (user ID primary key: push endpoint,
+provider, Web Push `p256dh`/`auth` keys), `whisper_typing_signals`
 (8-second freshness),
 upload/discover/bypass/destructive/username-check/signup quotas, deleted
 tombstones, image ownership, the legacy-sunset registry
@@ -291,7 +294,7 @@ Edge functions in `supabase/functions/whisper-*/index.ts`:
 | `whisper-delete-account` | 243 | Verifies JWT plus password header plus 5-minute confirmation timestamp, wipes server data before deleting the GoTrue user. |
 | `whisper-image-upload` | 416 | Accepts base64 PNG with the ImgBB key held server-side, returns URL and ID. Attest-gated (inlined `_shared/attest.ts`). |
 | `whisper-image-delete` | 164 | Deletes an ImgBB blob by ID. |
-| `whisper-push-send` | 299 | Database webhook on message and friend inserts. Skips receivers seen within 60 seconds, sends one data-only FCM message per token, prunes dead tokens. Never logs tokens or payloads. Intentionally NOT attest-gated (webhook auth, never sees client headers). |
+| `whisper-push-send` | ~300 | Database webhook on message and friend inserts. Skips receivers seen within 60 seconds, then one wake ping per registered target: `provider='webpush'` targets get an RFC 8291-encrypted (aes128gcm) payload with RFC 8292 VAPID auth; `provider='plain'` targets (external distributors) get the raw JSON ping. Prunes dead endpoints on 404/410. Never logs tokens or payloads. Intentionally NOT attest-gated (webhook auth, never sees client headers). |
 | `whisper-signup-gate` | 256 | Pre-auth IP-budgeted signup gate (5/day/IP via `whisper_check_signup_allowed`); server-side IP hash, 429 over quota. Attest-gated (inlined `_shared/attest.ts`). |
 | `whisper-legacy-migrate` | 180 | Service-role legacy token migration (copies the profile to the full-hash user, deletes the legacy GoTrue user, records `whisper_legacy_disabled`). |
 
@@ -420,7 +423,8 @@ scheduler with 15-second exponential backoff (42).
   plus whisper code, clipboard auto-expiry for displayed tokens, username
   availability check, sign-out, and account deletion (re-auth for password
   accounts, edge deletion with password header plus confirmation timestamp,
-  then local wipe of sessions, Room, trust, outbox, avatars, and FCM token).
+  then local wipe of sessions, Room, trust, outbox, avatars, and push
+  registration).
 
 `ui/screens/whisper/WhisperAuthViewModel.kt` (601) drives these flows with
 clipboard expiry, access-file import, and single-attempt token login.
@@ -468,18 +472,24 @@ All 19 files under `ui/screens/whisper/`:
 
 ## 9. Push, workers, app wiring
 
-- `push/WhisperPushService.kt` (142): new FCM tokens upsert into
-  `whisper_fcm_tokens` (user ID primary key), parked locally in
-  `whisper_push_pending` when they arrive before login and retried on next
-  launch. Incoming data messages show generic content-free notifications keyed
-  by sender and message ID for dedupe.
+- `push/WhisperPushService.kt` (`PushService`): UnifiedPush registration events
+  upsert into `whisper_push_targets` (user ID primary key: endpoint, provider,
+  Web Push `p256dh`/`auth` keys), parked locally in `whisper_push_pending`
+  when they arrive before login and retried on next launch. Incoming wake
+  pings (`push/WhisperPushNotifier.kt`) show generic content-free
+  notifications keyed by sender and message ID for dedupe. Registration is
+  zero-UX (`push/WhisperPushRegistrar.kt`): the default distributor is
+  auto-picked (external distributor first, else the embedded FCM fallback,
+  which requires Google Play Services or microG on-device); with none
+  available the app runs without pings.
 - `ToolzApplication` schedules local tombstone cleanup every 24 hours and
   encrypted outbox delivery every 15 minutes, plus immediate delivery on send.
   Delivery retries transient failures with backoff up to five WorkManager
   attempts; permanent rejections end as success because the drop ledger already
-  handled them. `MainActivity` retries parked push tokens, injects the avatar
-  loader, and owns the `whisper-auth://login` deep link alongside the generic
-  share intents. The manifest declares that deep link and the FCM entry point.
+  handled them. `MainActivity` retries parked push registrations, injects the
+  avatar loader, and owns the `whisper-auth://login` deep link alongside the
+  generic share intents. The manifest declares that deep link and the
+  UnifiedPush `PUSH_EVENT` service entry point.
 
 ## 10. Tests
 
@@ -508,14 +518,18 @@ and crypto AAD (direction binding, fingerprints, null safety).
 
 Ciphertext and IV markers, sender and receiver IDs, timestamps, profile fields
 (username, display name, bio, avatar URL), the friend and block graph, last-seen
-presence, typing signals, reaction rows, FCM tokens, prekey material and
+presence, typing signals, reaction rows, push targets (endpoint + Web Push
+keys), prekey material and
 signatures, and image URLs with IDs. Usernames reveal who talks to whom;
 message and image bytes stay opaque. Group rows additionally reveal group IDs,
 member lists, epochs, per-member frame sizes, a per-row traffic label
 (`msg_kind`: chat/poll/vote/image), the admin-only-send mirror flag, and
 reaction/request/receipt presence rows (frames and bodies themselves stay
 opaque — one v3 frame per member, each sealed through that member's 1:1
-session). FCM sees sender/message IDs and friend
+session). The push path splits by distributor: the embedded FCM fallback
+receives RFC 8291-encrypted pings (ciphertext only), while an external
+distributor's server (ntfy/NextPush) sees the plaintext wake JSON — sender/
+message IDs and friend
 pings, plus — accepted explicitly for groups — group NAMES, actor/inviter/
 sender/subject names, group IDs and event kinds on group pushes
 (invite/message/join/leave/decline/remove/promote/demote/rename/picture/
@@ -652,8 +666,8 @@ Invites: creating a group sends persistent invites (never direct adds).
 Invitees can also READ the event log (SELECT policy mirrors the invite exception — otherwise join fails with "no history"). Invite rows die only by join (trigger-consumed), decline (invitee), or cancel
 (any admin — explicit decision: owner-only was considered, any-admin chosen
 to match WhatsApp-style admin teams). No expiry. Invitees see the card on the
-Chats tab (survives restarts) and get pinged (realtime while open, FCM push
-while closed). Owner gets join/leave/decline pings with randomized copy;
+Chats tab (survives restarts) and get pinged (realtime while open, UnifiedPush
+ping while closed). Owner gets join/leave/decline pings with randomized copy;
 per-group toggle defaults ON for owner/admins (join/leave scope, +declines
 for the owner) and OFF for members; admin-action events
 (remove/promote/demote/rename/picture/settings) ping like message pings

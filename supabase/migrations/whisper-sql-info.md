@@ -77,7 +77,7 @@ Non-Whisper migrations (unrelated Supabase features) may still use timestamped f
 | 7 | `20260826_whisper_bypass_atomic.sql` | atomic `whisper_bypass_attempt` + advisory lock |
 | 8 | `20260827_whisper_review_v2_hardening.sql` | image ownership, uid-param RPCs, RLS shrink, immutability v2, friend transitions, `whisper_purge_account_data`, bypass advisory lock, discover clamps |
 | 9 | `20260828_whisper_destructive_rate_limit.sql` | destructive attempts + public view + discover rewrite |
-| 10 | `20260829_whisper_fcm_tokens.sql` | FCM token registry |
+| 10 | `20260829_whisper_fcm_tokens.sql` | FCM token registry (superseded — table dropped in section 19) |
 | 11 | `20260830_whisper_prekeys.sql` | prekeys + identity_binding + purge coverage |
 | 12 | `20260831_whisper_typing_signal.sql` | `whisper_typing_signals` durable typing indicator |
 | 13 | `20260901_whisper_server_enforcement.sql` | block-aware insert guard + replay `content_hash` guard |
@@ -86,6 +86,7 @@ Non-Whisper migrations (unrelated Supabase features) may still use timestamped f
 | 16 | `20261004_whisper_remove_presence_typing.sql` | REVERSAL (product same-rights): drops `presence_enabled`/`typing_enabled` columns + typing-suppress trigger/function, restores direct `last_seen_at` projection and ungated discover ranking; keeps tombstone UPDATE + username-check quota/RPC + purge coverage |
 | 17 | `20261005_whisper_signup_discover_hardening.sql` | Sybil-resistant signup gate (`whisper_signup_quota` + `whisper_check_signup_allowed()` 5/day/IP, anon-callable for the pre-auth edge gate), Discover opt-in (`hide_from_discover` default true for new rows, no backfill), username-oracle contract comments + `lower(username)` index (select policy intentionally kept for public_key discovery), legacy-disable registry (`whisper_legacy_disabled` + `whisper_is_legacy_disabled()`, service-role only) |
 | 18 | `20261006_whisper_rotation_cert_transport.sql` | ROTv2 rotation-cert transport: `profiles.rotation_cert` + `profiles.rotation_counter` (published by the device at protocol-signer rotation, in the same update as `identity_binding`); peers fetch the record per candidate key and verify with `WireProtocol.verifyRotationCert` (ROTv2: monotonic counter + 24h window); no new RLS policies — existing profiles policies are column-agnostic (SELECT via `profiles_select_authenticated`, owner UPDATE via `profiles_update_own`) |
+| 19 | `20261017_whisper_push_targets.sql` | UnifiedPush target registry: `whisper_push_targets` (user ID PK → auth.users cascade; `provider` check `webpush`/`plain`, push endpoint, Web Push `keys_p256dh`/`keys_auth`, `updated_at`), endpoint index, RLS + owner-only policies; drops `whisper_fcm_tokens` |
 
 Each section keeps its original filename banner for `grep` traceability:
 
