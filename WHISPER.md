@@ -21,7 +21,7 @@ Contents:
 12. File inventory
 13. Groups (Phase 2, ships in 1.1.7)
 14. Daily Ups (stories, ships in the same 1.1.7)
-15. Known limitations (external review, 2026-10)
+15. Known limitations and calibration notes (external review, 2026-10)
 
 ## 1. Overview and honesty notes
 
@@ -48,9 +48,11 @@ Three corrections to older docs:
 Images are AES-256-GCM sealed on device, wrapped as lossless PNG (`WZ1` header
 with CRC32), and hosted on ImgBB through an edge function. Avatars use Supabase
 Storage or ImgBB with deterministic per-owner keys. Push is UnifiedPush wake
-pings (sender and message IDs, no content) via the embedded FCM fallback
+pings (IDs and event kinds, no content) via the embedded FCM fallback
 (RFC 8291-encrypted — the push service sees only ciphertext) or an external
-distributor such as ntfy/NextPush. Local Room caches hold ciphertext only.
+distributor such as ntfy/NextPush; the latter receives ID-only pings, because
+any human-readable name rides solely inside encrypted webpush payloads (§11).
+Local Room caches hold ciphertext only.
 
 Uses custom E2EE, not independently audited.
 
@@ -134,7 +136,13 @@ can never catch up) additionally triggers a fresh handshake fire-and-forget,
 rate-limited to one attempt per 30s per peer (`ratchet.gapHandshake`,
 `WireProtocol.isGapLoss`/`shouldRefreshOnGap`), with the UI notice "Missed too
 many messages - starting fresh session, ask peer to resend"; other losses keep
-the placeholder and rely on server catch-up.
+the placeholder and rely on server catch-up. Skipped AND consumed message keys
+persist WITH the session (the whole snapshot is serialized and Keystore-wrapped
+before it touches disk), so offline history and duplicate delivery survive
+restarts. The honest forward-secrecy corollary: a device compromise yields that
+wrapped snapshot, so FS protects keys derived AFTER the snapshot was taken
+(future traffic), not messages whose keys were already on disk at compromise
+time.
 
 `data/whisper/session/WhisperSessionStore.kt` persists one session
 per peer at `filesDir/whisper_sessions/<sha256(peerId)>.json` plus an in-memory
@@ -726,8 +734,10 @@ Push fan-out lives in `whisper-push-send`
 (single-file, dashboard deploys; webhooks must be INSERT-only on the three
 group tables — the in-code op gate is defense-in-depth; NEVER add webhooks on
 receipts/typing/reactions/requests); realtime publication
-now includes all group tables. Push payloads carry group/actor/sender/subject
-names (see §11 — accepted explicitly).
+now includes all group tables. Push payloads carry names ONLY on encrypted
+webpush targets: plain (ntfy/NextPush) targets are scrubbed to IDs and event
+kinds, and the client rebuilds every name locally (§11 — the review-prompted
+scrub, deployed server-side at ship).
 
 Group picture: EXIF-strip + 1920 + JPEG82 (shared preprocess, 1:1 untouched),
 fresh AES-256-GCM key per picture, PNG-wrapped for the image host, uploaded
@@ -927,11 +937,11 @@ permit nor deny a publish. Received ups keep their sealed bytes; unlike 1:1
 messages there is no "keep forever" tier — 24 hours is the whole contract, and
 deleted/expired stories prune locally even when the sweep is unreachable.
 
-## 15. Known limitations (external review, 2026-10)
+## 15. Known limitations and calibration notes (external review, 2026-10)
 
-Documented trade-offs surfaced by the October 2026 external review — verified
-against code, deliberately NOT changed unilaterally (each is a product
-decision). Listed so the next reviewer does not rediscover them.
+Verified against code after the October 2026 external review, so the next
+reviewer doesn't rediscover them. Where a number below is a choice, it is a
+calibration knob with an owner (the operator), not a silent default.
 
 1. **Ratchet gap-loss residual.** All far-future/forged-header
    `WhisperRatchet` rejects fire BEFORE any state mutation (pinned:
@@ -941,31 +951,44 @@ decision). Listed so the next reviewer does not rediscover them.
    re-connection at most once per 30 s per peer (`shouldRefreshOnGap`
    cooldown) — a bounded availability annoyance, not a confidentiality or
    message-loss path. Accepted.
-2. **Groups fan-out budget (600 envelopes/day/sender).** `DAILY_ENVELOPE_BUDGET`
-   (client) mirrors the SQL limiter: at 12-member groups that is ~50 sends/day,
-   splitting proportionally in bigger/smaller groups; the sender is refused
-   fail-closed with a quota message beyond that. 1:1 messages are NOT budget
-   limited. Raising the ceiling touches TWO numbers (SQL `v_limit` and the
-   client constant) and is a deliberate product knob, not a bug. Accepted for
-   v1; reconsider if heavy groups hit it in practice.
-3. **Signup gate 5/day/IP.** `whisper_check_signup_allowed` budgets account
-   creation per IP. CGNAT campus/office/carrier networks share thousands of
-   users per IP, so legitimate signups can 429. Mitigations if it bites:
-   allow-list known-good subnets in the edge function or raise the cap —
-   policy decision, left to the operator.
-4. **Group-event signing keys are install-scoped.** The scheduled 30-day
-   rotation (`WhisperKeyRotationStore` heartbeat) rotates ONLY the 1:1
-   envelope identity (X25519 profile public key); the ECDSA cert that signs
-   group admin/member events is regenerated only on reinstall. Consequence:
-   historical group events stay verifiable for every member whose install
-   still lives — the common sync path is unaffected. The narrow failure list:
-   when a group CREATOR reinstalls, their new install can no longer verify the
-   old CREATE event they themselves signed, and the group fails closed for
-   THEM with a dedicated diagnostic card (other members keep working logs).
-   This is fail-closed by design, not a decode hole. A future fix could
-   publish the per-event signer cert (or walk the ROTv2 rotation-cert chain)
-   so old logs verify across reinstalls — designed, deliberately not built
-   for 1.1.7.
+2. **Groups fan-out budget (600 envelopes/day/sender) — working calibration,
+   not a limitation.** The SQL limiter charges each group message its fan-out
+   size (members count) and stops a sender at 600 envelopes per UTC day —
+   ~50 messages/day in a full 12-member group, proportionally more in small
+   ones. That is deliberately generous chat-scale volume; what it curbs is the
+   abnormal case (scripted 1→N spam reshaping everyone's server row), so
+   1:1 messaging stays unlimited while groups stay honest. The refusal copy
+   tells the user it is a DAILY limit that resets tomorrow
+   (`st_Whisper_Groups_ErrQuota`). If a real group ever rubs against it, the
+   change is one SQL value (`v_limit` in
+   `whisper_check_group_send_allowed`, advisory-locked, 7-day retention) plus
+   the mirror constant — cheap and owned by the operator.
+3. **Signup gate (5 accounts/day/IP) — appropriate for the audience.** A
+   friends-only messenger has no anonymous-account use case, and this is the
+   only server-side Sybil brake. One real-world wrinkle to watch: carrier
+   CGNAT (common for mobile-heavy audiences, e.g. Morocco) shares IPs across
+   many users, so a handful of legit classmates on one carrier tower share
+   slots. Recommended during the beta: watch 429 counts in the
+   whisper-signup-gate function logs — a cluster of denials at one /24 is the
+   signal to allow-list that carrier range (function-side list, no SQL
+   change). Nothing to change before ship.
+4. **Group-event signing keys are install-scoped — the one real v1.1.8
+   candidate.** The scheduled 30-day rotation (`WhisperKeyRotationStore`
+   heartbeat) rotates ONLY the 1:1 envelope identity (X25519 profile public
+   key); the ECDSA cert that signs group admin/member events is regenerated
+   only on reinstall. Every LIVE install keeps verifying its history fine —
+   but a group CREATOR who reinstalls (routine: new phone) can no longer
+   verify their own old CREATE event on the new install, and the group fails
+   closed FOR THEM: they keep the diagnostic card, others keep a working
+   group, ownership continuity for the group comes from having promoted a
+   co-admin beforehand. Remedies, in order of size: (a) product-hygiene nudge
+   in group settings — "hand off ownership to a co-admin before reinstalling"
+   (cheap, ships easily); (b) the actual fix: publish the per-event signer
+   cert on event rows and verify each event against ITS OWN cert chained to
+   the current identity (SQL column + write path + per-event verify) —
+   designed, sized as the first post-1.1.7 work item so the failure stops
+   being silent. Neither is folded into 1.1.7 (frozen SQL + crypto surface);
+   flagged loudly so it cannot be forgotten.
 5. **External review before any "secure" marketing.** Whisper must not be
    publicly promoted as audited/secure until either a third-party security
    review or a libsignal production-parity audit happens — claimed security
