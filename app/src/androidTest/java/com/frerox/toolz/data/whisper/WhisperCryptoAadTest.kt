@@ -6,6 +6,11 @@ package com.frerox.toolz.data.whisper
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -26,7 +31,16 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class WhisperCryptoAadTest {
 
-    private val crypto = WhisperCrypto(InstrumentationRegistry.getInstrumentation().targetContext)
+    private val healthCheckScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val crypto = WhisperCrypto(
+        InstrumentationRegistry.getInstrumentation().targetContext,
+        healthCheckScope,
+    )
+
+    @After
+    fun stopHealthChecks() {
+        healthCheckScope.cancel()
+    }
 
     private fun myKey(): String = crypto.getPublicKeyBase64()
         ?: throw IllegalStateException("Keystore key missing — ensureKeyPairExists failed")

@@ -40,6 +40,7 @@ import com.frerox.toolz.data.password.PasswordDao
 import com.frerox.toolz.data.search.SearchDao
 import com.frerox.toolz.data.device.cache.DeviceSpecsDao
 import com.frerox.toolz.data.whisper.WhisperMessageDao
+import com.frerox.toolz.data.whisper.WhisperStoryLocalDao
 import com.frerox.toolz.util.security.KeyManager
 import dagger.Module
 import dagger.Provides
@@ -351,6 +352,15 @@ object DatabaseModule {
         }
     }
 
+    /** Internal for the instrumented migration contract; production builders register it below. */
+    internal val MIGRATION_62_63 = object : Migration(62, 63) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("CREATE TABLE IF NOT EXISTS `whisper_story_local` (`storyId` TEXT NOT NULL, `ownerId` TEXT NOT NULL, `sealedDescriptor` TEXT NOT NULL, `expiresAtMs` INTEGER NOT NULL, `receiptsEnabled` INTEGER NOT NULL, `state` TEXT NOT NULL, `updatedAtMs` INTEGER NOT NULL, PRIMARY KEY(`storyId`))")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_whisper_story_local_expiresAtMs` ON `whisper_story_local` (`expiresAtMs`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_whisper_story_local_ownerId_expiresAtMs` ON `whisper_story_local` (`ownerId`, `expiresAtMs`)")
+        }
+    }
+
     // Notepad V3 60->61: createdAt/updatedAt + query indices; attachment
     // metadata + lookup indices. Purely additive, backfills from timestamp.
     private val MIGRATION_60_61 = object : Migration(60, 61) {
@@ -396,7 +406,7 @@ object DatabaseModule {
         .openHelperFactory(factory)
         // V2-FIX (reviewwhisper.md) H-10: explicit migrations only — every version bump
         // must ship one (see AppDatabase comment).
-        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56, MIGRATION_56_57, MIGRATION_57_58, MIGRATION_58_59, MIGRATION_59_60, MIGRATION_60_61, MIGRATION_61_62)
+        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56, MIGRATION_56_57, MIGRATION_57_58, MIGRATION_58_59, MIGRATION_59_60, MIGRATION_60_61, MIGRATION_61_62, MIGRATION_62_63)
         .fallbackToDestructiveMigrationOnDowngrade()
         // NOTE: Add explicit Migration objects here when schema changes. Schemas are now
         // EXPORTED to app/schemas (H-10 fix) so diffs are reviewable — never re-introduce
@@ -460,7 +470,7 @@ object DatabaseModule {
                 // Fresh builder avoids leaking the first helper's connection.
                 return Room.databaseBuilder(context, AppDatabase::class.java, dbName)
                     .openHelperFactory(factory)
-        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56, MIGRATION_56_57, MIGRATION_57_58, MIGRATION_58_59, MIGRATION_59_60, MIGRATION_60_61, MIGRATION_61_62)
+        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56, MIGRATION_56_57, MIGRATION_57_58, MIGRATION_58_59, MIGRATION_59_60, MIGRATION_60_61, MIGRATION_61_62, MIGRATION_62_63)
                     .fallbackToDestructiveMigrationOnDowngrade()
                     .build()
             }
@@ -473,6 +483,11 @@ object DatabaseModule {
     @Provides
     fun provideNoteDao(database: AppDatabase): NoteDao {
         return database.noteDao()
+    }
+
+    @Provides
+    fun provideWhisperStoryLocalDao(database: AppDatabase): WhisperStoryLocalDao {
+        return database.whisperStoryLocalDao()
     }
 
     @Provides

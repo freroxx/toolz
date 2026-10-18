@@ -71,6 +71,8 @@ import com.frerox.toolz.data.whisper.WhisperGroupEntity
 import com.frerox.toolz.data.whisper.WhisperGroupMemberEntity
 import com.frerox.toolz.data.whisper.WhisperGroupEventEntity
 import com.frerox.toolz.data.whisper.WhisperGroupDao
+import com.frerox.toolz.data.whisper.WhisperStoryLocalEntity
+import com.frerox.toolz.data.whisper.WhisperStoryLocalDao
 import com.frerox.toolz.data.device.cache.DeviceSpecCacheEntity
 import com.frerox.toolz.data.device.cache.DeviceSpecsDao
 import com.frerox.toolz.data.device.cache.DeviceSpecConverters
@@ -117,6 +119,7 @@ import com.frerox.toolz.data.purgeshot.PurgeShotEntity
         WhisperGroupEntity::class,
         WhisperGroupMemberEntity::class,
         WhisperGroupEventEntity::class,
+        WhisperStoryLocalEntity::class,
         SpeedHistoryEntity::class,
         DeviceInventoryEntity::class,
         ScanSnapshotEntity::class,
@@ -151,7 +154,9 @@ import com.frerox.toolz.data.purgeshot.PurgeShotEntity
     // groupId (1:1 rows migrate untouched, DEFAULT NULL) + index
     // (see MIGRATION_61_62). Purely additive — no existing table altered
     // beyond the nullable outbox column.
-    version = 62,
+    // Daily Ups (63): whisper_story_local stores only opaque, session-sealed
+    // descriptors and lifecycle metadata; see MIGRATION_62_63 in DatabaseModule.
+    version = 63,
     // H-10 FIX (reviewwhisper.md): schemas are now exported to app/schemas (see
     // build.gradle.kts room.schemaLocation). Every future bump MUST ship a Migration —
     // the DatabaseModule comment documents this contract too.
@@ -181,6 +186,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun whisperOutboxDao(): WhisperOutboxDao
     abstract fun whisperLocalTombstoneDao(): WhisperLocalTombstoneDao
     abstract fun whisperGroupDao(): WhisperGroupDao
+    abstract fun whisperStoryLocalDao(): WhisperStoryLocalDao
     abstract fun speedHistoryDao(): SpeedHistoryDao
     abstract fun deviceInventoryDao(): DeviceInventoryDao
     abstract fun scanSnapshotDao(): ScanSnapshotDao

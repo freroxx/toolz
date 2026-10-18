@@ -90,6 +90,9 @@ class WhisperRepository @Inject constructor(
     internal val outgoingQueue: WhisperOutgoingQueue,
     internal val deliveryScheduler: WhisperDeliveryScheduler,
     private val messageDao: WhisperMessageDao,
+    // Daily Ups descriptors are opaque at rest but still account-scoped state: a
+    // sign-out or account deletion must never leave them available to the next user.
+    private val storyLocalDao: WhisperStoryLocalDao,
     private val keyTrustStore: WhisperKeyTrustStore,
     private val hiddenChatsStore: WhisperHiddenChatsStore,
     private val mutePrefs: WhisperMutePreferences,
@@ -3369,6 +3372,7 @@ class WhisperRepository @Inject constructor(
         // account's local data so a following sign-in starts from a clean slate.
         imageDiskCache.clearAll()
         messageDao.clearAll()
+        storyLocalDao.clearAll()
         deletedStore.clearAll()
         // V6 (planwhisper.md §3.1): ratchet sessions die with the account — a later
         // sign-in must never inherit another identity's chains.

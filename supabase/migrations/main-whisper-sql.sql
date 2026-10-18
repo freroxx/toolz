@@ -3268,3 +3268,247 @@ create index if not exists whisper_push_targets_endpoint_idx
 
 -- Legacy FCM token registry — no client or function references it anymore.
 drop table if exists public.whisper_fcm_tokens;
+-- ═══════════════ 20261018_whisper_stories_lifecycle.sql ═
+-- Daily Ups are photo-only, short-lived private posts.  These tables deliberately
+-- contain only hosting metadata, audience identity, lifecycle state, and an opaque
+-- per-recipient encrypted descriptor.  They must never receive a plaintext caption
+-- or encryption key.  Client roles have no direct write route: publish, receipts,
+-- expiry, and deletion are introduced through narrowly scoped RPCs/edge work in
+-- later sections, while this contract already makes direct forgery fail closed.
+--
+-- Server time is authoritative.  RLS calls whisper_story_can_read(), which rejects
+-- every story at expires_at even if an expiry worker has not run yet.  The audience
+-- is an immutable snapshot: future friends have no recipient row to read.
+
+create table if not exists public.whisper_stories (
+    id uuid primary key default gen_random_uuid(),
+    poster_id uuid not null references auth.users(id) on delete cascade,
+    client_id uuid not null,
+    host_url text not null check (char_length(host_url) between 1 and 4096),
+    host_object_id text not null check (char_length(host_object_id) between 1 and 512),
+    receipts_enabled boolean not null default false,
+    state text not null default 'published'
+        check (state in ('published', 'delete_pending', 'deleted', 'cleanup_failed')),
+    created_at timestamptz not null default now(),
+    expires_at timestamptz not null,
+    deleted_at timestamptz,
+    unique (poster_id, client_id),
+    check (expires_at > created_at),
+    check ((state = 'deleted') = (deleted_at is not null))
+);
+
+create index if not exists whisper_stories_poster_created_idx
+    on public.whisper_stories (poster_id, created_at desc);
+create index if not exists whisper_stories_expiry_idx
+    on public.whisper_stories (expires_at)
+    where state in ('published', 'delete_pending', 'cleanup_failed');
+
+create table if not exists public.whisper_story_recipients (
+    story_id uuid not null references public.whisper_stories(id) on delete cascade,
+    recipient_id uuid not null references auth.users(id) on delete cascade,
+    sealed_descriptor text not null check (char_length(sealed_descriptor) between 1 and 32768),
+    created_at timestamptz not null default now(),
+    delivered_at timestamptz,
+    primary key (story_id, recipient_id)
+);
+
+create index if not exists whisper_story_recipients_recipient_idx
+    on public.whisper_story_recipients (recipient_id, story_id);
+
+create table if not exists public.whisper_story_views (
+    story_id uuid not null references public.whisper_stories(id) on delete cascade,
+    viewer_id uuid not null references auth.users(id) on delete cascade,
+    viewed_at timestamptz not null default now(),
+    primary key (story_id, viewer_id)
+);
+
+create index if not exists whisper_story_views_story_idx
+    on public.whisper_story_views (story_id, viewed_at desc);
+
+create table if not exists public.whisper_story_cleanup (
+    story_id uuid primary key references public.whisper_stories(id) on delete cascade,
+    status text not null default 'pending'
+        check (status in ('pending', 'in_progress', 'retry', 'complete', 'terminal')),
+    attempt_count integer not null default 0 check (attempt_count >= 0 and attempt_count <= 20),
+    next_attempt_at timestamptz not null default now(),
+    last_failure_class text check (last_failure_class is null or char_length(last_failure_class) <= 64),
+    updated_at timestamptz not null default now()
+);
+
+create index if not exists whisper_story_cleanup_due_idx
+    on public.whisper_story_cleanup (next_attempt_at)
+    where status in ('pending', 'retry');
+
+-- Successful Daily Ups are capped per UTC calendar day.  The table is
+-- intentionally not client-writable: the atomic publishing function will count a
+-- completed transaction, never an attempted upload.
+create table if not exists public.whisper_story_publish_quota (
+    poster_id uuid not null references auth.users(id) on delete cascade,
+    day date not null,
+    successful_count integer not null default 0
+        check (successful_count >= 0 and successful_count <= 5),
+    primary key (poster_id, day)
+);
+
+alter table public.whisper_stories enable row level security;
+alter table public.whisper_story_recipients enable row level security;
+alter table public.whisper_story_views enable row level security;
+alter table public.whisper_story_cleanup enable row level security;
+alter table public.whisper_story_publish_quota enable row level security;
+
+-- The caller cannot choose either time.  This trigger covers service-role and
+-- future RPC inserts too, making the 24-hour lifetime an invariant rather than a
+-- convention in one publisher implementation.
+create or replace function public.whisper_story_enforce_server_expiry()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+    if tg_op = 'INSERT' then
+        new.created_at := now();
+        new.expires_at := new.created_at + interval '24 hours';
+        return new;
+    end if;
+
+    if new.created_at is distinct from old.created_at
+       or new.expires_at is distinct from old.expires_at then
+        raise exception 'Daily Up lifetime is server controlled' using errcode = '42501';
+    end if;
+    return new;
+end;
+$$;
+
+drop trigger if exists whisper_story_enforce_server_expiry on public.whisper_stories;
+create trigger whisper_story_enforce_server_expiry
+    before insert or update on public.whisper_stories
+    for each row execute function public.whisper_story_enforce_server_expiry();
+
+-- SECURITY DEFINER avoids recursive RLS evaluation while preserving the caller's
+-- auth.uid() in the policy argument.  It returns no row data and treats a block in
+-- either direction as an immediate denial, including after a story was published.
+create or replace function public.whisper_story_can_read(p_story_id uuid, p_user_id uuid)
+returns boolean
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+    v_poster_id uuid;
+    v_expires_at timestamptz;
+    v_state text;
+begin
+    if p_story_id is null or p_user_id is null then
+        return false;
+    end if;
+
+    select poster_id, expires_at, state
+      into v_poster_id, v_expires_at, v_state
+      from public.whisper_stories
+     where id = p_story_id;
+
+    if not found or v_state <> 'published' or v_expires_at <= now() then
+        return false;
+    end if;
+
+    if v_poster_id = p_user_id then
+        return true;
+    end if;
+
+    if exists (
+        select 1 from public.whisper_blocks wb
+        where (wb.blocker_id = v_poster_id and wb.blocked_id = p_user_id)
+           or (wb.blocker_id = p_user_id and wb.blocked_id = v_poster_id)
+    ) then
+        return false;
+    end if;
+
+    return exists (
+        select 1 from public.whisper_story_recipients sr
+        where sr.story_id = p_story_id and sr.recipient_id = p_user_id
+    );
+end;
+$$;
+
+create or replace function public.whisper_story_can_read_receipts(p_story_id uuid, p_user_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+    select exists (
+        select 1
+          from public.whisper_stories s
+         where s.id = p_story_id
+           and s.poster_id = p_user_id
+           and s.receipts_enabled
+           and s.state = 'published'
+           and s.expires_at > now()
+    );
+$$;
+
+revoke all on function public.whisper_story_can_read(uuid, uuid) from public, anon;
+grant execute on function public.whisper_story_can_read(uuid, uuid) to authenticated;
+revoke all on function public.whisper_story_can_read_receipts(uuid, uuid) from public, anon;
+grant execute on function public.whisper_story_can_read_receipts(uuid, uuid) to authenticated;
+
+drop policy if exists "whisper_stories_select_live_audience" on public.whisper_stories;
+create policy "whisper_stories_select_live_audience"
+    on public.whisper_stories for select to authenticated
+    using (public.whisper_story_can_read(id, auth.uid()));
+
+drop policy if exists "whisper_story_recipients_select_live_audience" on public.whisper_story_recipients;
+create policy "whisper_story_recipients_select_live_audience"
+    on public.whisper_story_recipients for select to authenticated
+    using (public.whisper_story_can_read(story_id, auth.uid()));
+
+drop policy if exists "whisper_story_views_select_live_authorized" on public.whisper_story_views;
+create policy "whisper_story_views_select_live_authorized"
+    on public.whisper_story_views for select to authenticated
+    using (
+        (viewer_id = auth.uid() and public.whisper_story_can_read(story_id, auth.uid()))
+        or public.whisper_story_can_read_receipts(story_id, auth.uid())
+    );
+
+-- Quota is safe for a user to inspect but all mutation is held for the atomic
+-- publishing RPC.  Cleanup has no client policy at all; only server work may touch it.
+drop policy if exists "whisper_story_publish_quota_select_own" on public.whisper_story_publish_quota;
+create policy "whisper_story_publish_quota_select_own"
+    on public.whisper_story_publish_quota for select to authenticated
+    using (poster_id = auth.uid());
+
+-- Keep account deletion complete before GoTrue removes the identity.  This replaces
+-- the earlier function body rather than adding a second cleanup path.
+create or replace function public.whisper_purge_account_data(p_uid uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+    if p_uid is null then raise exception 'uid required' using errcode = '42501'; end if;
+    delete from public.messages where sender_id = p_uid or receiver_id = p_uid;
+    delete from public.message_reactions where user_id = p_uid;
+    delete from public.friends where user_a = p_uid or user_b = p_uid;
+    delete from public.whisper_blocks where blocker_id = p_uid or blocked_id = p_uid;
+    delete from public.whisper_story_views where viewer_id = p_uid;
+    delete from public.whisper_story_recipients where recipient_id = p_uid;
+    delete from public.whisper_stories where poster_id = p_uid;
+    delete from public.whisper_story_publish_quota where poster_id = p_uid;
+    delete from public.profiles where id = p_uid;
+    delete from public.whisper_upload_quota where user_id = p_uid;
+    delete from public.whisper_deleted_tombstones where user_id = p_uid;
+    delete from public.whisper_discover_quota where user_id = p_uid;
+    delete from public.whisper_username_check_quota where user_id = p_uid;
+    delete from public.whisper_image_ownership where user_id = p_uid;
+    -- UnifiedPush targets are cascade-cleaned with their account; the legacy
+    -- FCM registry was removed by the UnifiedPush migration above.
+    delete from public.whisper_prekeys where account = p_uid;
+end;
+$$;
+
+revoke all on function public.whisper_purge_account_data(uuid) from public, anon, authenticated;
+grant execute on function public.whisper_purge_account_data(uuid) to service_role;

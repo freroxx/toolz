@@ -132,6 +132,8 @@ enum class WhisperGroupEventType(val wire: String) {
     DECLINE("decline"),
     CANCEL("cancel"),
     PICTURE("picture"),
+    /** Versioned ownership and delegated-capability state, signed by the owner. */
+    POLICY("policy"),
     /**
      * Forward-compat sentinel: rows carrying a wire type this build does not
      * know (shipped after us) decode to UNKNOWN and fail closed inside
@@ -188,6 +190,8 @@ data class WhisperGroupMembership(
     val groupId: String,
     val epoch: Long,
     val members: Map<String, WhisperGroupRole>,
+    /** Canonical authorization state reconstructed from verified events. */
+    val policy: GroupPolicyV1,
     val name: String,
     /** True when only admins may add members (set at creation, signed in CREATE). */
     val inviteAdminsOnly: Boolean = true,
@@ -221,8 +225,12 @@ data class WhisperGroupMembership(
     val admins: Set<String> get() = members.filterValues { it == WhisperGroupRole.ADMIN }.keys
     fun isMember(userId: String): Boolean = members.containsKey(userId)
     fun isAdmin(userId: String): Boolean = members[userId] == WhisperGroupRole.ADMIN
-    /** Whether [userId] may invite right now (admins always; members iff open invites). */
-    fun canInvite(userId: String): Boolean = isAdmin(userId) || (!inviteAdminsOnly && isMember(userId))
+    fun allows(userId: String, capability: WhisperGroupCapability): Boolean =
+        policy.allows(userId, members, capability)
+    /** Both the policy and the legacy invite mode must permit an invitation. */
+    fun canInvite(userId: String): Boolean =
+        allows(userId, WhisperGroupCapability.INVITE_MEMBERS) &&
+            (isAdmin(userId) || !inviteAdminsOnly)
     /** Whether [userId] belonged to the group at [epoch] (read-side history gate). */
     fun isMemberAt(userId: String, epoch: Long): Boolean =
         ranges[userId]?.any { epoch in it } ?: false
@@ -313,6 +321,7 @@ fun applyEvents(
     var adminOnlySend = false
     var membersCanEdit = false
     var description = ""
+    var policy: GroupPolicyV1? = null
     val members = mutableMapOf<String, WhisperGroupRole>()
     val invited = mutableSetOf<String>()
     val joinEpoch = mutableMapOf<String, Long>()
@@ -344,6 +353,13 @@ fun applyEvents(
             }.getOrDefault("" to true)
             name = parsedName.take(WhisperGroupsConfig.MAX_GROUP_NAME_CHARS)
             inviteAdminsOnly = parsedInvite
+            // Existing CREATE rows predate GroupPolicyV1.  Their signed invite
+            // mode is the compatibility source for the one extra member grant.
+            policy = GroupPolicyV1(
+                ownerId = ev.actor,
+                memberCapabilities = GroupPolicyV1.DEFAULT_MEMBER_CAPABILITIES +
+                    if (parsedInvite) emptySet<WhisperGroupCapability>() else setOf(WhisperGroupCapability.INVITE_MEMBERS),
+            )
             epoch = ev.epoch
             continue
         }
@@ -356,6 +372,9 @@ fun applyEvents(
             WhisperGroupEventType.ADD -> error("legacy add events are no longer accepted (use invite+join)")
             WhisperGroupEventType.REMOVE -> {
                 require(isAdminSigned(ev, members, verify, signerKeyOf)) { "remove not admin-signed" }
+                require(requireNotNull(policy).allows(ev.actor, members, WhisperGroupCapability.REMOVE_MEMBERS)) {
+                    "remove not permitted by policy"
+                }
                 val target = targetOf(ev)
                 require(members.containsKey(target)) { "remove of non-member" }
                 require(members[target] != WhisperGroupRole.ADMIN || members.count { it.value == WhisperGroupRole.ADMIN } > 1) {
@@ -376,11 +395,17 @@ fun applyEvents(
             }
             WhisperGroupEventType.RENAME -> {
                 require(isAdminSigned(ev, members, verify, signerKeyOf)) { "rename not admin-signed" }
+                require(requireNotNull(policy).allows(ev.actor, members, WhisperGroupCapability.EDIT_INFO)) {
+                    "rename not permitted by policy"
+                }
                 name = targetOf(ev).take(WhisperGroupsConfig.MAX_GROUP_NAME_CHARS)
                 epoch = ev.epoch
             }
             WhisperGroupEventType.PROMOTE -> {
                 require(isAdminSigned(ev, members, verify, signerKeyOf)) { "promote not admin-signed" }
+                require(requireNotNull(policy).allows(ev.actor, members, WhisperGroupCapability.PROMOTE_DEMOTE)) {
+                    "promote not permitted by policy"
+                }
                 val target = targetOf(ev)
                 require(members[target] == WhisperGroupRole.MEMBER) { "promote of non-member" }
                 members[target] = WhisperGroupRole.ADMIN
@@ -388,6 +413,9 @@ fun applyEvents(
             }
             WhisperGroupEventType.DEMOTE -> {
                 require(isAdminSigned(ev, members, verify, signerKeyOf)) { "demote not admin-signed" }
+                require(requireNotNull(policy).allows(ev.actor, members, WhisperGroupCapability.PROMOTE_DEMOTE)) {
+                    "demote not permitted by policy"
+                }
                 val target = targetOf(ev)
                 require(members[target] == WhisperGroupRole.ADMIN) { "demote of non-admin" }
                 require(members.count { it.value == WhisperGroupRole.ADMIN } > 1) {
@@ -398,9 +426,26 @@ fun applyEvents(
             }
             WhisperGroupEventType.SETTINGS -> {
                 require(isAdminSigned(ev, members, verify, signerKeyOf)) { "settings not admin-signed" }
+                require(requireNotNull(policy).allows(ev.actor, members, WhisperGroupCapability.EDIT_INFO)) {
+                    "settings not permitted by policy"
+                }
                 val (send, desc, edit) = parseGroupSettings(ev.payloadJson) ?: error("bad settings payload")
                 if (send != null) adminOnlySend = send
-                if (edit != null) membersCanEdit = edit
+                if (edit != null) {
+                    membersCanEdit = edit
+                    // Legacy SETTINGS carried member picture-edit permission
+                    // before the versioned policy existed.  Mirror that signed
+                    // decision into the derived compatibility policy; a later
+                    // POLICY event remains authoritative and replaces it.
+                    val current = requireNotNull(policy)
+                    policy = current.copy(
+                        memberCapabilities = if (edit) {
+                            current.memberCapabilities + WhisperGroupCapability.EDIT_PICTURE
+                        } else {
+                            current.memberCapabilities - WhisperGroupCapability.EDIT_PICTURE
+                        },
+                    )
+                }
                 if (desc != null) description = desc.take(WhisperGroupsConfig.MAX_GROUP_DESC_CHARS)
                 // No epoch bump: settings change no crypto scope, so in-flight
                 // sends never go stale on a settings change.
@@ -409,6 +454,9 @@ fun applyEvents(
                 require(isMemberSigned(ev, members, verify, signerKeyOf)) { "invite not signed by inviter" }
                 require(members[ev.actor] == WhisperGroupRole.ADMIN || !inviteAdminsOnly) {
                     "invite not admin-signed"
+                }
+                require(requireNotNull(policy).allows(ev.actor, members, WhisperGroupCapability.INVITE_MEMBERS)) {
+                    "invite not permitted by policy"
                 }
                 val target = targetOf(ev)
                 require(!members.containsKey(target)) { "invite of existing member" }
@@ -441,6 +489,9 @@ fun applyEvents(
             }
             WhisperGroupEventType.CANCEL -> {
                 require(isAdminSigned(ev, members, verify, signerKeyOf)) { "cancel not admin-signed" }
+                require(requireNotNull(policy).allows(ev.actor, members, WhisperGroupCapability.INVITE_MEMBERS)) {
+                    "cancel not permitted by policy"
+                }
                 val target = targetOf(ev)
                 require(invited.contains(target)) { "cancel without invite" }
                 invited.remove(target)
@@ -453,8 +504,22 @@ fun applyEvents(
                 } else {
                     require(isAdminSigned(ev, members, verify, signerKeyOf)) { "picture not admin-signed" }
                 }
+                require(requireNotNull(policy).allows(ev.actor, members, WhisperGroupCapability.EDIT_PICTURE)) {
+                    "picture not permitted by policy"
+                }
                 val picUrl = parseGroupPicture(ev.payloadJson) ?: error("bad picture payload")
                 picture = WhisperGroupPicture(url = picUrl, epoch = ev.epoch)
+            }
+            WhisperGroupEventType.POLICY -> {
+                val current = requireNotNull(policy) { "policy missing after create" }
+                require(ev.actor == current.ownerId) { "policy not signed by current owner" }
+                require(isAdminSigned(ev, members, verify, signerKeyOf)) { "policy not owner-signed" }
+                val next = parseGroupPolicyPayload(ev.payloadJson) ?: error("bad or unsupported policy payload")
+                next.validateFor(members)
+                policy = next
+                // Ownership changes are authorization-scope changes; all members
+                // observe a new epoch before any later encrypted group delivery.
+                if (next.ownerId != current.ownerId) epoch = ev.epoch
             }
             // Forward-compat: a type shipped after this build is never trusted,
             // never skipped — it truncates the log here in the tolerant path.
@@ -469,7 +534,7 @@ fun applyEvents(
         closed + open
     }
     return WhisperGroupMembership(
-        groupId, epoch, members.toMap(), name, inviteAdminsOnly, ranges,
+        groupId, epoch, members.toMap(), requireNotNull(policy) { "missing group policy" }, name, inviteAdminsOnly, ranges,
         invited.toSet(), picture, degraded = false, badSeq = null,
         adminOnlySend = adminOnlySend, membersCanEdit = membersCanEdit,
         description = description,
@@ -1386,7 +1451,7 @@ suspend fun WhisperRepository.cancelGroupInvite(groupId: String, userId: String)
     requireGroupsEnabled()
     val me = requireMe()
     val m = syncGroup(groupId).getOrThrow()
-    require(m.isAdmin(me)) { "Only admins can cancel invites." }
+    require(m.allows(me, WhisperGroupCapability.INVITE_MEMBERS)) { "You cannot cancel invites in this group." }
     require(userId in m.pendingInvites) { "No invite to cancel." }
     db.from("whisper_group_invites").delete { filter { eq("group_id", groupId); eq("user_id", userId) } }
     val (seq, epoch) = nextGroupSeqEpoch(groupId)
@@ -1420,7 +1485,7 @@ suspend fun WhisperRepository.removeGroupMember(groupId: String, userId: String)
     requireGroupsEnabled()
     val me = requireMe()
     val m = syncGroup(groupId).getOrThrow()
-    require(m.isAdmin(me)) { "Only admins can remove members." }
+    require(m.allows(me, WhisperGroupCapability.REMOVE_MEMBERS)) { "You cannot remove members in this group." }
     require(m.isMember(userId)) { "Not a member." }
     require(!(m.members[userId] == WhisperGroupRole.ADMIN && m.admins.size <= 1)) {
         "Cannot remove the last admin."
@@ -1435,7 +1500,7 @@ suspend fun WhisperRepository.promoteGroupMember(groupId: String, userId: String
     requireGroupsEnabled()
     val me = requireMe()
     val m = syncGroup(groupId).getOrThrow()
-    require(m.isAdmin(me)) { "Only admins can promote members." }
+    require(m.allows(me, WhisperGroupCapability.PROMOTE_DEMOTE)) { "You cannot change member roles in this group." }
     require(m.members[userId] == WhisperGroupRole.MEMBER) { "Not a promotable member." }
     val (seq, epoch) = nextGroupSeqEpoch(groupId)
     publishGroupEvent(groupId, seq, epoch + 1, WhisperGroupEventType.PROMOTE, me, "\"$userId\"").getOrThrow()
@@ -1449,7 +1514,7 @@ suspend fun WhisperRepository.demoteGroupMember(groupId: String, userId: String)
     requireGroupsEnabled()
     val me = requireMe()
     val m = syncGroup(groupId).getOrThrow()
-    require(m.isAdmin(me)) { "Only admins can demote members." }
+    require(m.allows(me, WhisperGroupCapability.PROMOTE_DEMOTE)) { "You cannot change member roles in this group." }
     require(m.members[userId] == WhisperGroupRole.ADMIN) { "Not an admin." }
     require(m.admins.size > 1) { "Cannot demote the last admin." }
     val (seq, epoch) = nextGroupSeqEpoch(groupId)
@@ -1473,13 +1538,41 @@ suspend fun WhisperRepository.updateGroupSettings(
     requireGroupsEnabled()
     val me = requireMe()
     val m = syncGroup(groupId).getOrThrow()
-    require(m.isAdmin(me)) { "Only admins can change settings." }
+    require(m.allows(me, WhisperGroupCapability.EDIT_INFO)) { "You cannot change group settings." }
     require(adminOnlySend != null || description != null || editMembers != null) { "Nothing to change." }
     val cleanDesc = description?.trim()?.take(WhisperGroupsConfig.MAX_GROUP_DESC_CHARS)
     val (seq, epoch) = nextGroupSeqEpoch(groupId)
     publishGroupEvent(
         groupId, seq, epoch, WhisperGroupEventType.SETTINGS, me,
         buildGroupSettingsPayload(adminOnlySend, cleanDesc, editMembers),
+    ).getOrThrow()
+    syncGroup(groupId).getOrThrow()
+}
+
+/**
+ * Publishes a complete, canonical authorization policy.  This deliberately
+ * does not mutate the server's convenience role rows: replayed, signature-
+ * verified event state remains the source of truth.  Ownership changes bump
+ * the epoch so callers cannot continue a send under an old authority scope.
+ */
+suspend fun WhisperRepository.updateGroupPolicy(
+    groupId: String,
+    nextPolicy: GroupPolicyV1,
+): Result<Unit> = runCatching {
+    requireGroupsEnabled()
+    val me = requireMe()
+    val membership = syncGroup(groupId).getOrThrow()
+    require(membership.policy.ownerId == me) { "Only the group owner can change permissions." }
+    nextPolicy.validateFor(membership.members)
+    val (seq, epoch) = nextGroupSeqEpoch(groupId)
+    val nextEpoch = if (nextPolicy.ownerId == membership.policy.ownerId) epoch else epoch + 1
+    publishGroupEvent(
+        groupId = groupId,
+        seq = seq,
+        epoch = nextEpoch,
+        type = WhisperGroupEventType.POLICY,
+        actor = me,
+        payload = buildGroupPolicyPayload(nextPolicy),
     ).getOrThrow()
     syncGroup(groupId).getOrThrow()
 }
@@ -1492,9 +1585,7 @@ suspend fun WhisperRepository.transferGroupOwnership(groupId: String, userId: St
     requireGroupsEnabled()
     val me = requireMe()
     val m = syncGroup(groupId).getOrThrow()
-    val group = db.from("whisper_groups").select { filter { eq("id", groupId) } }
-        .decodeSingleOrNull<GroupRow>() ?: error("Group not found.")
-    require(group.createdBy == me) { "Only the owner can transfer ownership." }
+    require(m.policy.ownerId == me) { "Only the owner can transfer ownership." }
     require(m.isMember(userId) && userId != me) { "Choose another member." }
     if (m.members[userId] != WhisperGroupRole.ADMIN) {
         promoteGroupMember(groupId, userId).getOrThrow()
@@ -1507,7 +1598,7 @@ suspend fun WhisperRepository.renameGroup(groupId: String, name: String): Result
     requireGroupsEnabled()
     val me = requireMe()
     val m = syncGroup(groupId).getOrThrow()
-    require(m.isAdmin(me)) { "Only admins can rename the group." }
+    require(m.allows(me, WhisperGroupCapability.EDIT_INFO)) { "You cannot rename this group." }
     val clean = name.trim().take(WhisperGroupsConfig.MAX_GROUP_NAME_CHARS)
     require(clean.isNotBlank()) { "Group name is required." }
     val (seq, epoch) = nextGroupSeqEpoch(groupId)
@@ -1567,7 +1658,13 @@ suspend fun WhisperRepository.sendGroupContent(groupId: String, content: Whisper
     val me = requireMe()
     val m = syncGroup(groupId).getOrThrow()
     require(m.isMember(me)) { "You are no longer a member of this group." }
-    require(!m.adminOnlySend || m.isAdmin(me)) { "Only admins can send messages in this group." }
+    require(m.allows(me, WhisperGroupCapability.SEND_MESSAGES)) { "You cannot send messages in this group." }
+    if (content.poll != null) {
+        require(m.allows(me, WhisperGroupCapability.CREATE_POLLS)) { "You cannot create polls in this group." }
+    }
+    if (content.pollClose != null) {
+        require(m.allows(me, WhisperGroupCapability.CLOSE_POLLS)) { "You cannot close polls in this group." }
+    }
     // Traffic class for push routing (server sees the label, never content):
     // votes stay push-silent, everything else fans out normally.
     val kind = when {
@@ -1987,7 +2084,11 @@ suspend fun WhisperRepository.pendingGroupJoinRequests(groupId: String): Result<
 /** Denies (or withdraws) a join request. */
 suspend fun WhisperRepository.denyGroupJoinRequest(groupId: String, userId: String): Result<Unit> = runCatching {
     requireGroupsEnabled()
-    requireMe()
+    val me = requireMe()
+    val membership = syncGroup(groupId).getOrThrow()
+    require(membership.allows(me, WhisperGroupCapability.APPROVE_JOIN_REQUESTS)) {
+        "You cannot moderate join requests in this group."
+    }
     db.from("whisper_group_join_requests").delete {
         filter { eq("group_id", groupId); eq("user_id", userId) }
     }
@@ -1996,6 +2097,11 @@ suspend fun WhisperRepository.denyGroupJoinRequest(groupId: String, userId: Stri
 /** Approves = invites (consumes the request via trigger). */
 suspend fun WhisperRepository.approveGroupJoinRequest(groupId: String, userId: String): Result<Unit> = runCatching {
     requireGroupsEnabled()
+    val me = requireMe()
+    val membership = syncGroup(groupId).getOrThrow()
+    require(membership.allows(me, WhisperGroupCapability.APPROVE_JOIN_REQUESTS)) {
+        "You cannot approve join requests in this group."
+    }
     inviteGroupMember(groupId, userId).getOrThrow()
 }
 
@@ -2154,7 +2260,7 @@ suspend fun WhisperRepository.setGroupPicture(
     requireGroupsEnabled()
     val me = requireMe()
     val m = syncGroup(groupId).getOrThrow()
-    require(m.isAdmin(me) || m.membersCanEdit) { "Only admins can change the picture." }
+    require(m.allows(me, WhisperGroupCapability.EDIT_PICTURE)) { "You cannot change the picture." }
     val (compressed, _) = compressImageForGroupUpload(imageBytes, mimeType)
     require(compressed.isNotEmpty()) { "Could not read that image." }
     val published = runCatching {

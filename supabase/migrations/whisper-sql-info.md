@@ -40,6 +40,12 @@ Squashing to **one idempotent baseline** solves:
 
 The single file is **idempotent (V6-R5 + P6)**: safe to re-run at any time.
 
+The current baseline also contains the Groups sections and
+`20261018_whisper_stories_lifecycle.sql`.  The Daily Ups section adds only
+additive `whisper_story_*` tables, RLS policies, and replace-compatible helper
+functions.  Its recipient descriptors are opaque ciphertext; do not add captions,
+keys, or plaintext content to those rows.
+
 ---
 
 ## Golden Rule

@@ -8,6 +8,7 @@ package com.frerox.toolz.data.whisper
 import com.frerox.toolz.ui.screens.whisper.WhisperGroupChatViewModel
 import com.frerox.toolz.ui.screens.whisper.resolveMentionIds
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -673,5 +674,118 @@ class WhisperGroupsTest {
     @Test
     fun `empty history maps to friendly string`() {
         assertNotNull(mapGroupError("Group has no history."))
+    }
+
+    @Test
+    fun `group policy canonical payload is deterministic and authorizes by verified role`() {
+        val policy = GroupPolicyV1(
+            ownerId = admin,
+            adminCapabilities = setOf(
+                WhisperGroupCapability.EDIT_INFO,
+                WhisperGroupCapability.SEND_MESSAGES,
+            ),
+            memberCapabilities = setOf(
+                WhisperGroupCapability.SEND_MESSAGES,
+                WhisperGroupCapability.INVITE_MEMBERS,
+            ),
+        )
+        val payload = buildGroupPolicyPayload(policy)
+        assertEquals(
+            "{\"v\":1,\"owner\":\"user-admin\",\"admin\":[\"editInfo\",\"send\"],\"member\":[\"invite\",\"send\"]}",
+            payload,
+        )
+        assertEquals(policy, parseGroupPolicyPayload(payload))
+
+        val membership = mapOf(admin to WhisperGroupRole.ADMIN, "u2" to WhisperGroupRole.MEMBER)
+        policy.validateFor(membership)
+        assertTrue(policy.allows(admin, membership, WhisperGroupCapability.REMOVE_MEMBERS))
+        assertTrue(policy.allows("u2", membership, WhisperGroupCapability.INVITE_MEMBERS))
+        assertFalse(policy.allows("u2", membership, WhisperGroupCapability.REMOVE_MEMBERS))
+        assertFalse(policy.allows("stranger", membership, WhisperGroupCapability.SEND_MESSAGES))
+    }
+
+    @Test
+    fun `group policy rejects unknown malformed stale and invalid role grants`() {
+        val canonical = "{\"v\":1,\"owner\":\"user-admin\",\"admin\":[\"send\"],\"member\":[\"send\"]}"
+        assertNull(parseGroupPolicyPayload("{\"v\":2,\"owner\":\"user-admin\",\"admin\":[\"send\"],\"member\":[\"send\"]}"))
+        assertNull(parseGroupPolicyPayload("{\"v\":1,\"owner\":\"user-admin\",\"admin\":[\"future\"],\"member\":[\"send\"]}"))
+        assertNull(parseGroupPolicyPayload("{\"v\":1,\"owner\":\"user-admin\",\"admin\":[\"send\"],\"member\":[\"send\"],\"owner2\":\"u2\"}"))
+        assertNull(parseGroupPolicyPayload("{\"owner\":\"user-admin\",\"v\":1,\"admin\":[\"send\"],\"member\":[\"send\"]}"))
+        assertNull(parseGroupPolicyPayload("{\"v\":1,\"owner\":\"user-admin\",\"admin\":[\"send\"],\"member\":[\"send\",\"send\"]}"))
+        assertNotNull(parseGroupPolicyPayload(canonical))
+
+        try {
+            GroupPolicyV1(admin, memberCapabilities = setOf(WhisperGroupCapability.REMOVE_MEMBERS))
+            fail("must reject privileged member grant")
+        } catch (e: IllegalArgumentException) {
+            assertTrue((e.message ?: "").contains("privileged"))
+        }
+        try {
+            GroupPolicyV1(admin).validateFor(mapOf(admin to WhisperGroupRole.MEMBER))
+            fail("must reject owner without admin role")
+        } catch (e: IllegalArgumentException) {
+            assertTrue((e.message ?: "").contains("owner"))
+        }
+    }
+
+    @Test
+    fun `verified policy events update capabilities and bad policy preserves verified prefix`() {
+        val before = listOf(create()) + inviteJoin(2, 0, "u2")
+        val updated = GroupPolicyV1(
+            ownerId = admin,
+            adminCapabilities = GroupPolicyV1.DEFAULT_ADMIN_CAPABILITIES,
+            memberCapabilities = setOf(WhisperGroupCapability.SEND_MESSAGES),
+        )
+        val log = before + ev(
+            4,
+            1,
+            WhisperGroupEventType.POLICY,
+            admin,
+            buildGroupPolicyPayload(updated),
+        )
+        val membership = applyEvents(gid, log, verify, keys2all)
+        assertEquals(updated, membership.policy)
+        assertTrue(membership.allows("u2", WhisperGroupCapability.SEND_MESSAGES))
+        assertFalse(membership.allows("u2", WhisperGroupCapability.INVITE_MEMBERS))
+
+        val forged = log + ev(
+            5,
+            1,
+            WhisperGroupEventType.POLICY,
+            "u2",
+            buildGroupPolicyPayload(updated),
+        )
+        val tolerant = applyEventsTolerant(gid, forged, verify, keys2all)
+        assertTrue(tolerant.degraded)
+        assertEquals(5L, tolerant.badSeq)
+        assertEquals(updated, tolerant.policy)
+    }
+
+    @Test
+    fun `policy ownership transfer requires current owner signature and an admin target`() {
+        val base = listOf(create()) + inviteJoin(2, 0, "u2") + listOf(
+            ev(4, 2, WhisperGroupEventType.PROMOTE, admin, "\"u2\""),
+        )
+        val transfer = GroupPolicyV1(ownerId = "u2")
+        val transferred = applyEvents(
+            gid,
+            base + ev(5, 3, WhisperGroupEventType.POLICY, admin, buildGroupPolicyPayload(transfer)),
+            verify,
+            keys2all,
+        )
+        assertEquals("u2", transferred.policy.ownerId)
+        assertEquals(3L, transferred.epoch)
+
+        try {
+            applyEvents(
+                gid,
+                base + ev(5, 3, WhisperGroupEventType.POLICY, "u2", buildGroupPolicyPayload(transfer)),
+                verify,
+                keys2all,
+            )
+            fail("new owner cannot authorize their own transfer")
+        } catch (e: IllegalArgumentException) {
+            assertTrue((e.message ?: "").contains("current owner"))
+        }
     }
 }

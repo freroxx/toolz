@@ -11,6 +11,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.ListenableWorker
 import androidx.work.WorkerParameters
 import com.frerox.toolz.data.whisper.WhisperDeletedMessagesStore
+import com.frerox.toolz.data.whisper.WhisperStoryLocalDao
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 
@@ -20,6 +21,7 @@ class WhisperLocalCleanupWorker @AssistedInject constructor(
     @Assisted context: Context,
     @Assisted workerParams: WorkerParameters,
     private val deletedMessagesStore: WhisperDeletedMessagesStore,
+    private val storyDao: WhisperStoryLocalDao,
 ) : CoroutineWorker(context, workerParams) {
     companion object {
         private const val TAG = "WhisperCleanup"
@@ -28,7 +30,10 @@ class WhisperLocalCleanupWorker @AssistedInject constructor(
     override suspend fun doWork(): ListenableWorker.Result =
         // V2-FIX L-?: the body is wrapped so a failure is always LOGGED (observability) —
         // the old bare failure() gave zero signal about recurring local-cleanup breakage.
-        runCatching { deletedMessagesStore.evictOldest() }.fold(
+        runCatching {
+            deletedMessagesStore.evictOldest()
+            storyDao.deleteDue(System.currentTimeMillis(), limit = 100)
+        }.fold(
             onSuccess = { ListenableWorker.Result.success() },
             onFailure = { e ->
                 if (e is kotlinx.coroutines.CancellationException) throw e
