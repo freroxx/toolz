@@ -2537,10 +2537,24 @@ create index if not exists whisper_group_invites_user_idx
 
 -- ── 2. New event types: invite/join/decline/cancel/picture ────────
 -- Events stay append-only; the CHECK grows (additive — old rows unaffected).
+-- Re-run guard: on a live database rows already carry event types from LATER
+-- sections (demote/settings), which this historical intermediate set would
+-- reject with 23514. Re-add only when every existing row conforms; the final
+-- section (20261010_whisper_groups_social) below always installs the
+-- complete set.
 alter table public.whisper_group_events drop constraint if exists whisper_group_events_type_check;
-alter table public.whisper_group_events add constraint whisper_group_events_type_check
-    check (type in ('create', 'add', 'remove', 'leave', 'rename', 'promote',
-                    'invite', 'join', 'decline', 'cancel', 'picture'));
+do $$
+begin
+  if not exists (
+    select 1 from public.whisper_group_events
+    where type not in ('create', 'add', 'remove', 'leave', 'rename', 'promote',
+                       'invite', 'join', 'decline', 'cancel', 'picture')
+  ) then
+    alter table public.whisper_group_events add constraint whisper_group_events_type_check
+        check (type in ('create', 'add', 'remove', 'leave', 'rename', 'promote',
+                        'invite', 'join', 'decline', 'cancel', 'picture'));
+  end if;
+end $$;
 
 -- ── 3. Join consumes the invite (the ONLY silent invite death) ────
 create or replace function public.whisper_group_consume_invite()
@@ -2755,10 +2769,21 @@ $$;
 -- legacy `add` rows fail-closed (verified prefix survives via truncation).
 -- Safe: no production rows behind the flag; dev logs with `add` degrade to
 -- their verified prefix instead of breaking.
+-- Re-run guard: same as above — skip the re-add when live rows predate this
+-- narrowing; the final section below always installs the complete set.
 alter table public.whisper_group_events drop constraint if exists whisper_group_events_type_check;
-alter table public.whisper_group_events add constraint whisper_group_events_type_check
-    check (type in ('create', 'remove', 'leave', 'rename', 'promote',
-                    'invite', 'join', 'decline', 'cancel', 'picture'));
+do $$
+begin
+  if not exists (
+    select 1 from public.whisper_group_events
+    where type not in ('create', 'remove', 'leave', 'rename', 'promote',
+                       'invite', 'join', 'decline', 'cancel', 'picture')
+  ) then
+    alter table public.whisper_group_events add constraint whisper_group_events_type_check
+        check (type in ('create', 'remove', 'leave', 'rename', 'promote',
+                        'invite', 'join', 'decline', 'cancel', 'picture'));
+  end if;
+end $$;
 
 -- ═══════════════ 20261010_whisper_groups_disband.sql ═
 -- Disband: the LAST remaining member may delete the group row (everything
@@ -3172,3 +3197,74 @@ create policy "whisper_group_events_select_member" on public.whisper_group_event
             where i.group_id = whisper_group_events.group_id and i.user_id = auth.uid()
         )
     );
+
+-- ═══════════════ 20261017_whisper_push_targets.sql ═════════
+-- FCM → UnifiedPush swap (F-Droid leaves the Firebase SDK and the foojay
+-- resolver plugin non-compliant; see the app-side swap in
+-- app/build.gradle.kts + push/WhisperPushService.kt). Push now rides
+-- UnifiedPush (spec AND-3.1.0) with two delivery flavors —
+--   * provider = 'webpush' — the endpoint came with RFC 8291 key sets; the
+--     whisper-push-send edge function encrypts each ping (aes128gcm, RFC 8290)
+--     and signs it with VAPID (RFC 8292). Serves the embedded FCM distributor
+--     bundled in the app and webpush-capable externals (Sunup, gCompat-UP); the
+--     ping is an opaque encrypted blob to the push service.
+--   * provider = 'plain'  — the endpoint expects the raw wake-ping JSON bytes
+--     (ntfy / NextPush UnifiedPush mode); same keys, no encryption envelope.
+--
+--   whisper_push_targets: one row per user (pk = user_id, so re-registration
+--   upserts and endpoint rotation overwrite the prior target). The 'provider'
+--   column is how the edge function branches between the two send paths.
+--
+--   keys_p256dh/keys_auth: the per-registration WebPush key set, base64url.
+--   NULL for plain providers. Registry secrets, never logged; RLS keeps the
+--   rows owner-only, the edge function uses the service role key.
+--
+--   The legacy whisper_fcm_tokens table is dropped: its only consumer (the
+--   FCM send path) is removed in the same change.
+--
+-- Safe to run from the Supabase SQL Editor; every statement is idempotent.
+
+create table if not exists public.whisper_push_targets (
+    user_id     uuid not null primary key references auth.users(id) on delete cascade,
+    provider    text not null check (provider in ('webpush', 'plain')),
+    endpoint    text not null,
+    keys_p256dh text,
+    keys_auth   text,
+    updated_at  timestamptz not null default now()
+);
+
+alter table public.whisper_push_targets enable row level security;
+
+-- Owner-only access (drop-then-create keeps re-runs idempotent); the push edge
+-- function reads/prunes rows via the service role key, which bypasses RLS.
+drop policy if exists "whisper_push_targets_select_own" on public.whisper_push_targets;
+create policy "whisper_push_targets_select_own"
+    on public.whisper_push_targets
+    for select
+    using (user_id = auth.uid());
+
+drop policy if exists "whisper_push_targets_insert_own" on public.whisper_push_targets;
+create policy "whisper_push_targets_insert_own"
+    on public.whisper_push_targets
+    for insert
+    with check (user_id = auth.uid());
+
+drop policy if exists "whisper_push_targets_update_own" on public.whisper_push_targets;
+create policy "whisper_push_targets_update_own"
+    on public.whisper_push_targets
+    for update
+    using (user_id = auth.uid())
+    with check (user_id = auth.uid());
+
+drop policy if exists "whisper_push_targets_delete_own" on public.whisper_push_targets;
+create policy "whisper_push_targets_delete_own"
+    on public.whisper_push_targets
+    for delete
+    using (user_id = auth.uid());
+
+-- Stale-endpoint pruning (push service replied 404/410 for that endpoint).
+create index if not exists whisper_push_targets_endpoint_idx
+    on public.whisper_push_targets(endpoint);
+
+-- Legacy FCM token registry — no client or function references it anymore.
+drop table if exists public.whisper_fcm_tokens;

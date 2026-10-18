@@ -1,6 +1,6 @@
-// Supabase Edge Function: whisper-push-send (V3-FIX, task F; Phase-2 groups)
+// Supabase Edge Function: whisper-push-send (F-Droid swap: FCM → UnifiedPush)
 //
-// FCM push scaffold invoked by Supabase Database Webhooks (no cron). Flow:
+// Push scaffold invoked by Supabase Database Webhooks (no cron). Flow:
 //   1. Auth: accept EITHER the service-role key as bearer OR a shared webhook
 //      secret header (x-whisper-push-secret) — whichever is configured.
 //   2. Read the row from the webhook payload. 1:1 path: INSERT to
@@ -13,30 +13,65 @@
 //      in-code op gate is defense-in-depth, not the primary filter.
 //   3. Skip if the receiver was recently active (< 60 s last_seen_at): their app is
 //      open and realtime already delivers the message.
-//   4. Look up receiver FCM tokens in whisper_fcm_tokens via the service role key.
-//      Group fan-out: invites → the invitee; messages → every member except
-//      the sender (with senderName); join/leave/decline events → owner +
+//   4. Look up receiver push targets in whisper_push_targets via the service
+//      role key. Group fan-out: invites → the invitee; messages → every member
+//      except the sender (with senderName); join/leave/decline events → owner +
 //      admins (declines owner-only); admin-action events
 //      (remove/promote/demote/rename/picture/settings) → members except actor.
-//   5. Send DATA-ONLY FCM HTTP v1 messages — NO content (privacy), android
-//      priority HIGH. Group payloads carry group/actor NAMES (like 1:1
-//      senderName): accepted and documented in WHISPER.md §11 — FCM sees who
-//      invited / joined / left which named group, never message bodies.
-//   6. Prune tokens rejected by FCM as invalid/unregistered.
+//   5. Deliver the DATA-ONLY ping — NO content (privacy) — per target kind:
+//      - provider='webpush': RFC 8291-encrypted aes128gcm payload + RFC 8292
+//        VAPID auth (the embedded FCM distributor and other webpush-capable
+//        UnifiedPush distributors). The push service sees an opaque blob.
+//      - provider='plain' : raw wake-ping JSON to the endpoint (ntfy / NextPush
+//        UnifiedPush mode). Same id/name keys the old FCM pings already carried.
+//      Group payloads carry group/actor NAMES (like 1:1 senderName): accepted
+//      and documented in WHISPER.md §11.
+//   6. Prune targets rejected as invalid/unregistered (HTTP 404/410).
 //
-// Rate-limit friendly: exactly ONE send attempt per token; errors are logged
-// generically (no payloads, no tokens). Client SDK integration is intentionally
-// deferred — see docs/WHISPER_PUSH_SETUP.md.
+// Env:
+//   WHISPER_VAPID_JWK      — private P-256 JWK (x,y,d) signing the VAPID pings.
+//                            Generate with scripts/generate-vapid-keys.sh; MUST
+//                            match the app's WHISPER_VAPID_PUBLIC_KEY.
+//   WHISPER_VAPID_SUBJECT  — optional contact URI for the JWT `sub` claim.
+//   SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY / WHISPER_PUSH_WEBHOOK_SECRET
+//
+// Rate-limit friendly: exactly ONE send attempt per target; errors are logged
+// generically (no payloads, no endpoints, no keys).
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { SignJWT, importPKCS8 } from "https://esm.sh/jose@5.9.6";
+import {
+  encryptWebPush,
+  parseVapidJwk,
+  type VapidJwk,
+  vapidAuthorizationHeader,
+} from "./webpush.ts";
 
 const RECENT_SEEN_WINDOW_MS = 60_000;
 const WEBHOOK_SECRET_HEADER = "x-whisper-push-secret";
-const FCM_SCOPE = "https://www.googleapis.com/auth/firebase.messaging";
+const DEFAULT_VAPID_SUBJECT = "mailto:push@toolz.app";
+// RFC 8030 requires a TTL on every push POST; a wake ping stays useful long
+// after the original message (the device may be offline for a while) — 24 h.
+const PUSH_TTL_SECONDS = "86400";
 
-// Cached Google OAuth2 access token minted from the service account JWT
-// (module-level so warm isolates reuse it until shortly before expiry).
-let _cachedAccessToken: { token: string; expMs: number; projectId: string } | null = null;
+interface PushTarget {
+  provider: string;
+  endpoint: string;
+  keysP256dh: string;
+  keysAuth: string;
+}
+
+interface GroupPushEnv {
+  supabaseUrl: string;
+  serviceRoleKey: string;
+  serviceHeaders: Record<string, string>;
+  vapidJwk: VapidJwk | null;
+  vapidSubject: string;
+}
+
+interface DeliveryResult {
+  sent: number;
+  pruned: number;
+  skipped?: string;
+}
 
 serve(async (request) => {
   if (request.method === "OPTIONS") {
@@ -58,8 +93,13 @@ serve(async (request) => {
   if (!isServiceRole && !isWebhookSecret) return json({ error: "Unauthorized" }, 401);
 
   if (!supabaseUrl || !serviceRoleKey) return json({ error: "Server misconfigured" }, 500);
-  const saJson = Deno.env.get("FCM_SERVICE_ACCOUNT_JSON");
-  if (!saJson) return json({ error: "Push is not configured" }, 503);
+  // VAPID is parsed per request (cheap); a missing key only degrades webpush
+  // targets — plain (ntfy/NextPush) targets still deliver.
+  const vapidJwk = parseVapidJwk(Deno.env.get("WHISPER_VAPID_JWK"));
+  const vapidSubject = Deno.env.get("WHISPER_VAPID_SUBJECT") ?? DEFAULT_VAPID_SUBJECT;
+  if (!vapidJwk) {
+    console.error("WHISPER_VAPID_JWK not configured — webpush targets will be skipped");
+  }
 
   // 2. Parse the Database Webhook payload (INSERT on public.messages or public.friends,
   // or any operation on the Phase-2 group tables — group ops are gated below).
@@ -79,8 +119,8 @@ serve(async (request) => {
   let messageId = "";
   let senderId = "";
   let receiverId = "";
-  let isFriendPush = false;
   let senderName = "";
+  let isFriendPush = false;
 
   if (isFriendRequest) {
     if (record?.status !== "pending") {
@@ -107,13 +147,14 @@ serve(async (request) => {
     Authorization: `Bearer ${serviceRoleKey}`,
     "Content-Type": "application/json",
   };
+  const env: GroupPushEnv = { supabaseUrl, serviceRoleKey, serviceHeaders, vapidJwk, vapidSubject };
 
   // ── Phase-2 groups: invite / message / join-leave-decline fan-out ──
   // INSERT-only: a CANCEL/decline invite DELETE (or a sender message wipe)
   // must never re-fire the push for the thing just withdrawn.
   if (isGroupTable(table) && record && typeof record === "object") {
     if (op && op !== "INSERT") return json({ skipped: "not_insert_group_event" }, 200);
-    return json(await handleGroupPush(record, table, { supabaseUrl, serviceRoleKey, serviceHeaders, saJson }), 200);
+    return json(await handleGroupPush(record, table, env), 200);
   }
 
   if (isFriendPush) {
@@ -130,109 +171,23 @@ serve(async (request) => {
     } catch {
       // Best effort profile name resolution
     }
+    if (!receiverId) return json({ skipped: "not_a_pushable_event" }, 200);
   }
 
   // 3. Skip when the receiver was seen recently — the app is foregrounded and the
   //    message arrives via realtime anyway; a push would be redundant noise.
-  try {
-    const profileRes = await fetch(
-      `${supabaseUrl}/rest/v1/profiles?id=eq.${encodeURIComponent(receiverId)}&select=last_seen_at&limit=1`,
-      { headers: serviceHeaders },
-    );
-    if (profileRes.ok) {
-      const rows = await profileRes.json();
-      const lastSeenAt = rows?.[0]?.last_seen_at;
-      if (typeof lastSeenAt === "string") {
-        const seenMs = Date.parse(lastSeenAt);
-        if (!Number.isNaN(seenMs) && Date.now() - seenMs < RECENT_SEEN_WINDOW_MS) {
-          return json({ skipped: "receiver_recently_active" }, 200);
-        }
-      }
-    }
-  } catch (profileError) {
-    console.error("profiles last_seen lookup failed", profileError);
-    // Fall through: an unavailable presence check must not block delivery.
-  }
+  const seenSkip = await recentlyActive(env, receiverId);
+  if (seenSkip) return json({ skipped: seenSkip }, 200);
 
-  // 4. Recipient tokens (service role bypasses RLS).
-  let tokens: string[];
-  try {
-    const tokenRes = await fetch(
-      `${supabaseUrl}/rest/v1/whisper_fcm_tokens?user_id=eq.${encodeURIComponent(receiverId)}&select=token`,
-      { headers: serviceHeaders },
-    );
-    if (!tokenRes.ok) {
-      console.error("token lookup failed", tokenRes.status);
-      return json({ error: "Token lookup failed" }, 502);
-    }
-    tokens = (await tokenRes.json())
-      .map((row: any) => (typeof row?.token === "string" ? row.token : ""))
-      .filter((t: string) => t.length > 0);
-  } catch (tokenError) {
-    console.error("token lookup threw", tokenError);
-    return json({ error: "Token lookup failed" }, 502);
-  }
-  if (tokens.length === 0) return json({ sent: 0, skipped: "no_tokens" }, 200);
+  // Data-only payload: NO content (privacy). messageId enables client-side
+  // dedupe with the in-app realtime path.
+  const dataPayload: Record<string, string> = isFriendPush
+    ? { whisper_friend_request: "true", senderId, senderName, messageId }
+    : { whisper_new_message: "true", senderId, messageId };
 
-  // 5. Mint the OAuth2 access token for FCM HTTP v1.
-  let accessToken: string;
-  let projectId: string;
-  try {
-    ({ accessToken, projectId } = await getFcmAccessToken(saJson));
-  } catch (authError) {
-    console.error("FCM access-token mint failed", authError);
-    return json({ error: "FCM authentication failed" }, 503);
-  }
-
-   // Single attempt per token; data-only payload carries NO content (privacy).
-   // FIX: include messageId for client-side dedupe and collapse handling.
-   let sent = 0;
-   let pruned = 0;
-   const fcmDataPayload: Record<string, string> = isFriendPush
-     ? { whisper_friend_request: "true", senderId, senderName, messageId }
-     : { whisper_new_message: "true", senderId, messageId };
-
-   for (const token of tokens) {
-     try {
-       const fcmRes = await fetch(
-         `https://fcm.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/messages:send`,
-         {
-           method: "POST",
-           headers: {
-             Authorization: `Bearer ${accessToken}`,
-             "Content-Type": "application/json",
-           },
-           body: JSON.stringify({
-             message: {
-               token,
-               data: fcmDataPayload,
-               android: { priority: "HIGH", collapse_key: isFriendPush ? `friend_${senderId}` : senderId },
-             },
-           }),
-           signal: AbortSignal.timeout(10_000),
-         },
-       );
-      if (fcmRes.ok) {
-        sent++;
-        continue;
-      }
-      // Log status + tiny body slice only; never log tokens or payload details.
-      console.error("FCM send failed", fcmRes.status, (await fcmRes.text().catch(() => "")).slice(0, 120));
-      if (await isInvalidTokenResponse(fcmRes)) {
-        // user_id is the PK: deleting by it removes this stale token row.
-        const delRes = await fetch(
-          `${supabaseUrl}/rest/v1/whisper_fcm_tokens?user_id=eq.${encodeURIComponent(receiverId)}`,
-          { method: "DELETE", headers: serviceHeaders },
-        );
-        if (delRes.ok || delRes.status === 404) pruned++;
-        else console.error("stale token prune failed", delRes.status);
-      }
-    } catch (sendError) {
-      console.error("FCM send threw", sendError);
-    }
-  }
-
-  return json({ sent, pruned }, 200);
+  const targets = await targetsForUser(env, receiverId);
+  if (targets.length === 0) return json({ sent: 0, skipped: "no_push_targets" }, 200);
+  return json(await deliver(dataPayload, targets, env), 200);
 });
 
 /** Group tables that fan out through handleGroupPush instead of the 1:1 path. */
@@ -242,32 +197,70 @@ function isGroupTable(table: string): boolean {
     table === "whisper_group_events";
 }
 
-interface GroupPushEnv {
-  supabaseUrl: string;
-  serviceRoleKey: string;
-  serviceHeaders: Record<string, string>;
-  saJson: string;
+/**
+ * Service-role PostgREST GET; returns the parsed row array. Throws on network
+ * or non-2xx — callers that can degrade (presence check, display names) catch
+ * it, and only the table name (never filter values) reaches error logs.
+ */
+async function restRows(env: GroupPushEnv, path: string): Promise<any[]> {
+  const res = await fetch(`${env.supabaseUrl}/rest/v1/${path}`, {
+    headers: { ...env.serviceHeaders, Accept: "application/json" },
+  });
+  if (!res.ok) {
+    throw new Error(`PostgREST ${path.split("?")[0]} → ${res.status}`);
+  }
+  const rows = await res.json();
+  return Array.isArray(rows) ? rows : [];
 }
 
-async function restRows(env: GroupPushEnv, path: string): Promise<any[]> {
+/** `skipped` reason when the user was seen in-app within the no-push window. */
+async function recentlyActive(env: GroupPushEnv, userId: string): Promise<string | null> {
+  if (!userId) return null;
   try {
-    const res = await fetch(`${env.supabaseUrl}/rest/v1/${path}`, { headers: env.serviceHeaders });
-    if (!res.ok) return [];
-    const rows = await res.json();
-    return Array.isArray(rows) ? rows : [];
-  } catch {
-    return [];
+    const rows = await restRows(env, `profiles?id=eq.${encodeURIComponent(userId)}&select=last_seen_at&limit=1`);
+    const lastSeenAt = rows?.[0]?.last_seen_at;
+    if (typeof lastSeenAt === "string") {
+      const seenMs = Date.parse(lastSeenAt);
+      if (!Number.isNaN(seenMs) && Date.now() - seenMs < RECENT_SEEN_WINDOW_MS) {
+        return "receiver_recently_active";
+      }
+    }
+  } catch (e) {
+    console.error("profiles last_seen lookup failed", e instanceof Error ? e.message : e);
+    // An unavailable presence check must not block delivery.
   }
+  return null;
+}
+
+/** Push targets of one user via the service role (RLS bypass). */
+async function targetsForUser(env: GroupPushEnv, userId: string): Promise<PushTarget[]> {
+  const rows = await restRows(
+    env,
+    `whisper_push_targets?user_id=eq.${encodeURIComponent(userId)}&select=provider,endpoint,keys_p256dh,keys_auth`,
+  );
+  return (Array.isArray(rows) ? rows : [])
+    .map((row: any) => ({
+      provider: typeof row?.provider === "string" ? row.provider : "",
+      endpoint: typeof row?.endpoint === "string" ? row.endpoint : "",
+      keysP256dh: typeof row?.keys_p256dh === "string" ? row.keys_p256dh : "",
+      keysAuth: typeof row?.keys_auth === "string" ? row.keys_auth : "",
+    }))
+    .filter((t: PushTarget) => t.endpoint.startsWith("https://"));
 }
 
 async function profileName(env: GroupPushEnv, userId: string): Promise<string> {
-  const rows = await restRows(env, `profiles?id=eq.${encodeURIComponent(userId)}&select=display_name,username&limit=1`);
-  return rows?.[0]?.display_name || rows?.[0]?.username || "";
+  try {
+    const rows = await restRows(env, `profiles?id=eq.${encodeURIComponent(userId)}&select=display_name,username&limit=1`);
+    return rows?.[0]?.display_name || rows?.[0]?.username || "";
+  } catch {
+    // A missing display name only degrades notification copy.
+    return "";
+  }
 }
 
 /**
  * Subject user id of admin events whose payload is a quoted id
- * (`"uuid"` for remove/promote/demote/invite/cancel). Null for anything else.
+ * (`"uuid"` for remove/promote/demote/invite/cancel). Empty for anything else.
  */
 function eventSubjectId(payload: unknown): string {
   if (typeof payload !== "string") return "";
@@ -298,7 +291,7 @@ async function handleGroupPush(
   record: any,
   table: string,
   env: GroupPushEnv,
-): Promise<{ sent: number; pruned: number; skipped?: string }> {
+): Promise<DeliveryResult> {
   const str = (v: unknown) => (typeof v === "string" ? v : "");
   if (table === "whisper_group_invites") {
     const groupId = str(record?.group_id);
@@ -308,12 +301,12 @@ async function handleGroupPush(
     const groupRows = await restRows(env, `whisper_groups?id=eq.${encodeURIComponent(groupId)}&select=name&limit=1`);
     const groupName = groupRows?.[0]?.name || "Group";
     const inviterName = invitedBy ? await profileName(env, invitedBy) : "";
-    return deliverTo(userId, {
+    return deliverToUser(env, userId, {
       whisper_group_invite: "true",
       groupId,
       groupName: String(groupName).slice(0, 64),
       inviterName: inviterName.slice(0, 64),
-    }, `ginvite_${groupId}`, env);
+    });
   }
   if (table === "whisper_group_messages") {
     const groupId = str(record?.group_id);
@@ -328,22 +321,23 @@ async function handleGroupPush(
       restRows(env, `whisper_groups?id=eq.${encodeURIComponent(groupId)}&select=name&limit=1`),
     ]);
     const groupName = String(groupRows?.[0]?.name || "Group").slice(0, 64);
-    // Sender name rides the push (like 1:1 senderName): FCM sees who wrote
-    // in which named group, never message bodies.
+    // Sender name rides the push (like 1:1 senderName): the push service can
+    // correlate who wrote in which named group, never message bodies.
     const senderName = (await profileName(env, senderId)).slice(0, 64);
+    const dataPayload = {
+      whisper_group_message: "true",
+      groupId,
+      groupName,
+      senderName,
+      senderId,
+      clientId: clientId.slice(0, 64),
+    };
     let sent = 0;
     let pruned = 0;
     for (const m of members) {
       const uid = str(m?.user_id);
       if (!uid || uid === senderId) continue;
-      const r = await deliverTo(uid, {
-        whisper_group_message: "true",
-        groupId,
-        groupName,
-        senderName,
-        senderId,
-        clientId: clientId.slice(0, 64),
-      }, `gmsg_${groupId}`, env);
+      const r = await deliverToUser(env, uid, dataPayload);
       sent += r.sent;
       pruned += r.pruned;
     }
@@ -388,8 +382,6 @@ async function handleGroupPush(
         targets.push({ id: subject, role: "member" });
       }
     }
-    let sent = 0;
-    let pruned = 0;
     // Subject info for role-change events (remove/promote/demote carry a
     // quoted user id payload): clients render "you" vs "X" copy from this.
     let subjectId = "";
@@ -398,18 +390,21 @@ async function handleGroupPush(
       subjectId = eventSubjectId(record?.payload);
       if (subjectId) subjectName = (await profileName(env, subjectId)).slice(0, 64);
     }
+    const dataPayload = {
+      whisper_group_event: "true",
+      groupId,
+      kind,
+      actorId: actor,
+      actorName,
+      groupName,
+      subjectId,
+      subjectName,
+      eventId: eventId.slice(0, 64),
+    };
+    let sent = 0;
+    let pruned = 0;
     for (const t of targets) {
-      const r = await deliverTo(t.id, {
-        whisper_group_event: "true",
-        groupId,
-        kind,
-        actorId: actor,
-        actorName,
-        groupName,
-        subjectId,
-        subjectName,
-        eventId: eventId.slice(0, 64),
-      }, `gevt_${groupId}`, env);
+      const r = await deliverToUser(env, t.id, dataPayload);
       sent += r.sent;
       pruned += r.pruned;
     }
@@ -419,82 +414,124 @@ async function handleGroupPush(
 }
 
 /**
- * Single-recipient delivery: recent-seen skip → token lookup → one FCM send
- * per token with stale-token prune. Shared by the 1:1 path and group fan-out.
+ * Single-recipient delivery (shared by 1:1 and group fan-out): recent-seen
+ * skip → target lookup → exactly one send attempt per target. Mirrors the
+ * old FCM deliverTo semantics exactly.
  */
-async function deliverTo(
+async function deliverToUser(
+  env: GroupPushEnv,
   receiverId: string,
   dataPayload: Record<string, string>,
-  collapseKey: string,
+): Promise<DeliveryResult> {
+  const seenSkip = await recentlyActive(env, receiverId);
+  if (seenSkip) return { sent: 0, pruned: 0, skipped: seenSkip };
+  let targets: PushTarget[];
+  try {
+    targets = await targetsForUser(env, receiverId);
+  } catch (e) {
+    console.error("target lookup threw", e instanceof Error ? e.message : e);
+    return { sent: 0, pruned: 0, skipped: "target_lookup_failed" };
+  }
+  if (targets.length === 0) return { sent: 0, pruned: 0, skipped: "no_push_targets" };
+  return { ...await deliver(dataPayload, targets, env) };
+}
+
+/**
+ * One delivery round over a user's targets; each target gets exactly one
+ * attempt, stale endpoints are pruned (404/410 only).
+ */
+async function deliver(
+  dataPayload: Record<string, string>,
+  targets: PushTarget[],
   env: GroupPushEnv,
-): Promise<{ sent: number; pruned: number; skipped?: string }> {
-  // Skip recently-active receivers (realtime already delivers).
-  try {
-    const rows = await restRows(env, `profiles?id=eq.${encodeURIComponent(receiverId)}&select=last_seen_at&limit=1`);
-    const lastSeenAt = rows?.[0]?.last_seen_at;
-    if (typeof lastSeenAt === "string") {
-      const seenMs = Date.parse(lastSeenAt);
-      if (!Number.isNaN(seenMs) && Date.now() - seenMs < RECENT_SEEN_WINDOW_MS) {
-        return { sent: 0, pruned: 0, skipped: "receiver_recently_active" };
-      }
-    }
-  } catch (e) {
-    console.error("profiles last_seen lookup failed", e instanceof Error ? e.message : e);
-  }
-  let tokens: string[];
-  try {
-    const rows = await restRows(env, `whisper_fcm_tokens?user_id=eq.${encodeURIComponent(receiverId)}&select=token`);
-    tokens = rows.map((row: any) => (typeof row?.token === "string" ? row.token : "")).filter((t) => t.length > 0);
-  } catch (e) {
-    console.error("token lookup threw", e instanceof Error ? e.message : e);
-    return { sent: 0, pruned: 0, skipped: "token_lookup_failed" };
-  }
-  if (tokens.length === 0) return { sent: 0, pruned: 0, skipped: "no_tokens" };
-  let accessToken: string;
-  let projectId: string;
-  try {
-    ({ accessToken, projectId } = await getFcmAccessToken(env.saJson));
-  } catch (e) {
-    console.error("FCM access-token mint failed", e instanceof Error ? e.message : e);
-    return { sent: 0, pruned: 0, skipped: "fcm_auth_failed" };
-  }
+): Promise<DeliveryResult> {
+  const payloadBytes = new TextEncoder().encode(JSON.stringify(dataPayload));
   let sent = 0;
   let pruned = 0;
-  for (const token of tokens) {
+  for (const target of targets) {
     try {
-      const fcmRes = await fetch(
-        `https://fcm.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/messages:send`,
-        {
-          method: "POST",
-          headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            message: { token, data: dataPayload, android: { priority: "HIGH", collapse_key: collapseKey } },
-          }),
-          signal: AbortSignal.timeout(10_000),
-        },
-      );
-      if (fcmRes.ok) {
+      const res = await sendToTarget(target, payloadBytes, env);
+      if (res.ok) {
         sent++;
         continue;
       }
-      console.error("FCM send failed", fcmRes.status, (await fcmRes.text().catch(() => "")).slice(0, 120));
-      if (await isInvalidTokenResponse(fcmRes)) {
-        try {
-          const delRes = await fetch(
-            `${env.supabaseUrl}/rest/v1/whisper_fcm_tokens?user_id=eq.${encodeURIComponent(receiverId)}`,
-            { method: "DELETE", headers: env.serviceHeaders },
-          );
-          if (delRes.ok || delRes.status === 404) pruned++;
-          else console.error("stale token prune failed", delRes.status);
-        } catch (e) {
-          console.error("stale token prune threw", e instanceof Error ? e.message : e);
-        }
-      }
-    } catch (e) {
-      console.error("FCM send threw", e instanceof Error ? e.message : e);
+      // Log status + tiny body slice only; never log endpoints or payloads.
+      console.error("push send failed", res.status, (await res.text().catch(() => "")).slice(0, 120));
+      if (isInvalidEndpointResponse(res)) pruned += await pruneTarget(target, env);
+    } catch (sendError) {
+      console.error("push send threw", sendError);
     }
   }
   return { sent, pruned };
+}
+
+/** Routes one target to its delivery flavor (encrypted webpush or plain POST). */
+async function sendToTarget(
+  target: PushTarget,
+  payloadBytes: Uint8Array,
+  env: GroupPushEnv,
+): Promise<Response> {
+  if (target.provider === "webpush") {
+    if (!env.vapidJwk) {
+      // Configuration issue, not a dead endpoint: must NOT be reported as
+      // 404/410, which would wrongly prune the target.
+      return new Response("vapid not configured", { status: 412 });
+    }
+    if (!target.keysP256dh || !target.keysAuth) {
+      return new Response("missing webpush key set", { status: 412 });
+    }
+    const [authorization, encrypted] = await Promise.all([
+      vapidAuthorizationHeader(target.endpoint, env.vapidJwk, env.vapidSubject),
+      encryptWebPush(payloadBytes, { p256dh: target.keysP256dh, auth: target.keysAuth }),
+    ]);
+    return fetch(target.endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: authorization,            // RFC 8292 VAPID
+        "Content-Encoding": "aes128gcm",         // RFC 8290 record encoding
+        "Content-Type": "application/octet-stream",
+        TTL: PUSH_TTL_SECONDS,                   // RFC 8030
+        Urgency: "high",
+      },
+      body: encrypted,
+      signal: AbortSignal.timeout(10_000),
+    });
+  }
+  // plain (ntfy / NextPush UnifiedPush): body IS the wake-ping JSON.
+  return fetch(target.endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      TTL: PUSH_TTL_SECONDS,
+      Urgency: "high",
+    },
+    body: payloadBytes,
+    signal: AbortSignal.timeout(10_000),
+  });
+}
+
+/** Deletes the stale target row behind one dead endpoint. */
+async function pruneTarget(target: PushTarget, env: GroupPushEnv): Promise<number> {
+  try {
+    const delRes = await fetch(
+      `${env.supabaseUrl}/rest/v1/whisper_push_targets?endpoint=eq.${encodeURIComponent(target.endpoint)}`,
+      { method: "DELETE", headers: env.serviceHeaders },
+    );
+    if (delRes.ok || delRes.status === 404) return 1;
+    console.error("stale target prune failed", delRes.status);
+    return 0;
+  } catch (e) {
+    console.error("stale target prune threw", e instanceof Error ? e.message : e);
+    return 0;
+  }
+}
+
+/**
+ * True when the push service rejected the ENDPOINT (not the request): HTTP
+ * 404/410 covers FCM webpush unregistered/gone and ntfy-style dead topics.
+ */
+function isInvalidEndpointResponse(res: Response): boolean {
+  return res.status === 404 || res.status === 410;
 }
 
 /** Constant-time string compare for secret/header checks. */
@@ -505,72 +542,6 @@ function timingSafeEqual(a: string, b: string): boolean {
   let diff = 0;
   for (let i = 0; i < ab.length; i++) diff |= ab[i] ^ bb[i];
   return diff === 0;
-}
-
-/**
- * Exchanges the service-account JWT (RS256, signed via jose) at Google's OAuth2
- * token endpoint for a short-lived FCM access token. Cached until exp − 60 s.
- */
-async function getFcmAccessToken(saJson: string): Promise<{ accessToken: string; projectId: string }> {
-  const cached = _cachedAccessToken;
-  if (cached && Date.now() < cached.expMs - 60_000) {
-    return { accessToken: cached.token, projectId: cached.projectId };
-  }
-  const sa = JSON.parse(saJson);
-  if (typeof sa.private_key !== "string" || typeof sa.client_email !== "string") {
-    throw new Error("service account JSON missing private_key/client_email");
-  }
-  const projectId = typeof sa.project_id === "string" ? sa.project_id : "";
-  if (!projectId) throw new Error("service account JSON missing project_id");
-  const tokenUri = typeof sa.token_uri === "string" ? sa.token_uri : "https://oauth2.googleapis.com/token";
-  const nowSec = Math.floor(Date.now() / 1000);
-  // JSON.parse already unescapes \n in the PEM; importPKCS8 accepts that directly.
-  const privateKey = await importPKCS8(sa.private_key, "RS256");
-  const assertion = await new SignJWT({ scope: FCM_SCOPE })
-    .setProtectedHeader({ alg: "RS256", typ: "JWT" })
-    .setIssuer(sa.client_email)
-    .setAudience(tokenUri)
-    .setIssuedAt(nowSec)
-    .setExpirationTime(nowSec + 3600)
-    .sign(privateKey);
-
-  const res = await fetch(tokenUri, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
-      assertion,
-    }).toString(),
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!res.ok) throw new Error(`oauth exchange failed (${res.status})`);
-  const out = await res.json();
-  const expiresInSec = Number(out.expires_in ?? 3600);
-  _cachedAccessToken = {
-    token: String(out.access_token),
-    expMs: Date.now() + expiresInSec * 1000,
-    projectId,
-  };
-  return { accessToken: String(out.access_token), projectId };
-}
-
-/**
- * True when FCM rejected the TOKEN (not the request): HTTP 404/410, or an error
- * body whose `error.status` marks unregistered/not-found/invalid-registration.
- */
-async function isInvalidTokenResponse(res: Response): Promise<boolean> {
-  if (res.status === 404 || res.status === 410) return true;
-  try {
-    const body = await res.json();
-    const status = body?.error?.status;
-    return (
-      status === "UNREGISTERED" ||
-      status === "NOT_FOUND" ||
-      (status === "INVALID_ARGUMENT" && /registration|token/i.test(String(body?.error?.message ?? "")))
-    );
-  } catch {
-    return false;
-  }
 }
 
 function json(body: unknown, statusCode: number) {
