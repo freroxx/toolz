@@ -1023,10 +1023,11 @@ every group screen without touching the server plane:
   user before any MediaStore write, reusing the 1:1 dialog.
 - **Every structural write is same-frame double-tap-proof in the ViewModel**
   — group-card navigation, poll votes/closes and poll/photo send
-  confirmations, reactions, permission saves, and every info-screen action
+  confirmations, reactions, creation, join-by-id requests, story deletion,
+  permission saves, and every info-screen action
   (invite, promote, demote, transfer, remove, report, picture set, leave,
   disband, request approve/deny) hold a one-write-at-a-time guard, so two
-  taps in one frame can never fire two signed events. Send confirmations
+  taps in one frame can never fire two signed events. Sheeted confirmations
   debounce on payload identity inside a short window instead of a shared
   busy flag, so a genuinely different send made while an upload is still in
   flight is never silently dropped. Stories-bar entry rows got the same

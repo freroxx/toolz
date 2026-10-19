@@ -569,6 +569,21 @@ class WhisperGroupsViewModel @Inject constructor(
         super.onCleared()
     }
 
+    /**
+     * Same-frame double-confirm guard for the create sheet: the sheet's
+     * confirm button disables via `submitting` only after recomposition, so a
+     * frozen frame can deliver both taps — two groups with the same name and
+     * membership. Debounced on PAYLOAD identity inside a short window (never a
+     * shared busy flag: `isLoading` also drives every hub reload pass), and
+     * never on raw time alone: a genuinely different create (name, membership
+     * or mode) also inside the window — humanly impossible, refilling the
+     * sheet takes seconds — would still pass.
+     */
+    private var lastCreateKey: String? = null
+    private var lastCreateAtMs = 0L
+    private var lastJoinRequestKey: String? = null
+    private var lastJoinRequestAtMs = 0L
+
     fun create(
         name: String,
         memberIds: List<String>,
@@ -576,6 +591,11 @@ class WhisperGroupsViewModel @Inject constructor(
         pictureBytes: ByteArray? = null,
         pictureMime: String = "image/jpeg",
     ) {
+        val key = "$name\u0000${memberIds.sorted().joinToString("\u0000")}\u0000$inviteAdminsOnly"
+        val now = System.currentTimeMillis()
+        if (key == lastCreateKey && now - lastCreateAtMs < 2_000) return
+        lastCreateKey = key
+        lastCreateAtMs = now
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
             val created = repository.createGroup(name, memberIds, inviteAdminsOnly)
@@ -609,6 +629,12 @@ class WhisperGroupsViewModel @Inject constructor(
     fun requestJoin(rawId: String) {
         val id = rawId.trim()
         if (id.isBlank()) return
+        // Same-frame double-confirm guard: two identical join-requests inside
+        // 2 s are one tap (same reasoning as [create]); a different id passes.
+        val now = System.currentTimeMillis()
+        if (id == lastJoinRequestKey && now - lastJoinRequestAtMs < 2_000) return
+        lastJoinRequestKey = id
+        lastJoinRequestAtMs = now
         viewModelScope.launch {
             _uiState.update { it.copy(error = null, notice = null) }
             repository.requestGroupJoin(id)

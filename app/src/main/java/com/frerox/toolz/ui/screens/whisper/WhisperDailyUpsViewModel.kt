@@ -363,6 +363,10 @@ class WhisperDailyUpsViewModel @Inject constructor(
      *  back off while the first request settles. */
     private val reactionInFlight = mutableSetOf<String>()
 
+    /** One-delete window anti-double-confirm (same class as [reactionInFlight]). */
+    private var lastDeleteStoryKey: String? = null
+    private var lastDeleteStoryAtMs = 0L
+
     fun toggleReaction(storyId: String, emoji: String, on: Boolean) {
         if (storyId in reactionInFlight) return
         reactionInFlight += storyId
@@ -398,6 +402,14 @@ class WhisperDailyUpsViewModel @Inject constructor(
 
     /** Delete my up: server lifecycle first, then the local row + hosted copy. */
     fun deleteMyStory(storyId: String) {
+        // Same-frame double-confirm guard (established VM-side pattern): the
+        // delete-confirm button can receive both taps in a frozen frame — the
+        // second delete then fails server-side with an "already gone" error
+        // snackbar right after the first one succeeded.
+        val now = System.currentTimeMillis()
+        if (storyId == lastDeleteStoryKey && now - lastDeleteStoryAtMs < 2_000) return
+        lastDeleteStoryKey = storyId
+        lastDeleteStoryAtMs = now
         viewModelScope.launch {
             repository.deleteDailyUp(storyId)
                 .onSuccess {
