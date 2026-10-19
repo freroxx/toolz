@@ -671,6 +671,9 @@ class WhisperViewModel @Inject constructor(
         onResult(nowMuted)
     }
 
+    /** One profile write at a time: a rapid double-tap must not fire two racing updates. */
+    private var profileUpdateInFlight = false
+
     fun updateProfile(
         displayName: String,
         bio: String,
@@ -680,24 +683,33 @@ class WhisperViewModel @Inject constructor(
     ) {
         val trimmedName = displayName.trim()
         if (trimmedName.isBlank()) {
-            handleError(Exception("Display name cannot be empty"), "updateProfile")
+            // Same direct-channel pattern as the group VM string-ification: a VM-known
+            // condition surfaces localized instead of a hardcoded English literal that
+            // WhisperErrorMapper would pass through verbatim.
+            _uiState.update { it.copy(error = UiText.StringResource(R.string.st_Whisper_Error_EmptyName)) }
             return
         }
+        if (profileUpdateInFlight) return
+        profileUpdateInFlight = true
         viewModelScope.launch {
-            val update = WhisperProfileUpdate(
-                displayName = trimmedName,
-                bio = bio.trim().takeIf { it.isNotBlank() },
-                isPrivate = isPrivate,
-                isHiddenFromDiscover = isHiddenFromDiscover,
-            )
-            repository.updateProfile(update)
-                .onSuccess {
-                    repository.getMyProfile(forceRefresh = true).onSuccess { p ->
-                        _uiState.update { it.copy(currentProfile = p) }
+            try {
+                val update = WhisperProfileUpdate(
+                    displayName = trimmedName,
+                    bio = bio.trim().takeIf { it.isNotBlank() },
+                    isPrivate = isPrivate,
+                    isHiddenFromDiscover = isHiddenFromDiscover,
+                )
+                repository.updateProfile(update)
+                    .onSuccess {
+                        repository.getMyProfile(forceRefresh = true).onSuccess { p ->
+                            _uiState.update { it.copy(currentProfile = p) }
+                        }
+                        onSuccess?.invoke()
                     }
-                    onSuccess?.invoke()
-                }
-                .onFailure { handleError(it, "updateProfile") }
+                    .onFailure { handleError(it, "updateProfile") }
+            } finally {
+                profileUpdateInFlight = false
+            }
         }
     }
 

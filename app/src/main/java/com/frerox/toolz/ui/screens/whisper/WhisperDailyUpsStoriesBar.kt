@@ -27,7 +27,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -63,6 +67,19 @@ internal fun DailyUpsStoriesBar(
     if (!WhisperDailyUpsConfig.ENABLED) return
     val strip by viewModel.dailyUpsStrip.collectAsStateWithLifecycle()
     val haptic = rememberToolzHapticFeedback()
+    // Double-tap guard across BOTH lanes (compose + hub): two fast taps must
+    // not push the destination twice (same ghost-nav case as the group card).
+    var barNavLock by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(1_200)
+        barNavLock = false
+    }
+    fun barNavigate(block: () -> Unit) {
+        if (barNavLock) return
+        barNavLock = true
+        haptic.click()
+        block()
+    }
 
     // The own bubble is ALWAYS present: it is the compose entry, exactly like
     // Instagram keeps "your story" on an empty day.
@@ -81,10 +98,7 @@ internal fun DailyUpsStoriesBar(
                 .clip(RoundedCornerShape(14.dp))
                 .clickable(
                     onClickLabel = stringResource(R.string.st_Whisper_DailyUp_AddCd),
-                    onClick = {
-                        haptic.click()
-                        onCompose()
-                    },
+                    onClick = { barNavigate(onCompose) },
                 )
                 .padding(vertical = 4.dp),
         ) {
@@ -117,10 +131,7 @@ internal fun DailyUpsStoriesBar(
                     .clip(RoundedCornerShape(14.dp))
                     .clickable(
                         onClickLabel = poster.effectiveName,
-                        onClick = {
-                            haptic.click()
-                            onOpenHub()
-                        },
+                        onClick = { barNavigate(onOpenHub) },
                     )
                     .padding(vertical = 4.dp),
             ) {

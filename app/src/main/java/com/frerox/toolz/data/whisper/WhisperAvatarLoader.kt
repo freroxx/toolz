@@ -7,7 +7,6 @@ package com.frerox.toolz.data.whisper
 
 import com.frerox.toolz.data.whisper.ProtocolDiagnostics
 import com.frerox.toolz.di.ApplicationScope
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
@@ -41,11 +40,20 @@ class WhisperAvatarLoader @Inject constructor(
     /** Bumped on clear() so stale results from a wiped cache are not re-cached. */
     private var generation = 0L
 
+    /**
+     * Negative cache: a dead avatar URL (deleted ImgBB image is PERMANENT) must
+     * not re-hit the network on every scroll for every composition instance.
+     * Failures are remembered per URL and re-eligible after 10 minutes — the
+     * same window as the verified-signer cert cache — or immediately via
+     * [clear] (sign-out) / [prime] (local re-upload).
+     */
+    private val failedAt = Collections.synchronizedMap(mutableMapOf<String, Long>())
+    private val failedRetryMs = 10 * 60_000L
+
     // V6-R7 (#cache): PERSISTENT layer for SEALED bytes (ciphertext on disk, same
     // posture as chat image cache) — avatars survive process death without re-fetch.
     private val diskDir: java.io.File
         get() = java.io.File(appContext.filesDir, "whisper_avatars").apply { mkdirs() }
-    private val diskMutex = Mutex()
 
     private fun diskFileFor(url: String): java.io.File =
         java.io.File(diskDir, java.security.MessageDigest.getInstance("SHA-256")
@@ -76,6 +84,7 @@ class WhisperAvatarLoader @Inject constructor(
     /** Prime the memory + disk cache after a local upload so the new avatar renders instantly without a network round-trip. */
     suspend fun prime(urlNoFragment: String, sealed: ByteArray) {
         val key = normalizeUrl(urlNoFragment)
+        failedAt.remove(key)
         diskPut(key, sealed)
         lruMutex.withLock { lru[key] = sealed.copyOf() }
     }
@@ -93,6 +102,12 @@ class WhisperAvatarLoader @Inject constructor(
                 return cached.copyOf()
             }
             runCatching { diskFileFor(key).delete() }
+        }
+        // Negative cache (offline/dead URL): serve the silent initials fallback
+        // instead of refetching a known-dead image on every recomposition.
+        failedAt[key]?.let { failed ->
+            if (System.currentTimeMillis() - failed < failedRetryMs) return null
+            failedAt.remove(key)
         }
         val deferred: Deferred<ByteArray?> = synchronized(inflight) {
             inflight.getOrPut(key) {
@@ -113,12 +128,16 @@ class WhisperAvatarLoader @Inject constructor(
         if (hostRes.isFailure) {
             ProtocolDiagnostics.increment("avatar.hostFail")
         }
-        val raw = hostRes.getOrNull() ?: return null
+        val raw = hostRes.getOrNull() ?: run {
+            rememberFailure(normalized)
+            return null
+        }
         // V6-R7 FIX: fail CLOSED — if the PNG transport unwrap fails we must not
         // cache/return the raw wrapper (it decoded as colored static downstream).
         var sealed = WhisperImageCipherTransport.decode(raw)
         if (sealed == null) {
             ProtocolDiagnostics.increment("avatar.transportDecodeFail")
+            rememberFailure(normalized)
             return null
         }
         // V6-R7b FIX (double-wrap heal): legacy avatars uploaded while the repo
@@ -126,13 +145,25 @@ class WhisperAvatarLoader @Inject constructor(
         // Sealed AES-GCM output never carries a PNG header — unwrap once more
         // when we see it so already-hosted avatars self-heal without re-upload.
         if (isPng(sealed)) {
-            sealed = WhisperImageCipherTransport.decode(sealed) ?: return null
+            sealed = WhisperImageCipherTransport.decode(sealed) ?: run {
+                rememberFailure(normalized)
+                return null
+            }
         }
         if (genAtStart != generation) return null // cache was cleared mid-flight
         val cacheKey = normalizeUrl(url)
+        failedAt.remove(cacheKey)
         diskPut(cacheKey, sealed)
         lruMutex.withLock { lru[cacheKey] = sealed }
         return sealed.copyOf()
+    }
+
+    private fun rememberFailure(url: String) {
+        synchronized(failedAt) {
+            // Bound: a pathological session cannot grow the map unbounded.
+            if (failedAt.size >= 128) failedAt.clear()
+            failedAt[url] = System.currentTimeMillis()
+        }
     }
 
     /** Called on sign-out / account wipe so one user's avatars never serve the next. */
@@ -140,6 +171,7 @@ class WhisperAvatarLoader @Inject constructor(
         generation++
         synchronized(lru) { lru.clear() }
         synchronized(inflight) { inflight.clear() }
+        failedAt.clear()
         runCatching { diskDir.listFiles()?.forEach { it.delete() } }
     }
 }

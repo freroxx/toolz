@@ -101,8 +101,12 @@ class WhisperGroupPermissionsViewModel @Inject constructor(
     }
 
     fun save() {
+        // Re-entry + already-saved reset: a second tap mid-save must not race
+        // a second signed POLICY event, and a second save in the same visit
+        // must re-fire the "saved" auto-return (the flag resets up front).
+        if (_uiState.value.isWorking) return
+        _uiState.update { it.copy(isWorking = true, error = null, saved = false) }
         viewModelScope.launch {
-            _uiState.update { it.copy(isWorking = true, error = null) }
             val current = _uiState.value
             val m = current.membership ?: run {
                 _uiState.update { it.copy(isWorking = false) }
