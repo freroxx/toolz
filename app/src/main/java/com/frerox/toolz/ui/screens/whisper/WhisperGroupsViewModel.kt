@@ -23,6 +23,9 @@ import com.frerox.toolz.data.whisper.cachedGroupMembers
 import com.frerox.toolz.data.whisper.cachedGroups
 import com.frerox.toolz.data.whisper.countGroupUnread
 import com.frerox.toolz.data.whisper.createGroup
+import com.frerox.toolz.data.whisper.getMyProfile
+import com.frerox.toolz.data.whisper.observeFriendDailyUps
+import com.frerox.toolz.data.whisper.observeMyDailyUps
 import com.frerox.toolz.data.whisper.declineGroupInvite
 import com.frerox.toolz.data.whisper.fetchGroupMessages
 import com.frerox.toolz.data.whisper.flushGroupOutbox
@@ -47,6 +50,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -96,6 +101,49 @@ class WhisperGroupsViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(UiState())
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
 
+    /** Own profile for the stories strip (avatar + name on the "+" bubble). */
+    private val _myProfile = MutableStateFlow<WhisperProfile?>(null)
+
+    /**
+     * Stories strip above the groups list (daily ups as IG-story circles).
+     * Cheapest possible lane: Room observes ONLY (no story-server round trip —
+     * the hub does the server reconcile when opened), a 60s ticker that expires
+     * rows at render, and posters resolved from the already-fetched friends
+     * list. Paused by [SharingStarted.WhileSubscribed] when the tab is away.
+     */
+    data class DailyUpsStripState(
+        /** My poster — null until the profile lands; the "+" bubble shows initials. */
+        val me: WhisperProfile? = null,
+        /** ≥1 of my daily ups is still live → the own ring lights up. */
+        val mineLive: Boolean = false,
+        /** Distinct live-poster profiles, oldest-expiring first (hub order). */
+        val friendPosters: List<WhisperProfile> = emptyList(),
+    )
+
+    private val stripTicker = flow {
+        while (true) {
+            emit(System.currentTimeMillis())
+            delay(60_000)
+        }
+    }
+
+    val dailyUpsStrip: StateFlow<DailyUpsStripState> = combine(
+        repository.observeMyDailyUps(),
+        repository.observeFriendDailyUps(),
+        _uiState,
+        _myProfile,
+        stripTicker,
+    ) { mine, friendRows, ui, me, now ->
+        DailyUpsStripState(
+            me = me,
+            mineLive = mine.any { it.expiresAtMs > now },
+            friendPosters = friendRows
+                .filter { it.expiresAtMs > now }
+                .distinctBy { it.ownerId }
+                .mapNotNull { row -> ui.friends.firstOrNull { it.id == row.ownerId } },
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DailyUpsStripState())
+
     /**
      * Decrypted group pictures by group id. ByteArray values defeat data-class
      * equals, so this rides a SEPARATE flow updated only when bytes actually
@@ -135,14 +183,26 @@ class WhisperGroupsViewModel @Inject constructor(
     fun load() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
+            // Cached rows render INSTANTLY (pure local Room read) — user-round
+            // speed fix: the paint happens before any network lane starts, so
+            // the hub opens on its own data even on a slow link.
+            _uiState.update { it.copy(groups = repository.cachedGroups()) }
+            // Friends only feed previews, mention chips and the stories strip —
+            // their two server round trips overlap the flush+sync chain instead
+            // of serializing in front of it.
+            val friendsDeferred = async { repository.getFriends().getOrNull().orEmpty() }
+            // Stories strip: cheap per-entry my-profile refresh (cached getter),
+            // parallel to the group sync below so neither lane blocks.
+            launch {
+                repository.getMyProfile()
+                    .onSuccess { _myProfile.value = it }
+            }
             // Drain queued group sends first so they land before the sync reads.
             runCatching { repository.flushGroupOutbox() }
-            // Cached rows render instantly; the verified sync replaces them.
-            _uiState.update { it.copy(groups = repository.cachedGroups()) }
-            val friends = repository.getFriends().getOrNull().orEmpty()
             val invites = repository.myGroupInvites().getOrNull().orEmpty()
             pingNewInvites(invites)
             val synced = repository.syncGroups()
+            val friends = friendsDeferred.await()
             synced.onSuccess { memberships ->
                 val fresh = repository.cachedGroups().sortedByDescending { g -> g.updatedAtMs }
                 val counts = fresh.associate { g ->

@@ -1698,6 +1698,9 @@ fun ToolzNavHost(
                     onNavigateToDailyUps = {
                         navController.navigate(Screen.WhisperDailyUps.route)
                     },
+                    onNavigateToDailyUpsCompose = {
+                        navController.navigate(Screen.WhisperDailyUpsCompose.route)
+                    },
                     onLoggedOut = {
                         navController.navigate(Screen.WhisperAuth.route) {
                             popUpTo(Screen.Whisper.route) { inclusive = true }

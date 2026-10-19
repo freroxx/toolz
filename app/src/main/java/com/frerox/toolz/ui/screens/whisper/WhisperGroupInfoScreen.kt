@@ -42,8 +42,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -58,10 +56,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.ui.graphics.Color
 import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.WhisperGroupCapability
 import com.frerox.toolz.data.whisper.groupsEnabled
 import com.frerox.toolz.ui.components.ExpressiveLinearProgressIndicator
+import com.frerox.toolz.ui.components.ExpressiveTopAppBar
+import com.frerox.toolz.ui.components.ToolzExpressiveIconButton
+import com.frerox.toolz.ui.components.rememberToolzHapticFeedback
 import com.frerox.toolz.ui.theme.toolzBackground
 import kotlinx.coroutines.launch
 
@@ -125,18 +127,21 @@ fun WhisperGroupInfoScreen(
 
     Scaffold(
         modifier = Modifier.fillMaxSize().toolzBackground(),
+        // 1:1 chat parity: transparent scaffold so the toolz background shows.
+        containerColor = Color.Transparent,
         snackbarHost = { GroupSnackbarHost(state = snackbar) },
         topBar = {
-            TopAppBar(
+            val haptic = rememberToolzHapticFeedback()
+            ExpressiveTopAppBar(
                 title = { Text(stringResource(R.string.st_Whisper_Groups_Info), fontWeight = FontWeight.Bold) },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
+                    ToolzExpressiveIconButton(onClick = {
+                        haptic.click()
+                        onNavigateBack()
+                    }) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = GroupCd.back())
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                ),
             )
         },
     ) { padding ->

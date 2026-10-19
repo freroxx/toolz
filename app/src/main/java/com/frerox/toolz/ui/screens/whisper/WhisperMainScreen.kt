@@ -109,6 +109,8 @@ fun WhisperMainScreen(
     onNavigateToProfile: (String) -> Unit,
     onNavigateToGroup: (String) -> Unit = {},
     onNavigateToDailyUps: () -> Unit = {},
+    // v1.1.7: the groups-list stories strip's "+" opens the composer directly.
+    onNavigateToDailyUpsCompose: () -> Unit = {},
     onLoggedOut: () -> Unit,
     viewModel: WhisperViewModel = hiltViewModel(),
 ) {
@@ -360,6 +362,7 @@ fun WhisperMainScreen(
                             onNavigateToProfile = onNavigateToProfile,
                             onNavigateToGroup = onNavigateToGroup,
                             onNavigateToDailyUps = onNavigateToDailyUps,
+                            onNavigateToDailyUpsCompose = onNavigateToDailyUpsCompose,
                             onLongClickConvo = { selectedConvoForOptions = it },
                             onLongClickFriend = { selectedFriendForOptions = it },
                             onViewAvatarFull = { profileForFullView = it },
@@ -829,6 +832,7 @@ private fun MergedChatsAndFriendsTab(
     onNavigateToProfile: (String) -> Unit,
     onNavigateToGroup: (String) -> Unit = {},
     onNavigateToDailyUps: () -> Unit = {},
+    onNavigateToDailyUpsCompose: () -> Unit = {},
     onLongClickConvo: (WhisperConversation) -> Unit,
     onLongClickFriend: (WhisperProfile) -> Unit,
     onViewAvatarFull: (WhisperProfile) -> Unit,
@@ -916,7 +920,11 @@ private fun MergedChatsAndFriendsTab(
         // while the flag is off, so 1:1 layout is byte-identical until ship.
         if (com.frerox.toolz.data.whisper.groupsEnabled()) {
             item {
-                WhisperGroupsSection(onNavigateToGroup = onNavigateToGroup)
+                WhisperGroupsSection(
+                    onNavigateToGroup = onNavigateToGroup,
+                    onNavigateToDailyUps = onNavigateToDailyUps,
+                    onNavigateToDailyUpsCompose = onNavigateToDailyUpsCompose,
+                )
             }
         }
         // Daily Ups (v1.1.7): entry row; inert while the compile-time flag is off.

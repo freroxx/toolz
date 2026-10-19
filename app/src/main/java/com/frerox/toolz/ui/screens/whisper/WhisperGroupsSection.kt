@@ -117,6 +117,9 @@ import kotlinx.coroutines.launch
 @Composable
 fun WhisperGroupsSection(
     onNavigateToGroup: (String) -> Unit,
+    // Daily Ups stories strip: friend circles open the hub, own "+" opens compose.
+    onNavigateToDailyUps: () -> Unit = {},
+    onNavigateToDailyUpsCompose: () -> Unit = {},
     viewModel: WhisperGroupsViewModel = hiltViewModel(),
 ) {
     if (!groupsEnabled()) return
@@ -146,6 +149,12 @@ fun WhisperGroupsSection(
         modifier = Modifier.fillMaxWidth().animateContentSize(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        // Instagram-stories circles first (own + live friends), then the groups
+        // header — the strip owns the very top like stories sit above the feed.
+        DailyUpsStoriesBar(
+            onCompose = onNavigateToDailyUpsCompose,
+            onOpenHub = onNavigateToDailyUps,
+        )
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,

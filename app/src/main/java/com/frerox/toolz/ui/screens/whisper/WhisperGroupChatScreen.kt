@@ -39,6 +39,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -244,6 +245,9 @@ fun WhisperGroupChatScreen(
 
     Scaffold(
         modifier = Modifier.fillMaxSize().toolzBackground(),
+        // 1:1 chat parity: the scaffold surface must not paint over the toolz
+        // background — the bars are transparent roots now and blend through it.
+        containerColor = Color.Transparent,
         snackbarHost = { GroupSnackbarHost(state = snackbar) },
         topBar = {
             GroupChatTopBar(

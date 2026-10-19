@@ -63,6 +63,7 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AddPhotoAlternate
 import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.BarChart
+import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
@@ -82,6 +83,7 @@ import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Badge
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -117,6 +119,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
@@ -124,11 +128,13 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.text.InlineTextContent
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -146,7 +152,6 @@ import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.components.ToolzExpressiveIconButton
 import com.frerox.toolz.ui.components.ToolzExpressiveIconToggleButton
 import com.frerox.toolz.ui.components.ToolzExpressiveTextButton
-import com.frerox.toolz.ui.components.ToolzTonalExpressiveIconButton
 import com.frerox.toolz.ui.components.rememberToolzHapticFeedback
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1248,125 +1253,200 @@ internal fun GroupComposer(
         animationSpec = spring(dampingRatio = 0.55f, stiffness = 500f),
         label = "sendScale",
     )
+    val sendCd = GroupCd.send()
 
-    Surface(color = scheme.surfaceContainerLow, modifier = modifier) {
-        Column(modifier = Modifier.fillMaxWidth().imePadding().navigationBarsPadding()) {
-            GroupAnimatedReveal(visible = uploading) {
-                ExpressiveLinearProgressIndicator(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+    // 1:1 MessageInputBar anatomy (WhisperChatScreen): floating tonal pill with
+    // attach + text field, and a floating 48dp circular send — no opaque bar
+    // strip, so the toolz background shows through the whole composer. The
+    // typing / reply / mention chips stay group-exclusive and float above it.
+    // The root carries the insets because it still lives in the Scaffold
+    // bottomBar slot, which gets no automatic keyboard/navbar padding.
+    Column(modifier = modifier.fillMaxWidth().imePadding().navigationBarsPadding()) {
+        // The dead-end (locked) state has no attach slot to host the progress
+        // spinner, so the thin upload line stays there only.
+        GroupAnimatedReveal(visible = locked && uploading) {
+            ExpressiveLinearProgressIndicator(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+        }
+        GroupAnimatedReveal(visible = typingNames.isNotEmpty()) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                ExpressiveTypingDots(color = scheme.primary)
+                Text(
+                    typingLine(shownTyping),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.primary,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
-            GroupAnimatedReveal(visible = typingNames.isNotEmpty()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    ExpressiveTypingDots(color = scheme.primary)
-                    Text(
-                        typingLine(shownTyping),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = scheme.primary,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+        }
+        GroupAnimatedReveal(visible = replyTarget != null && !locked) {
+            if (replyTarget != null) {
+                ReplyPreviewBar(
+                    sender = replyTarget.senderName,
+                    text = replyTarget.body.ifBlank { stringResource(R.string.st_Whisper_Groups_Photo) },
+                    onCancel = onCancelReply,
+                )
             }
-            GroupAnimatedReveal(visible = replyTarget != null && !locked) {
-                if (replyTarget != null) {
-                    ReplyPreviewBar(
-                        sender = replyTarget.senderName,
-                        text = replyTarget.body.ifBlank { stringResource(R.string.st_Whisper_Groups_Photo) },
-                        onCancel = onCancelReply,
-                    )
-                }
+        }
+        MentionSuggestions(
+            draft = draft,
+            memberNames = memberNames,
+            myId = myId,
+            onPick = { name ->
+                val at = draft.lastIndexOf("@")
+                onDraftChange(if (at >= 0) draft.substring(0, at) + "@$name " else "$draft@$name ")
+            },
+        )
+        if (locked) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                Icon(
+                    Icons.Rounded.Lock, contentDescription = null,
+                    tint = scheme.onSurfaceVariant, modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    stringResource(R.string.st_Whisper_Groups_AdminOnlySend),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = scheme.onSurfaceVariant,
+                )
             }
-            MentionSuggestions(
-                draft = draft,
-                memberNames = memberNames,
-                myId = myId,
-                onPick = { name ->
-                    val at = draft.lastIndexOf("@")
-                    onDraftChange(if (at >= 0) draft.substring(0, at) + "@$name " else "$draft@$name ")
-                },
-            )
-            if (locked) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center,
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 8.dp, top = 4.dp),
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                // 1. Main pill container (attachment + text input).
+                Surface(
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(26.dp),
+                    color = scheme.surfaceContainerHigh,
+                    tonalElevation = 2.dp,
+                    shadowElevation = 0.dp,
                 ) {
-                    Icon(
-                        Icons.Rounded.Lock, contentDescription = null,
-                        tint = scheme.onSurfaceVariant, modifier = Modifier.size(18.dp),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        stringResource(R.string.st_Whisper_Groups_AdminOnlySend),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = scheme.onSurfaceVariant,
-                    )
-                }
-            } else {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.Bottom,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    ToolzTonalExpressiveIconButton(onClick = onAttach, modifier = Modifier.size(48.dp)) {
-                        Icon(Icons.Rounded.Add, contentDescription = GroupCd.attach())
-                    }
-                    Surface(
-                        shape = RoundedCornerShape(26.dp),
-                        color = scheme.surfaceContainerHigh,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Column {
+                    Column {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            if (uploading) {
+                                Box(
+                                    modifier = Modifier.size(38.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(20.dp),
+                                        strokeWidth = 2.5.dp,
+                                        color = scheme.primary,
+                                    )
+                                }
+                            } else {
+                                IconButton(
+                                    onClick = onAttach,
+                                    modifier = Modifier.size(38.dp),
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.Add,
+                                        contentDescription = GroupCd.attach(),
+                                        tint = scheme.primary,
+                                        modifier = Modifier.size(22.dp),
+                                    )
+                                }
+                            }
                             BasicTextField(
                                 value = draft,
                                 onValueChange = onDraftChange,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(horizontal = 6.dp, vertical = 10.dp),
                                 textStyle = MaterialTheme.typography.bodyLarge.copy(color = scheme.onSurface),
                                 cursorBrush = SolidColor(scheme.primary),
                                 maxLines = 6,
-                                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                                modifier = Modifier.fillMaxWidth(),
+                                // Keyboard Send key submits (1:1 parity).
+                                keyboardOptions = KeyboardOptions(
+                                    capitalization = KeyboardCapitalization.Sentences,
+                                    imeAction = ImeAction.Send,
+                                ),
+                                keyboardActions = KeyboardActions(onSend = { if (canSend) onSend() }),
                                 decorationBox = { inner ->
                                     Box(
-                                        modifier = Modifier.heightIn(min = 48.dp).padding(horizontal = 18.dp, vertical = 12.dp),
+                                        modifier = Modifier.heightIn(min = 40.dp),
                                         contentAlignment = Alignment.CenterStart,
                                     ) {
                                         if (draft.isEmpty()) {
                                             Text(
                                                 stringResource(R.string.st_Whisper_Groups_MessageHint),
                                                 style = MaterialTheme.typography.bodyLarge,
-                                                color = scheme.onSurfaceVariant,
+                                                color = scheme.onSurfaceVariant.copy(alpha = 0.55f),
                                                 maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
                                             )
                                         }
                                         inner()
                                     }
                                 },
                             )
-                            if (draft.length > maxChars - 200) {
-                                Text(
-                                    "${maxChars - draft.length}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (overLimit) scheme.error else scheme.onSurfaceVariant,
-                                    modifier = Modifier.align(Alignment.End).padding(end = 16.dp, bottom = 6.dp),
+                        }
+                        // The 8k-char group footer counter — group-only detail,
+                        // kept inside the pill so the bar silhouette stays 1:1.
+                        if (draft.length > maxChars - 200) {
+                            Text(
+                                "${maxChars - draft.length}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (overLimit) scheme.error else scheme.onSurfaceVariant,
+                                modifier = Modifier.align(Alignment.End).padding(end = 16.dp, bottom = 6.dp),
+                            )
+                        }
+                    }
+                }
+                // 2. Floating circular send (1:1 parity: rises on text).
+                Surface(
+                    onClick = onSend,
+                    enabled = canSend,
+                    shape = CircleShape,
+                    color = if (canSend) scheme.primary else scheme.surfaceContainerHigh,
+                    contentColor = if (canSend) scheme.onPrimary else scheme.onSurfaceVariant.copy(alpha = 0.4f),
+                    shadowElevation = if (canSend) 3.dp else 0.dp,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .graphicsLayer {
+                            scaleX = sendScale
+                            scaleY = sendScale
+                        }
+                        // The idle bubble icon has no CD of its own — expose the action here.
+                        .semantics { if (!canSend) contentDescription = sendCd },
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        AnimatedContent(
+                            targetState = canSend,
+                            transitionSpec = { fadeIn(tween(150)) togetherWith fadeOut(tween(150)) },
+                            label = "groupSendIcon",
+                        ) { ready ->
+                            if (ready) {
+                                Icon(
+                                    Icons.AutoMirrored.Rounded.Send,
+                                    contentDescription = sendCd,
+                                    modifier = Modifier.size(22.dp),
+                                )
+                            } else {
+                                Icon(
+                                    Icons.Rounded.ChatBubbleOutline,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(22.dp),
                                 )
                             }
                         }
-                    }
-                    ToolzExpressiveIconButton(
-                        onClick = onSend,
-                        enabled = canSend,
-                        modifier = Modifier.size(48.dp).graphicsLayer {
-                            scaleX = sendScale
-                            scaleY = sendScale
-                        },
-                    ) {
-                        Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = GroupCd.send())
                     }
                 }
             }
