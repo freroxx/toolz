@@ -84,6 +84,8 @@ private sealed interface DailyUpSource {
 @Composable
 fun WhisperDailyUpsComposeScreen(
     onNavigateBack: () -> Unit,
+    /** The hub ("Daily Ups") — the entry row sits above the photo picker. */
+    onOpenHub: () -> Unit = {},
     viewModel: WhisperDailyUpsComposeViewModel = hiltViewModel(),
 ) {
     if (!WhisperDailyUpsConfig.ENABLED) return
@@ -149,6 +151,10 @@ fun WhisperDailyUpsComposeScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            // The daily-ups entry: hub access lives HERE, above the photo
+            // picker — there is no separate row under the groups section.
+            WhisperDailyUpsEntryRow(onOpen = onOpenHub)
+
             PhotoSlot(
                 state = state,
                 onPick = {

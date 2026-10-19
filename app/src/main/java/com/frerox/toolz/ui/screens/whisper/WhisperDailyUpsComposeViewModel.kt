@@ -14,6 +14,7 @@ import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.WhisperDailyUpsConfig
 import com.frerox.toolz.data.whisper.WhisperProfile
 import com.frerox.toolz.data.whisper.WhisperRepository
+import com.frerox.toolz.data.whisper.applyWhisperImageExifOrientation
 import com.frerox.toolz.data.whisper.dailyUpErrorText
 import com.frerox.toolz.data.whisper.dailyUpsPostedToday
 import com.frerox.toolz.data.whisper.getFriends
@@ -174,7 +175,13 @@ class WhisperDailyUpsComposeViewModel @Inject constructor(
         }
     }
 
-    /** Preview decode bounded to ~720px long edge — the pipeline re-encodes anyway. */
+    /**
+     * Preview decode bounded to ~720px long edge — the publish pipeline
+     * re-encodes anyway. The preview is ORIENTED exactly like the pipeline
+     * ([applyWhisperImageExifOrientation] on the same bytes): a plain bitmap decode
+     * ignores EXIF rotation, so compose used to show landscape camera shots
+     * sideways while recipients saw them upright.
+     */
     private fun decodePreview(bytes: ByteArray): ImageBitmap? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
@@ -190,6 +197,8 @@ class WhisperDailyUpsComposeViewModel @Inject constructor(
                 inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
             },
         ) ?: return null
-        return bmp.asImageBitmap()
+        val oriented = applyWhisperImageExifOrientation(bytes, bmp)
+        if (oriented !== bmp) bmp.recycle()
+        return oriented.asImageBitmap()
     }
 }

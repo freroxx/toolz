@@ -1750,6 +1750,9 @@ fun ToolzNavHost(
         composable(Screen.WhisperDailyUpsCompose.route) {
             com.frerox.toolz.ui.screens.whisper.WhisperDailyUpsComposeScreen(
                 onNavigateBack = { toolOnBack() },
+                onOpenHub = {
+                    navController.navigate(Screen.WhisperDailyUps.route)
+                },
             )
         }
 

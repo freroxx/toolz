@@ -84,11 +84,10 @@ suspend fun preprocessDailyUpPhoto(
     var working = decoded
 
     return try {
-        applyExifOrientation(source, working)?.also { oriented ->
-            if (oriented !== working) {
-                working.recycle()
-                working = oriented
-            }
+        val oriented = applyWhisperImageExifOrientation(source, working)
+        if (oriented !== working) {
+            working.recycle()
+            working = oriented
         }
 
         scaleLongEdge(working, DAILY_UP_LONG_EDGE_PX).also { scaled ->
@@ -164,22 +163,53 @@ private fun sampledPixelCount(width: Int, height: Int, sampleSize: Int): Long {
     return sampledWidth * sampledHeight
 }
 
-private fun applyExifOrientation(source: ByteArray, bitmap: Bitmap): Bitmap? {
+/**
+ * Orients [bitmap] per [ExifInterface.TAG_ORIENTATION] in [source]. Returns
+ * [bitmap] UNCHANGED when nothing applies — callers receiving a DIFFERENT
+ * instance own recycling the original.
+ *
+ * Shared by the Daily Up path (publish + compose preview) and the group
+ * upload preprocess: one EXIF implementation, pixel-verified.
+ *
+ * Every transform is an explicitly normalized affine whose four mapped corners
+ * stay inside the (possibly swapped) output bounds:
+ *  2 flip H    (x,y) → (W−x, y)
+ *  3 rot 180   (x,y) → (W−x, H−y)
+ *  4 flip V    (x,y) → (x, H−y)
+ *  5 transpose (x,y) → (y, x)        output H×W  (was MISSING — mirrored cameras)
+ *  6 rot 90 CW (x,y) → (H−y, x)      output H×W
+ *  7 transverse(x,y) → (H−y, W−x)    output H×W  (was MISSING)
+ *  8 rot90 CCW (x,y) → (y, W−x)      output H×W
+ */
+fun applyWhisperImageExifOrientation(source: ByteArray, bitmap: Bitmap): Bitmap {
     val orientation = runCatching {
         ExifInterface(ByteArrayInputStream(source)).getAttributeInt(
             ExifInterface.TAG_ORIENTATION,
             ExifInterface.ORIENTATION_NORMAL,
         )
     }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
-    val matrix = Matrix()
-    when (orientation) {
-        ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
-        ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
-        ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
-        ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
-        ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+    val w = bitmap.width.toFloat()
+    val h = bitmap.height.toFloat()
+    val matrix = when (orientation) {
+        ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> exifAffine(-1f, 0f, w, 0f, 1f, 0f)
+        ExifInterface.ORIENTATION_ROTATE_180 -> exifAffine(-1f, 0f, w, 0f, -1f, h)
+        ExifInterface.ORIENTATION_FLIP_VERTICAL -> exifAffine(1f, 0f, 0f, 0f, -1f, h)
+        ExifInterface.ORIENTATION_TRANSPOSE -> exifAffine(0f, 1f, 0f, 1f, 0f, 0f)
+        ExifInterface.ORIENTATION_ROTATE_90 -> exifAffine(0f, -1f, h, 1f, 0f, 0f)
+        ExifInterface.ORIENTATION_TRANSVERSE -> exifAffine(0f, -1f, h, -1f, 0f, w)
+        ExifInterface.ORIENTATION_ROTATE_270 -> exifAffine(0f, 1f, 0f, -1f, 0f, w)
+        else -> return bitmap
     }
-    return if (matrix.isIdentity) bitmap else Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+    // Never fail the pipeline over a Bitmap allocation: wrong orientation on
+    // screen beats publishing nothing.
+    return runCatching {
+        Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+    }.getOrDefault(bitmap)
+}
+
+/** Row-major affine matrix setter: (x,y) → (a·x + b·y + c, d·x + e·y + f). */
+private fun exifAffine(a: Float, b: Float, c: Float, d: Float, e: Float, f: Float): Matrix = Matrix().apply {
+    setValues(floatArrayOf(a, b, c, d, e, f, 0f, 0f, 1f))
 }
 
 private fun scaleLongEdge(bitmap: Bitmap, maxLongEdge: Int): Bitmap {

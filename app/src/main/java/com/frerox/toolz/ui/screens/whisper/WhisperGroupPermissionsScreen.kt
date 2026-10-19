@@ -36,9 +36,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -46,7 +43,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -54,6 +50,7 @@ import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.WhisperGroupCapability
 import com.frerox.toolz.data.whisper.groupsEnabled
 import com.frerox.toolz.ui.components.ExpressiveLinearProgressIndicator
+import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.theme.toolzBackground
 import kotlinx.coroutines.delay
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -110,16 +107,13 @@ fun WhisperGroupPermissionsScreen(
         modifier = Modifier.fillMaxSize().toolzBackground(),
         snackbarHost = { GroupSnackbarHost(state = snackbar) },
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.st_Whisper_Groups_Permissions), fontWeight = FontWeight.Bold) },
+            ExpressiveTopAppBar(
+                title = stringResource(R.string.st_Whisper_Groups_Permissions),
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = GroupCd.back())
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                ),
             )
         },
     ) { padding ->

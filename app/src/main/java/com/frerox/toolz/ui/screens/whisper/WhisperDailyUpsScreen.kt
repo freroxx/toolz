@@ -241,7 +241,7 @@ fun WhisperDailyUpsScreen(
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
                 )
             }
-            if (state.mine.isEmpty() && state.friends.isEmpty()) {
+            if (!state.loading && state.mine.isEmpty() && state.friends.isEmpty()) {
                 WhisperEmptyState(
                     icon = Icons.Rounded.Timer,
                     title = stringResource(R.string.st_Whisper_DailyUp_EmptyTitle),
@@ -258,19 +258,15 @@ fun WhisperDailyUpsScreen(
                         fontWeight = FontWeight.SemiBold,
                     )
                 }
-            }
-            RingStrip(
-                heading = stringResource(R.string.st_Whisper_DailyUp_Mine),
-                items = state.mine,
-                leadingSlot = { NewUpRing(onClick = onNavigateToCompose) },
-                onOpen = viewModel::openViewer,
-            )
-            if (state.friends.isNotEmpty()) {
-                RingStrip(
-                    heading = stringResource(R.string.st_Whisper_DailyUp_SectionTitle),
-                    items = state.friends,
-                    leadingSlot = null,
+            } else {
+                // One quiet rail; the hub reading order === viewer reading
+                // order: "+" to upload, then MY ups, then friends' — no
+                // section headers (rings already carry who + how long).
+                TodayRail(
+                    mine = state.mine,
+                    friends = state.friends,
                     onOpen = viewModel::openViewer,
+                    onCompose = onNavigateToCompose,
                 )
             }
         }
@@ -303,24 +299,20 @@ fun WhisperDailyUpsScreen(
 // ────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun RingStrip(
-    heading: String,
-    items: List<WhisperDailyUpsViewModel.StoryItem>,
-    /** The "+" slot rendered FIRST in my strip (friends' strips have none). */
-    leadingSlot: (@Composable () -> Unit)?,
+private fun TodayRail(
+    mine: List<WhisperDailyUpsViewModel.StoryItem>,
+    friends: List<WhisperDailyUpsViewModel.StoryItem>,
+    /** The "+" slot is always FIRST; my ups follow, then friends'. */
     onOpen: (String) -> Unit,
+    onCompose: () -> Unit,
 ) {
-    if (items.isEmpty() && leadingSlot == null) return
-    SectionHeader(heading)
     LazyRow(
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        if (leadingSlot != null) {
-            item(key = "daily_up_add_slot") { leadingSlot() }
-        }
-        items(items, key = { "daily_up_${it.storyId}" }) { element ->
+        item(key = "daily_up_add_slot") { NewUpRing(onClick = onCompose) }
+        items(items = mine + friends, key = { "daily_up_${it.storyId}" }) { element ->
             StoryRing(element, onClick = { onOpen(element.storyId) })
         }
     }

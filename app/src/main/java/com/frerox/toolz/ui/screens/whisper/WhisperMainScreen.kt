@@ -927,12 +927,8 @@ private fun MergedChatsAndFriendsTab(
                 )
             }
         }
-        // Daily Ups (v1.1.7): entry row; inert while the compile-time flag is off.
-        if (com.frerox.toolz.data.whisper.WhisperDailyUpsConfig.ENABLED) {
-            item {
-                WhisperDailyUpsEntryRow(onOpen = onNavigateToDailyUps)
-            }
-        }
+        // Daily Ups entry lives on the compose screen now (above "choose a
+        // photo") — no separate row below the groups section.
         // Incoming Friend Requests Banner — pendingIncomingRequests is the single source
         // of truth (L-2: duplicate mirror list removed).
         if (uiState.pendingIncomingRequests.isNotEmpty()) {

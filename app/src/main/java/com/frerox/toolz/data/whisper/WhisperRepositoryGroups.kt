@@ -968,7 +968,7 @@ private suspend fun WhisperRepository.signerCertsOf(userId: String): List<String
         }.map { it.signerCert }.filter { it.isNotBlank() }
         return (listOfNotNull(current) + archived).distinct()
     }
-    return sessionFactory.fetchAndVerifyBundle(userId).getOrNull()?.signerCertsB64 ?: emptyList()
+    return sessionFactory.verifiedSignerCerts(userId).orEmpty()
 }
 
 private fun WhisperRepository.groupVerify(
@@ -1036,8 +1036,28 @@ private suspend fun WhisperRepository.fetchVerifiedMembershipInner(groupId: Stri
         // Pre-fetch every distinct actor's published signer SET (bundle fetch
         // is suspend; the verifier lambda below is a pure map read — never
         // blocks). Reinstall-proof: sets carry past certs, not just current.
-        val keys = mutableMapOf<String, List<String>>()
-        log.map { it.actor }.distinct().forEach { uid -> keys[uid] = signerCertsOf(uid) }
+        val actors = log.map { it.actor }.distinct()
+        suspend fun fetchAll(): Map<String, List<String>> = buildMap {
+            actors.forEach { uid -> put(uid, signerCertsOf(uid)) }
+        }
+        val cold = runCatching {
+            val keys = fetchAll()
+            applyEventsTolerant(
+                groupId = groupId,
+                events = log,
+                verify = { payload, sig, signer -> groupVerify(payload, sig, signer) },
+                signerCertsOf = { uid -> keys[uid].orEmpty() },
+            )
+        }.getOrNull()
+        if (cold != null) return cold
+        // One cold-retry round on ANY verification failure: cached peer signer
+        // sets can miss a signer that was rotated after the cache pin, and
+        // verification must never stick on a cache window. Clear the pin,
+        // refetch, retry once; a genuine failure rethrows with its original
+        // shape so verifyOrDiagnose's attribution keeps working (re-runs are
+        // safe — applyEventsTolerant is rerun by the bisect path already).
+        actors.forEach { sessionFactory.invalidateSignerCache(it) }
+        val keys = fetchAll()
         return applyEventsTolerant(
             groupId = groupId,
             events = log,
@@ -1819,8 +1839,11 @@ suspend fun WhisperRepository.sendGroupImage(
     val (compressed, outMime) = compressGroupChatImage(imageBytes, mimeType)
     require(compressed.isNotEmpty()) { "Could not read that image." }
     val (sealed, key) = newGroupPictureSeal(compressed)
-    val png = WhisperImageCipherTransport.encode(sealed)
-    val (url, att) = encryptedImageHost.upload(png, "gmsg-$groupId-${System.currentTimeMillis()}", null).getOrThrow()
+    // Pass RAW sealed bytes: the host applies the WZ1/PNG transport wrap
+    // exactly once. Pre-wrapping here produced PNG(WZ1(PNG(WZ1(sealed))))
+    // and the loader (openGroupImage) unwraps only once → every sent image
+    // failed with "Could not decrypt the image." (V6-R7b avatar precedent.)
+    val (url, att) = encryptedImageHost.upload(sealed, "gmsg-$groupId-${System.currentTimeMillis()}", null).getOrThrow()
     require(url.isNotBlank()) { "Picture upload failed." }
     val ref = GroupImageRef(
         url = url,
@@ -2536,8 +2559,11 @@ private suspend fun WhisperRepository.publishPictureFrames(
     compressed: ByteArray,
 ): Result<Unit> = runCatching {
     val (sealed, key) = newGroupPictureSeal(compressed)
-    val png = WhisperImageCipherTransport.encode(sealed)
-    val (url, _) = encryptedImageHost.upload(png, "group-$groupId", null).getOrThrow()
+    // Pass RAW sealed bytes — the host wraps WZ1/PNG exactly once; the open
+    // side (openGroupPictureInner) decodes once. Double-wrapping (pre-wrap +
+    // host wrap) made the hosted blob undecodable: the picture change landed
+    // but no member could ever display it (V6-R7b avatar precedent).
+    val (url, _) = encryptedImageHost.upload(sealed, "group-$groupId", null).getOrThrow()
     require(url.isNotBlank()) { "Picture upload failed." }
     val keyB64 = java.util.Base64.getEncoder().encodeToString(key)
     val frames = mutableMapOf<String, String>()

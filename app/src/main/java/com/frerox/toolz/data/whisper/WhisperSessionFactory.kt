@@ -183,6 +183,31 @@ class WhisperSessionFactory @Inject constructor(
             signerPublicX509Base64 = signerX509,
         )
 
+    /**
+     * Single verification body for a raw [BundleDto]: binding present, SPK
+     * signed, signature valid against the binding's signer. Signed
+     * verification failure is a HARD error — surfaced as key-change UI
+     * (the MITM window this protocol exists to close).
+     */
+    private fun BundleDto.verified(): VerifiedBundle {
+        val binding = requireNotNull(identity_binding) {
+            "Peer has no identity binding (pre-Phase-2 client)"
+        }
+        val spkSignature = requireNotNull(spk.signature) { "Unsigned SPK rejected" }
+        check(
+            verifyBundleSignature(spk.public_key, spk.kid, spkSignature, binding.signer)
+        ) { "Prekey bundle signature invalid for this contact." }
+        return VerifiedBundle(
+            spkKid = spk.kid,
+            spkPubB64 = spk.public_key,
+            opkKid = opk?.kid,
+            opkPubB64 = opk?.public_key,
+            identityIkB64 = binding.ik,
+            signerX509B64 = binding.signer,
+            extraSignerHistoryB64 = signer_history,
+        )
+    }
+
     // ------------------------------------------------------------------ network
 
     /**
@@ -192,23 +217,7 @@ class WhisperSessionFactory @Inject constructor(
      * window this protocol exists to close).
      */
     suspend fun fetchAndVerifyBundle(peerId: String): Result<VerifiedBundle> = runCatching {
-        val bundle = fetchBundle(peerId)
-        val binding = requireNotNull(bundle.identity_binding) {
-            "Peer has no identity binding (pre-Phase-2 client)"
-        }
-        val spkSignature = requireNotNull(bundle.spk.signature) { "Unsigned SPK rejected" }
-        check(
-            verifyBundleSignature(bundle.spk.public_key, bundle.spk.kid, spkSignature, binding.signer)
-        ) { "Prekey bundle signature invalid for this contact." }
-        VerifiedBundle(
-            spkKid = bundle.spk.kid,
-            spkPubB64 = bundle.spk.public_key,
-            opkKid = bundle.opk?.kid,
-            opkPubB64 = bundle.opk?.public_key,
-            identityIkB64 = binding.ik,
-            signerX509B64 = binding.signer,
-            extraSignerHistoryB64 = bundle.signer_history,
-        )
+        fetchBundle(peerId).verified()
     }.onFailure {
         ProtocolDiagnostics.increment("x3dh.bundleVerifyFail")
     }
@@ -269,23 +278,74 @@ class WhisperSessionFactory @Inject constructor(
     /** P2: transport moved to [EdgeFunctionClient]; behavior (URL, headers, error
      *  strings, timeouts) preserved verbatim. Suspend now — both callers were already
      *  suspend-context. The old @Synchronized serialization is preserved via a mutex
-     *  (@Synchronized is not applicable to suspend functions). */
-    private val fetchMutex = kotlinx.coroutines.sync.Mutex()
+     *  (@Synchronized is not applicable to suspend functions) — PER PEER now: the
+     *  original GLOBAL lock queued every peer behind one gate, so a group sync's
+     *  N peer-cert fetches ran strictly sequentially (each up to 25s) and every
+     *  group open/send felt like a slow roundtrip. The lock's only real job —
+     *  keeping same-peer fetches coherent — is preserved, one lock per peer. */
+    private val fetchMutexes = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.sync.Mutex>()
 
-    internal suspend fun fetchBundle(peerId: String): BundleDto = fetchMutex.withLock {
-        val response = edgeFunctions.execute(
-            EdgeFunctionClient.Request(
-                function = "whisper-bundle-fetch",
-                jsonBody = """{"account":"$peerId"}""",
-                authMode = EdgeFunctionClient.AuthMode.ANON,
-                connectTimeoutMs = 10_000,
-                readTimeoutMs = 15_000,
-            ),
-        )
-        if (!response.is2xx) {
-            error("Bundle fetch failed (${response.code}): ${response.body.take(160)}")
+    internal suspend fun fetchBundle(peerId: String): BundleDto = fetchMutexes
+        .getOrPut(peerId) { kotlinx.coroutines.sync.Mutex() }
+        .withLock {
+            val response = edgeFunctions.execute(
+                EdgeFunctionClient.Request(
+                    function = "whisper-bundle-fetch",
+                    jsonBody = """{"account":"$peerId"}""",
+                    authMode = EdgeFunctionClient.AuthMode.ANON,
+                    connectTimeoutMs = 10_000,
+                    readTimeoutMs = 15_000,
+                ),
+            )
+            if (!response.is2xx) {
+                error("Bundle fetch failed (${response.code}): ${response.body.take(160)}")
+            }
+            json.decodeFromString(BundleDto.serializer(), response.body)
         }
-        json.decodeFromString(BundleDto.serializer(), response.body)
+    // [fetchBundle] throws TRANSPORT-flavored failures only (offline edge, HTTP,
+    // decode). Binding/signature alarms live exclusively in [BundleDto.verified]
+    // — that split is load-bearing for [verifiedSignerCerts] below.
+
+    // ------------------------------------------------------------------ signer cache
+
+    /**
+     * Verified peer signer sets, used ONLY for group-event signature checks —
+     * never for X3DH initiation (an initiation consumes the bundle's OPK, so
+     * it must always fetch fresh). The published signer set only ever GROWS
+     * (archived certs stay valid, §15.4), so a cached set never invalidates a
+     * previously-verified cert; its only blind spot is a NEW cert (rotation)
+     * signed after the cache pin — the group verify path answers a miss by
+     * calling [invalidateSignerCache] and refetching once.
+     */
+    private data class SignerCacheEntry(val fetchedAtMs: Long, val certs: List<String>)
+
+    private val signerCache = java.util.concurrent.ConcurrentHashMap<String, SignerCacheEntry>()
+
+    /**
+     * Peer signer certs for verification, with a short TTL so a warm group
+     * open costs zero roundtrips. Failure classification is STRUCTURAL:
+     * transport failures throw inside [fetchBundle] and MAY serve the stale
+     * but previously-verified pin (offline reads keep working); binding or
+     * signature alarms throw inside [BundleDto.verified] and NEVER serve old
+     * material — key-change semantics stay hard.
+     */
+    suspend fun verifiedSignerCerts(peerId: String): List<String>? {
+        val now = System.currentTimeMillis()
+        signerCache[peerId]?.takeIf { now - it.fetchedAtMs < SIGNER_CACHE_TTL_MS }?.let { return it.certs }
+        val raw = try {
+            fetchBundle(peerId)
+        } catch (_: Throwable) {
+            // Transport — the pin was verified against the trusted edge before.
+            return signerCache[peerId]?.certs
+        }
+        val verified = runCatching { raw.verified() }.getOrNull() ?: return null
+        signerCache[peerId] = SignerCacheEntry(System.currentTimeMillis(), verified.signerCertsB64)
+        return verified.signerCertsB64
+    }
+
+    /** Drops the cached signer set for [peerId] (rotation suspect) — next read refetches. */
+    fun invalidateSignerCache(peerId: String) {
+        signerCache.remove(peerId)
     }
 
     // ------------------------------------------------------------------ internals
@@ -310,5 +370,6 @@ class WhisperSessionFactory @Inject constructor(
 
     private companion object {
         const val TAG = "WhisperX3DH"
+        const val SIGNER_CACHE_TTL_MS = 10 * 60_000L
     }
 }

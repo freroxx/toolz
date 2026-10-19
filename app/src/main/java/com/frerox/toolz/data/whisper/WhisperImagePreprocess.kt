@@ -20,57 +20,50 @@ import kotlin.math.roundToInt
  *
  * EXIF orientation applied before scaling, 1920px bound, JPEG q82 (PNG kept
  * for alpha-capable sources), GPS/EXIF dropped by the re-encode.
+ *
+ * FAIL-CLOSED: undecodable input is an ERROR — it is never shipped raw. The
+ * old `re-encode kept only when smaller than the original` fallback sent the
+ * ORIGINAL bytes upstream instead: EXIF/GPS still embedded, possibly past
+ * transport size bounds, possibly in a format recipients cannot decode. The
+ * re-encode is always the shipped artifact; for tiny already-compressed
+ * sources being a few bytes larger is the price of sanitization.
  */
 private val GROUP_ALPHA_CAPABLE_MIMES = setOf("image/png", "image/webp")
 
 suspend fun compressImageForGroupUpload(bytes: ByteArray, mimeType: String): Pair<ByteArray, String> =
     withContext(Dispatchers.Default) {
-        runCatching {
-            var bitmap = decodeBoundedBitmap(bytes, 1920, 1920) ?: return@withContext bytes to mimeType
-            try {
-                val exif = androidx.exifinterface.media.ExifInterface(java.io.ByteArrayInputStream(bytes))
-                val orientation = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
-                val matrix = android.graphics.Matrix()
-                when (orientation) {
-                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
-                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
-                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
-                    androidx.exifinterface.media.ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
-                    androidx.exifinterface.media.ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
-                    else -> {}
-                }
-                if (!matrix.isIdentity) {
-                    val rotated = android.graphics.Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-                    if (rotated != bitmap) { bitmap.recycle(); bitmap = rotated }
-                }
-            } catch (_: Exception) {}
-            val maxDimension = 1920
-            val scaledBitmap = if (bitmap.width > maxDimension || bitmap.height > maxDimension) {
-                val ratio = min(maxDimension.toFloat() / bitmap.width, maxDimension.toFloat() / bitmap.height)
-                val b = Bitmap.createScaledBitmap(bitmap, (bitmap.width * ratio).roundToInt().coerceAtLeast(1), (bitmap.height * ratio).roundToInt().coerceAtLeast(1), true)
-                if (b != bitmap) bitmap.recycle()
-                b
-            } else {
-                bitmap
-            }
-            // Square crop for group pictures (avatar-style).
-            val side = min(scaledBitmap.width, scaledBitmap.height)
-            val cropped = Bitmap.createBitmap(
-                scaledBitmap,
-                (scaledBitmap.width - side) / 2,
-                (scaledBitmap.height - side) / 2,
-                side, side,
-            )
-            if (cropped != scaledBitmap) scaledBitmap.recycle()
-            val keepAlpha = mimeType in GROUP_ALPHA_CAPABLE_MIMES && cropped.hasAlpha()
-            val format = if (keepAlpha) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG
-            val outMime = if (keepAlpha) "image/png" else "image/jpeg"
-            val out = ByteArrayOutputStream()
-            cropped.compress(format, 82, out)
-            cropped.recycle()
-            val result = out.toByteArray()
-            if (result.isNotEmpty() && result.size < bytes.size) result to outMime else bytes to mimeType
-        }.getOrDefault(bytes to mimeType)
+        val decoded = decodeBoundedBitmap(bytes, 1920, 1920)
+            ?: error("Could not read that image.")
+        val oriented = applyWhisperImageExifOrientation(bytes, decoded)
+        if (oriented !== decoded) decoded.recycle()
+        val bitmap = oriented
+        val maxDimension = 1920
+        val scaledBitmap = if (bitmap.width > maxDimension || bitmap.height > maxDimension) {
+            val ratio = min(maxDimension.toFloat() / bitmap.width, maxDimension.toFloat() / bitmap.height)
+            val b = Bitmap.createScaledBitmap(bitmap, (bitmap.width * ratio).roundToInt().coerceAtLeast(1), (bitmap.height * ratio).roundToInt().coerceAtLeast(1), true)
+            if (b !== bitmap) bitmap.recycle()
+            b
+        } else {
+            bitmap
+        }
+        // Square crop for group pictures (avatar-style).
+        val side = min(scaledBitmap.width, scaledBitmap.height)
+        val cropped = Bitmap.createBitmap(
+            scaledBitmap,
+            (scaledBitmap.width - side) / 2,
+            (scaledBitmap.height - side) / 2,
+            side, side,
+        )
+        if (cropped !== scaledBitmap) scaledBitmap.recycle()
+        val keepAlpha = mimeType in GROUP_ALPHA_CAPABLE_MIMES && cropped.hasAlpha()
+        val format = if (keepAlpha) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG
+        val outMime = if (keepAlpha) "image/png" else "image/jpeg"
+        val out = ByteArrayOutputStream()
+        cropped.compress(format, 82, out)
+        cropped.recycle()
+        val result = out.toByteArray()
+        if (result.isEmpty()) error("Could not process this image.")
+        result to outMime
     }
 
 /** Fresh random key + AES-256-GCM seal. Returns (sealedBytes, keyBytes). */
@@ -116,45 +109,32 @@ fun readBoundedGroupImageBytes(input: java.io.InputStream): ByteArray {
 /**
  * In-chat image preprocess: same EXIF-strip + 1920 + JPEG82 pipeline as the
  * group picture path but WITHOUT the square avatar crop (chat photos keep
- * their aspect ratio).
+ * their aspect ratio). FAIL-CLOSED like [compressImageForGroupUpload]:
+ * undecodable/unsanitizable input is an error, never a raw passthrough.
  */
 suspend fun compressGroupChatImage(bytes: ByteArray, mimeType: String): Pair<ByteArray, String> =
     withContext(Dispatchers.Default) {
-        runCatching {
-            var bitmap = decodeBoundedBitmap(bytes, 1920, 1920) ?: return@withContext bytes to mimeType
-            try {
-                val exif = androidx.exifinterface.media.ExifInterface(java.io.ByteArrayInputStream(bytes))
-                val orientation = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
-                val matrix = android.graphics.Matrix()
-                when (orientation) {
-                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
-                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
-                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
-                    androidx.exifinterface.media.ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
-                    androidx.exifinterface.media.ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
-                    else -> {}
-                }
-                if (!matrix.isIdentity) {
-                    val rotated = android.graphics.Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-                    if (rotated != bitmap) { bitmap.recycle(); bitmap = rotated }
-                }
-            } catch (_: Exception) {}
-            val maxDimension = 1920
-            val scaledBitmap = if (bitmap.width > maxDimension || bitmap.height > maxDimension) {
-                val ratio = min(maxDimension.toFloat() / bitmap.width, maxDimension.toFloat() / bitmap.height)
-                val b = Bitmap.createScaledBitmap(bitmap, (bitmap.width * ratio).roundToInt().coerceAtLeast(1), (bitmap.height * ratio).roundToInt().coerceAtLeast(1), true)
-                if (b != bitmap) bitmap.recycle()
-                b
-            } else {
-                bitmap
-            }
-            val keepAlpha = mimeType in GROUP_ALPHA_CAPABLE_MIMES && scaledBitmap.hasAlpha()
-            val format = if (keepAlpha) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG
-            val outMime = if (keepAlpha) "image/png" else "image/jpeg"
-            val out = ByteArrayOutputStream()
-            scaledBitmap.compress(format, 82, out)
-            scaledBitmap.recycle()
-            val result = out.toByteArray()
-            if (result.isNotEmpty() && result.size < bytes.size) result to outMime else bytes to mimeType
-        }.getOrDefault(bytes to mimeType)
+        val decoded = decodeBoundedBitmap(bytes, 1920, 1920)
+            ?: error("Could not read that image.")
+        val oriented = applyWhisperImageExifOrientation(bytes, decoded)
+        if (oriented !== decoded) decoded.recycle()
+        val bitmap = oriented
+        val maxDimension = 1920
+        val scaledBitmap = if (bitmap.width > maxDimension || bitmap.height > maxDimension) {
+            val ratio = min(maxDimension.toFloat() / bitmap.width, maxDimension.toFloat() / bitmap.height)
+            val b = Bitmap.createScaledBitmap(bitmap, (bitmap.width * ratio).roundToInt().coerceAtLeast(1), (bitmap.height * ratio).roundToInt().coerceAtLeast(1), true)
+            if (b !== bitmap) bitmap.recycle()
+            b
+        } else {
+            bitmap
+        }
+        val keepAlpha = mimeType in GROUP_ALPHA_CAPABLE_MIMES && scaledBitmap.hasAlpha()
+        val format = if (keepAlpha) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG
+        val outMime = if (keepAlpha) "image/png" else "image/jpeg"
+        val out = ByteArrayOutputStream()
+        scaledBitmap.compress(format, 82, out)
+        scaledBitmap.recycle()
+        val result = out.toByteArray()
+        if (result.isEmpty()) error("Could not process this image.")
+        result to outMime
     }

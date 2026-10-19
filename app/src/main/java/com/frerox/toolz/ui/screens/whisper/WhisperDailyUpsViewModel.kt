@@ -202,10 +202,10 @@ class WhisperDailyUpsViewModel @Inject constructor(
 
     // ── Viewer ─────────────────────────────────────────────────────────────
 
-    /** Viewer reading order: friends first, then my own (WhatsApp order). */
+    /** Viewer reading order mirrors the hub rail: my ups first, then friends'. */
     fun openViewer(storyId: String) {
         val state = uiState.value
-        val flat = state.friends + state.mine
+        val flat = state.mine + state.friends
         val index = flat.indexOfFirst { it.storyId == storyId }
         if (index < 0) return
         _viewer.value = ViewerState(stories = flat, index = index)

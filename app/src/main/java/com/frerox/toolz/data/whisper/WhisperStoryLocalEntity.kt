@@ -57,8 +57,14 @@ interface WhisperStoryLocalDao {
     @Query("DELETE FROM whisper_story_local WHERE storyId = :storyId")
     suspend fun delete(storyId: String)
 
-    /** Bounded transaction-safe sweep; only rows actually due are eligible. */
-    @Query("DELETE FROM whisper_story_local WHERE storyId IN (SELECT storyId FROM whisper_story_local WHERE expiresAtMs <= :nowMs OR state != 'active' ORDER BY expiresAtMs ASC LIMIT :limit)")
+    /**
+     * Bounded transaction-safe sweep: a row ends its life at ITS OWN expiry,
+     * whatever its state — 'own' rows must survive the full day (they are the
+     * poster's only copy of the delete capability), so the sweep deletes ONLY
+     * rows whose expiresAtMs has passed. Never by state: every sync used to
+     * wipe 'own' rows here because they fail `state = 'active'` checks.
+     */
+    @Query("DELETE FROM whisper_story_local WHERE storyId IN (SELECT storyId FROM whisper_story_local WHERE expiresAtMs <= :nowMs ORDER BY expiresAtMs ASC LIMIT :limit)")
     suspend fun deleteDue(nowMs: Long, limit: Int): Int
 
     @Query("DELETE FROM whisper_story_local")
