@@ -21,6 +21,7 @@ import com.frerox.toolz.data.whisper.getFriends
 import com.frerox.toolz.data.whisper.publishDailyUp
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -53,6 +54,8 @@ class WhisperDailyUpsComposeViewModel @Inject constructor(
     data class ComposeUiState(
         val friends: List<WhisperProfile> = emptyList(),
         val friendsLoading: Boolean = true,
+        /** Distinguishes "no friends yet" from "the load failed" (retry row). */
+        val friendsFailed: Boolean = false,
         val photo: PhotoDraft? = null,
         val receiptsOn: Boolean = false,
         /** Friend ids explicitly trimmed OUT of the all-friends audience. */
@@ -81,6 +84,7 @@ class WhisperDailyUpsComposeViewModel @Inject constructor(
                     it.copy(
                         friends = friends,
                         friendsLoading = false,
+                        friendsFailed = false,
                         quotaUsed = repository.dailyUpsPostedToday(),
                     )
                 }
@@ -89,10 +93,19 @@ class WhisperDailyUpsComposeViewModel @Inject constructor(
                 _state.update {
                     it.copy(
                         friendsLoading = false,
+                        friendsFailed = true,
                         error = dailyUpErrorText(appContext, e),
                     )
                 }
             }
+    }
+
+    /** Manual retry for the friends load (surfaced next to the audience). */
+    fun retryFriends() {
+        viewModelScope.launch {
+            _state.update { it.copy(friendsLoading = true) }
+            loadFriends()
+        }
     }
 
     fun refreshQuota() {
@@ -101,9 +114,14 @@ class WhisperDailyUpsComposeViewModel @Inject constructor(
         }
     }
 
+    private var photoDecodeJob: Job? = null
+
     /** Reads the picker's photo into an in-memory draft + downsampled preview. */
     fun setPhoto(bytes: ByteArray, mime: String) {
-        viewModelScope.launch {
+        // Cancel any decode in flight: picking twice in quick succession must
+        // NEVER let the slower FIRST decode overwrite the later pick.
+        photoDecodeJob?.cancel()
+        photoDecodeJob = viewModelScope.launch {
             val preview = withContext(Dispatchers.IO) { decodePreview(bytes) }
             if (preview == null) {
                 _state.update {

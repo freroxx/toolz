@@ -3930,6 +3930,7 @@
     <string name="st_Whisper_Groups_CdMore">More options</string>
     <string name="st_Whisper_Groups_CdLatest">Jump to latest</string>
     <string name="st_Whisper_Groups_Retry">Retry</string>
+    <string name="st_Whisper_Groups_ImgFailed">Couldn\'t load this photo.</string>
     <string name="st_Whisper_Groups_Member">Member</string>
     <string name="st_Whisper_Groups_NoFriendsForGroup">Add friends first — groups are friends-only. Find people in Discover.</string>
     <string name="st_Whisper_Groups_InvalidId">That doesn\u2019t look like a group ID.</string>
@@ -4072,6 +4073,9 @@
     <string name="st_Whisper_DailyUp_Posting">Sharing…</string>
     <string name="st_Whisper_DailyUp_ReactHint">Reacting also tells your friend you saw this.</string>
     <string name="st_Whisper_DailyUp_AudienceWarning">Everyone is excluded — include at least one friend to share.</string>
+    <string name="st_Whisper_DailyUp_ErrLoad">Couldn\'t load this up.</string>
+    <string name="st_Whisper_DailyUp_FriendsFailed">Couldn\'t load your friends.</string>
+    <string name="st_Whisper_DailyUp_Retry">Retry</string>
     <string name="st_AppSkin_section_title">APP SKIN</string>
     <string name="st_AppSkin_screen_title">App Skin</string>
     <string name="st_AppSkin_screen_subtitle">Icons, colors &amp; community skins</string>

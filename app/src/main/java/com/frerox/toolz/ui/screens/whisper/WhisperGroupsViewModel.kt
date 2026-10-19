@@ -42,6 +42,9 @@ import com.frerox.toolz.data.whisper.setGroupPicture
 import com.frerox.toolz.data.whisper.shouldNotifyGroupEvent
 import com.frerox.toolz.data.whisper.syncGroups
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -55,6 +58,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -180,65 +184,89 @@ class WhisperGroupsViewModel @Inject constructor(
         }
     }
 
+    private var loadJob: Job? = null
+
+    @Volatile
+    private var loadQueued = false
+
+    /**
+     * Coalesced reload, matching the chat VM: init/join/decline/create and the
+     * quiet resync can all fire `load()` concurrently — bursts collapse into
+     * ONE pass plus at most one queued re-run instead of parallel passes whose
+     * `_uiState` writes interleave.
+     */
     fun load() {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, error = null) }
-            // Cached rows render INSTANTLY (pure local Room read) — user-round
-            // speed fix: the paint happens before any network lane starts, so
-            // the hub opens on its own data even on a slow link.
-            _uiState.update { it.copy(groups = repository.cachedGroups()) }
-            // Friends only feed previews, mention chips and the stories strip —
-            // their two server round trips overlap the flush+sync chain instead
-            // of serializing in front of it.
-            val friendsDeferred = async { repository.getFriends().getOrNull().orEmpty() }
-            // Stories strip: cheap per-entry my-profile refresh (cached getter),
-            // parallel to the group sync below so neither lane blocks.
-            launch {
-                repository.getMyProfile()
-                    .onSuccess { _myProfile.value = it }
+        loadQueued = true
+        loadJob?.takeIf { it.isActive }?.let { return }
+        loadJob = viewModelScope.launch {
+            try {
+                do {
+                    loadQueued = false
+                    runLoadOnce()
+                } while (loadQueued)
+            } finally {
+                loadJob = null
             }
-            // Drain queued group sends first so they land before the sync reads.
-            runCatching { repository.flushGroupOutbox() }
-            val invites = repository.myGroupInvites().getOrNull().orEmpty()
-            pingNewInvites(invites)
-            val synced = repository.syncGroups()
-            val friends = friendsDeferred.await()
-            synced.onSuccess { memberships ->
-                val fresh = repository.cachedGroups().sortedByDescending { g -> g.updatedAtMs }
-                val counts = fresh.associate { g ->
-                    g.id to repository.cachedGroupMembers(g.id).size
-                }
-                val freshInvites = repository.myGroupInvites().getOrNull().orEmpty()
-                pingNewInvites(freshInvites)
-                lastMemberships = memberships
-                quietResyncAttempts = 0
-                lastFriendNames = friends.associate { it.id to it.effectiveName }
-                lastGroups = fresh
-                watchGroupLogs()
-                _uiState.update {
-                    it.copy(
-                        groups = fresh,
-                        memberCounts = counts,
-                        invites = freshInvites,
-                        friends = friends,
-                        isLoading = false,
-                    )
-                }
-                // Previews + pictures resolve off the main sync path (decrypts).
-                refreshPreviews(fresh)
-            }.onFailure { e ->
-                // UX rule (user round): an EMPTY list must never surface the sync
-                // banner — for someone with no groups the honest state is the
-                // friendly "nothing here yet" CTA, not "couldn't sync". Real faults
-                // still surface exactly where they land (chat/hub loads); with
-                // cached groups the cached render already stays error-free.
-                _uiState.update {
-                    it.copy(invites = invites, friends = friends, isLoading = false, error = null)
-                }
-                // One quiet self-heal so an offline app-open converges on its own:
-                // the retry backs off and stops counting fresh failures only.
-                if (e != null) scheduleQuietResync()
+        }
+    }
+
+    private suspend fun CoroutineScope.runLoadOnce() {
+        _uiState.update { it.copy(isLoading = true, error = null) }
+        // Cached rows render INSTANTLY (pure local Room read) — user-round
+        // speed fix: the paint happens before any network lane starts, so
+        // the hub opens on its own data even on a slow link.
+        _uiState.update { it.copy(groups = repository.cachedGroups()) }
+        // Friends only feed previews, mention chips and the stories strip —
+        // their two server round trips overlap the flush+sync chain instead
+        // of serializing in front of it.
+        val friendsDeferred = async { repository.getFriends().getOrNull().orEmpty() }
+        // Stories strip: cheap per-entry my-profile refresh (cached getter),
+        // parallel to the group sync below so neither lane blocks.
+        launch {
+            repository.getMyProfile()
+                .onSuccess { _myProfile.value = it }
+        }
+        // Drain queued group sends first so they land before the sync reads.
+        runCatching { repository.flushGroupOutbox() }
+        val invites = repository.myGroupInvites().getOrNull().orEmpty()
+        pingNewInvites(invites)
+        val synced = repository.syncGroups()
+        val friends = friendsDeferred.await()
+        synced.onSuccess { memberships ->
+            val fresh = repository.cachedGroups().sortedByDescending { g -> g.updatedAtMs }
+            val counts = fresh.associate { g ->
+                g.id to repository.cachedGroupMembers(g.id).size
             }
+            val freshInvites = repository.myGroupInvites().getOrNull().orEmpty()
+            pingNewInvites(freshInvites)
+            lastMemberships = memberships
+            quietResyncAttempts = 0
+            lastFriendNames = friends.associate { it.id to it.effectiveName }
+            lastGroups = fresh
+            watchGroupLogs()
+            _uiState.update {
+                it.copy(
+                    groups = fresh,
+                    memberCounts = counts,
+                    invites = freshInvites,
+                    friends = friends,
+                    isLoading = false,
+                )
+            }
+            // Previews + pictures resolve off the main sync path (decrypts).
+            refreshPreviews(fresh)
+        }.onFailure { e ->
+            // UX rule (user round): an EMPTY list must never surface the sync
+            // banner — for someone with no groups the honest state is the
+            // friendly "nothing here yet" CTA, not "couldn't sync". Real faults
+            // still surface exactly where they land (chat/hub loads); with
+            // cached groups the cached render already stays error-free.
+            _uiState.update {
+                it.copy(invites = invites, friends = friends, isLoading = false, error = null)
+            }
+            // One quiet self-heal so an offline app-open converges on its own:
+            // the retry backs off and stops counting fresh failures only.
+            if (e != null) scheduleQuietResync()
         }
     }
 
@@ -326,16 +354,38 @@ class WhisperGroupsViewModel @Inject constructor(
         else -> m.body
     }
 
+    /**
+     * Realtime subscriptions are SELF-HEALING (same discipline as the chat
+     * VM): the old `runCatching { flow.collect {} }` died silently on the
+     * FIRST thrown event — one dropped channel took invite notifications (or
+     * every further per-group ping) down for the whole screen's life. Loop
+     * resubscribes with capped backoff; dedupe sets stop repeat pings.
+     */
+    private fun watchLiveForever(tag: String, block: suspend () -> Unit): Job =
+        viewModelScope.launch {
+            var backoff = 1_500L
+            while (isActive) {
+                try {
+                    block()
+                    backoff = 1_500L
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    android.util.Log.w("WhisperGroupsVM", "$tag watcher dropped; resubscribing", e)
+                }
+                delay(backoff)
+                backoff = (backoff * 2).coerceAtMost(30_000L)
+            }
+        }
+
     /** Realtime invite lane: refetch + ping only genuinely new invites. */
     private fun watchInvites() {
         inviteWatchJob?.cancel()
-        inviteWatchJob = viewModelScope.launch {
-            runCatching {
-                repository.observeMyGroupInvites().collect {
-                    val fresh = repository.myGroupInvites().getOrNull().orEmpty()
-                    pingNewInvites(fresh)
-                    _uiState.update { it.copy(invites = fresh) }
-                }
+        inviteWatchJob = watchLiveForever("invites") {
+            repository.observeMyGroupInvites().collect {
+                val fresh = repository.myGroupInvites().getOrNull().orEmpty()
+                pingNewInvites(fresh)
+                _uiState.update { it.copy(invites = fresh) }
             }
         }
     }
@@ -398,39 +448,35 @@ class WhisperGroupsViewModel @Inject constructor(
         if (me.isBlank()) return
         logWatchJobs = lastMemberships.flatMap { m ->
             listOf(
-                viewModelScope.launch {
-                    runCatching {
-                        repository.observeGroupLog(m.groupId).collect { row ->
-                            if (!seenEventIds.add("evt:${row.id}")) return@collect
-                            onGroupEventRow(m, row, me)
-                        }
+                watchLiveForever("groupl:${m.groupId}") {
+                    repository.observeGroupLog(m.groupId).collect { row ->
+                        if (!seenEventIds.add("evt:${row.id}")) return@collect
+                        onGroupEventRow(m, row, me)
                     }
                 },
-                viewModelScope.launch {
-                    runCatching {
-                        repository.observeGroupMessagesLive(m.groupId).collect { ping ->
-                            if (ping.senderId == me) return@collect
-                            // Votes are tally data: open chats refresh silently
-                            // via load(), but they never ping (push layer agrees).
-                            if (ping.kind == "vote") return@collect
-                            if (!seenEventIds.add("msg:${ping.clientId}")) return@collect
-                            val group = lastGroups.firstOrNull { it.id == m.groupId }
-                            val sender = lastFriendNames[ping.senderId]?.takeIf { it.isNotBlank() }
-                            val text = if (sender != null) {
-                                appContext.getString(
-                                    com.frerox.toolz.R.string.st_Whisper_Groups_SenderNewMessage,
-                                    sender,
-                                )
-                            } else {
-                                appContext.getString(com.frerox.toolz.R.string.st_Whisper_Notif_NewMessage)
-                            }
-                            notificationManager.showGroupEventNotification(
-                                groupId = m.groupId,
-                                title = group?.name?.ifBlank { "Group" } ?: "Group",
-                                text = text,
-                                dedupeKey = "msg:${ping.clientId}",
+                watchLiveForever("pings:${m.groupId}") {
+                    repository.observeGroupMessagesLive(m.groupId).collect { ping ->
+                        if (ping.senderId == me) return@collect
+                        // Votes are tally data: open chats refresh silently
+                        // via load(), but they never ping (push layer agrees).
+                        if (ping.kind == "vote") return@collect
+                        if (!seenEventIds.add("msg:${ping.clientId}")) return@collect
+                        val group = lastGroups.firstOrNull { it.id == m.groupId }
+                        val sender = lastFriendNames[ping.senderId]?.takeIf { it.isNotBlank() }
+                        val text = if (sender != null) {
+                            appContext.getString(
+                                com.frerox.toolz.R.string.st_Whisper_Groups_SenderNewMessage,
+                                sender,
                             )
+                        } else {
+                            appContext.getString(com.frerox.toolz.R.string.st_Whisper_Notif_NewMessage)
                         }
+                        notificationManager.showGroupEventNotification(
+                            groupId = m.groupId,
+                            title = group?.name?.ifBlank { "Group" } ?: "Group",
+                            text = text,
+                            dedupeKey = "msg:${ping.clientId}",
+                        )
                     }
                 },
             )

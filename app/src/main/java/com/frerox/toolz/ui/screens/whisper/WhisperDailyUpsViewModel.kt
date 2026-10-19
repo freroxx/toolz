@@ -102,6 +102,8 @@ class WhisperDailyUpsViewModel @Inject constructor(
     private val _error = MutableStateFlow<String?>(null)
     private val _viewer = MutableStateFlow<ViewerState?>(null)
     private val _images = MutableStateFlow<Map<String, ImageBitmap>>(emptyMap())
+    /** Story ids whose image decode failed (inline retry affordance in the viewer). */
+    private val _failedImages = MutableStateFlow<Set<String>>(emptySet())
     private val _receipts = MutableStateFlow(ReceiptsUi())
     private val _quotaUsed = MutableStateFlow(0)
     private val _refreshing = MutableStateFlow(true)
@@ -162,6 +164,7 @@ class WhisperDailyUpsViewModel @Inject constructor(
 
     val viewer: StateFlow<ViewerState?> = _viewer.asStateFlow()
     val images: StateFlow<Map<String, ImageBitmap>> = _images.asStateFlow()
+    val failedImages: StateFlow<Set<String>> = _failedImages.asStateFlow()
     val receipts: StateFlow<ReceiptsUi> = _receipts.asStateFlow()
 
     init {
@@ -194,8 +197,15 @@ class WhisperDailyUpsViewModel @Inject constructor(
         }.collect { ids ->
             val resolved = _profiles.value
             if (ids.any { it !in resolved }) {
-                val (blocked, fetched) = repository.batchProfilesById(ids)
-                _profiles.value = resolved + fetched.filterKeys { it !in blocked }
+                // batchProfilesById deliberately propagates network faults
+                // (R-H2). Unguarded here, a single flaky batch would kill this
+                // collector AND the whole viewModelScope coroutine (app crash
+                // on open). The collector must survive; the next row emission
+                // (any hub change) retries the missing names.
+                runCatching { repository.batchProfilesById(ids) }
+                    .onSuccess { (blocked, fetched) ->
+                        _profiles.value = resolved + fetched.filterKeys { it !in blocked }
+                    }
             }
         }
     }
@@ -251,23 +261,50 @@ class WhisperDailyUpsViewModel @Inject constructor(
         }
     }
 
+    /** One story image failed to load; the viewer page offers an inline retry. */
+    fun retryImage(storyId: String) {
+        _failedImages.value = _failedImages.value - storyId
+        ensureImage(storyId)
+    }
+
     /** Decrypt-once per storyId; concurrent loads collapse on [inFlightImages]. */
     private fun ensureImage(storyId: String) {
         if (storyId in _images.value) return
         if (storyId in inFlightImages.value) return
+        _failedImages.value = _failedImages.value - storyId
         inFlightImages.value = inFlightImages.value + storyId
         viewModelScope.launch {
             repository.downloadDailyUpImage(storyId)
                 .onSuccess { image ->
                     val bmp = withContext(Dispatchers.IO) { decodeDisplayBitmap(image.bytes) }
                     if (bmp != null) {
-                        _images.value = _images.value + (storyId to bmp)
+                        insertViewerImage(storyId, bmp)
                     } else {
+                        _failedImages.value = _failedImages.value + storyId
                         _error.value = appContext.getString(R.string.st_Whisper_DailyUp_ErrCorrupt)
                     }
                 }
-                .onFailure { e -> _error.value = dailyUpErrorText(appContext, e) }
+                .onFailure { e ->
+                    _failedImages.value = _failedImages.value + storyId
+                    _error.value = dailyUpErrorText(appContext, e)
+                }
             inFlightImages.value = inFlightImages.value - storyId
+        }
+    }
+
+    /**
+     * Bounded in-memory window for decoded story bits. The hub never decrypts;
+     * ONLY the viewer consumes this map, and a pager composes at most the
+     * current page ±1. A whole day of ~2 MP ups (≈8 MB each) unbounded was a
+     * straight OOM path — keep the viewer window resident, page back re-decodes
+     * (decrypt-once per session trades for memory safety).
+     */
+    private fun insertViewerImage(storyId: String, bmp: ImageBitmap) {
+        val merged = _images.value + (storyId to bmp)
+        _images.value = if (merged.size > MAX_VIEWER_IMAGES) {
+            merged.entries.drop(merged.size - MAX_VIEWER_IMAGES).associate { it.toPair() }
+        } else {
+            merged
         }
     }
 
@@ -355,5 +392,10 @@ class WhisperDailyUpsViewModel @Inject constructor(
                 }
                 .onFailure { e -> _error.value = dailyUpErrorText(appContext, e) }
         }
+    }
+
+    private companion object {
+        /** Viewer decoded-image window cap (see [insertViewerImage]). */
+        const val MAX_VIEWER_IMAGES = 6
     }
 }

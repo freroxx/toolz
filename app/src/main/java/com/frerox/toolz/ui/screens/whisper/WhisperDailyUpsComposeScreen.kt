@@ -43,8 +43,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -63,6 +61,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.WhisperDailyUpsConfig
+import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.theme.toolzBackground
 import java.io.ByteArrayOutputStream
@@ -127,19 +126,13 @@ fun WhisperDailyUpsComposeScreen(
         modifier = Modifier.fillMaxSize().toolzBackground(),
         snackbarHost = { GroupSnackbarHost(state = snackbar) },
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        stringResource(R.string.st_Whisper_DailyUp_ComposeTitle),
-                        fontWeight = FontWeight.Bold,
-                    )
-                },
+            ExpressiveTopAppBar(
+                title = stringResource(R.string.st_Whisper_DailyUp_ComposeTitle),
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = GroupCd.back())
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
             )
         },
     ) { padding ->
@@ -169,7 +162,11 @@ fun WhisperDailyUpsComposeScreen(
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-            AudienceSection(state = state, onToggle = viewModel::toggleExcluded)
+            AudienceSection(
+                state = state,
+                onToggle = viewModel::toggleExcluded,
+                onRetryFriends = viewModel::retryFriends,
+            )
 
             Spacer(Modifier.height(8.dp))
             ShareButton(state = state, onClick = viewModel::publish)
@@ -276,6 +273,7 @@ private fun ReceiptsRow(on: Boolean, onChange: (Boolean) -> Unit) {
 private fun AudienceSection(
     state: WhisperDailyUpsComposeViewModel.ComposeUiState,
     onToggle: (String) -> Unit,
+    onRetryFriends: () -> Unit = {},
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
@@ -301,6 +299,21 @@ private fun AudienceSection(
                     modifier = Modifier.size(20.dp),
                     strokeWidth = 2.dp,
                 )
+            }
+            // Failed load ≠ "no friends yet": the honest copy comes with a
+            // retry, otherwise the composer looks permanently broken.
+            state.friendsFailed && state.friends.isEmpty() -> {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = stringResource(R.string.st_Whisper_DailyUp_FriendsFailed),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = onRetryFriends) {
+                        Text(stringResource(R.string.st_Whisper_DailyUp_Retry))
+                    }
+                }
             }
             state.friends.isEmpty() -> {
                 Text(

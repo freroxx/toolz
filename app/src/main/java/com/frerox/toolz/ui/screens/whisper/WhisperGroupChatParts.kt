@@ -61,6 +61,7 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AddPhotoAlternate
 import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.BarChart
+import androidx.compose.material.icons.rounded.BrokenImage
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
@@ -429,6 +430,7 @@ internal fun GroupMessageItem(
     item: FeedItem.Msg,
     imageBytes: ByteArray?,
     imageExpired: Boolean,
+    imageFailed: Boolean,
     seenCount: Int,
     pollTally: WhisperGroupChatViewModel.PollTally?,
     pollClosed: Boolean,
@@ -438,6 +440,7 @@ internal fun GroupMessageItem(
     memberNames: Map<String, String>,
     highlighted: Boolean,
     onRequestImage: () -> Unit,
+    onRetryImage: () -> Unit,
     onImageClick: (ByteArray) -> Unit,
     onLongPress: () -> Unit,
     onReply: () -> Unit,
@@ -474,6 +477,7 @@ internal fun GroupMessageItem(
                     first = item.first,
                     imageBytes = imageBytes,
                     imageExpired = imageExpired,
+                    imageFailed = imageFailed,
                     seenCount = seenCount,
                     pollTally = pollTally,
                     pollClosed = pollClosed,
@@ -482,6 +486,7 @@ internal fun GroupMessageItem(
                     memberNames = memberNames,
                     highlighted = highlighted,
                     onImageClick = onImageClick,
+                    onRetryImage = onRetryImage,
                     onLongPress = onLongPress,
                     onQuoteClick = onQuoteClick,
                     onVote = onVote,
@@ -547,6 +552,7 @@ private fun MessageBubble(
     first: Boolean,
     imageBytes: ByteArray?,
     imageExpired: Boolean,
+    imageFailed: Boolean,
     seenCount: Int,
     pollTally: WhisperGroupChatViewModel.PollTally?,
     pollClosed: Boolean,
@@ -555,6 +561,7 @@ private fun MessageBubble(
     memberNames: Map<String, String>,
     highlighted: Boolean,
     onImageClick: (ByteArray) -> Unit,
+    onRetryImage: () -> Unit,
     onLongPress: () -> Unit,
     onQuoteClick: (String) -> Unit,
     onVote: (Int) -> Unit,
@@ -641,7 +648,9 @@ private fun MessageBubble(
                 BubbleImage(
                     bytes = imageBytes,
                     expired = imageExpired,
+                    failed = imageFailed,
                     onClick = onImageClick,
+                    onRetry = onRetryImage,
                     overlay = if (msg.body.isBlank() && !imageExpired) {
                         {
                             Surface(
@@ -781,7 +790,9 @@ private fun mentionAnnotated(body: String, memberNames: Map<String, String>, acc
 private fun BubbleImage(
     bytes: ByteArray?,
     expired: Boolean,
+    failed: Boolean = false,
     onClick: (ByteArray) -> Unit,
+    onRetry: () -> Unit = {},
     overlay: (@Composable BoxScope.() -> Unit)?,
 ) {
     val scheme = MaterialTheme.colorScheme
@@ -803,6 +814,38 @@ private fun BubbleImage(
                 stringResource(R.string.st_Whisper_ImageExpired),
                 style = MaterialTheme.typography.bodyMedium,
                 color = scheme.onSurfaceVariant,
+            )
+        }
+        return
+    }
+    // Failed load: SAME footprint as expired (no eternal spinner), plus a
+    // tappable retry — the only escape from a dead decode/network lane.
+    if (failed) {
+        Row(
+            modifier = Modifier
+                .width(248.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(scheme.surfaceContainerHighest.copy(alpha = 0.7f))
+                .clickable(onClick = onRetry)
+                .padding(horizontal = 12.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Icon(
+                Icons.Rounded.BrokenImage, contentDescription = null,
+                tint = scheme.onSurfaceVariant, modifier = Modifier.size(20.dp),
+            )
+            Text(
+                stringResource(R.string.st_Whisper_Groups_ImgFailed),
+                style = MaterialTheme.typography.bodyMedium,
+                color = scheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                stringResource(R.string.st_Whisper_Groups_Retry),
+                style = MaterialTheme.typography.labelLarge,
+                color = scheme.primary,
+                fontWeight = FontWeight.Bold,
             )
         }
         return

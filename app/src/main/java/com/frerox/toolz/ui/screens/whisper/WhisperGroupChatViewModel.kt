@@ -5,6 +5,7 @@
 
 package com.frerox.toolz.ui.screens.whisper
 
+import android.util.Log
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -48,11 +49,14 @@ import com.frerox.toolz.data.whisper.sendGroupMessage
 import com.frerox.toolz.data.whisper.sendGroupTyping
 import com.frerox.toolz.data.whisper.syncGroup
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -69,6 +73,9 @@ class WhisperGroupChatViewModel @Inject constructor(
     private val mutePrefs: WhisperMutePreferences,
     private val notificationManager: WhisperNotificationManager,
     private val readStore: WhisperGroupReadStore,
+    // M-10 pattern: `viewModelScope` is cancelled the moment onCleared starts —
+    // residual cleanup (typing off) must ride an application-lifetime scope.
+    @com.frerox.toolz.di.ApplicationScope private val appScope: kotlinx.coroutines.CoroutineScope,
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
@@ -103,6 +110,8 @@ class WhisperGroupChatViewModel @Inject constructor(
         val reactions: Map<String, Map<String, List<String>>> = emptyMap(),
         /** Row ids whose images expired (rendered as expired, never fetched). */
         val expiredImages: Set<String> = emptySet(),
+        /** Row ids whose image load FAILED (inline tap-to-retry in the bubble). */
+        val failedImages: Set<String> = emptySet(),
         /** In-timeline activity (join/leave/rename/role/picture/settings). */
         val systemEvents: List<SysLine> = emptyList(),
         /** First unread message id at load (unread separator anchor). */
@@ -146,6 +155,20 @@ class WhisperGroupChatViewModel @Inject constructor(
     /** Text sends go out strictly in order (parallel seals could reorder). */
     private val sendMutex = Mutex()
 
+    // V-5 parity with the 1:1 chat: a bounded ACCESS-ORDER window of decrypted
+    // image bytes. The groups map used to grow for the whole session (every
+    // opened photo, up to megabytes each, for the VM's lifetime) — a straight
+    // OOM path on busy groups. Evicted ids silently re-fetch when scrolled
+    // back into view (LaunchedEffect(msg.id) re-fires).
+    private val imageCacheMutex = Mutex()
+    private val decryptedImages = object : LinkedHashMap<String, ByteArray>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ByteArray>): Boolean =
+            size > MAX_DECRYPTED_IMAGES
+    }
+
+    /** Group chat image decode lanes are main-dispatcher guarded. */
+    private val inFlightImages = mutableSetOf<String>()
+
     init {
         if (groupsEnabled() && groupId.isNotBlank()) {
             // Open-chat suppression id (mirrors 1:1 currentChatId).
@@ -155,54 +178,71 @@ class WhisperGroupChatViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Realtime subscriptions are SELF-HEALING. The previous
+     * `runCatching { flow.collect {} }` died silently on the FIRST thrown
+     * event — one dropped channel took every further update down with it for
+     * the rest of the screen's life. Every watcher now resubscribes through
+     * [watchLive] with a capped backoff until the VM leaves.
+     */
+    private fun watchLive(tag: String, block: suspend () -> Unit): Job = viewModelScope.launch {
+        var backoff = 1_500L
+        while (isActive) {
+            try {
+                block()
+                backoff = 1_500L
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("WhisperGroupChatVM", "$tag watcher dropped; resubscribing", e)
+            }
+            delay(backoff)
+            backoff = (backoff * 2).coerceAtMost(30_000L)
+        }
+    }
+
     private fun watchAll() {
         watchJobs.forEach { it.cancel() }
-        val logJob = viewModelScope.launch {
-            runCatching { repository.observeGroupLog(groupId).collect { load() } }
+        val logJob = watchLive("log") {
+            repository.observeGroupLog(groupId).collect { load() }
         }
         // New rows ARRIVE with their sealed frame: the insert is ingested
         // locally (decrypt + merge, zero refetch). Wipes and pings without a
         // decodable row still fall back to the full reload lane.
-        val msgJob = viewModelScope.launch {
-            runCatching { repository.observeGroupMessagesLive(groupId).collect { ping ->
+        val msgJob = watchLive("rows") {
+            repository.observeGroupMessagesLive(groupId).collect { ping ->
                 val row = ping.row
                 if (row != null) ingestRow(row) else load()
-            } }
+            }
         }
-        val delJob = viewModelScope.launch {
-            runCatching { repository.observeGroupMessageDeletes(groupId).collect { load() } }
+        val delJob = watchLive("deletes") {
+            repository.observeGroupMessageDeletes(groupId).collect { load() }
         }
-        val typingJob = viewModelScope.launch {
-            runCatching {
-                repository.observeGroupTyping(groupId).collect { ids ->
-                    val names = _uiState.value.memberNames
-                    _uiState.update { it.copy(typingNames = ids.map { id -> names[id] ?: "Someone" }) }
-                }
+        val typingJob = watchLive("typing") {
+            repository.observeGroupTyping(groupId).collect { ids ->
+                val names = _uiState.value.memberNames
+                _uiState.update { it.copy(typingNames = ids.map { id -> names[id] ?: "Someone" }) }
             }
         }
         // Reaction chips merge in place (Applied/Removed); Refetch is the rare
         // unresolvable delete that falls back to the bulk read.
-        val reactJob = viewModelScope.launch {
-            runCatching {
-                repository.observeGroupReactionEvents(groupId).collect { evt ->
-                    when (evt) {
-                        is WhisperGroupReactionEvent.Applied ->
-                            applyReaction(evt.messageId, evt.userId, evt.emoji)
-                        is WhisperGroupReactionEvent.Removed ->
-                            applyReaction(evt.messageId, evt.userId, null)
-                        WhisperGroupReactionEvent.Refetch -> refreshReactions()
-                    }
+        val reactJob = watchLive("reactions") {
+            repository.observeGroupReactionEvents(groupId).collect { evt ->
+                when (evt) {
+                    is WhisperGroupReactionEvent.Applied ->
+                        applyReaction(evt.messageId, evt.userId, evt.emoji)
+                    is WhisperGroupReactionEvent.Removed ->
+                        applyReaction(evt.messageId, evt.userId, null)
+                    WhisperGroupReactionEvent.Refetch -> refreshReactions()
                 }
             }
         }
-        val receiptJob = viewModelScope.launch {
-            runCatching {
-                repository.observeGroupReceiptEvents(groupId).collect { row ->
-                    if (row.userId == repository.myId) return@collect
-                    _uiState.update { s ->
-                        val users = s.receipts[row.messageId].orEmpty().filter { it != row.userId } + row.userId
-                        s.copy(receipts = s.receipts + (row.messageId to users))
-                    }
+        val receiptJob = watchLive("receipts") {
+            repository.observeGroupReceiptEvents(groupId).collect { row ->
+                if (row.userId == repository.myId) return@collect
+                _uiState.update { s ->
+                    val users = s.receipts[row.messageId].orEmpty().filter { it != row.userId } + row.userId
+                    s.copy(receipts = s.receipts + (row.messageId to users))
                 }
             }
         }
@@ -211,70 +251,100 @@ class WhisperGroupChatViewModel @Inject constructor(
 
     override fun onCleared() {
         watchJobs.forEach { it.cancel() }
-        viewModelScope.launch { repository.clearGroupTyping(groupId) }
+        // NOT viewModelScope (cancelled at onCleared entry — dead code gone):
+        // release my typing signal from app scope; the 8s freshness window
+        // covers any residual row server-side.
+        appScope.launch {
+            runCatching { repository.clearGroupTyping(groupId) }
+        }
         if (notificationManager.currentChatId == "group:$groupId") {
             notificationManager.currentChatId = null
         }
         super.onCleared()
     }
 
+    private var loadJob: Job? = null
+
+    @Volatile
+    private var loadQueued = false
+
+    /**
+     * Timeline reload, SINGLE-FLIGHT: a burst of triggers (realtime events,
+     * retries, deletes) collapses into ONE full pass plus at most one queued
+     * re-run. Serially launched passes used to interleave their `_uiState`
+     * writes — a slower OLDER pass could overwrite a newer one's membership
+     * and unread counts. Signature unchanged (still returns a Job).
+     */
     fun load(): Job {
+        loadQueued = true
+        loadJob?.takeIf { it.isActive }?.let { return it }
         return viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, error = null) }
-            // Drain queued group sends first so they land before the sync reads.
-            runCatching { repository.flushGroupOutbox() }
-            // Capture the read watermark BEFORE this load marks everything read.
-            val markBefore = readStore.readAt(groupId)
-            val membership = repository.syncGroup(groupId)
-            membership.onSuccess { m ->
-                val messages = repository.fetchGroupMessages(groupId)
-                messages.onSuccess { list ->
-                    val names = repository.friendNameMap()
-                    val receipts = repository.fetchGroupReceipts(groupId).getOrNull().orEmpty()
-                    val reactionMap = repository.fetchGroupReactions(groupId).getOrNull().orEmpty()
-                    val myId = repository.myId
-                    val unread = list.filter { it.createdAt > markBefore && it.senderId != myId }
-                    val systems = repository.cachedGroupSystemEvents(groupId).mapNotNull { raw ->
-                        sysText(raw.type, raw.actor, raw.payload, names, myId)?.let { text ->
-                            SysLine(seq = raw.seq, text = text, atMs = raw.createdAtMs)
-                        }
+            try {
+                do {
+                    loadQueued = false
+                    runLoadOnce()
+                } while (loadQueued)
+            } finally {
+                loadJob = null
+            }
+        }.also { loadJob = it }
+    }
+
+    private suspend fun runLoadOnce() {
+        _uiState.update { it.copy(isLoading = true, error = null) }
+        // Drain queued group sends first so they land before the sync reads.
+        runCatching { repository.flushGroupOutbox() }
+        // Capture the read watermark BEFORE this load marks everything read.
+        val markBefore = readStore.readAt(groupId)
+        val membership = repository.syncGroup(groupId)
+        membership.onSuccess { m ->
+            val messages = repository.fetchGroupMessages(groupId)
+            messages.onSuccess { list ->
+                val names = repository.friendNameMap()
+                val receipts = repository.fetchGroupReceipts(groupId).getOrNull().orEmpty()
+                val reactionMap = repository.fetchGroupReactions(groupId).getOrNull().orEmpty()
+                val myId = repository.myId
+                val unread = list.filter { it.createdAt > markBefore && it.senderId != myId }
+                val systems = repository.cachedGroupSystemEvents(groupId).mapNotNull { raw ->
+                    sysText(raw.type, raw.actor, raw.payload, names, myId)?.let { text ->
+                        SysLine(seq = raw.seq, text = text, atMs = raw.createdAtMs)
                     }
-                    _uiState.update {
-                        it.copy(
-                            membership = m,
-                            messages = list,
-                            isLoading = false,
-                            hasMore = list.size >= PAGE_SIZE,
-                            degraded = m.degraded,
-                            isSending = false,
-                            isUploadingImage = false,
-                            receipts = receipts,
-                            memberNames = names,
-                            pollTallies = tallyPolls(list, myId),
-                            closedPolls = closedPollIds(list),
-                            reactions = reactionMap,
-                            systemEvents = systems,
-                            firstUnreadId = unread.firstOrNull()?.id,
-                            unreadCount = unread.size,
-                        )
-                    }
-                    // Seen receipts + read watermark (fire-and-forget).
-                    viewModelScope.launch {
-                        runCatching { repository.markGroupSeen(groupId, list.map { msg -> msg.clientId }) }
-                        list.lastOrNull()?.createdAt?.let { readStore.markRead(groupId, it) }
-                    }
-                }.onFailure { e ->
-                    _uiState.update {
-                        it.copy(
-                            membership = m, isLoading = false, degraded = m.degraded,
-                            isSending = false, isUploadingImage = false, error = err(e),
-                        )
-                    }
+                }
+                _uiState.update {
+                    it.copy(
+                        membership = m,
+                        messages = list,
+                        isLoading = false,
+                        hasMore = list.size >= PAGE_SIZE,
+                        degraded = m.degraded,
+                        isSending = false,
+                        isUploadingImage = false,
+                        receipts = receipts,
+                        memberNames = names,
+                        pollTallies = tallyPolls(list, myId),
+                        closedPolls = closedPollIds(list),
+                        reactions = reactionMap,
+                        systemEvents = systems,
+                        firstUnreadId = unread.firstOrNull()?.id,
+                        unreadCount = unread.size,
+                    )
+                }
+                // Seen receipts + read watermark (fire-and-forget).
+                viewModelScope.launch {
+                    runCatching { repository.markGroupSeen(groupId, list.map { msg -> msg.clientId }) }
+                    list.lastOrNull()?.createdAt?.let { readStore.markRead(groupId, it) }
                 }
             }.onFailure { e ->
                 _uiState.update {
-                    it.copy(isLoading = false, isSending = false, isUploadingImage = false, error = err(e))
+                    it.copy(
+                        membership = m, isLoading = false, degraded = m.degraded,
+                        isSending = false, isUploadingImage = false, error = err(e),
+                    )
                 }
+            }
+        }.onFailure { e ->
+            _uiState.update {
+                it.copy(isLoading = false, isSending = false, isUploadingImage = false, error = err(e))
             }
         }
     }
@@ -599,24 +669,55 @@ class WhisperGroupChatViewModel @Inject constructor(
         viewModelScope.launch { runCatching { repository.sendGroupTyping(groupId) } }
     }
 
+    /** Bubble retry affordance: clears the failed mark, then reloads. */
+    fun retryImage(msg: WhisperGroupChatMessage) {
+        _uiState.update { it.copy(failedImages = it.failedImages - msg.id) }
+        loadImage(msg)
+    }
+
     fun loadImage(msg: WhisperGroupChatMessage) {
         val ref = msg.image ?: return
-        if (_uiState.value.images[msg.id] != null || msg.id in _uiState.value.expiredImages) return
+        val current = _uiState.value
+        if (msg.id in current.expiredImages || msg.id in current.failedImages) return
+        // Settled (already decoded): no refetch. Eviction is visibility-driven
+        // through rememberDecryptedImage's snapshots, so the state mirrors the
+        // live LRU exactly.
+        if (msg.id in current.images) return
         // Local expiry gate (openGroupImage also fails closed server-blind).
         if (ref.exp != null && ref.exp * 1000 < System.currentTimeMillis()) {
             _uiState.update { it.copy(expiredImages = it.expiredImages + msg.id) }
             return
         }
+        if (msg.id in inFlightImages) return
+        inFlightImages += msg.id
         viewModelScope.launch {
-            val out = repository.openGroupImage(ref, "gmsg:${msg.id}")
-            out.getOrNull()?.let { bytes ->
-                _uiState.update { it.copy(images = it.images + (msg.id to bytes)) }
-            } ?: run {
-                if (out.exceptionOrNull()?.message?.contains("expired") == true) {
-                    _uiState.update { it.copy(expiredImages = it.expiredImages + msg.id) }
+            try {
+                val out = repository.openGroupImage(ref, "gmsg:${msg.id}")
+                out.getOrNull()?.let { bytes -> rememberDecryptedImage(msg.id, bytes) }
+                if (out.getOrNull() == null) {
+                    val message = out.exceptionOrNull()?.message.orEmpty()
+                    if (message.contains("expired")) {
+                        _uiState.update { it.copy(expiredImages = it.expiredImages + msg.id) }
+                    } else {
+                        // A failed load must be VISIBLE and escapable: mark the
+                        // row failed so the bubble offers tap-to-retry instead
+                        // of spinning forever in silence.
+                        _uiState.update { it.copy(failedImages = it.failedImages + msg.id) }
+                    }
                 }
+            } finally {
+                inFlightImages -= msg.id
             }
         }
+    }
+
+    /** Bounded LRU insert (V-5 parity): publishes the warmed window to uiState. */
+    private suspend fun rememberDecryptedImage(id: String, bytes: ByteArray) {
+        val snapshot = imageCacheMutex.withLock {
+            decryptedImages[id] = bytes
+            decryptedImages.toMap()
+        }
+        _uiState.update { it.copy(images = snapshot, failedImages = it.failedImages - id) }
     }
 
     fun deleteForMe(msg: WhisperGroupChatMessage) {
@@ -685,6 +786,9 @@ class WhisperGroupChatViewModel @Inject constructor(
         /** Group mutes reuse the 1:1 mute store under a reserved namespace. */
         fun muteKey(groupId: String) = "group:$groupId"
         const val PAGE_SIZE = 50
+
+        /** V-5 parity: resident decrypted-image window (true LRU, see [decryptedImages]). */
+        private const val MAX_DECRYPTED_IMAGES = 8
 
         /** Bounded head refetch for send/vote echo fallbacks (see [refreshTimelineHead]). */
         const val TIMELINE_HEAD_PAGE = 16

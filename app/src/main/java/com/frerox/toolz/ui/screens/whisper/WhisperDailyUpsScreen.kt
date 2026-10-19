@@ -54,8 +54,6 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -80,6 +78,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.WhisperDailyUpsConfig
+import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.theme.toolzBackground
 import kotlinx.coroutines.delay
@@ -150,6 +149,7 @@ fun WhisperDailyUpsScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val viewer by viewModel.viewer.collectAsStateWithLifecycle()
     val images by viewModel.images.collectAsStateWithLifecycle()
+    val failedImages by viewModel.failedImages.collectAsStateWithLifecycle()
     val receipts by viewModel.receipts.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
 
@@ -165,17 +165,24 @@ fun WhisperDailyUpsScreen(
     // server — deletes, new friend ups, expiry — before anything renders.
     LaunchedEffect(Unit) { viewModel.refresh() }
 
+    // The viewer shows a SNAPSHOT captured at open. If the story being read
+    // vanishes underneath (deleted on another device, expired mid-view), the
+    // overlay leaves too — otherwise the reader reacts into the void while
+    // the resulting snackbar hides behind the black overlay.
+    LaunchedEffect(state.mine, state.friends, viewer) {
+        val v = viewer ?: return@LaunchedEffect
+        val living = (state.mine + state.friends).map { it.storyId }.toSet()
+        val current = v.stories.getOrNull(v.index)?.storyId
+        if (current != null && current !in living) viewModel.closeViewer()
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
     Scaffold(
         modifier = Modifier.fillMaxSize().toolzBackground(),
         snackbarHost = { GroupSnackbarHost(state = snackbar) },
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        stringResource(R.string.st_Whisper_DailyUp_Title),
-                        fontWeight = FontWeight.Bold,
-                    )
-                },
+            ExpressiveTopAppBar(
+                title = stringResource(R.string.st_Whisper_DailyUp_Title),
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = GroupCd.back())
@@ -204,7 +211,6 @@ fun WhisperDailyUpsScreen(
                         }
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
             )
         },
     ) { padding ->
@@ -283,6 +289,7 @@ fun WhisperDailyUpsScreen(
             stories = v.stories,
             index = v.index,
             images = images,
+            failedImages = failedImages,
             receipts = receipts,
             ownName = stringResource(R.string.st_Whisper_DailyUp_Mine),
             onShown = viewModel::onStoryDisplayed,
@@ -290,7 +297,21 @@ fun WhisperDailyUpsScreen(
             onClose = viewModel::closeViewer,
             onReact = viewModel::toggleReaction,
             onDelete = viewModel::deleteMyStory,
+            onRetryImage = viewModel::retryImage,
         )
+    }
+
+    // Errors raised while the FULLSCREEN viewer is up must surface ABOVE it:
+    // the Scaffold host sits underneath the black overlay where nobody sees
+    // it. Same SnackbarHostState, second host drawn last (winning z-order).
+    if (viewer != null) {
+        GroupSnackbarHost(
+            state = snackbar,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 16.dp),
+        )
+    }
     }
 }
 
@@ -423,6 +444,7 @@ private fun StoryViewerOverlay(
     stories: List<WhisperDailyUpsViewModel.StoryItem>,
     index: Int,
     images: Map<String, ImageBitmap>,
+    failedImages: Set<String>,
     receipts: WhisperDailyUpsViewModel.ReceiptsUi,
     ownName: String,
     onShown: (String) -> Unit,
@@ -430,6 +452,7 @@ private fun StoryViewerOverlay(
     onClose: () -> Unit,
     onReact: (storyId: String, emoji: String, on: Boolean) -> Unit,
     onDelete: (String) -> Unit,
+    onRetryImage: (String) -> Unit,
 ) {
     BackHandler(onBack = onClose)
     val pagerState = rememberPagerState(initialPage = index, pageCount = { stories.size })
@@ -480,6 +503,8 @@ private fun StoryViewerOverlay(
             StoryPage(
                 story = story,
                 image = images[story.storyId],
+                failed = story.storyId in failedImages,
+                onRetry = { onRetryImage(story.storyId) },
                 displayName = if (story.isMine) ownName else story.ownerName,
                 pressed = { p -> pressed = p },
             )
@@ -599,6 +624,8 @@ private fun StoryViewerOverlay(
 private fun StoryPage(
     story: WhisperDailyUpsViewModel.StoryItem,
     image: ImageBitmap?,
+    failed: Boolean,
+    onRetry: () -> Unit,
     displayName: String,
     pressed: (Boolean) -> Unit,
 ) {
@@ -616,15 +643,40 @@ private fun StoryPage(
             },
         contentAlignment = Alignment.Center,
     ) {
-        if (image != null) {
-            Image(
-                bitmap = image,
-                contentDescription = displayName,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxSize(),
-            )
-        } else {
-            CircularProgressIndicator(color = Color.White)
+        when {
+            image != null -> {
+                Image(
+                    bitmap = image,
+                    contentDescription = displayName,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            // Failed decode/download: say so ON the page — an eternal spinner
+            // next to a paused story reads as "frozen". Retry re-runs the
+            // decrypt lane; the error snackbar ALSO has a copy now.
+            failed -> {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.padding(horizontal = 32.dp),
+                ) {
+                    Text(
+                        text = stringResource(R.string.st_Whisper_DailyUp_ErrLoad),
+                        color = Color.White.copy(alpha = 0.85f),
+                        style = MaterialTheme.typography.bodyMedium,
+                        textAlign = TextAlign.Center,
+                    )
+                    TextButton(onClick = onRetry) {
+                        Text(
+                            text = stringResource(R.string.st_Whisper_DailyUp_Retry),
+                            color = Color.White,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                }
+            }
+            else -> CircularProgressIndicator(color = Color.White)
         }
     }
 }
