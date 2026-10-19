@@ -1,1040 +1,1136 @@
-# Whisper Architecture
+# Whisper — Architecture & Design Guide
 
-Friends-only, end-to-end encrypted messenger inside Toolz. Own Supabase backend,
-separate from the rest of the app. Section names point at the source files that
-implement them; the working tree is truth (this doc is not verified by CI, so
-read claims against code before trusting them).
+Whisper is the private-messenger module inside Toolz: a friends-only,
+end-to-end encrypted chat with groups and 24-hour photo stories, running on
+its own Supabase backend, fully decoupled from the rest of the app. This
+document explains how the whole system works — the cryptography, the server,
+the client, and the user experience — well enough that a reader who has never
+seen the codebase can reason about it.
+
+**How to read this document.** It describes the codebase as of the 1.1.7
+release (October 2026). The working tree is the source of truth; this document
+is not machine-checked against code, so treat any specific constant or file
+name as a pointer to verify, not a guarantee. Key material describes
+cryptography; "server" means the Supabase project Whisper operates (database,
+Row Level Security policies, trigger functions, and hosted edge functions).
 
 Contents:
 
-1. Overview and honesty notes
-2. Cryptography
-3. Wire formats
-4. Images and avatars
-5. Backend
-6. Client repository
-7. Auth
-8. UI and view models
-9. Push, workers, app wiring
-10. Tests
-11. What the server sees
-12. File inventory
-13. Groups (Phase 2, ships in 1.1.7)
-14. Daily Ups (stories, ships in the same 1.1.7)
-15. Known limitations and calibration notes (external review, 2026-10)
+1. What Whisper is
+2. The privacy model: what the server can and cannot see
+3. Cryptography
+4. The life of a message (end-to-end walkthrough)
+5. Images and avatars
+6. The client architecture
+7. Accounts and authentication
+8. The backend
+9. Push notifications
+10. Background work and app wiring
+11. Groups
+12. Daily Ups
+13. How it is verified
+14. Limits, trade-offs, and the honest security statement
 
-## 1. Overview and honesty notes
+Appendix A — file map
+Appendix B — glossary
 
-Whisper has a hybrid identity: long-term P-256 ECDH and P-256 signing keys in
-AndroidKeyStore, plus software X25519 identity, signed prekeys, and one-time
-prekeys for sessions. Messages travel as v2 multi-key envelopes (static ECDH,
-self-healing across key drift) or v3 Double Ratchet frames (X3DH handshake, then
-per-message forward secrecy). New chats try v3 first; proven v3 peers never
-silently downgrade to v2 (seal failure blocks with a warning instead), and only
-unproven peers may fall back to v2 envelopes. New v3 frames never carry a v2
-insurance copy.
+---
 
-Three corrections to older docs:
+## 1. What Whisper is
 
-- Keys are not "P-256 only". Chat confidentiality is X25519 (sessions and ratchet)
-  with P-256 for identity and prekey signatures.
-- Forward secrecy is not on every message. Only v3 ratchet frames have it. The v2
-  envelope fallback uses static ECDH with no forward secrecy; a 30-day key rotation
-  bounds exposure.
-- Sign-in is email-free for the user but not for the backend. Usernames map to
-  `user@u.whisper.local` and tokens map to `SHA-256(token)@whisper.toolz.app`
-  through Supabase GoTrue virtual emails.
+### 1.1 The product
 
-Images are AES-256-GCM sealed on device, wrapped as lossless PNG (`WZ1` header
-with CRC32), and hosted on ImgBB through an edge function. Avatars use Supabase
-Storage or ImgBB with deterministic per-owner keys. Push is UnifiedPush wake
-pings (IDs and event kinds, no content) via the embedded FCM fallback
-(RFC 8291-encrypted — the push service sees only ciphertext) or an external
-distributor such as ntfy/NextPush; the latter receives ID-only pings, because
-any human-readable name rides solely inside encrypted webpush payloads (§11).
-Local Room caches hold ciphertext only.
+Whisper is invite-only in the strict sense: you can only talk to people who
+have accepted a friend request. There is no public directory, no phone-number
+lookup, and no pre-existing identity to import. An account is either a
+**username + password** or an opaque **whisper token** (a random 64-hex string
+that *is* the credential — lose it without the access-file or vault backup
+and the account cannot be logged into again).
 
-Uses custom E2EE, not independently audited.
+Feature surface at 1.1.7:
 
-## 2. Cryptography
+- **1:1 chat** — text, images (with one-minute-to-180-day disappearing
+  timers), replies, reactions, read receipts, typing and presence, in-chat
+  search, clear-chat with undo, per-chat muting, blocking. Every message is
+  end-to-end encrypted on top of a Signal-style session protocol.
+- **Groups** — up to 12 members with owner/admin/member roles. Group history
+  is an admin-**signed event log** that every client verifies independently;
+  membership changes, polls, mentions, invites, and permission changes are all
+  events in that log. Messages fan out pairwise: every member's copy is sealed
+  through *their own* 1:1-quality session with the sender.
+- **Daily Ups** — 24-hour photo stories posted to all friends at once, capped
+  at 5 per UTC day per poster, with optional view receipts and a six-emoji
+  reaction vocabulary. Photos are stripped of GPS/EXIF metadata before they
+  ever leave the device.
+- **Cross-cutting** — offline-first (history reads from a local encrypted
+  store; sends queue and drain), push notifications whose payloads never carry
+  message content, screenshot protection with a server-gated bypass for
+  accessibility cases, QR/safety-number key verification, account deletion
+  that wipes the server and the device, and an access-file backup for
+  credentials (never key material).
 
-### 2.1 Primitives
+### 1.2 Design principles
 
-`crypto/SessionCrypto.kt` is X25519 via Tink `subtle.X25519` (constant-time
-curve25519-donna; the old BigInteger Montgomery ladder is removed),
-HKDF-SHA256 (RFC 5869), HMAC-SHA256, SHA-256, and AES-256-GCM (12-byte IV,
-128-bit tag, packed as IV + ciphertext + tag). `sharedSecret` returns null on
-banned/low-order or all-zero peer points (Tink throws InvalidKeyException;
-mapped to null); callers treat that as an invalid key. Covered by
-`SessionCryptoVectorTest` with RFC 7748 §5.2/§6.1 vectors.
+These principles explain most specific decisions later in the document.
 
-`data/whisper/WhisperCrypto.kt` is the hardware identity:
+1. **The server is untrusted for confidentiality.** The Postgres database is
+   allowed to store *ciphertext, user IDs, timestamps, and friendship edges* —
+   nothing more that could reveal content. Every server-side rule that guards
+   content is enforced with Row Level Security and triggers, so a malfunction
+   or modification of client behavior can leak presence and topology, never
+   plaintext.
+2. **Fail closed everywhere.** When verification is ambiguous — a bad
+   signature, an unknown key, an unparseable event, a missing one-time prekey —
+   the system refuses the action rather than improvising a downgrade. The one
+   deliberate escape hatch (the legacy v2 envelope fallback for chats where a
+   ratchet session cannot be established) is described precisely in §3.2, and
+   blocked after repeated failures.
+3. **Honest degradation over silent loss.** When a ratchet loses part of its
+   history (a peer is offline longer than the out-of-order window allows), the
+   message renders as an explicit locked placeholder, not as garbage or a
+   crash; a group whose event log cannot be fully verified is flagged
+   "degraded" in both the chat and its info screen.
+4. **Ciphertext on disk.** The local Room database holds ciphertext only;
+   decryption happens per render or on demand. The ratchet snapshots that
+   necessarily sit on disk are wrapped by hardware-keyed Keystore AES.
+5. **The server sees topology, never content.** Notifications are wake pings;
+   name keys are stripped on any third-party hop; image hosts receive opaque
+   PNGs. §2 spells out exactly what metadata remains visible.
 
-- Active ECDH key on `secp256r1` in AndroidKeyStore. Legacy alias
-  `whisper_e2ee_ec_key`, new keys under
-  `whisper_e2ee_ec_key_staged_<millis>_<entropy>`. Rotation is staged:
-  `stageNewKeyPair`, publish, then `commitStagedKeyPair` (pointer is committed
-  before the old key is deleted; history under the old key becomes unreadable,
-  accepted trade-off) or `abortStagedKeyPair`. Startup sweeps orphaned staged
-  aliases while protecting the active one, repairs dangling pointers, runs a
-  3-attempt canary (never resets identity implicitly), and detects unexpected
-  public-key changes.
-- `deriveSharedKey` does ECDH, then HKDF-extract with a zero 32-byte salt
-  (documented deviation from RFC 5869, stable, must not change without a
-  migration), then HKDF-expand with info `whisper-e2ee-v1` to AES-256. No forward
-  secrecy at this layer, as noted in code.
-- `encryptMessage` / `decryptMessage` use AES-GCM with AAD of
-  `whisper-message-v1` plus sender and receiver IDs, so ciphertext replayed into
-  another chat fails authentication. Pre-AAD rows decrypt through a legacy
-  fallback only if created before 2026-09-01 (`LEGACY_AAD_CUTOFF_EPOCH_MS`) while
-  the fallback flag is on (earliest retirement 2026-12-01, gated on fleet
-  counters). Message cap is 8,192 chars. Attachments add `whisper-attachment-v1`
-  to the AAD.
-- Signing identity `whisper_protocol_sign_key` (P-256, SHA256withECDSA) signs
-  prekeys. The signed payload is always `SPK:<kid><publicKey>` built through one
-  shared helper so signer and verifiers cannot drift.
-- Keystore AES wrapper `whisper_protocol_wrap_key` protects X25519 seeds,
-  SPK/OPK private halves, session keys, and ratchet snapshots. Fingerprints are
-  SHA-256 of the public key rendered as eight groups of four hex chars.
+---
 
-### 2.2 X3DH session establishment
+## 2. The privacy model: what the server can and cannot see
 
-`data/whisper/WhisperSessionFactory.kt`:
+This is the section to internalize first. Everything else in the design
+follows from this split.
 
-- Initiator fetches the peer bundle from `whisper-bundle-fetch`, requires the
-  `identity_binding` and a signed SPK, and fails hard on a bad signature (shown
-  as key-change UI, never silent). It generates an ephemeral key and computes
-  three Diffie-Hellman shared secrets (identity-to-SPK, ephemeral-to-identity,
-  ephemeral-to-SPK), plus a fourth with a one-time prekey when one is available.
-  The KDF concatenates them after a 32-byte `0xFF` pad through HKDF-SHA256 with
-  salt of 32 zero bytes and info `WhisperX3DH-v1`, producing a 32-byte session
-  key. The session ID is `s` plus 12 hex chars of SHA-256 of the key, derived
-  identically on both sides. The header `{ik, ek, spkKid, opkKid}` must ride on
-  the next outgoing message.
-- Responder recovers its SPK and OPK private halves by key ID and recomputes the
-  same key. A missing OPK private half is a hard failure (a silent downgrade once
-  caused divergent keys and permanently locked chats).
+**Never visible to the server (and therefore to anyone but the endpoints):**
 
-### 2.3 Double Ratchet
+- Message and image content. All of it is ciphertext until the recipient's
+  device opens it.
+- Private keys. Keystore-bound hardware keys never leave the device; software
+  private halves (session keys, prekey halves, ratchet snapshots) exist on the
+  server only as public halves wrapped locally with a Keystore AES key.
+- Group message text, poll votes, mention targets — group payloads are the
+  same wire frames as 1:1 messages, sealed per member.
+- Story photo bytes and their AES keys — stories carry one sealed descriptor
+  per friend; the database sees opaque descriptor buckets.
 
-`data/whisper/session/WhisperRatchet.kt` implements Signal sections
-1-5. Root KDF uses HKDF with info `WhisperRatchetRoot` (64 bytes split into new
-root and chain key). Chain KDF uses HMAC with `0x01` for the message key and
-`0x02` for the next chain key. Headers carry `{dhPub, pn, n}` and the AAD binds
-header bytes plus session and participant IDs, so routing tampering fails
-authentication. Decrypt is copy-commit (`tryDecryptOnCopy`): the primary path
-derives on a trial copy and commits only after AEAD verifies, so a forged
-header/ciphertext advances no chain and triggers no DH step (snapshot-identical
-before/after, pinned by `forged-header-no-mutation`). Out-of-order keys are
-kept up to `MAX_SKIPPED = 400` with NO eviction: far-future `n` (gap beyond the
-window) or a full window is REJECTED with `WhisperRatchetLostMessage`, leaving
-the existing window intact. Consumed keys are remembered so duplicates still
-open, and the last eight retired remote keys are tracked. Unrecoverable
-messages throw `WhisperRatchetLostMessage`, rendered as an honest locked
-placeholder. A gap-overflow lock (skipped-key gap beyond `MAX_SKIPPED`, which
-can never catch up) additionally triggers a fresh handshake fire-and-forget,
-rate-limited to one attempt per 30s per peer (`ratchet.gapHandshake`,
-`WireProtocol.isGapLoss`/`shouldRefreshOnGap`), with the UI notice "Missed too
-many messages - starting fresh session, ask peer to resend"; other losses keep
-the placeholder and rely on server catch-up. Skipped AND consumed message keys
-persist WITH the session (the whole snapshot is serialized and Keystore-wrapped
-before it touches disk), so offline history and duplicate delivery survive
-restarts. The honest forward-secrecy corollary: a device compromise yields that
-wrapped snapshot, so FS protects keys derived AFTER the snapshot was taken
-(future traffic), not messages whose keys were already on disk at compromise
-time.
+**Visible to the server by design:**
 
-`data/whisper/session/WhisperSessionStore.kt` persists one session
-per peer at `filesDir/whisper_sessions/<sha256(peerId)>.json` plus an in-memory
-map, guarded by a per-peer mutex so two threads never advance one ratchet. It
-also keeps an in-memory-only consecutive establish-failure count per peer
-(incremented on every X3DH establish failure, reset on success or process
-restart — never persisted, so a block can never wedge across reboots). Only
-framing (session ID, pending header, peer identity key) is plaintext; the X3DH
-key and the whole ratchet snapshot are Keystore-wrapped. A corrupt file is
-deleted and treated as no session, which falls back to envelopes plus a fresh
-handshake. Incoming handshakes are accepted on same-session replay or peer
-identity change, otherwise the lower session ID wins so racing initiators
-converge. `WhisperSessionSecretProtector.kt` is the wrap/unwrap seam
-(Keystore in production, fake in tests).
+| Data | Why it must be visible |
+|---|---|
+| User IDs, timestamps, ciphertext, its marker column | Delivery requires routing and ordering |
+| Usernames, display names, avatars, bios | Profiles are the address book |
+| The friend and block graph | Friendship is the access-control primitive ("friends-only messenger") |
+| Who talks to whom (1:1 chat rows; group membership rows) | You cannot route encrypted envelopes without a recipient list |
+| Read receipts, typing signals, last-seen presence | Features, explicitly unconditional |
+| Reaction rows (emoji + user) | Features |
+| Prekey public halves and signatures | Session establishment |
+| Push targets (endpoint + Web Push binding keys) | Delivery of wake pings |
+| Group event log with admin signatures | It is by definition a public-in-group list of membership facts |
+| Story state machine, quota counters, receipt/reaction presence rows | Enforcement and features |
 
-`data/whisper/WireProtocol.kt` holds the pure decisions: negotiated
-version never above what this build speaks, peer floor is the lowest version the
-peer proved, v3 is used for live sessions or fresh contacts unless the peer
-proved it cannot parse v3 or an establish failed within the last 30 seconds,
-key changes are fail-closed (MATCH iff pinned == server; any difference is
-CHANGED unless a ROTv2 rotation cert `ROTv2:<prev>:<new>:<counter>:<ts>`
-chains the new key to the pin — counter must strictly exceed the peer's last
-accepted counter (`WhisperKeyTrustStore` `rotation_counter_*`, default 0) and
-|now-ts| must be within 24h; v1 `sign(prev,new)` certs are still accepted for
-compat — verified peers always need manual re-verify; time windows never
-auto-accept), stale sessions tear down only on in-window fresh rows, and after
-3 consecutive establish failures with no live/proven session the envelope
-fallback blocks ("Handshake repeatedly failed (3x) - blocked insecure fallback,
-retry later", `send.blocked.downgrade_N`) instead of silently downgrading under
-persistent failure. `WhisperProtocolConfig.kt`
- sets live version 2 (envelope fallback), ratchet version 3, ratchet
-enabled.
+The consequence, stated plainly: the operator of the backend knows the social
+graph — who is friends with whom, who is in which group, who is online and
+when. What the operator cannot do is read, forge, or reorder message content:
+ciphertexts are sealed with keys the server never sees, and every
+membership/permission fact that content cryptography relies on is
+independently signed by device keys the server does not control.
 
-### 2.4 Key management
+Three nuances worth calling out:
 
-- `WhisperPrekeyManager.kt`: publishes the identity binding (X25519
-  identity key plus P-256 signer) to `profiles`, rotates the signed prekey
-  weekly, tops the one-time pool to 50 (persisted cap 120). Private halves are
-  Keystore-wrapped and persisted so process death cannot break handshakes.
-- Rotation cert transport (`20261006` SQL: `profiles.rotation_cert` +
-  `rotation_counter`): `WhisperPrekeyManager` publishes the ROTv2 cert
-  (`ROTv2:<prev>:<new>:<counter>:<ts>`, old-key P-256 signed) on rotation;
-  peers fetch it via bundle/profile rows and `rotationCertFor` feeds
-  `classifyKeyChangeStrict` — counter replay and stale timestamps reject.
-  RLS owner-write, authenticated-read.
-- `WhisperKeyTrustStore.kt`: TOFU anchors plus user-verified keys in
-  `EncryptedSharedPreferences` (migrated once from the old plaintext file),
-  durable fsync writes off the main thread, plus the ROTv2 anti-replay counter
-  (`rotation_counter_*` per peer, default 0 — only a cert with a strictly
-  greater counter and a fresh timestamp chains).
-- `WhisperKeyRotationStore.kt`: 30-day rotation interval with up to 6 hours
-  of jitter, single source of truth shared with key-change classification.
-  Rotation trust is cert-based (`sign(prev,new)` verified against the pin),
-  never time-window based; verified safety numbers always re-verify manually.
-- `ProtocolDiagnostics.kt`: process-local ring buffer (last 60 events) plus
-  counters. Never carries content, IDs, or key material. Exported only through
-  the debug diagnostics button.
+- **Usernames reveal pairs.** A 1:1 chat row identifies both participants and
+  their row timestamps; an observer with database access can infer
+  conversation patterns. This is inherent to a friends-only model and is
+  documented rather than hidden.
+- **Push pings split by carrier.** The embedded FCM fallback receives
+  wake pings whose entire payload is RFC 8291-encrypted Web Push (ciphertext
+  only). An external distributor's server (ntfy, NextPush) must see *some*
+  routing body; for those targets, the edge function strips every
+  human-readable field — names of senders, groups, inviters, story posters —
+  and sends IDs and event kinds only. The receiving device rebuilds the
+  human parts from its own local caches. So a third-party distribution server
+  learns "device X was pinged because of event kind Y in entity Z", and
+  nothing about humans or content.
+- **Image hosts see opaque PNGs.** Chat images, group pictures, and stories
+  are re-encoded into encrypted, lossless PNG wrappers, so the hosting
+  service (ImgBB or Supabase Storage) sees picture files with meaningful
+  pixels but no plaintext content beyond what any image viewer would show —
+  which is, by construction, noise pixels from ciphertext.
 
-## 3. Wire formats
+---
 
-| Version | Stored in | Shape |
+## 3. Cryptography
+
+### 3.1 Keys on a device
+
+Whisper has a deliberately split key hierarchy. Two kinds of hardware
+identity live in AndroidKeyStore (keys generated with hardware-backed entropy
+and never exportable in plaintext):
+
+- An **ECDH identity** on the P-256 curve — the long-term "envelope identity"
+  used to seal and open v2 static envelopes. Rotated on a 30-day schedule
+  (with up to 6 hours of jitter, so all devices on an account do not rotate in
+  the same minute), through a staged procedure: a new key is generated, its
+  public half is published, the alias pointer is atomically committed, and
+  only then is the old key destroyed. A startup "canary" self-check verifies
+  that the identity is still usable, so a keystore repair or a restore that
+  damaged it is detected, never silently reset.
+- A **signing identity** (P-256, ECDSA) — the device certificate used to sign
+  prekey material in 1:1 and, in groups, to sign the group event log. This key
+  is per-install: it is regenerated when the app is reinstalled. Groups take
+  that into account with a signer-history mechanism (§11.1) that preserves the
+  validity of history signed by earlier installs of the same account.
+
+Software keys (stored encrypted with the Keystore AES wrapper, and therefore
+disk-resident but hardware-gated) sit on top:
+
+- An **X25519 identity key** — the modern, constant-time curve used by the
+  session protocol.
+- A **signed prekey (SPK)**, rotated weekly, whose public half is signed by
+  the P-256 signing key so nobody can substitute it.
+- A pool of up to **50 one-time prekeys (OPKs)** — freshly generated, signed,
+  published, and consumed one per session setup.
+
+This division is intentional. Hardware keys guard trust and long-term
+identity; software session-level keys cost milliseconds per handshake and gain
+forward secrecy; the wrapper key ensures that nothing on disk is usable
+without the device's secure hardware.
+
+### 3.2 Two generations of the protocol
+
+1:1 content travels in one of two shapes, negotiated per chat:
+
+- **v2 static envelopes** — one JSON object carrying AES-256-GCM ciphertext
+  under a key derived from the sender's *static* ECDH identity and the
+  recipient's pinned identity key (multi-key envelopes allow several
+  candidate keys for rotation tolerance). It is self-healing across key
+  rotation and device reinstall. Its weakness: **no forward secrecy** — the
+  compromise of either identity key exposes all v2 traffic ever sent between
+  the pair; the 30-day rotation cycle bounds that window.
+- **v3 ratchet frames** — Signal-style Double Ratchet messages, with an X3DH
+  handshake on the first frame. Every frame is sealed under a chaotically
+  advancing symmetric chain; compromise of today's file does not open
+  yesterday's traffic.
+
+The negotiation policy lives in a pure, fully-tested decision module
+(`WireProtocol`): new contacts and live ratchet sessions use v3; an
+establishment failure cools down v3 attempts for 30 seconds (so a transiently
+unreachable prekey pool does not loop); a peer whose client provably cannot
+parse v3 is allowed to receive v2 — once. Three consecutive handshake failures
+with no working session block the fallback outright ("Handshake repeatedly
+failed (3x) — blocked insecure fallback"), because a persistent failure is
+indistinguishable from an attack. Proven-v3 peers never silently degrade to
+v2; a broken ratchet session surfaces as an error, and the user is told rather
+than downgraded through a weaker protection state.
+
+A historical "insurance copy" (a v2 backup riding inside a v3 frame for
+unsent-queue robustness) existed in older builds. It is decode-only: modern
+frames never carry it, and rows past a setup cutoff (2026-12-01) that still do
+are rejected rather than interpreted, since a post-cutoff insurance copy can
+only be a replay or forgery.
+
+### 3.3 Establishing a session: X3DH
+
+Session setup follows the X3DH pattern from the Signal specification. The
+initiator fetches the peer's **bundle** (identity binding, signed SPK, and one
+OPK) from the `whisper-bundle-fetch` edge function and verifies it locally: the
+identity binding must match the pinned trust state, and a bad SPK signature is
+a hard, loud failure surfaced as key-change UI — never a silent acceptance. It
+then computes three Diffie-Hellman
+shared secrets (identity→SPK, ephemeral→identity, ephemeral→SPK), plus a
+fourth through the consumed OPK when one is available.
+
+KDF framing: the shared secrets are concatenated after a 32-byte `0xFF` pad
+between each, run through HKDF-SHA256 with a zero salt and info string
+`WhisperX3DH-v1`, yielding a 32-byte root session key and a session ID that
+both sides derive identically (the ID is what binds every later frame to the
+session). The handshake header `{ik, ek, spkKid, opkKid}` rides on the first
+outgoing frame.
+
+The responder recovers its SPK and OPK private halves by key ID and recomputes
+the same key. A missing OPK private half is a hard error — this exact path,
+when mishandled silently in an earlier build, produced divergent keys and
+permanently locked chats, which is why the rule is fail-closed today.
+
+### 3.4 Forward secrecy: the Double Ratchet
+
+After the handshake, every frame advances a Double Ratchet:
+
+- **Root chain** (HKDF, info `WhisperRatchetRoot`) turns a new DH agreement —
+  re-established whenever the peer rotates its ratchet identity — into the
+  next chain root.
+- **Message chain** (HMAC) turns a chain key into a per-message key with
+  separating domain tags (`0x01` for the message key, `0x02` for the next
+  chain key).
+- Headers carry `{dhPub, pn, n}` and the AEAD rules bind the header bytes plus
+  session and participant IDs — a forged or misrouted header is detected as an
+  authentication failure before any key state moves.
+- Decryption is **copy-commit**: state is advanced on a trial copy and only
+  committed after AEAD verification succeeds. A forged header or tampered
+  ciphertext therefore advances no chain and triggers no DH step — the state
+  is snapshot-identical before and after the attempt, and this property is
+  guarded by the security-test suite.
+- **Out-of-order and replay tolerance:** up to 400 skipped (unused) message
+  keys are held per chain with *no eviction* — a message further away than
+  that window fails loudly instead of discarding honest keys under pressure from
+  a flood. Consumed message keys are remembered so that a duplicate delivery
+  re-opens the same frame. Both collections persist with the session snapshot,
+  so offline catch-up and duplicate deliveries survive process death.
+- **What is on disk:** the entire session snapshot (X3DH secret, ratchet
+  state, all skipped and consumed keys) is serialized and wrapped with the
+  Keystore AES wrapper before being written. Honest framing of the
+  forward-secrecy corollary: a compromised device yields that wrapped
+  snapshot, so FS protects keys derived *after* the compromise (future
+  traffic); messages whose keys were already on disk at compromise time are
+  not protected by it.
+
+Unrecoverable gaps raise `WhisperRatchetLostMessage`, rendered as an honest
+locked placeholder: "this message could not be opened because part of the
+session history is missing." If the gap is the one kind that cannot catch up
+(far-future counter beyond the window), the client additionally fires a fresh
+handshake at most once per 30 seconds per peer and tells the user to ask the
+peer to resend; other losses wait for the server to deliver the missing
+frames, and the placeholder survives until then.
+
+### 3.5 Wire formats
+
+| Generation | Stored in | Shape |
 |---|---|---|
-| v1 legacy | `messages.content` + separate `content_iv` | raw base64 ciphertext + IV column |
-| v2 envelope | `messages.content`, `content_iv = NULL` | `{"v":2,"k":[{"kid","iv","ct"}], "ik"?, "x3dh"?}` |
-| v3 ratchet | `messages.content`, `content_iv = "v3"` | `{"v":3,"sid","dh","pn","n","ct", "x3dh"?}` (no `env` on new sends; legacy rows may still carry one for decode) |
+| v3 ratchet frame | `messages.content`, marker `content_iv = "v3"` | `{"v":3,"sid","dh","pn","n","ct", "x3dh"?}` — one JSON per frame; `x3dh` rides only on the handshake frame |
+| v2 envelope | `messages.content`, marker `content_iv = NULL` | `{"v":2,"k":[{"kid","iv","ct"}], "ik"?, "x3dh"?}` — the sealed body is a multi-key envelope over the static identities |
+| v1 (legacy, decode-only) | `messages.content` + a separate `content_iv` column | raw base64 ciphertext with a standalone IV |
 
-`WhisperEnvelope.kt`: key IDs are the first 8 hex chars of
-SHA-256 of the base64 public key. Senders seal only to the pinned key plus keys
-chaining to it via a valid rotation cert (fail-closed — an unproven server key
-is dropped and the send blocks with a key-change warning); receivers try each
-decrypt candidate including the trial-only in-band sender key `ik` (never
-adopted into trust without a cert). The sender public key
-rides in-band as `ik` so delivery does not depend on a fresh profile row. The
-X3DH header rides as a sibling `x3dh` object on the first session message.
-Detection is prefix-based, so v1 and v2 rows coexist.
+Notes that matter for interop reasoning:
 
-`session/WhisperV3Codec.kt`: one JSON object per frame, never a
-multi-key envelope. `x3dh` appears only on the first frame. Legacy `env`
-(decode-only) may still ride on pre-Phase-1A rows for backward compat, but only
-for rows created at or before 2026-12-01 (`LEGACY_ENV_CUTOFF_MS`): post-cutoff
-`env` copies are rejected fail-closed in `tryInsurance` (`v3.insuranceCutoff` —
-a post-cutoff `env` is a replay or a misbehaving peer, since new sends never
-populate it); new sends never populate it, and per-message FS state
-(`fsProtected`, v + sessionProven) drives the lock badge in chat bubbles.
+- A **key ID** is the first 8 hex characters of SHA-256 over the base64 public
+  key — no registry, purely derived.
+- The sender's public key rides **inside** the envelope as `ik` so delivery
+  never depends on the freshness of a profile row; receiving tries every
+  candidate key, plus the in-band key on a probation basis (it is never
+  adopted as trust on its own).
+- Senders seal only to the pinned key plus keys provably chained to it by a
+  rotation certificate — an "unproven new server key" gets dropped, and the
+  send fails loudly with a key-change warning rather than sealing to a key
+  nobody verified.
+- AEAD association data is direction-sensitive: `whisper-message-v1` plus
+  sender ID and receiver ID is bound into v2 ciphertext, so a message stolen
+  from chat A cannot be replayed into chat B. Attachments use
+  `whisper-attachment-v1`. Message size cap is 8,192 characters; clients whose
+  rows predate the AAD era decrypt through a legacy fallback only for rows
+  created before a cutoff date (2026-09-01), and the fallback itself has an
+  administration-controlled retirement timeline.
 
-## 4. Images and avatars
+### 3.6 Key trust: fingerprints, safety numbers, rotation certificates
 
-- `WhisperImageCipherTransport.kt`: ciphertext becomes lossless PNG pixels
-  (RGB payload, opaque alpha to defeat premultiplication, forced sRGB). v2
-  container is magic `WZ1`, version byte 1, CRC32, length, then cipher bytes,
-  with a legacy length-only fallback. Caps: 5 MiB cipher bytes, 8 MP decode
-  (4 MP on low-RAM devices), bounds pre-pass against dimension bombs.
-- `WhisperEncryptedImageHost.kt`: uploads PNG-wrapped bytes through
-  `whisper-image-upload` (bearer token, 15/45 s timeouts, one refresh-and-retry
-  on 401) and returns URL plus ID. Deletes go to Supabase `whisper-avatars`
-  (path-checked to the caller's own folder, rejects `..`) or to
-  `whisper-image-delete` for ImgBB blobs. Downloads require `https://`, strip
-  query and fragment, allowlist `i.ibb.co`, `ibb.co`, and the project's
-  `whisper-avatars` storage path (one redirect followed), cap 7 MiB, and map
-  403/404 to an expired-image signal.
-- `EncryptedBlobHost.kt`: interface (upload/delete/download) decoupling
-  callers (`WhisperRepository`, `WhisperAvatarLoader` hold the interface
-  type) from the ImgBB implementation; R2/B2 is a future impl behind the
-  same seam.
-- `WhisperAvatarCodec.kt`: deterministic per-owner OBFUSCATION (sealed blobs),
-  not encryption — key from `HKDF(SHA-256(ownerPub + ":whisper-avatar-v1"),
-  info "whisper-avatar-key")`, owner key as AAD. Sealed: anyone with your
-  public key can derive the key; the host sees ciphertext only. Hides bytes
-  from third-party hosts only, fails closed on mismatch. Never label "encrypted"
-  in UI/docs; `strings.xml` carries no avatar-encryption claims (verified).
-- `WhisperAvatarLoader.kt`: memory LRU plus in-flight dedupe plus sealed
-  disk cache under `filesDir/whisper_avatars` (SHA-256 of URL, max 64 entries),
-  with PNG and double-wrap healing and a generation guard so sign-out cannot
-  repopulate the cache mid-flight.
+Key verification is the piece a user actually interacts with, so the rules
+matter more than the hashes they live in:
 
-Chat images are downscaled to 1920 px max dimension at JPEG quality 82 before
-sealing (`WhisperChatViewModel.compressImageForUpload`). Avatars are cropped to
-256 px (`WhisperRepository.AVATAR_SIDE_PX`).
+- **Trust anchor:** the first time a peer's identity is seen, it is pinned
+  (trust-on-first-use). From then on, this pinned key is the reference every
+  sealed envelope is validated against.
+- **Safety numbers / fingerprints:** each party's public identity is hashed to
+  an eight-group hex fingerprint, surfaced in the profile tab, verifiable via
+  an in-app QR exchange, and the verification state is stored durably.
+- **Key change is fail-closed.** If the pinned identity and the current
+  published key differ, the chat is read-only with an explicit key-change
+  banner until the user takes action. The one automatic re-acceptance path is
+  a **rotation certificate** — a signed statement `ROTv2:<prev>:<new>:<counter>:<timestamp>`
+  signed by the *old* key, with an anti-replay counter that must strictly
+  increase per peer. Verified-verified peers (users who explicitly compared
+  safety numbers) always re-verify manually even with a valid cert: an
+  automatic acceptance would reduce verification to decoration.
+- The same trust store maintains the counters used for anti-replay, so a
+  spoofed cert replayed weeks later neither verifies nor advances the counter.
 
-## 5. Backend
+### 3.7 Key management: prekeys and rotation
 
-`supabase/migrations/main-whisper-sql.sql` is the canonical single
-baseline, squashing 18 migrations (policy in `whisper-sql-info.md`; header banner
-lists all 17, `20260820`…`20261005_whisper_signup_discover_hardening.sql`).
-Tables:
-`messages` (with `content_hash` replay guard, block-aware insert guard, and a
-sender-authorized delete-for-everyone tombstone exception in the content guard),
-`message_reactions`, `friendships`/`friends` (pending-only transitions,
-block-aware), `profiles` (identity binding, public key, last seen, avatar),
-`whisper_blocks`, `whisper_prekeys` (account, key ID, kind, public key,
-signature), `whisper_push_targets` (user ID primary key: push endpoint,
-provider, Web Push `p256dh`/`auth` keys), `whisper_typing_signals`
-(8-second freshness),
-upload/discover/bypass/destructive/username-check/signup quotas, deleted
-tombstones, image ownership, the legacy-sunset registry
-(`whisper_legacy_disabled`), and the `whisper_public_profiles` view
-(with direct `last_seen_at`). Includes
-the discover, bypass-attempt, quota-refund, username-availability,
-account-purge, signup-gate, and legacy-disable RPCs, owner-scoped
-RLS, realtime publication, and full replica identity. Latest sections
-(per the banner order): `20261003` server enforcement (sender-authorized
-tombstone UPDATE, `whisper_check_username_available()` RPC at
-10 checks/hour/caller, purge coverage), `20261004` presence/typing
-opt-out removal (the `presence_enabled`/`typing_enabled` columns and
-the typing-suppress trigger are dropped — stamps and typing signals are
-unconditional again, same for everyone), and `20261005` signup Sybil
-quota (`whisper_signup_quota` + `whisper_check_signup_allowed()`,
-5 signups/day/IP, advisory-lock serialized, pre-auth executable),
-Discover opt-in (`profiles.hide_from_discover` now defaults to true —
-new rows are hidden from Discover/search until the owner enables it;
-existing rows deliberately NOT backfilled), and the legacy-disable
-registry (`whisper_legacy_disabled` + `whisper_is_legacy_disabled()`,
-service-role only). Idempotent, safe to rerun.
+The prekey manager publishes the identity binding to the server, rotates the
+signed prekey weekly, tops the OPK pool up to 50, and keeps every private half
+Keystore-wrapped on disk, so process death cannot strand half-prepared
+handshakes. Rotations of the static identity publish a rotation certificate,
+and every peer's policy engine consumes those certificates, so rotation is a
+content-verified event rather than a trust gesture. A process-local
+diagnostics buffer (last 60 protocol events, IDs and key material scrubbed)
+aids support diagnostics without logging secrets.
 
-Edge functions in `supabase/functions/whisper-*/index.ts`:
+---
+
+## 4. The life of a message (end-to-end walkthrough)
+
+This section ties the earlier pieces together. Follow one text message from
+Alice's keyboard to Bob's screen.
+
+**On Alice's device:**
+
+1. **Compose.** Alice types. The composer carries a reply target, optional
+   mentions, and message-length safeguards. Nothing has left the device yet.
+2. **Seal.** On send, the repository asks the session module for Bob's
+   session:
+   - If a live v3 session exists, the message is sealed with the Double
+     Ratchet under a mutex (one writer at a time per peer). The ratchet state
+     is *persisted before the frame is released* — an on-send crash can cost
+     delivery, never a usable chain.
+   - If no session exists, the X3DH handshake runs first (fetching Bob's
+     bundle, consuming one OPK if available) and the frame goes out with the
+     handshake header.
+   - If both fail after the block threshold, an attempt to send is explicit:
+     the message is enqueued *as ciphertext* and the engine retries when
+     connectivity or key state heals. The queue never holds plaintext.
+3. **Queue and deliver.** The sealed row enters the local outbox (FIFO,
+   capped) with a client-generated UUID used for idempotent delivery: a
+   retried send cannot double-post. A network-constrained scheduler with
+   exponential backoff drains the queue; the database `INSERT` carries the
+   sender ID, receiver ID, timestamps, and the formatted ciphertext. Once the
+   server acknowledges the insert, the outbox row is settled — no further
+   round-trip is needed for delivery.
+
+**On the server:**
+
+4. The row lands in `messages`. RLS ensures the sender owns the row and Bob
+   (a friend) may select it. A content-hash replay guard refuses identical
+   duplicate rows, and a block check refuses rows between blocked pairs.
+5. An INSERT **database webhook** wakes `whisper-push-send`, which checks
+   Bob's last-seen and his registered push targets. If Bob was seen in the
+   last 60 seconds, it does nothing (the app is already alive); otherwise it
+   sends a wake ping shaped by Bob's target type (§9). The ping carries IDs
+   and event kinds; on FCM-fallback targets the whole ping is additionally
+   RFC 8291-encrypted so even the carrier sees only ciphertext.
+
+**On Bob's device:**
+
+6. **Realtime lane.** If the app is open, a Supabase realtime subscription on
+   the pair's postgres channel delivers the row in milliseconds; the row is
+   decrypted through the unified pipeline (v3 frame → envelope → legacy) and
+   appended to the bubble list. In-band sender keys can heal a rotated trust
+   pin; a fresh non-v3 row from a session peer tears down the stale session.
+7. **Or via wake ping.** If the app was closed, the ping contains nothing
+   displayable — the client renders a generic content-free notification, and
+   the human-readable content only ever appears once the app has opened,
+   synced, and decrypted locally.
+8. **Render.** The Bubble UI displays the decrypted content — or a locked
+   placeholder if the history genuinely cannot catch up. Read receipts,
+   typing, and presence flow back over their own channels; reactions and
+   deletes travel as their own protocol objects.
+
+---
+
+## 5. Images and avatars
+
+All binary media share one philosophy: **seal on-device, host untrusted,
+transport opaque containers.**
+
+**The sealed-image container.** AES-256-GCM ciphertext is not stored as raw
+bytes; it is *re-encoded* into a lossless PNG whose pixels carry the
+ciphertext, with a `WZ1` magic header, version byte, and CRC32 (the pixel
+shape defeats image-compressing hosts that re-encode "real" pictures; forced
+sRGB defeats desktop/mobile premultiplication quirks). Caps: 5 MiB of cipher
+bytes; decode capped at 8 megapixels (4 on low-RAM devices) with a
+pre-decode bounds check against dimension-bomb images. Download side has an
+https-only allowlist (the ImgBB image domains and
+the project's own Storage folder), accepts a single redirect, and maps a
+403/404 to an "expired/unavailable" state rather than treating it as a fault.
+
+**Chat photos.** Compress on-device to a 1920-px long edge at JPEG quality 82
+before sealing. Every recipient — plus a **self-addressed copy** — receives
+their own sealed frame, so the sender keeps access to the photo even after
+the peer rotates keys. Disappearing timers (60 seconds to 180 days) live
+inside the reference payload; the local loader honors expiry and renders the
+expired state without ever decrypting late bytes.
+
+**Group pictures (avatars) and story photos** use a *fresh AES key per
+image*; the key rides inside the admin-signed group event that publishes the
+new picture URL, and inside the sealed Daily-Ups descriptor. Group pictures do
+not use the ratchet at all, so they cannot perturb live sessions.
+
+**Avatars.** Avatars are one deliberate exception, marked honestly: they are
+**obfuscated, not end-to-end encrypted.** The obfuscation key is derived
+from the owner's public identity, so *anyone with the public key* could
+derive it; its job is to hide image bytes from the hosting provider and
+casual third parties, not from holders of the (public) key. On-disk caches
+(either for avatar or chat images) remain encrypted containers with
+generation-scoped guards so a signed-out state cannot keep population artifacts.
+
+---
+
+## 6. The client architecture
+
+### 6.1 The repository layer
+
+`WhisperRepository` is the load-bearing orchestrator: one singleton-facing API
+for send, receive, realtime, friends, profiles, reactions, and deletes. It
+defines the protocol constants (8,192-char cap, image expirations from 60
+seconds to 180 days, a 30-second/1024-ID dedupe window for realtime events,
+up to 6 realtime resubscribes at least 2.5 seconds apart, 8-second typing
+freshness, 256-px avatars, 5-minute profile cache) and delegates:
+
+| File | Role |
+|---|---|
+| `WhisperRepository.kt` | core orchestration: health, send, receive, realtime, deletes, images |
+| `WhisperRepositorySocial.kt` | friend requests, blocks, discover (paged + quota), hide/mute |
+| `WhisperRepositoryProfile.kt` | profile CRUD, avatar hosting, username availability |
+| `WhisperRepositoryGroups.kt` | the entire group plane: event log, sealing, receipts/reactions, offline outbox |
+| `WhisperRepositoryStories.kt` | the Daily Ups plane: publish, sync, receipts, local expiry (§12) |
+| `WireProtocol.kt` | pure negotiation + key-change decisions, no I/O — fully unit-tested |
+
+Send/receive are the heart of §4 and do not need repetition here. Two pieces
+of the *health* machinery are worth naming:
+
+- **Identity republish:** startup verifies that the local identity matches
+  what the server has, repairing a divergent row before anything else writes.
+- **Prekey health:** failed prekey publishes retry later; a terminated OPK
+  pool causes a *loud* envelope fallback path (§3.2), never a silent failure.
+
+### 6.2 What lives on the device
+
+Local state is split across purpose-built stores, all read in full by the app
+(so the picture below is the complete on-device footprint):
+
+| Store | Holds | Notably does NOT hold |
+|---|---|---|
+| Room (messages, local tombstones, outbox) | ciphertext-only messages (latest 500), delete-for-me tombstones, FIFO outbox (cap 100, 200-entry drop ledger) | plaintext before render; no key material |
+| `whisper_sessions/` | one wrapped session snapshot per peer | anything unwappable (Keystore gate) |
+| Key trust store | pinned/verified fingerprints + rotation counters | private halves |
+| Mute/hidden-chats/delete-for-me/undo/preferences stores | UX state with expiries (24h eviction for delete-for-me, 30s undo window, hidden chat auto-return) | — |
+| Access-file backup (`WhisperAubupManager`) | credential-only payload (username, auth type, credential, display name) | session/ratchet state, key material — never |
+| Sealed image disk caches | encrypted containers keyed by URL hash, generation-guarded | plaintext pixels |
+
+The Room outbox and delivery scheduler work together: FIFO delivery of
+ciphertext-only rows, duplicate-delivery detection (a server replay guard),
+exhausted attempts into the drop ledger, and WorkManager-side 15-second
+exponential backoff. The network-constrained immediate scheduler covers the
+common "send while online" path in one step.
+
+### 6.3 Realtime connectivity
+
+Postgres-changes lanes are per chat (`chatpg_<sortedPair>`), plus an inbox
+broadcast lane per user, a per-pair broadcast lane, typing and presence lanes.
+Channels are cached, health-watched, and resubscribed with a backoff ladder;
+an event dedupe window (30 s, max 1024 IDs) neutralizes replays. The realtime
+channel's last-seen pings map presence to online (≤2 min), recent (≤1 h), and
+offline. The per-user inbox lane scopes itself to the owner's rows via RLS
+plus single-column filters, and deliberately does not consume its message
+broadcasts — the Postgres-change lane ordering is authoritative.
+
+---
+
+## 7. Accounts and authentication
+
+Whisper accounts live in the Supabase GoTrue identity service behind two
+facade paths (`WhisperAuthManager`):
+
+**Username + password.** 3–20 lowercase alphanumeric/underscore username,
+10+-character password, display name 1–60. Internally this maps to a virtual
+email `user@u.whisper.local`, so the user-facing concept stays a username even
+though GoTrue requires an email.
+
+**Whisper tokens.** A token is 64 hex characters of freshly generated entropy;
+the GoTrue "email" is SHA-256 of it and the password another hash of it. A
+login is a **single** attempt with the current full-hash derivation. If that
+misses with a credential error (detected structurally, never by bare status
+code), the manager probes each of the three legacy derivations once — before
+failing loudly — and, on a legacy hit, **does not log the legacy session
+in.** It surfaces a "Legacy account found — tap Migrate" banner with a
+30-day window; the migration edge function copies the profile to the
+modern hash-based identity and retires the legacy one through the Auth admin
+API, recording it in the legacy-disable registry so legacy login is
+permanently refused afterward. Without a token (and without the access-file
+or vault backup) an account cannot be logged into again — that is the
+documented trade-off of token-style identities.
+
+Support features: restore from the Toolz password vault or an encrypted
+access file plus whisper code; automatic clipboard expiry for displayed
+tokens; username availability checks; signed-out and full-wipe account
+deletion (re-auth for password accounts, edge deletion with a password
+header and a 5-minute confirmation timestamp, then local wipe of sessions,
+Room, trust store, outbox, avatar caches, and push registration).
+
+---
+
+## 8. The backend
+
+### 8.1 The database
+
+`supabase/migrations/main-whisper-sql.sql` is the single canonical,
+idempotent baseline (safe to re-run; previous migrations are squashed into
+it). The shape:
+
+| Domain | Tables / constructs |
+|---|---|
+| Messaging | `messages` (`content_hash` replay guard, block-aware insert guard, sender-authorized tombstone exception), `message_reactions` |
+| People | `profiles` (identity binding, keys, presence, discoverability), `friendships`/`friends` (pending-only transitions, block-aware), `whisper_blocks` |
+| Keying | `whisper_prekeys` (signed SPK + OPKs), rotation cert columns, identity archive triggers |
+| Presence/signals | `whisper_typing_signals` (8-second freshness), presence stamps on profiles (opt-out switches deliberately removed — these features are unconditional and uniform) |
+| Push | `whisper_push_targets` (endpoint + provider + Web Push binding keys) |
+| Abuse control | upload / discover / bypass / destructive / username-check / signup (5/day/IP) quotas |
+| Lifecycle | delete tombstones, image ownership ledger (unique delete URL per upload), account-purge RPC, legacy-sunset registry |
+| Groups | §11.6 |
+| Stories | §12.3 |
+| Views/RPCs | `whisper_public_profiles` (opt-in visibility only), discover paging, username-availability, signup gate, purge |
+
+All of it is wrapped in **owner-scoped RLS**: a row's owner (and their
+accepted friends, where applicable) is the only identity the policy admits;
+the service role bypasses RLS only for the sweeper/migration/webhook edges.
+Realtime publication exists for exactly the tables the app subscribes to,
+with full replica identity so deletes carry their old rows.
+
+Two server-side behaviors deserve explicit notice:
+
+- **Presence and typing are unconditional.** Earlier opt-out switches were
+  removed deliberately: last-seen stamps and typing signals are now uniform
+  for every account — the same information, visible the same way, with no
+  per-user asymmetries. This is a feature data model, not a hidden switch
+  matrix; if a user is uncomfortable with presence being visible, that is a
+  documented product trade-off (§14).
+- **Signup is IP-budgeted at 5/day/IP** to blunt Sybil-style abuse of the
+  friends-only model, advisory-locked so a burst of parallel signups shares
+  one counter, and enforced pre-auth in the edge function so an unbudgeted
+  request never reaches GoTrue.
+
+### 8.2 Edge functions
+
+Every function runs in `supabase/functions/whisper-*/index.ts` (languages:
+TypeScript/Deno, single-file — deliberately so that all shareable
+verification code is inlined into exactly one deployable JS file per
+function).
 
 | Function | Role |
 |---|---|
-| `whisper-attest` | POST (user JWT) returns the caller's attestation verdict `{ok, mode:"cert"|"integrity"}`; 428 for unofficial builds. Single-file: the `_shared/attest.ts` gate is INLINED (dashboard deploys are single-file), no `_shared` imports. Optional Play Integrity strong path (env-gated, off by default). |
-| `whisper-bundle-fetch` | POST `{account}` returns identity binding, latest signed SPK, and consumes one OPK; also returns `signer_history` — every signer the account ever published (archive trigger; group events verify against this set, which is what makes a reinstall NOT lock out the log's author). Rejects self-bundles, no-store. Attest-gated (inlined `_shared/attest.ts`). |
-| `whisper-bypass-verify` | Constant-time screenshot-bypass password check, 5 failures per 15 minutes locks out with 429. |
-| `whisper-delete-account` | Verifies JWT plus password header plus 5-minute confirmation timestamp, wipes server data before deleting the GoTrue user. |
-| `whisper-image-upload` | Accepts base64 PNG with the ImgBB key held server-side, returns URL and ID. Attest-gated (inlined `_shared/attest.ts`). |
-| `whisper-image-delete` | Deletes an ImgBB blob by ID. |
-| `whisper-push-send` | Database webhook on message, friend, group-table and story-recipient inserts. Skips receivers seen within 60 seconds, then one wake ping per registered target: `provider='webpush'` targets get an RFC 8291-encrypted (aes128gcm) payload with RFC 8292 VAPID auth (names ride inside the ciphertext); `provider='plain'` targets (external distributors) get a NAME-SCRUBBED JSON ping — IDs and event kinds only, every human-readable name key stripped (see §11). Prunes dead endpoints on 404/410. Never logs tokens or payloads. Intentionally NOT attest-gated (webhook auth, never sees client headers). |
-| `whisper-signup-gate` | Pre-auth IP-budgeted signup gate (5/day/IP via `whisper_check_signup_allowed`); server-side IP hash, 429 over quota. Attest-gated (inlined `_shared/attest.ts`). |
-| `whisper-story-sweep` | Service-role hosted-copy sweeper for expired/deleted Daily Ups (leases via SKIP LOCKED, no pg_cron) — see §14. |
-| `whisper-legacy-migrate` | Service-role legacy token migration (copies the profile to the full-hash user, deletes the legacy GoTrue user, records `whisper_legacy_disabled`). |
+| `whisper-attest` | Returns the caller's build-integrity verdict (`{ok, mode: "cert"\|"integrity"}`); 428 for unofficial builds; optional, env-gated Play Integrity strong path |
+| `whisper-bundle-fetch` | Returns a peer's identity binding, latest signed SPK, consumes one OPK, and serves the signer history archive that makes group verification reinstall-proof (§11.1). Rejects self-bundles |
+| `whisper-bypass-verify` | Constant-time check for the screenshot-bypass password; 5 failures per 15 minutes locks out |
+| `whisper-delete-account` | Verifies JWT + password header + confirmation timestamp, wipes all rows, then deletes the GoTrue user |
+| `whisper-image-upload` | Stores a sealed PNG on ImgBB, binds the ownership ledger entry that later resolves deletes; returns URL + opaque ID |
+| `whisper-image-delete` | Deletes an ImgBB blob by ID (ledger-gated) |
+| `whisper-push-send` | The wake-ping fan-out (§9). Database-webhook triggered; scrub path external-distributor targets |
+| `whisper-signup-gate` | Pre-auth IP-budget gate (5/day/IP) |
+| `whisper-story-sweep` | Service-role cleanup of expired/deleted story images, lease-based (SKIP LOCKED), no scheduled-cron dependency |
+| `whisper-legacy-migrate` | One-shot legacy-account migration (copies profile to the full-hash identity, deletes legacy user, records the sunset) |
 
-Anti-mod gate (a speed bump, NOT a trust boundary — read this twice): every
-`whisper-*` edge call carries
-`X-App-Package` / `X-App-Cert-Sha256` / `X-App-VersionCode`
-headers (`data/whisper/PlayIntegrityAttestor.kt` —
-local-only, FOSS-safe: PackageManager signing-cert SHA-256 vs
-`WhisperPinConfig.OFFICIAL_CERT_SHA256`, cached 1h; no Google API,
-no Play Integrity dependency). `supabase/functions/_shared/attest.ts`
-enforces package + cert + version (`MIN_VERSION_CODE`)
-server-side and answers 428 for unofficial builds; it is inlined
-verbatim into `whisper-bundle-fetch` and `whisper-image-upload`
-(single-file dashboard deploys). Honesty, per external review: all of this is
-client-supplied header checking against values an attacker can read from an
-official APK — it stops lazy reuse of the official label, not a determined
-repackager. It is an availability/abuse gate, never an E2EE participant-vetting
-mechanism, and NO security statement in this document depends on it. The only
-cryptographically real path is the OPTIONAL Play Integrity verification
-(`PLAY_INTEGRITY_ENABLED`, off by default — a Google-dependent strong gate that
-cannot ship in the FOSS baseline). `WhisperPinConfig.kt` holds the identity constants
-(`OFFICIAL_PACKAGE=com.frerox.toolz`, `OFFICIAL_CERT_SHA256`
-pinned to the release signing cert (`58A16BCD6E9CEF75706A957B19A15BED19BD47F0B7FDB602364D9EBFC5C369F9` — public value, readable from any official APK; the private key never leaves the release machine), `MIN_VERSION_CODE=17L`, synced with
-`update_manifest.json` `minimumVersionCode`). `update_manifest.json`
-also carries an Ed25519 `signature` over the canonical manifest JSON
-(`UpdateRepository` verifies it fail-closed — the Ed25519 keypair is
-provisioned (pubkey embedded, manifest signed); unverified manifests are
-ignored and the GitHub Release API path is unaffected). Locally, `ui/screens/whisper/WhisperBuildGate.kt`
- gates Whisper access at runtime: release-cert pin,
-`FLAG_DEBUGGABLE` in a non-debug build, and the version floor
-(max of the signature-verified manifest floor and
-`WhisperPinConfig.MIN_VERSION_CODE`) — blocked builds see a full-screen
-card with the reason and the official download URL, so no chat UI is
-reachable.
+`EdgeFunctionClient.kt` is the app's single hardened HTTP lane (Ktor over
+OkHttp; mandatory timeouts; bearer selection per lane; no response-body
+logging). When a build carries no Supabase credentials at all (open-source
+variants self-hosting elsewhere), the DI module plugs in an invalid URL so
+Whisper sits cleanly offline with one log line instead of crashing.
 
-`data/whisper/EdgeFunctionClient.kt` is the single hardened transport
-(Ktor over OkHttp, anonymous/user/explicit-token bearers, mandatory timeouts, no
-body logging). `di/SupabaseModule.kt` falls back to an invalid URL when the
-build has no Supabase credentials, keeping Whisper offline with one log line.
+### 8.3 The build-integrity gate (and what it is *not*)
 
-## 6. Client repository
+Every `whisper-*` edge call carries `X-App-Package` / `X-App-Cert-Sha256` /
+`X-App-VersionCode` headers, checked server-side against pinned constants
+(official package name, the SHA-256 of the release signing certificate, and a
+minimum version code). Unofficial builds get HTTP 428. On-device, a runtime
+gate re-checks the release cert pin, refuses debuggable non-debug builds, and
+enforces a version floor — a blocked build shows a full-screen card with the
+reason and the official download URL, so no chat UI is reachable.
 
-`data/whisper/WhisperRepository.kt` orchestrates everything.
-Constants: 8,192-char message cap, JPEG/PNG/WebP images, disappearing images
-from 60 seconds to 180 days, event dedupe TTL 30 seconds (max 1024 IDs), up to
-6 realtime resubscribes at least 2.5 seconds apart, 8-second typing freshness,
-256 px avatars, 5-minute profile cache.
+Say this twice: **this gate is an availability/abuse speed bump, not a trust
+boundary.** The header values are readable from any official APK, so a
+determined repackager can replay them; nothing in the cryptography treats
+this as an authentication factor, and no security claim in this document
+depends on it. The cryptographically meaningful variant — remote Play
+Integrity attestation — exists but is disabled by default since it would
+make the FOSS baseline dependent on Google services.
 
-- Health: republishes the local key when the server row diverges (repairing a
-  broken identity first), retries prekey publication on failure.
-- Send: tries the ratchet under the per-peer mutex (establishing the session on
-  a miss), otherwise builds a multi-key envelope to every candidate key. The
-  advanced ratchet state is persisted BEFORE the frame leaves the mutex
-  (`sealWithRatchet`: encrypt → clear pending header → `sessionStore.save` —
-  verified, no code change in Phase 1B). Inserts
-  the row with a client UUID (idempotent retries), queues ciphertext-only on
-  failure (never plaintext), and schedules delivery. Images are sealed per
-  recipient plus a self-addressed copy so the sender keeps access after partner
-  rotation, hosted, then referenced by an encrypted `whisper:image:{...}`
-  message.
-- Receive: server rows flow through unified decryption (v3 frame path with
-  handshake gate and insurance fallback, else v2 envelope trying every key ID
-  and the in-band sender key with a 512-entry memo, else legacy v1 with
-  pre-cutoff fallback), then tombstone and image enrichment, then the
-  ciphertext-only Room guard (anything non-encrypted becomes a legacy
-  placeholder), then reaction snapshots. In-band keys can heal trust; a fresh
-  non-v3 row from a session peer tears the stale session down.
-- Realtime: `chatpg_<sortedPair>` postgres lane per chat,
-  `whisper-user-inbox-<userId>` incoming lane (message broadcasts deliberately
-  not consumed there; RLS plus two single-column filters scope it to the
-  user's rows), `chat_<sortedPair>` broadcast lane, `typing_` and `presence_`
-  lanes, cached channels with health watching and resubscribe, dedupe IDs,
-  poll backoff ladder, sorted-pair conversation keys, last-seen pings mapping
-  to online (2 min) / recent (1 h) / offline.
-- Social (`WhisperRepositorySocial.kt`) and profile
-  (`WhisperRepositoryProfile.kt`) splits cover friend requests, blocks
-  (client plus DB enforcement), discover paging with quota, hide/mute, typing
-  broadcast, profile CRUD,
-  username-availability checks (migrating to the quota-guarded RPC),
-  avatar upload/delete under
-  `whisper-avatars/<userId>/`, and QR key verification.
-- Deletes and reactions: delete-for-everyone writes a
-  `[deleted_by_sender:<name>]` tombstone and deletes the hosted image (the
-  server content guard permits only this sender-authorized tombstone write),
-  delete-for-me stays device-local, clear-chat supports 24h/7d/30d/all/custom
-  with 30-second undo, reactions send delta toggles reconciled by authoritative
-  snapshots, and the outbox flushes FIFO (duplicate keys count as delivered,
-  exhausted attempts go to the drop ledger).
+---
 
-Supporting stores, all read in full: access-file backup and restore
-(`WhisperAubupManager`, credential-only `WhisperAccessPayload` — username,
-authType, credential, displayName; ratchet/session state is NEVER included,
-verified Phase 1B, no code change), device-only delete-for-me with 24-hour
-eviction (`WhisperDeletedMessagesStore`), auto-returning hidden chats
-(`WhisperHiddenChatsStore`), mute with expiry (`WhisperMutePreferences`),
-30-second clear-chat undo (`WhisperUndoBufferStore`), grouped deduplicated
-suppressed notifications (`WhisperNotificationManager`), permanent-vs-transient
-error mapping for WorkManager (`WhisperErrorMapper`), sealed PNG disk cache
-(`WhisperImageDiskCache`), the local tombstone entity, message entity with
-numeric sort epoch and protocol inference, message DAO capped at the latest
-500 rows, ciphertext-only Room outbox FIFO capped at 100 oldest-kept with a
-200-entry drop ledger plus legacy prefs migration, and the immediate
-network-constrained delivery scheduler with 15-second exponential backoff.
+## 9. Push notifications
 
-## 7. Auth
+Wake logic is coordinated over **UnifiedPush** with an embedded FCM fallback:
 
-`data/whisper/WhisperAuthManager.kt`:
+- The default **distributor** is auto-picked (no user setup): an installed
+  external one (ntfy, NextPush) wins; otherwise the embedded FCM fallback,
+  which requires Play Services or microG on-device. With neither, the app
+  simply runs without pings — chat still works synchronously, you just do not
+  get poked on a background device.
+- Registers itself into `whisper_push_targets` (endpoint, provider, and — for
+  Web Push targets — the RFC 8291 binding keys). A registration arriving
+  before login is parked locally and flushed on the next launch.
+- The edge function fans out **one wake ping per registered target** —
+  skipping anyone seen within the last 60 seconds — with the following parts:
+  - FCM fallback targets: RFC 8291-**encrypted** payload (binding keys pinned
+    at registration), so the FCM hop itself is opaque.
+  - External distributors: a plaintext but **name-scrubbed** JSON containing
+    only IDs and event kinds. Any human-readable field — senderName,
+    groupName, inviterName, actorName, subjectName, posterName — is stripped
+    server-side. The client reassembles the human bits from its friends and
+    groups caches *before* rendering, so what a user sees is normal full
+    copy but what a third-party distributor sees is structure only.
+- Dead endpoints (404/410) are pruned so a stale phone does not generate push
+  noise forever. The push function never logs tokens or payloads.
 
-- Username path: 3-20 lowercase letters/digits/underscores, password of at least
-  10 chars, display name 1-60 chars, mapped to `user@u.whisper.local` through
-  GoTrue email auth (confirmation off, immediate session, one retry on transient
-  post-signup failure).
-- Token path: 32 random bytes as 64 hex. Email is `SHA-256(token)` at
-  `whisper.toolz.app`, password is `SHA-256("pwd_" + token)`. Login makes a
-  SINGLE attempt with the current full-hash derivation; only when that misses
-  with invalid credentials does it probe the three pre-P1-15 legacy
-  derivations ONCE each (truncated-email + SHA-512/SHA-256 password
-  variants, paced 500 ms apart — `migrateLegacyTokenAccounts`) before
-  failing. A legacy hit does NOT log the legacy session in: it signs the
-  legacy session straight back out and fails with
-  `LegacyMigrationNeededException` (carrying the legacy username/display
-  name), which the UI surfaces as the "Legacy account found — tap Migrate"
-  banner (`st_Whisper_Legacy_Banner`) with a 30-day migration window
-  (`st_Whisper_Legacy_Warning`); the retiring edge function
-  (`whisper-legacy-migrate`) disables the legacy GoTrue identity via the
-  Auth admin API and records it in the `whisper_legacy_disabled` registry.
-  No legacy hit fails closed with "Invalid login credentials". Tokens are
-  normalized (non-hex stripped, lowercased) and validated as 64 hex.
-  Credential errors are detected structurally, not by bare status code.
-- Extras: restore from the Toolz password vault or an encrypted access file
-  plus whisper code, clipboard auto-expiry for displayed tokens, username
-  availability check, sign-out, and account deletion (re-auth for password
-  accounts, edge deletion with password header plus confirmation timestamp,
-  then local wipe of sessions, Room, trust, outbox, avatars, and push
-  registration).
+Incoming pings show a generic, content-free notification keyed by sender and
+message ID for dedupe. Tapping opens the relevant surface; combined with the
+master mute switch and per-chat mutes, the user controls exactly which
+surfaces can wake the phone.
 
-`ui/screens/whisper/WhisperAuthViewModel.kt` drives these flows with
-clipboard expiry, access-file import, and single-attempt token login.
+---
 
-## 8. UI and view models
+## 10. Background work and app wiring
 
-All 19 files under `ui/screens/whisper/`:
+`ToolzApplication` schedules the two periodic workers:
 
-- `WhisperViewModel.kt`: hub state (conversations, friends, single-source
-  incoming requests, outgoing requests, search, recommended and paged discover,
-  mutes, error plus info channel), conversation hide and history clear, block
-  and mute toggles, profile update, avatar upload and delete, access-file
-  creation, 30-day key rotation heartbeat, account deletion and sign-out with
-  full wipe, screenshot-bypass flag, beta and onboarding flags.
-- `WhisperChatViewModel.kt`: per-chat state (message flow capped at 500,
-  friend and block status, typing, online state, last seen, mute, reply target,
-  search matches, key trust, upload state, decrypted image bytes, realtime
-  status, errors) plus an isolated 30-second undo state that does not recompose
-  the list. Operations include message load and paging, optimistic send, image
-  pick/compress/send, encrypted image load through the allowlist and caches,
-  reactions, both delete paths, clear-chat with undo, mute and block, friend
-  actions, QR key verification, drafts, realtime reconnect, and visibility
-  pausing. History remains readable offline.
-- Screens: hub with chats/friends/requests/discover/profile tabs, unread badges,
-  presence dots, key-change banners, and pull-refresh (`WhisperMainScreen`);
-  row cards (`WhisperMainScreenComponents`) and chat-list
-  message merging (`ChatMessageMerger`); full chat with bubbles,
-  reply snippets, reactions, in-message search, typing indicator, online header,
-  mute/block menus, expiring attachments, tombstone and locked placeholders,
-  the per-message FS lock badge (`message.fsProtected` → Lock/LockOpen icon,
-  `WhisperChatScreen`), and the undo bar (`WhisperChatScreen`); self profile
-  with editing, avatar picker, fingerprints, rotation, access file, sign-out,
-  deletion, and a debug diagnostics export (`WhisperProfileTab`); peer profile
-  with QR verification and block/unfriend; friends-only onboarding explainer;
-  username/password plus token auth UI with vault restore, access-file import,
-  token-loss warnings, and the legacy-migration banner; re-auth banner;
-  toasts; FLAG_SECURE window control with a server-gated screenshot bypass;
-  the LOCAL runtime tamper gate (`WhisperBuildGate` — release-cert pin,
-  non-debug `FLAG_DEBUGGABLE`, version floor; blocked
-  builds get a full-screen card with the reason and the official download
-  URL, so no chat UI is reachable); and the bypass verifier mapping Granted/Denied/RateLimited/
-  Unavailable with fail-closed behavior.
+- **Local cleanup** every 24 hours (device-side tombstone expiry and expired
+  local-media pruning).
+- **Outbox delivery** every 15 minutes (plus immediate on-send), with up to
+  five WorkManager attempts per row; permanent rejections end their retry
+  life in the drop ledger, which is the only place "we gave up" is recorded —
+  again, ciphertext-side, never as a leaked message.
 
-## 9. Push, workers, app wiring
+`MainActivity` re-flushes parked push registrations, injects the avatar
+loader, owns the `whisper-auth://login` deep link (the access-file restore
+path), and wires generic share intents. The manifest declares the deep link
+and the UnifiedPush service entry point.
 
-- `push/WhisperPushService.kt` (`PushService`): UnifiedPush registration events
-  upsert into `whisper_push_targets` (user ID primary key: endpoint, provider,
-  Web Push `p256dh`/`auth` keys), parked locally in `whisper_push_pending`
-  when they arrive before login and retried on next launch. Incoming wake
-  pings (`push/WhisperPushNotifier.kt`) show generic content-free
-  notifications keyed by sender and message ID for dedupe. Registration is
-  zero-UX (`push/WhisperPushRegistrar.kt`): the default distributor is
-  auto-picked (external distributor first, else the embedded FCM fallback,
-  which requires Google Play Services or microG on-device); with none
-  available the app runs without pings.
-- `ToolzApplication` schedules local tombstone cleanup every 24 hours and
-  encrypted outbox delivery every 15 minutes, plus immediate delivery on send.
-  Delivery retries transient failures with backoff up to five WorkManager
-  attempts; permanent rejections end as success because the drop ledger already
-  handled them. `MainActivity` retries parked push registrations, injects the
-  avatar loader, and owns the `whisper-auth://login` deep link alongside the
-  generic share intents. The manifest declares that deep link and the
-  UnifiedPush `PUSH_EVENT` service entry point.
+---
 
-## 10. Tests
+## 11. Groups
 
-Handshake math and SessionCrypto vectors (RFC 7748 sections 5.2 and 6.1, the
-`WhisperX3DH-v1` HKDF framing, AES-GCM round trip), ratchet security matrix
-(`WhisperRatchetSecurityTest`: out-of-order, replay, reinstall desync,
-key-change strict, skipped-limit rejected, forged-header-no-mutation
-snapshot-identical), interop/persistence/reinstall gates (`WhisperV3InteropTest` —
-self-interop only: both ends are this code, so a systematic framing bug would
-pass there unnoticed), EXTERNAL reference vectors (`WhisperRefVectorTest`: RFC
-7748 DH pairs in Signal X3DH arrangement, RFC 5869 Appendix A.2 HKDF,
-Python-cross-checked Double-Ratchet root/chain KATs, env-cutoff boundary, and
-the no-`env`-on-new-sends pin — every expected value comes from an RFC or an
-independent implementation, never from this repo's output; external review of
-the full Signal-compat claim is still needed), pure-rule pins for the
-residual-downgrade N-block, ROTv2 counter/timestamp anti-replay, and
-gap-refresh rate-limiting (`WireProtocolTest`),
-chaos with zero wrong plaintexts (`WhisperRatchetChaosTest`, far-future
-rejected, window never evicted), model invariants (names,
-avatars, pending/sent/read ordering, image prefix, tombstones, snake-case
-serialization), chat reaction merging, bypass verdicts (blank and oversize
-inputs), image transport (v2 magic, legacy fallback, CRC rejection, pixel cap),
-and crypto AAD (direction binding, fingerprints, null safety).
+Groups are the most intricate subsystem: a cryptographically authenticated
+membership log, pairwise message fan-out, and a permission model, all inside
+the existing 1:1 trust machinery. Up to 12 members, three roles
+(**owner / admin / member**), and one event log that is the single source of
+membership truth.
 
-Daily Ups adds 20 JVM tests (`WhisperStoryDescriptorTest`: roundtrip, wire
-prefix/field contract, default elision, tamper matrix, delete-capability
-placement; `WhisperDailyUpErrorMapperTest`: the full server-literal vocabulary
-plus config parity with the SQL plane — emoji palette and bounds), and the
-instrumented `WhisperDailyUpPhotoPreprocessorTest`: a geotagged,
-device-labeled JPEG publishes as Ready with ZERO GPS/make/model/datetime EXIF
-on the exact publish bytes, the 1920 long edge only shrinks, alpha sources
-re-encode to PNG, and unsupported/empty/garbage sources are rejected —
-device-only, like all Bitmap work.
+### 11.1 The event log: membership is signed, not stored
 
-## 11. What the server sees
+The server tables reflect membership, but the client *never trusts them*
+directly. Instead, every structural change is an event in
+`whisper_group_events`: create, invite, join, leave, remove, promote, demote,
+make-owner, rename, picture, settings. Each event carries:
 
-Ciphertext and IV markers, sender and receiver IDs, timestamps, profile fields
-(username, display name, bio, avatar URL), the friend and block graph, last-seen
-presence, typing signals, reaction rows, push targets (endpoint + Web Push
-keys), prekey material and
-signatures, and image URLs with IDs. Usernames reveal who talks to whom;
-message and image bytes stay opaque. Group rows additionally reveal group IDs,
-member lists, epochs, per-member frame sizes, a per-row traffic label
-(`msg_kind`: chat/poll/vote/image), the admin-only-send mirror flag, and
-reaction/request/receipt presence rows (frames and bodies themselves stay
-opaque — one v3 frame per member, each sealed through that member's 1:1
-session). The push path splits by distributor: the embedded FCM fallback
-receives RFC 8291-encrypted pings (ciphertext only), while an external
-distributor's server (ntfy/NextPush) sees a name-SCRUBBED wake JSON —
-external review (2026-10) flagged that names on a plain third-party hop let
-that server correlate who-wrote-where, so every human-readable key
-(senderName, groupName, inviterName, actorName, subjectName, posterName) is
-stripped for `provider='plain'` targets; those pings carry IDs and event kinds
-only, and the CLIENT rebuilds each name on-device (friends cache + local group
-table) before rendering the notification. Webpush targets keep the names —
-their payload is RFC 8291-encrypted end-to-end, so the push service sees only
-opaque bytes (invite payloads additionally carry `inviterId` so the client can
-resolve the inviter without a name key). Group push bodies still never carry
-message text. ImgBB sees opaque PNGs with expiry. Passwords travel only to
-GoTrue over TLS at auth and deletion time; the bypass password goes only to the
-edge secret check.
+- a **sequence number** (total order, monotonic per group),
+- an **epoch number** (bumped when membership changes, so every message is
+  pinned to the exact membership it was sealed for),
+- the actor's ID, the payload, and an **admin signature** over the full
+  payload.
 
-Daily Ups rows additionally reveal: poster/recipient/viewer/reaction-author IDs
-and timestamps, the `receipts_enabled` flag, the story state machine
-(published → delete_pending → deleted / cleanup_failed), the poster's 5/UTC-day
-quota counter, and the six-emoji reaction vocabulary. One deliberate, explicit
-exception to "reactions hide when receipts are off": REACTION rows are visible
-to the story poster ALWAYS (even with view receipts off) and to the reaction
-author — the server-side §14 policy keeps a poster's reaction wall working
-without timeline overlap. Sealed descriptors on recipient rows are opaque
-buckets; stories carry NO delete capability column — the
-`whisper_image_ownership` ledger (unique delete_url, written by the upload
-edge) is what resolves the sweep's deletes. The story push ping carries
-poster ID and story ID — and the poster NAME only on encrypted webpush
-targets (plain targets get IDs and resolve the name locally); image- and
-key-free either way (§14 has the payload).
+A client applies events only after verifying the signature AND a certificate
+history. That history is the piece that survives reinstallation: each event
+row publishes the exact signer certificate that made its signature, and the
+database separately archives **every signer cert the account has ever
+published** (an archive trigger on the identity binding). Verification accepts
+a row only when (a) its signature verifies under the row's cert and (b) that
+cert belongs to the actor's published set. So if the group creator reinstalls
+— new device key, same account — the new device can still replay and accept
+the old log its predecessor signed, because both devices' certs are in the
+published set. Never-published certs fail, no matter how well-formed the
+signature.
 
-## 12. File inventory
+Applying is **tolerant**: a bad event does not brick the group — the client
+truncates to the verified prefix and flags the membership "degraded"
+(surfaced by a banner in the chat and info screens; history at or after the
+bad sequence is dropped, never trusted). A bad *create* event fails the whole
+log, so the log opens with certainty. Unknown event types still arrive as
+decode markers that fail closed inside the apply loop, rather than throwing
+before the verification even starts — future clients can extend the log and
+old clients will not be corrupted by it.
 
-> Line counts are deliberately NOT listed here: they rot on every edit (and
-> sections of older revisions disagreed with each other — one reason this list
-> dropped them). Names and roles stay accurate; the working tree is truth.
+### 11.2 Sealing: pairwise fan-out and epochs
 
-Client `data/whisper` (45 files + `session/`): EdgeFunctionClient,
-EncryptedBlobHost, PlayIntegrityAttestor, ProtocolDiagnostics, session/
-(WhisperRatchet, WhisperSessionSecretProtector, WhisperSessionStore,
-WhisperV3Codec), WhisperAubupManager, WhisperAuthManager, WhisperAvatarCodec,
-WhisperAvatarLoader, WhisperCrypto, WhisperDailyUpPhotoPreprocessor,
-WhisperDeletedMessagesStore, WhisperDeliveryScheduler,
-WhisperEncryptedImageHost, WhisperEnvelope, WhisperErrorMapper,
-WhisperGroupEntities, WhisperGroupNotifications, WhisperGroupPolicy,
-WhisperGroupReadStore, WhisperHiddenChatsStore, WhisperImageCipherTransport,
-WhisperImageDiskCache, WhisperImagePreprocess, WhisperKeyRotationStore,
-WhisperKeyTrustStore, WhisperLocalTombstoneEntity, WhisperMessageDao,
-WhisperMessageEntity, WhisperModels, WhisperMutePreferences,
-WhisperNotificationManager, WhisperOutboxEntity, WhisperOutgoingQueue,
-WhisperPinConfig, WhisperPrekeyManager, WhisperProtocolConfig,
-WhisperRepository + WhisperRepositoryGroups / WhisperRepositoryProfile /
-WhisperRepositorySocial / WhisperRepositoryStories, WhisperSessionFactory,
-WhisperStoryLocalEntity, WhisperUndoBufferStore, WireProtocol.
+The sender fans out one inner frame **per member, including self**, sealing
+through the *unmodified 1:1 machinery*: the sender→peer Double Ratchet. The
+self leg does not pass through the edge function (peer bundles refuse
+requests for one's own bundle); a dedicated per-install self-leg anchor spins
+up the sender's own symmetric chain without touching the shared
+infrastructure, so a solo-owner group — or a second account on the same
+device — can send at all. Group ID and epoch ride *inside* the AEAD plaintext,
+so a frame cannot be retargeted from one group to another.
 
-Groups + Daily Ups UI (`ui/screens/whisper`): WhisperGroupsSection,
-WhisperGroupsViewModel, WhisperGroupChatScreen, WhisperGroupChatViewModel,
-WhisperGroupInfoScreen, WhisperGroupInfoViewModel, WhisperDailyUpsScreen,
-WhisperDailyUpsViewModel, WhisperDailyUpsComposeScreen,
-WhisperDailyUpsComposeViewModel. Tests: `WhisperGroupsTest` (43 tests, incl.
-the reinstall-proof signer-set cases), the Daily Ups suite in §10.
+Opening is equally strict: a member opens only the frame addressed to them
+(their own session), and a row only when the reader's membership range covers
+that epoch (`isMemberAt` ranges). Someone who left and rejoined keeps a gap
+for messages in missing epochs and is locked out of them, honestly. Per-leg
+seal failure is fail-closed over the whole fan-out — a partially sealed group
+message is never sent.
 
-Also: `crypto/SessionCrypto`, `push/` (WhisperPushNotifier,
-WhisperPushRegistrar, WhisperPushService), the whisper workers
-(WhisperDeliveryWorker, WhisperLocalCleanupWorker, WhisperClipboardClearWorker),
-ten edge functions (whisper-attest, whisper-bundle-fetch,
-whisper-bypass-verify, whisper-delete-account, whisper-image-delete,
-whisper-image-upload, whisper-legacy-migrate, whisper-push-send with the Daily
-Ups story branch, whisper-signup-gate, whisper-story-sweep) plus the inlined
-`_shared/attest.ts` gate, and the SQL baseline (groups + Daily Ups sections
-included, idempotent re-runnable).
+Offline messages queue their sealed bundles in the local outbox with a
+per-group marker; group pictures queue differently (they re-run from
+persisted original bytes) — both drained by the group flush on hub/chat open,
+while the periodic worker stays 1:1-only (a blind worker replay would burn
+attempts on stale-epoch rows).
 
-## 13. Groups (Phase 2, ships in 1.1.7)
+### 11.3 Membership, invites, and join requests
 
-`WhisperGroupsConfig.ENABLED = true` in dev builds (1.1.7 is unshipped at doc
-time, so only dev devices carry it); every entry point still requires it, and the
-Chats-tab section returns early otherwise. Server-side, every group write
-requires `client_version_code >= 18`, and the ship-day floor flip blocks
-<1.1.7 clients from all of Whisper — so the flag stays true after ship.
-1:1 behavior is unchanged (no shared code path was
-rewritten — four properties were widened private→internal (`outgoingQueue`,
-`deliveryScheduler`, `deletedStore`, `imageDiskCache`), one DAO was added
-to the repository constructor; `VerifiedBundle` fields; the 1:1 outbox
-flush additionally skips `groupId != null` rows, a pure guard).
+Creating a group sends **persistent invites** (there are no auto-adds). An
+invite row can only be removed by joining (the row is trigger-consumed),
+declining (the recipient), or being explicitly canceled (any admin).
+Recipients see the invite card pinned on the Chats tab and can also *read*
+the group's event log while pending (necessary: otherwise joining would
+arrive with no context). Separately, **join requests** live in
+`whisper_group_join_requests`: a friend who knows the group's ID (or scanned
+its QR) can ask to join; the request lands in the admins' join-request inbox,
+where it is approved into a real invite or denied.
 
-Transport (`WhisperRepositoryGroups.kt`): pairwise fan-out, ≤12
-members. The sender seals one inner frame per member (self included, so the
-sender's own lines open through the same path) through the unmodified 1:1
-`sealWithRatchet`; groupId + epoch ride inside the AEAD plaintext
-(`WhisperGroupFrameBody`, version field required on the wire). Each member
-opens only their frame (`openV3Frame` + `openGroupFrameBody`) and rows open
-only for epochs the reader belonged to (`isMemberAt` ranges — re-added
-members keep a gap for missed epochs). Membership derives from verified
-admin-signed events only (`applyEvents`, fail-closed: bad sig, non-admin op,
-last-admin removal, over-cap, stale epoch, unordered log, legacy `add`).
-Signatures use the
-admin's protocol signing key (`signProtocol`/`verifyProtocol`). Since the
-20261019 signer-history section, each event row carries the signer cert
-that made its `admin_sig`, and verification accepts a row cert ONLY if it
-is in the actor's PUBLISHED signer set (`whisper_group_signer_history`
-archive trigger, served by `whisper-bundle-fetch.signer_history`; self
-reads its own archive rows over RLS) — so a creator reinstall (new
-device key in the same account set) replays the log it authored before
-the keystore key was destroyed, and a cert the account never published
-fails closed even over a well-formed signature. Rows without a row cert
-(pre-1.1.7 data only) fall back to legacy current-bundle verification.
-Event payloads are TEXT
-(jsonb would normalize key order and break signature round-trips).
+Group joining follows an event-first rule with a heal path: if the log says
+"joined" but the member row is missing, the row is recreated rather than
+locked out. Reported members are blocked globally and leave the group, and
+the report path pre-checks last-admin boundaries so no one can strand a group
+without an owner.
 
-Resilience (correctness + resilience passes): a poisoned event no longer
-bricks the group — `applyEventsTolerant` truncates to the verified prefix and
-flags the membership `degraded` (chat + info banner it; history at/after
-`badSeq` is dropped, never trusted). A bad CREATE still fails the whole log.
-Sync is incremental off the local event cache (watermark = max cached seq;
-a degraded watermark drops the cache and refetches full). Unknown future event
-types decode to an `UNKNOWN` sentinel that fails closed inside `applyEvents`
-(truncatable) instead of bricking the sync before verification starts. Seq
-races between admins retry with re-sign of seq AND epoch (3 attempts, backoff)
-instead of surfacing 23505. Typing upserts set `updated_at` explicitly (a
-bare PK-conflict upsert would keep the stale stamp). Pagination cursors are
-strictly-older (`lt`, never `lte`). Report pre-checks last-admin BEFORE
-blocking (no stranded block-without-exit). Per-leg seal failures log the
-self-vs-peer split and stay fail-closed (partial fan-out never sends).
-`syncGroups` isolates per-group failures (one bad group never hides the
-healthy ones). Offline sends queue sealed bundles in the Room outbox
-(`groupId` legs, `content_iv = v3-group:<epoch>`; pictures re-run from
-persisted original bytes under `gpic`) drained by `flushGroupOutbox` on hub
-and chat loads; the worker lane stays 1:1-only. Join is event-first with a
-heal path (log-knows-me-but-row-missing restores the row); create tears down
-partial state (orphan rows, phantom invites) on mid-way failure. Transport
-errors map to strings (`mapGroupError`) — raw server English never reaches UI.
+### 11.4 Content: messages, polls, mentions, replies
 
-Server (`main-whisper-sql.sql` groups sections): `whisper_groups` /
-`whisper_group_members` / `whisper_group_events` / `whisper_group_messages` /
-`whisper_group_invites` + fan-out quota `whisper_check_group_send_allowed`
-(600 envelopes/day/sender) + guard triggers (12-cap on members AND
-members+invites, epoch chain, member+epoch+admin-send+quota message guard
-(`admin_only_send` mirrors the signed SETTINGS log via trigger + backfill,
-so modded clients cannot bypass it), invite-gated
-member inserts, consume-on-join, all fail-closed 42501) + last-member disband
-DELETE policy (a live group can never be nuked) + receipt/reaction cleanup on
-message wipe + request-consumed-on-invite. `whisper_group_reactions`
-(one emoji per user per message) and `whisper_group_join_requests`
-(friends ask in, admins approve/deny) are member-RLS presence tables on the
-realtime publication. Message rows carry `msg_kind` (chat/poll/vote/image) so
-votes stay push-silent. The direct-`add` event type
-is retired from the CHECK (legacy rows degrade, never resurrect). Group
-writes require `client_version_code >= 18`.
+Structured content rides inside the sealed frames as `wg1:` JSON — text,
+image references (with optional expiries), reply quotes, poll cards and votes,
+poll closes, and mention lists. Everything stays client-side:
 
-UI: Chats-tab `WhisperGroupsSection` (rows with picture, last-message
-preview, time, unread badge (decrypt-free count, no 20-cap), @You mention chip
-+ persistent invite cards with Join/Decline + withdrawn-invite retraction +
-in-flight guards + create dialog with friend picker, picture picker, and
-invite mode + join-with-ID request dialog), `WhisperGroupChatScreen`
-(in-timeline system bubbles from the verified log, unread separator +
-jump-to-latest FAB (opens at first unread), bubbles with sender names,
-reaction chips + emoji picker, expiring images with save-to-gallery viewer,
-quote replies, poll cards with admin close, @mention highlighting, send +
-photo attach with disappearing-photo picker, mute, refresh, full-history
-search (decrypted page-by-page, server rows are opaque), draft persistence,
-degraded banner, live refresh on events/messages/wipes/reactions, typing line,
-long-press actions, seen-by info, paging), `WhisperGroupInfoScreen`
-(picture header with permission-gated change, description, rename (admin-only:
-server RLS), multi-pick add/invite with search, member search, pending
-invites with admin cancel, inbound join-request inbox with approve/deny,
-promote, demote, make-owner, remove, block-a-member, report (= block + leave,
-last-admin pre-checked), mute with durations, per-group notifications toggle,
-settings card (admin-only send, member-edit flag, description), share sheet
-with QR, shared-photos gallery with save, leave, last-member disband — all
-admin-gated client-side AND server-side where the server can see the rule).
-Group mutes reuse `WhisperMutePreferences` under `group:<id>` (durations
-supported by the store).
+- **Polls** tally on the client (latest vote per sender wins; admin close
+  freezes the tally) — no server table, no server semantics.
+- **@mentions** render as highlighted chips with an on-device picker; the
+  server cannot read them, so they ride message payloads. Badge chips ("you
+  were mentioned") are computed locally from recent decrypted rows.
+- **Replies** freeze a quote snapshot at send time.
+- **Images** follow the same sealed-container pipeline as 1:1 chat (§5),
+  hosted and expiring per the owned reference.
+- **Receipts, reactions, typing, join requests** are member-RLS "presence"
+  tables on the realtime publication — small, high-frequency, absolutely
+  content-free.
 
-Invites: creating a group sends persistent invites (never direct adds).
-Invitees can also READ the event log (SELECT policy mirrors the invite exception — otherwise join fails with "no history"). Invite rows die only by join (trigger-consumed), decline (invitee), or cancel
-(any admin — explicit decision: owner-only was considered, any-admin chosen
-to match WhatsApp-style admin teams). No expiry. Invitees see the card on the
-Chats tab (survives restarts) and get pinged (realtime while open, UnifiedPush
-ping while closed). Owner gets join/leave/decline pings with randomized copy;
-per-group toggle defaults ON for owner/admins (join/leave scope, +declines
-for the owner) and OFF for members; admin-action events
-(remove/promote/demote/rename/picture/settings) ping like message pings
-(mute + open-chat + self only, no toggle), with you-vs-other copy. Message
-pushes carry the sender name (like 1:1). Votes never push (tally refreshes
-silently in open chats). Withdrawn invites retract their notification.
-Push fan-out lives in `whisper-push-send`
-(single-file, dashboard deploys; webhooks must be INSERT-only on the three
-group tables — the in-code op gate is defense-in-depth; NEVER add webhooks on
-receipts/typing/reactions/requests); realtime publication
-now includes all group tables. Push payloads carry names ONLY on encrypted
-webpush targets: plain (ntfy/NextPush) targets are scrubbed to IDs and event
-kinds, and the client rebuilds every name locally (§11 — the review-prompted
-scrub, deployed server-side at ship).
+### 11.5 Live updates
 
-Group picture: EXIF-strip + 1920 + JPEG82 (shared preprocess, 1:1 untouched),
-fresh AES-256-GCM key per picture, PNG-wrapped for the image host, uploaded
-via `EncryptedBlobHost`, key sealed per member into a signed `picture` event
-(`{"url","frames"}` — no IV field; the nonce rides inside the sealed bytes).
-URL is server-visible metadata; bytes + key stay opaque. Picture changes do
-not bump the epoch; removed members keep bytes they already fetched (can't
-un-send) but never get new keys.
+Realtime rides the same publication as everything else, but the open chat
+does something smarter than "refetch on ping":
 
-Report/block: info-screen Block is 1:1-level (does not remove the member from
-the group nor stop their lines); Report = block everywhere + leave the group
-(confirmed, no server moderator queue — documented as the v1 semantic).
+- **A message INSERT carries its sealed row.** The open chat decrypts that
+  one row locally (one ratchet open through the exact same helper the bulk
+  reads use) and merges it into the timeline. No outbox flush, no re-sync, no
+  full-history scan — a live relay rather than a reload.
+- **Reaction changes** arrive as typed events (applied / removed) and are
+  merged into the chip map in place, with replace semantics matching the
+  server's one-emoji-per-user rule; a rare unresolvable delete falls back to
+  a bulk refetch. Receipt events ("seen by") merge in place as they arrive.
+- **Fallbacks are bounded.** The belt-and-suspenders lane for send/vote echo
+  misses is a 16-row head refresh, never a full reload. Membership/log
+  changes and wipes still full-reload, because those *are* structural.
+- **Name resolution rides a TTL cache** (60 s) so the message path never pays
+  two server round trips to relearn what has not changed.
 
-Social slice: frames carry `wg1:<json>` structured bodies (text, image ref
-with optional expiry, reply quote, poll, vote, poll-close, mentions) with
-legacy bare-text fallback; polls tally client-side (latest vote per sender
-wins, admin close freezes the tally, no server change); @mentions render
-highlighted with an @-picker at compose time (no special push — the server
-cannot see mentions; unread @You chips ride the list rows); replies freeze a
-quote snapshot (best-effort scroll to the quoted client_id); `demote` /
-`settings` (admin-only send + member-edit flag + description) are signed
-events in the same log (settings bump no epoch); picture edits follow the
-member-edit flag (rename stays admin-only: server RLS); ownership moves via
-promote + `created_by` update; receipts (`whisper_group_receipts`), reactions
-(`whisper_group_reactions`, one emoji per user per message, toggle to remove),
-typing (`whisper_group_typing`), and join requests
-(`whisper_group_join_requests`, friends ask in via ID/QR, admins approve into
-an invite or deny) are member-RLS presence tables on the realtime
-publication. Admin-only groups reject member sends fail-closed client AND
-server side. Chat photos support disappearing timers (1m/1h/1d, same bounds
-as 1:1); expired images render expired and never decrypt.
+### 11.6 Server rules
 
-Dashboard checklist (ship day): (1) four INSERT-only webhooks
-(whisper_group_invites, whisper_group_messages, whisper_group_events,
-whisper_story_recipients) →
-whisper-push-send, and NO webhooks on whisper_group_receipts /
-whisper_group_typing / whisper_group_reactions / whisper_group_join_requests /
-whisper_story_views / whisper_story_reactions;
-(2) redeploy whisper-push-send — REQUIRED this ship even without new story
-machinery: the plain-target name scrub, the `inviterId` invite field, and the
-story branch all live in that function, and an outdated deploy ships name
-leaks to external distributors by omission; ALSO redeploy
-whisper-bundle-fetch — REQUIRED, its new `signer_history` field is what makes
-group verification reinstall-proof (an outdated deploy serves empty history
-and the OLD current-cert-only behavior returns silently);
-deploy
-whisper-story-sweep; (3) re-run the full
-main-whisper-sql.sql (idempotent, additive — this ship it adds
-whisper_group_signer_history(+ archiving trigger + backfill) and
-whisper_group_events.signer_cert); (4) publish 1.1.7 APKs + signed
-manifest with floor 18; (5) set edge MIN_VERSION_CODE=18; (6) run the
-post-deploy smoke (supabase/POST_DEPLOY_SMOKE.md) — SQL trigger health,
-bundle-fetch `signer_history`, and the plain-push name-scrub, end to
-end; do NOT proceed with the rollout on a failed part.
+`whisper_groups`, `whisper_group_members`, `whisper_group_events`,
+`whisper_group_messages`, `whisper_group_invites`, plus presence tables…
+guarded by triggers that make the client's rules server-enforced:
 
-v1 limits (documented, not bugs): invite mode is fixed at creation;
-QR/ID join creates a REQUEST (admins approve into an invite — no token-link
-auto-join); voice notes, video, docs, and forwards need new pipelines/tables
-(neither 1:1 nor groups have them); message editing is absent; the group
-outbox drains on app open (the worker lane stays 1:1-only — a blind worker
-replay would burn attempts on stale-epoch rows); a queued vote replays its own
-kind now: the outbox row persists `groupMsgKind` (drain sends kind=vote, no
-misaddressed push; historic rows predating the column fall back to the default
-kind, the old behavior); unread @You detection covers the last 20
-decrypted rows (counts are exact); search decrypts up to 500 rows per query.
+- the 12-member cap (on both members and members+pending invites),
+- a chained epoch rule (you cannot renumber membership history),
+- message guard: sender must be a current member of the current epoch, and
+  admin-only-send mirrored faithfully from the signed log (trigger + backfill
+  — a modified client cannot bypass what it *cannot sign*),
+- fan-out **quota: 600 sealed envelopes per UTC day per sender** (~50
+  messages in a full 12-member group; proportionally more in smaller ones —
+  see §14, item 2),
+- invite-gated member inserts with consume-on-join,
+- last-member disband protection (a live group can never be deleted by
+  accident),
+- cleanup of receipts/reactions when a message is wiped,
+- direct-add events accepted only in historic rows (legacy degrade, never
+  resurrect).
 
-## 14. Daily Ups (stories, ships in the same 1.1.7)
+Server-side group writes additionally require a minimum client version code
+(the release floor), so old clients that predate signatures cannot inject.
 
-24-hour photo "ups" posted to all friends at once, taxed 5 per UTC day and bound
-to the friend graph AT POST TIME. Entry: `WhisperDailyUpsConfig.ENABLED`
-(compile-time flag in `WhisperRepositoryStories`, the same gating pattern as
-§13; the Chats entry row and both nav routes no-op while off and stay true
-after ship because the server floor is 18).
+### 11.7 In the app
 
-### Photo pipeline (`WhisperDailyUpPhotoPreprocessor`)
+**Entry.** The Chats tab's Groups section lists rows with picture,
+time-stamped last-message preview, unread badge, an "@You" mention chip, and
+pinned invite cards. A stories bar above it shows self + friend "Daily Ups"
+rings (§12.4). Creation offers friend picking, an optional picture, and an
+invite-mode choice that is fixed at creation (see the permissions edge note
+below).
 
-`preprocessDailyUpPhoto(context, source, mime)` produces uploadable ciphertext
-or rejects — never falls back to raw input:
+**Chat screen.** Mirrors the 1:1 experience deliberately — same composer
+shape, send-button anatomy, and bubble geometry (fixed per-side corner
+shapes, uniform padding, width-capped bubbles with sender names), because the
+model here is "a 1:1 you can multi-party". On top of that sit
+group-exclusive pieces: in-timeline **system bubbles** generated from verified
+log events, the unread separator with jump-to-latest FAB, reaction chips with
+an emoji picker, long-press actions (quote, react, poll vote, close for
+admins), full-history search (decrypts page-by-page; the server never sees a
+plaintext lookup), draft persistence, and a degraded-history banner when the
+log could not be fully verified. Seen-by info is available per message.
 
--accepts jpeg/png/webp sources ≤ 12 MiB (else `INPUT_TOO_LARGE`/`UNSUPPORTED`);
--decodes capped at 8 MP (4 MP on low-RAM devices via `ActivityManager`);
--scales the long edge to 1920, only ever DOWN, aspect preserved;
--re-encodes JPEG q82 (alpha sources → lossless PNG), capping plain bytes at
-`WhisperImageCipherTransport.MAX_CIPHER_BYTES − 16` (5 MiB; `OUTPUT_TOO_LARGE`);
--EXIF/GPS strip verified, not assumed: the re-encode drops metadata by
-construction AND the output is reopened and audited against
-`DAILY_UP_EXIF_TAGS` (make/model/dates/GPS lat-lon-alt-timestamps) — any
-survivor is `METADATA_REMAINS` and the headline is never published;
--seals with `newGroupPictureSeal` (`nonce || ciphertext`), same shape as group
-pictures — the descriptor therefore needs NO IV field.
+**Info screen.** The power surface: picture header with permission-gated
+edit, description, rename (admin; enforced server-side too), add/invite with
+multi-select and search, pending-invite management, join-request inbox
+(approve → real invite), promote/demote/make-owner/remove/block/report, mute
+with durations, per-group notification toggle, the settings card
+(admin-only-send, member-edit, description), share sheet with QR of the group
+ID, a shared-photos gallery, leave, and owner-flow disband. Actions are
+admin-gated client-side AND server-side where the server can see the rule
+(which is nearly everywhere structural).
 
-The instrumented test proves the privacy promise on the exact publish bytes.
+**Permissions v1 edge accepted:** invite mode is fixed at creation; QR/ID
+join makes a *request*, not a token-link auto-join; message editing does not
+exist (in 1:1 either); voice/video/documents require pipelines that neither
+surface has yet. The group outbox drains on open rather than by worker, and
+search decrypts up to 500 rows per query — documented costs, not hidden
+ones.
 
-### Distribution: descriptors, not ratchet frames
+---
 
-A story is ONE photo + ONE fresh AES-256-GCM key. The descriptor
-`whisper:story:{v,u,k,x,r,a}` — v (version gate; decode rejects explicit
-non-1), u (host URL), k (32-byte base64 AES key, exactly 44 chars or tampered),
-x (server expiry, reject ≤ 0), r (receipts on; omitted = off), a (ImgBB delete
-capability — ONLY in the poster's self-sealed copy) — carries NO story id by
-design: ids always come from rows (server truth). One descriptor is sealed per
-friend with `sealStaticEnvelope` (V2 static envelope over the pinned 1:1 key —
-NEVER Double-Ratchet frames, so posts never touch protocol state;
-`openStaticEnvelope` is likewise stateless). The poster's own copy is
-self-sealed (`crypto.encryptMessage(json, myPub, me, me)` +
-`WhisperEnvelope.encode(..., myPub)`; in-band key opens because there is no
-self pin) and lives in Room with state `own`; viewer rows carry state
-`active` and no capability. The audience snaps at publish: whisper_story_publish
-validates every recipient against the CURRENT accepted-friend graph AND the
-block ledger, so friends added later have no row to read and blocks stop
-further distribution server-side.
+## 12. Daily Ups
 
-### Server plane (`20261018_whisper_stories_actions.sql` in main-whisper-sql.sql)
+Daily Ups are 24-hour **photo stories** posted to all friends at once — never
+addressed to one person, capped at 5 per poster per UTC day, and bound to the
+friend graph **at publish time** (friends added later literally have no row to
+read; the server validates the audience against the live friend graph and the
+block ledger).
 
-Tables: `whisper_stories` (poster, per-poster-unique `client_id`, `host_url`,
-`host_object_id`, `receipts_enabled`, state
-published → delete_pending → deleted / cleanup_failed; the
-`whisper_story_enforce_server_expiry` trigger rewrites created_at/expires_at on
-every insert, making the 24-hour lifetime an invariant no caller can bend),
-`whisper_story_recipients` (PK story+recipient, opaque sealed descriptor
-≤ 32768 = `DESCRIPTOR_MAX_CHARS`), `whisper_story_views`,
-`whisper_story_reactions` (PK story+user, one toggleable emoji from the
-whitelist the client renders verbatim),
-`whisper_story_cleanup` (lease registry), `whisper_story_publish_quota`
-(poster+UTC-day, ≤ 5 enforced on the row UPDATE itself).
+### 12.1 What a story is
 
-Write routes (all version-gated ≥ `MIN_VERSION_CODE` 18 = the ship floor):
-`whisper_story_publish(client_id, host_url, host_object_id, receipts_enabled,
-recipients jsonb, version)` — idempotent on client_id (a retry returns the live
-story without re-counting quota or re-shaping the audience), atomic
-(story + audience + quota in ONE transaction), bounded housekeeping inside each
-publish (quota-row prune, cleanup backfill for expired stories). No
-`delete_url` column exists on stories BY DESIGN: `host_object_id` is a ledger
-key the sweep resolves through `whisper_image_ownership` (unique delete_url,
-written by whisper-image-upload at upload time — the client never holds the raw
-ImgBB object id), so a forged row can only point at a capability Supabase
-itself recorded. `whisper_story_view` is receipts-gated and idempotent;
-`whisper_story_react` is receipts-INDEPENDENT (poster sees reactions even when
-view receipts are off — §11), enforces the whitelist + audience-only; 
-`whisper_story_delete` flips state (RLS hides the story the same instant) and
-re-queues hosting cleanup. Read helpers `whisper_story_can_read /
-_read_receipts / _is_poster`; RLS mirrors them on every SELECT (state + expiry +
-recipient snapshot + block edges re-checked per query).
+One photo + one fresh AES-256-GCM key. The photo is:
+preprocessed, sealed (`nonce‖ciphertext` framing), and uploaded once to the
+media host; the host returns a URL. The **descriptor**
+`whisper:story:{v,u,k,x,r,a}` — version, host URL, base64 AES key, server
+expiry, receipts-on flag, and the delete capability — is then sealed **per
+friend** with the static-envelope machinery (the same v2 envelope from §3.2,
+but statelessly: stories must never consume or perturb ratchet state, which is
+precisely why they do not use frames). The poster's own copy is self-sealed
+through the same machinery and carries the `a` capability, since a story's
+owner retains delete rights no one else does.
 
-### Client plane (`WhisperRepositoryStories`, Room v64)
+Ids are deliberately absent from the descriptor: identifiers always come from
+server rows, which are the source of truth (so a client cannot hallucinate a
+story by forging its own id story).
 
-`publishDailyUp`: preprocess → seal → upload (EncryptedBlobHost;
-whisper-image-upload stamps the ownership ledger and asks ImgBB for
-`expiration=86400` as defense-in-depth behind the server lifecycle) → one
-sealed descriptor leg per friend → `whisper_story_publish` → self-sealed own
-row → opportunistic `kickDailyUpSweep` ping. Fail-closed: every step's failure
-maps through `mapDailyUpError` (vocabulary pinned by tests) and NOTHING partial
-is ever exposed — a failure before the RPC leaves zero server truth. 
-`syncDailyUps` refreshes via an embedded inner-join select on
-whisper_story_recipients (RLS-invisible rows drop out of the join outright) and
-prunes `deleteDue(nowMs, 50)` locally. Local expiry pruning runs without
-network. `dailyUpsPostedToday` reads the quota row as an advisory counter —
-the authoritative cap is the publish transaction. `deleteDailyUp` reads the
-own copy BEFORE the server RPC (torn order would orphan the ack), then
-best-effort host delete + sweep ping: the state flip already hides everything,
-and whisper-story-sweep (service-role lease with SKIP LOCKED, 10-min leases,
-≤ 20 attempts with backoff, retry-classes) converges the hosted copy so no
-pg_cron is needed.
+### 12.2 The photo pipeline
 
-### UI
+Strictly fail-closed, rejecting rather than degrading:
 
-Chats entry row → hub (`WhisperDailyUpsScreen`): my-strip with
-`+ New up` ring and Mine stats, friends' rings rendered as INITIALS (the hub
-NEVER decrypts media — identity chips stay business-agnostic), quota chip,
-empty state, in-place full-screen viewer overlay (no third nav route):
-HorizontalPager, 7-second auto-advance paused while pressed, progress segments,
-decrypt-on-demand images (2 MP display budget), one snackbar failure surface
-across hub + viewer, `SecureWindow()` on both surfaces. Reactions are one
-toggleable emoji per viewer per story. Mine shows receipts + reaction counts on
-demand (`fetchDailyUpReceipts` — names resolved client-side).
+- jpeg/png/webp sources up to 12 MiB;
+- decode capped at 8 MP (4 MP on low-RAM devices), long edge scaled down to
+  1920 px (aspect preserved, never upscaled);
+- re-encoded to JPEG q82 (alpha sources become lossless PNG), with a plain
+  byte cap before sealing;
+- **EXIF/GPS stripping is verified, not assumed.** After re-encode, the output
+  is *reopened and audited* for a fixed list of tags (make, model, dates,
+  GPS latitude/longitude/altitude/timestamps). Any surviving tag fails the
+  publish (`METADATA_REMAINS`). An instrumented test proves this on the exact
+  publish bytes with a geotagged, device-labeled source photo.
 
-Compose (`WhisperDailyUpsComposeScreen`): photo picker with a
-12 MiB bounded read mirroring the preprocessor, in-memory draft + downsampled
-preview (bytes never touch disk before the pipeline), receipts switch,
-audience = all current friends with per-friend exclusion checkboxes (summary
-text mirrors the final audience size), quota-aware share button with in-button
-progress; retries keep the draft; success returns to the hub.
+### 12.3 The server plane
 
-### Push
+Rows: `whisper_stories` (poster, per-poster-unique `client_id`, host URL, an
+opaque ledger key, receipts flag, state machine.published → delete_pending →
+deleted / cleanup_failed, a trigger rewriting `expires_at` on insert so the
+24-hour lifetime cannot be bent by any caller), `whisper_story_recipients`
+(story + recipient, opaque sealed descriptor), `whisper_story_views`,
+`whisper_story_reactions` (story + user, one toggleable emoji from a fixed
+six-emoji whitelist rendered verbatim by the client), `whisper_story_cleanup`
+(leases), and `whisper_story_publish_quota` (poster + UTC day, ≤5, enforced
+on the row update itself).
 
-`whisper-push-send` grew a story branch: INSERT on whisper_story_recipients
-(fourth INSERT-only webhook) → looks up the story poster + state → refuses to
-wake devices for anything no longer `published` → data-only ping
-`{whisper_story_new:"true", posterId, posterName, storyId}` — content-free
-media-wise; per §11, the poster NAME only rides encrypted webpush targets —
-plain targets get the `plainTargetBody()` scrub (IDs only; the client resolves
-the name from the friend cache). The client renders the ping in
-`WhisperPushNotifier` → `WhisperNotificationManager.showDailyUpNotification`:
-deduplicated per story (a re-fanout can't double-post), silenced by the Master
-Whisper toggle AND the poster's chat mute, tapping opens the Daily Ups hub via
-the `OPEN_WHISPER_DAILY_UPS` intent; reaction/view events deliberately have NO
-webhook (receipts are read in-app only).
+Actions are all **version-gated** to the release floor:
+`whisper_story_publish` (atomic: story + audience + quota in one transaction;
+idempotent on `client_id`, so a retry neither re-charges quota nor reshapes
+the audience; bounded housekeeping in-transaction); `whisper_story_view`
+(receipts-gated, idempotent); `whisper_story_react`
+(receipts-**independent** — deliberately, so the poster's reaction wall works
+even when their own viewing receipts are off; whitelist- and audience-checked);
+`whisper_story_delete` (poster-only; state flip; RLS hides the instant flip);
+read helpers + RLS mirrors. There is deliberately **no raw delete URL** on
+story rows: the ledger key resolves through the image-ownership ledger, so
+even a forged story row can only point at a hosting capability Supabase
+itself recorded.
 
-### Honesty notes
+### 12.4 Viewing, receipts, reactions
 
-The client-side capability `a` travels in the descriptor and Room rows; a viewer
-who somehow obtained a descriptor with `a` still cannot delete —
-whisper_story_delete authorizes posters only, and the sweep only talks to the
-ownership ledger. Quota is server-enforced; a stale local read can neither
-permit nor deny a publish. Received ups keep their sealed bytes; unlike 1:1
-messages there is no "keep forever" tier — 24 hours is the whole contract, and
-deleted/expired stories prune locally even when the sweep is unreachable.
+The **hub** shows my ring (with a `+ New up` entry), friends' rings rendered
+as initials (the hub never decrypts media — identity chips stay
+business-agnostic until the viewer is opened), a quota chip, and the
+empty state. Opening a ring launches the in-place **viewer overlay**:
+horizontal paging, 7-second auto-advance paused under the user's finger,
+progress segments, decrypt-on-demand images, and one failure snackbar across
+hub + viewer. **View receipts (optional per poster)**, reactions, and who
+deleted/expired what are all resolved server-side (RLS-visible only for
+rows the viewer genuinely may see — the poster sees reaction counts and
+names resolved on-device on demand).
 
-## 15. Known limitations and calibration notes (external review, 2026-10)
+### 12.5 Publishing
 
-Verified against code after the October 2026 external review, so the next
-reviewer doesn't rediscover them. Where a number below is a choice, it is a
-calibration knob with an owner (the operator), not a silent default.
+The compose screen opens with the CTA on the hub (and the entry row, and the
+stories bar in the groups section): photo pick (bounded 12-MiB read mirroring
+the pipeline), an in-memory draft + downsampled preview (bytes never touch
+disk before the pipeline runs), receipts switch, audience = **all current
+friends minus explicit exclusions** (a summary line always shows the final
+audience size), and a quota-aware share button that explains itself when
+disabled (no photo, quota out). Upload chain: preprocess → seal → host →
+one sealed leg per friend → publish RPC → self-sealed own row → opportunistic
+sweep kick. Any failure up-chain maps to a fixed vocabulary of errors; a
+failure *before* the publish RPC leaves zero server truth (nothing partial
+ever exists). Retries keep the draft.
 
-1. **Ratchet gap-loss residual.** All far-future/forged-header
-   `WhisperRatchet` rejects fire BEFORE any state mutation (pinned:
-   `WhisperRatchetSecurityTest` — skipped-limit, forged-header-no-mutation,
-   key-change-fail-closed), so a forged/missing frame never costs honest
-   frames. Residual: a malicious server can still force a GAP-HANDSHAKE
-   re-connection at most once per 30 s per peer (`shouldRefreshOnGap`
-   cooldown) — a bounded availability annoyance, not a confidentiality or
-   message-loss path. Accepted.
-2. **Groups fan-out budget (600 envelopes/day/sender) — working calibration,
-   not a limitation.** The SQL limiter charges each group message its fan-out
-   size (members count) and stops a sender at 600 envelopes per UTC day —
-   ~50 messages/day in a full 12-member group, proportionally more in small
-   ones. That is deliberately generous chat-scale volume; what it curbs is the
-   abnormal case (scripted 1→N spam reshaping everyone's server row), so
-   1:1 messaging stays unlimited while groups stay honest. The refusal copy
-   tells the user it is a DAILY limit that resets tomorrow
-   (`st_Whisper_Groups_ErrQuota`). If a real group ever rubs against it, the
-   change is one SQL value (`v_limit` in
-   `whisper_check_group_send_allowed`, advisory-locked, 7-day retention) plus
-   the mirror constant — cheap and owned by the operator.
-3. **Signup gate (5 accounts/day/IP) — appropriate for the audience.** A
-   friends-only messenger has no anonymous-account use case, and this is the
-   only server-side Sybil brake. One real-world wrinkle to watch: carrier
-   CGNAT (common for mobile-heavy audiences, e.g. Morocco) shares IPs across
-   many users, so a handful of legit classmates on one carrier tower share
-   slots. Recommended during the beta: watch 429 counts in the
-   whisper-signup-gate function logs — a cluster of denials at one /24 is the
-   signal to allow-list that carrier range (function-side list, no SQL
-   change). Nothing to change before ship.
-4. **Group-event signing keys and reinstalls — RESOLVED in 1.1.7
-   (account-owned signer history).** The per-install ECDSA cert (Android
-   Keystore; regenerated only on reinstall, the 30-day heartbeat rotates
-   only the 1:1 envelope identity) used to make a group creator's OWN log
-   unverifiable to their replacement device: verification checked every
-   historical event against the actor's CURRENT published cert. Now each
-   event row carries the signer cert that made its signature
-   (`whisper_group_events.signer_cert`, written at publish time after a
-   self-check against that same published key), and an archive trigger on
-   `profiles.identity_binding` records every signer the account ever
-   published (`whisper_group_signer_history`; served via
-   `whisper-bundle-fetch` as `signer_history`). The publish-time gate
-   (third-pass review) runs BEFORE any insert: it compares the local
-   signer against the prekey manager's record of the last successfully
-   published binding (`publishedSignerCert`, written to prefs only after
-   the profiles UPDATE returns), best-effort re-publishes on mismatch
-   (one `ensurePublished`, ROTv2-chained), and fails closed with a
-   user-actionable error while still unpublished — so a keystore repair
-   or a crashed rotation can never sign an event with an unpublished
-   cert (every verifier, the author on resync included, would reject
-   it). A cheap in-loop guard re-checks mid-retry signer stability.
-   Verification rule:
-   signature under the ROW cert, and the row cert must belong to the
-   actor's published set — so the new device (new key in the same set)
-   replays the full history the OLD device signed. Fail-closed edges:
-   a row cert the account never published is rejected even if its
-   signature would verify; rows without a signer cert (pre-1.1.7 data
-   only — groups were not publicly shipped before this release) fall back
-   to legacy current-cert-only; a failed own-history read degrades to
-   current-only and can never ADD an unpublished key. Honest residual:
-   the set-served trust boundary is the bundle endpoint's, same as 1:1 —
-   an operator-level compromise can present its own keys (true before
-   this change too); signatures over the full event body still prevent
-   content forgeries without private keys. Pinned by
-   `WhisperGroupsTest` (row cert from published history verifies after
-   reinstall; foreign row cert fails closed).
-   Backfill boundary (review-closed): the archive trigger starts at
-   this ship — a creator who ALREADY reinstalled before 1.1.7 has lost
-   the old install's signer everywhere beyond that (old prefs died
-   with the install; nothing server-side recorded it), so any
-   pre-existing dev/beta group from that window stays unresolvable for
-   its old events. Accepted: groups were not public before this ship.
-5. **External review before any "secure" marketing.** Whisper must not be
-   publicly promoted as audited/secure until either a third-party security
-   review or a libsignal production-parity audit happens — claimed security
-   without review is exactly the kind of overstatement FOSS gets hammered for.
-   Until then, user-facing copy should say end-to-end encrypted + open
-   description, never "audited".
+### 12.6 Cleanup and honest notes
 
+Expiry/deletion goes through two paths that reinforce each other: the state
+flip hides the story instantly (RLS), and the **sweep worker** (service role,
+lease-based with SKIP LOCKED, 10-minute leases, ≤20 attempts with backoff)
+converges the hosted copy to deletion through the ownership ledger — no
+database cron dependency. Deleted/expired stories prune locally even when the
+sweep is unreachable.
+
+Honesty notes: the `a` capability travels inside the descriptor and Room rows;
+a viewer who somehow acquired it still cannot delete (poster-only RPC +
+ledger-only sweep), so capability possession is not authority. Quota is
+server-enforced; a stale local counter can neither permit nor deny a publish.
+And: received ups keep their sealed bytes for the 24 hours, and there is no
+"keep forever" tier — 24 hours is the whole contract, for everyone.
+
+Story push pings carry poster ID and story ID; the poster's name rides only inside
+encrypted Web Push payloads on the FCM-fallback path (external distributors
+get IDs and resolve the name locally) — content-free either way.
+
+---
+
+## 13. How it is verified
+
+Whisper's cryptography is pinned with a deliberately paranoid test stack:
+
+- **External reference vectors** — every expected value in the core crypto
+  tests comes from a specification or an independent implementation (RFC
+  7748 curve vectors in the X3DH arrangement, RFC 5869 Appendix A HKDF cases,
+  cross-checked Double-Ratchet KATs, wire-cutoff boundaries). Nothing is
+  verified against this repo's own output.
+- **Security-matrix tests** for the ratchet (out-of-order, replay,
+  reinstall desync, key-change strictness, skipped-limit behavior, and the
+  forged-header-no-mutation property from §3.4), plus a chaos suite that
+  asserts zero wrong-plaintext openings.
+- **Pure-decision pins** for version negotiation, rotation certs
+  (counter/timestamp anti-replay), and the handshake-failure block.
+- **Self-interop honesty:** the interop suite only proves *this codebase*
+  talks to *itself*; a systematic framing bug shared by both ends would pass
+  there unnoticed — that gap is why the external-vector suite exists, and why
+  broader signal-compat review remains on the roadmap (§14.5).
+- **Model invariants & UI plumbing** — serialization round-trips, ordering,
+  tombstone behavior, chat reactions, error vocabularies.
+- **Instrumented media test** for Daily Ups: a fully geotagged, device-labeled
+  test photo must publish with *zero* surviving EXIF/GPS tags on the exact
+  publish bytes — device-only, like all Bitmap work.
+
+---
+
+## 14. Limits, trade-offs, and the honest security statement
+
+A few design constraints documented as *decisions*, not surprises:
+
+1. **Ratchet gap-loss residual.** Forged headers and far-future counters
+   fail closed *before* any state mutation, so an attacker cannot spend
+   honest keys. A residual remains: a malicious server can force a
+   gap-handshake re-connection attempt at most once per 30 s per peer — a
+   bounded availability annoyance, not a confidentiality or loss path.
+2. **Group fan-out budget (600/day/sender)** is a working calibration, not a
+   limitation: ~50 messages/day in a full 12-member group, more in smaller
+   ones — generous chat volume; what it curbs is scripted 1→N spam. The knob
+   is one SQL value plus a mirrored client constant, owned by the operator
+   and surfaced honestly to users whose group hits it (a daily-limit message,
+   not an error).
+3. **Signup gate (5/day/IP)** is the only server-side brake on Sybil
+   accounts, appropriate for a friends-only audience. Real-world caveat:
+   carrier CGNAT can put many genuine users behind one IP; the remediation is
+   a function-side allow-list of that carrier range if the logs ever show it.
+4. **Group signing keys and reinstalls** were resolved in 1.1.7 by the
+   account-owned signer history (§11.1). Residual: the trust boundary of that
+   set is served by the *bundle endpoint*, same as 1:1 — the operator is the
+   boundary of last resort; but content forgeries still require signing keys
+   the operator never has. Pre-1.1.7 dev groups may keep unresolvable
+   histories from before the archive trigger existed (accepted: groups were
+   not public before this release).
+5. **External review before any "audited" claim.** Whisper uses a custom
+   end-to-end construction; it must not be publicly described as
+   "audited"/"secure" until either a third-party security review or a
+   libsignal production-parity audit happens. Until then the honest copy is
+   "end-to-end encrypted", designed as described above, with its residual
+   limits listed — and an explicit honesty note in-app: uses *custom E2EE,
+   not independently audited*. This document's job is to state the
+   architecture plainly enough that such a review can find its way around.
+
+Deployment/operational runbooks (rollout, smoke tests, edge redeploys) live
+outside this document, on purpose: `supabase/POST_DEPLOY_SMOKE.md` and the
+release checklist cover them.
+
+---
+
+## Appendix A — file map
+
+Paths relative to `app/src/main/java/com/frerox/toolz/`.
+
+**Core data — `data/whisper/`:**
+
+`WhisperRepository.kt` (orchestrator) + `WhisperRepositoryGroups.kt`,
+`WhisperRepositoryStories.kt`, `WhisperRepositorySocial.kt`,
+`WhisperRepositoryProfile.kt` · `WhisperCrypto.kt` (hardware identity),
+`WhisperSelfLegCrypto.kt` (self-leg anchor), `session/` (`WhisperRatchet`,
+`WhisperSessionFactory`, `WhisperSessionStore`,
+`WhisperSessionSecretProtector`, `WhisperV3Codec` in `data/whisper/session/`),
+`WhisperEnvelope.kt` (wire codecs), `WireProtocol.kt` (pure decisions),
+`WhisperPrekeyManager.kt`, `WhisperKeyTrustStore.kt`,
+`WhisperKeyRotationStore.kt`, `WhisperProtocolConfig.kt`,
+`WhisperAuthManager.kt`, `WhisperModels.kt` (shared data models),
+`WhisperGroupEntities.kt`, `WhisperGroupPolicy.kt`,
+`WhisperGroupNotifications.kt`, `WhisperGroupReadStore.kt`,
+`WhisperStoryLocalEntity.kt`, `WhisperDailyUpPhotoPreprocessor.kt`,
+`WhisperOutgoingQueue.kt` (Room outbox + delivery), `WhisperDeliveryScheduler.kt`,
+`WhisperMessageDao.kt`/`WhisperMessageEntity.kt`/
+`WhisperLocalTombstoneEntity.kt`, `WhisperEncryptedImageHost.kt`,
+`WhisperImageCipherTransport.kt` (WZ1 container), `WhisperImagePreprocess.kt`,
+`WhisperAvatarCodec.kt`, `WhisperAvatarLoader.kt`,
+`WhisperImageDiskCache.kt`, `WhisperDeletedMessagesStore.kt`,
+`WhisperHiddenChatsStore.kt`, `WhisperMutePreferences.kt`,
+`WhisperUndoBufferStore.kt`, `WhisperAubupManager.kt` (access-file backup),
+`WhisperNotificationManager.kt`, `WhisperErrorMapper.kt`,
+`WhisperPinConfig.kt` (identity constants), `PlayIntegrityAttestor.kt`,
+`EdgeFunctionClient.kt`, `EncryptedBlobHost.kt`, `ProtocolDiagnostics.kt`.
+
+**UI — `ui/screens/whisper/`:** `WhisperMainScreen.kt` (hub: chats/friends/
+requests/discover/profile tabs) + `WhisperMainScreenComponents.kt` (row
+cards), `ChatMessageMerger.kt`; `WhisperChatScreen.kt` +
+`WhisperChatViewModel.kt` (1:1 chat), `WhisperGroupChatScreen.kt` +
+`WhisperGroupChatViewModel.kt` + `WhisperGroupChatParts.kt` (group chat),
+`WhisperGroupInfoScreen.kt` + `WhisperGroupInfoViewModel.kt` +
+`WhisperGroupInfoParts.kt`, `WhisperGroupPermissionsScreen.kt` +
+`WhisperGroupPermissionsViewModel.kt`, `WhisperGroupUiKit.kt`,
+`WhisperGroupsSection.kt` + `WhisperGroupsViewModel.kt` (Chats-tab section),
+`WhisperDailyUpsScreen.kt` + `WhisperDailyUpsViewModel.kt`,
+`WhisperDailyUpsComposeScreen.kt` + `WhisperDailyUpsComposeViewModel.kt`,
+`WhisperDailyUpsStoriesBar.kt`, `WhisperProfileTab.kt`,
+`WhisperUserProfileScreen.kt` + `WhisperUserProfileViewModel.kt`,
+`WhisperVerifyQrDialog.kt`, `WhisperAuthScreen.kt` +
+`WhisperAuthViewModel.kt`, `WhisperOnboardingScreen.kt`,
+`WhisperBuildGate.kt`, `WhisperBypassValidator.kt`,
+`BypassScreenshotHandler.kt`, `SecureWindow.kt`, `WhisperToast.kt`,
+`WhisperPermissionBanner.kt`.
+
+**Push — `push/`:** `WhisperPushService.kt`, `WhisperPushRegistrar.kt`,
+`WhisperPushNotifier.kt`.
+
+**Backend — `supabase/`:** `migrations/main-whisper-sql.sql` (canonical
+baseline), `functions/` (see §8.2), `whisper-sql-info.md`,
+`POST_DEPLOY_SMOKE.md` (ops runbook).
+
+**Workers:** `WhisperDeliveryWorker.kt`, `WhisperLocalCleanupWorker.kt`,
+`WhisperClipboardClearWorker.kt`.
+
+---
+
+## Appendix B — glossary
+
+| Term | Meaning here |
+|---|---|
+| **AAD** | Additional authenticated data — extra bytes bound into AEAD ciphertext so a valid ciphertext cannot be replayed into a different context |
+| **Bundle** | A peer's published key package: identity binding, signed SPK, an OPK |
+| **Descriptor** | The sealed, self-contained story reference: photo URL + key + expiry + receipts flag (+ poster's delete capability) |
+| **Envelope (v2)** | The static-identity multi-key sealed body; self-healing, no forward secrecy |
+| **Epoch** | A group's membership version; every message is sealed for exactly one |
+| **Event log** | The admin-signed sequence that defines group membership and permissions |
+| **Fan-out** | Sealing one group message once per recipient (≤12 members) |
+| **Frame (v3)** | A Double Ratchet message; forward-secretive |
+| **GoTrue** | Supabase's auth service, here fronted by username/token facades |
+| **OPK / SPK** | One-time prekey / signed prekey in a peer's bundle |
+| **RLS** | Row-level security — Postgres policies that decide which rows a database identity may touch |
+| **Realtime publication** | The set of tables whose changes stream to subscribed clients |
+| **Remote wake ping** | A push notification carrying no content — only IDs + event kinds (encrypted on FCM-fallback hops) |
+| **ratchet lost / placeholder** | The honest UI state for a message that cannot open because part of the session history is unrecoverable |
+| **Static envelope** | §3.2's v2 sealed body; called "static" because it uses pinned long-term identities |
+| **TOFU** | Trust-on-first-use — pin the first key seen; subsequent changes are fail-closed |
+| **Web Push (RFC 8291/8292)** | Standard browser-push encryption/auth; used on the FCM-fallback hop |
+| **Whisper code (access file)** | The credential-only backup artifact for account moves, restored via deep link or vault |
