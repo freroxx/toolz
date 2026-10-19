@@ -9,6 +9,7 @@ import android.util.Log
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.data.whisper.WhisperGroupChatMessage
 import com.frerox.toolz.data.whisper.WhisperGroupMembership
 import com.frerox.toolz.data.whisper.WhisperGroupReadStore
@@ -53,8 +54,10 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -73,6 +76,9 @@ class WhisperGroupChatViewModel @Inject constructor(
     private val mutePrefs: WhisperMutePreferences,
     private val notificationManager: WhisperNotificationManager,
     private val readStore: WhisperGroupReadStore,
+    // Screenshot-override parity with the 1:1 chat — the same password-gated
+    // user setting decides when group E2EE content may be captured.
+    private val settingsRepository: SettingsRepository,
     // M-10 pattern: `viewModelScope` is cancelled the moment onCleared starts —
     // residual cleanup (typing off) must ride an application-lifetime scope.
     @com.frerox.toolz.di.ApplicationScope private val appScope: kotlinx.coroutines.CoroutineScope,
@@ -84,6 +90,10 @@ class WhisperGroupChatViewModel @Inject constructor(
 
     /** My user id for mention matching ("mentioned you" highlighting). */
     val myUserId: String get() = repository.myId
+
+    /** Screenshot-override parity with the 1:1 chat (same shared setting). */
+    val screenshotBypassEnabled: StateFlow<Boolean> = settingsRepository.whisperScreenshotBypass
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     data class UiState(
         val membership: WhisperGroupMembership? = null,
@@ -509,25 +519,42 @@ class WhisperGroupChatViewModel @Inject constructor(
         }
     }
 
+    /** Double-tap guard: the same vote option / same close action fires once. */
+    private val pollActionsInFlight = mutableSetOf<String>()
+
     /** Votes (or re-votes — latest per sender wins the tally). */
     fun vote(pollId: String, opt: Int) {
         if (pollId.isBlank()) return
         if (pollId in _uiState.value.closedPolls) return
+        val actionKey = "v:$pollId:$opt"
+        if (actionKey in pollActionsInFlight) return
+        pollActionsInFlight += actionKey
         viewModelScope.launch {
-            repository.sendGroupContent(groupId, WhisperGroupContent(vote = GroupVote(pollId, opt)))
-                .onSuccess { refreshTimelineHead() }
-                .onFailure { e -> _uiState.update { it.copy(error = err(e)) } }
+            try {
+                repository.sendGroupContent(groupId, WhisperGroupContent(vote = GroupVote(pollId, opt)))
+                    .onSuccess { refreshTimelineHead() }
+                    .onFailure { e -> _uiState.update { it.copy(error = err(e)) } }
+            } finally {
+                pollActionsInFlight -= actionKey
+            }
         }
     }
 
     /** Admins freeze a poll (tally stops, voting disables). */
     fun closePoll(pollId: String) {
-        if (pollId.isBlank()) return
+        if (pollId.isBlank() || pollId in _uiState.value.closedPolls) return
+        val actionKey = "c:$pollId"
+        if (actionKey in pollActionsInFlight) return
+        pollActionsInFlight += actionKey
         viewModelScope.launch {
-            _uiState.update { it.copy(error = null) }
-            repository.sendGroupContent(groupId, WhisperGroupContent(t = "poll closed", pollClose = pollId))
-                .onSuccess { refreshTimelineHead() }
-                .onFailure { e -> _uiState.update { it.copy(error = err(e)) } }
+            try {
+                _uiState.update { it.copy(error = null) }
+                repository.sendGroupContent(groupId, WhisperGroupContent(t = "poll closed", pollClose = pollId))
+                    .onSuccess { refreshTimelineHead() }
+                    .onFailure { e -> _uiState.update { it.copy(error = err(e)) } }
+            } finally {
+                pollActionsInFlight -= actionKey
+            }
         }
     }
 

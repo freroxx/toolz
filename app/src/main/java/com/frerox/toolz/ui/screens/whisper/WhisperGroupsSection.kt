@@ -382,6 +382,14 @@ private fun GroupRowCard(
     val unread = preview?.unread ?: 0
     val hasUnread = unread > 0
 
+    // Double-tap guard: two fast taps on the same card must not push the
+    // chat destination twice (users then swipe back through a ghost copy).
+    var openLock by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(1_200)
+        openLock = false
+    }
+
     val photoLabel = stringResource(R.string.st_Whisper_Groups_Photo)
     val pollLabel = stringResource(R.string.st_Whisper_Groups_Poll)
     val membersLabel = stringResource(R.string.st_Whisper_Groups_Members)
@@ -408,7 +416,13 @@ private fun GroupRowCard(
     } else null
 
     ExpressiveCard(
-        onClick = { haptic.click(); onOpen() },
+        onClick = {
+            if (!openLock) {
+                openLock = true
+                haptic.click()
+                onOpen()
+            }
+        },
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(28.dp),
     ) {

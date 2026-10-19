@@ -3940,6 +3940,7 @@
     <string name="st_Whisper_Groups_JoinByIdHint">Paste a group ID</string>
     <string name="st_Whisper_Groups_JoinByIdHelp">Where do I find one? A member of the group opens the group profile, taps Share, then Copy ID — send that here. Your request lands on their screen as an invite and a group admin approves it.</string>
     <string name="st_Whisper_Groups_RequestSent">Request sent \u2014 an admin will review it.</string>
+    <string name="st_Whisper_Groups_PictureWarn">Group created, but the picture couldn\'t be set — try again from the group\'s photo option.</string>
     <string name="st_Whisper_Groups_Requests">Join requests</string>
     <string name="st_Whisper_Groups_Approve">Approve</string>
     <string name="st_Whisper_Groups_Deny">Deny</string>

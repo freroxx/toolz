@@ -80,6 +80,9 @@ fun WhisperGroupInfoScreen(
     viewModel: WhisperGroupInfoViewModel = hiltViewModel(),
 ) {
     if (!groupsEnabled()) return
+    // Member list + names are E2EE-derived too: screenshots/recents stay
+    // blocked here (plain guard; no screenshot override lane on this screen).
+    SecureWindow()
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     var showAdd by remember { mutableStateOf(false) }
     var showRename by remember { mutableStateOf(false) }

@@ -74,6 +74,11 @@ fun WhisperGroupChatScreen(
     if (!groupsEnabled()) return
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val myId = viewModel.myUserId
+    // E2EE group content never appears in screenshots or recent-app previews
+    // — the same discipline as the 1:1 chat; bypass rides the shared
+    // password-approved setting so the two surface behave identically.
+    val screenshotBypassEnabled by viewModel.screenshotBypassEnabled.collectAsStateWithLifecycle()
+    SecureWindow(bypassEnabled = screenshotBypassEnabled)
     var draft by rememberSaveable(viewModel.groupId) { mutableStateOf("") }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()

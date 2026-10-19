@@ -582,12 +582,22 @@ class WhisperGroupsViewModel @Inject constructor(
             created.onSuccess { groupId ->
                 // Picture is best-effort after the group exists (needs the id);
                 // a picture failure must not lose the created group.
-                if (pictureBytes != null) {
-                    repository.setGroupPicture(groupId, pictureBytes, pictureMime)
-                        .onFailure { e -> _uiState.update { it.copy(error = err(e)) } }
-                }
+                val pictureFailed = pictureBytes?.let {
+                    repository.setGroupPicture(groupId, it, pictureMime).isFailure
+                } == true
                 load()
-                _uiState.update { it.copy(createdGroupId = groupId) }
+                // The failure text rides `notice`, NOT `error`: `load()`'s every
+                // pass clears `error` (single-flight queued re-runs included),
+                // which used to wipe the warn before it ever rendered. Notice
+                // self-clears in the UI and is untouched by load().
+                _uiState.update {
+                    it.copy(
+                        createdGroupId = groupId,
+                        notice = if (pictureFailed) {
+                            appContext.getString(com.frerox.toolz.R.string.st_Whisper_Groups_PictureWarn)
+                        } else null,
+                    )
+                }
             }
             created.onFailure { e ->
                 _uiState.update { it.copy(isLoading = false, error = err(e)) }

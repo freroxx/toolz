@@ -59,6 +59,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -82,6 +83,7 @@ import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.theme.toolzBackground
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.math.max
 
 // Rings and progress speak in theme tokens only — the rest of the Whisper UI
@@ -457,6 +459,7 @@ private fun StoryViewerOverlay(
     BackHandler(onBack = onClose)
     val pagerState = rememberPagerState(initialPage = index, pageCount = { stories.size })
     var pressed by remember { mutableStateOf(false) }
+    val navScope = rememberCoroutineScope()
     var pendingDeleteId by remember { mutableStateOf<String?>(null) }
 
     // Follow the ViewModel's index (open-on-ring) and report settled drags back;
@@ -507,6 +510,15 @@ private fun StoryViewerOverlay(
                 onRetry = { onRetryImage(story.storyId) },
                 displayName = if (story.isMine) ownName else story.ownerName,
                 pressed = { p -> pressed = p },
+                onNavigate = { delta ->
+                    if (pendingDeleteId == null) {
+                        val target = (pagerState.currentPage + delta)
+                            .coerceIn(0, stories.size - 1)
+                        if (target != pagerState.currentPage) {
+                            navScope.launch { pagerState.animateScrollToPage(target) }
+                        }
+                    }
+                },
             )
         }
 
@@ -628,6 +640,7 @@ private fun StoryPage(
     onRetry: () -> Unit,
     displayName: String,
     pressed: (Boolean) -> Unit,
+    onNavigate: (Int) -> Unit,
 ) {
     Box(
         modifier = Modifier
@@ -638,6 +651,12 @@ private fun StoryPage(
                         pressed(true)
                         runCatching { tryAwaitRelease() }
                         pressed(false)
+                    },
+                    // Standard story navigation: right two-thirds = next, left
+                    // third = previous. Holds still pause (onPress above); the
+                    // chrome (close / reaction palette) consumes its own taps.
+                    onTap = { pos ->
+                        onNavigate(if (pos.x > size.width * 0.33f) 1 else -1)
                     },
                 )
             },
