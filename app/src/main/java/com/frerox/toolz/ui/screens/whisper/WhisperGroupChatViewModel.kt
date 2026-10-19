@@ -509,6 +509,13 @@ class WhisperGroupChatViewModel @Inject constructor(
             }
             return
         }
+        // Same-frame double-confirm guard (see the field documentation above):
+        // identical question+options inside 2 s is one send.
+        val key = "$q\u0000${opts.joinToString("\u0000")}"
+        val now = System.currentTimeMillis()
+        if (key == lastPollSendKey && now - lastPollSendAtMs < 2_000) return
+        lastPollSendKey = key
+        lastPollSendAtMs = now
         viewModelScope.launch {
             _uiState.update { it.copy(isSending = true, error = null) }
             val poll = GroupPoll(id = java.util.UUID.randomUUID().toString(), q = q, opts = opts)
@@ -525,6 +532,22 @@ class WhisperGroupChatViewModel @Inject constructor(
 
     /** Double-tap guard: the same vote option / same close action fires once. */
     private val pollActionsInFlight = mutableSetOf<String>()
+
+    /**
+     * Same-frame double-confirm guards for the poll/photo send sheets. Both
+     * sheets remove themselves on the first send tap, but a frozen frame can
+     * deliver both taps to the still-composed button — two signed events (and,
+     * for a photo, a second sealed upload that burns hosting quota). Debounced
+     * on PAYLOAD identity inside a short window, never on a shared busy flag:
+     * a flag would silently drop a genuinely different send made while the
+     * first upload is still in flight. Refilling a sheet with new content
+     * within the window is humanly impossible (attach → picker/typing takes
+     * seconds), so the window never eats a real message.
+     */
+    private var lastPollSendKey: String? = null
+    private var lastPollSendAtMs = 0L
+    private var lastImageSendKey: Int? = null
+    private var lastImageSendAtMs = 0L
 
     /** Votes (or re-votes — latest per sender wins the tally). */
     fun vote(pollId: String, opt: Int) {
@@ -674,6 +697,15 @@ class WhisperGroupChatViewModel @Inject constructor(
     }
 
     fun sendImage(bytes: ByteArray, mime: String, expiresAfterSeconds: Long? = null) {
+        // Same-frame double-confirm guard: identical bytes inside 1.5 s are one
+        // upload (a frozen frame can fire the sheet's Send twice); a genuinely
+        // different pick — a new picker round-trip is seconds — always passes,
+        // so concurrent distinct sends stay possible.
+        val now = System.currentTimeMillis()
+        val key = bytes.contentHashCode()
+        if (key == lastImageSendKey && now - lastImageSendAtMs < 1_500) return
+        lastImageSendKey = key
+        lastImageSendAtMs = now
         viewModelScope.launch { repository.clearGroupTyping(groupId) }
         viewModelScope.launch {
             _uiState.update { it.copy(isUploadingImage = true, error = null) }

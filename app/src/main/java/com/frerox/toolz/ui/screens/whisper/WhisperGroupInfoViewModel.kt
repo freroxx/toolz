@@ -187,9 +187,21 @@ class WhisperGroupInfoViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Same-frame double-tap guard for EVERY structural/signed write. Two taps
+     * inside one frame both observe the old `isWorking = false`, so the check
+     * must live inside the VM (UI gating alone cannot close the race).
+     * Returns false and does nothing when a write is already in flight.
+     */
+    private fun beginWork(): Boolean {
+        if (_uiState.value.isWorking) return false
+        _uiState.update { it.copy(isWorking = true, error = null) }
+        return true
+    }
+
     private fun work(block: suspend () -> Result<Unit>) {
+        if (!beginWork()) return
         viewModelScope.launch {
-            _uiState.update { it.copy(isWorking = true, error = null) }
             block().onSuccess { load() }.onFailure { e ->
                 _uiState.update { it.copy(isWorking = false, error = err(e)) }
             }
@@ -205,8 +217,8 @@ class WhisperGroupInfoViewModel @Inject constructor(
     fun addMembers(userIds: List<String>) {
         val ids = userIds.filter { it.isNotBlank() }.distinct()
         if (ids.isEmpty()) return
+        if (!beginWork()) return
         viewModelScope.launch {
-            _uiState.update { it.copy(isWorking = true, error = null) }
             var failed = 0
             ids.forEach { uid ->
                 if (repository.inviteGroupMember(groupId, uid).isFailure) failed++
@@ -248,26 +260,33 @@ class WhisperGroupInfoViewModel @Inject constructor(
     }
 
     fun approveRequest(userId: String) {
+        if (!beginWork()) return
         viewModelScope.launch {
-            _uiState.update { it.copy(isWorking = true, error = null) }
             repository.approveGroupJoinRequest(groupId, userId)
-                .onSuccess { load() }
+                .onSuccess {
+                    _uiState.update { it.copy(isWorking = false) }
+                    load()
+                }
                 .onFailure { e -> _uiState.update { it.copy(isWorking = false, error = err(e)) } }
         }
     }
 
     fun denyRequest(userId: String) {
+        if (!beginWork()) return
         viewModelScope.launch {
             repository.denyGroupJoinRequest(groupId, userId)
-                .onSuccess { loadRequests() }
-                .onFailure { e -> _uiState.update { it.copy(error = err(e)) } }
+                .onSuccess {
+                    _uiState.update { it.copy(isWorking = false) }
+                    loadRequests()
+                }
+                .onFailure { e -> _uiState.update { it.copy(isWorking = false, error = err(e)) } }
         }
     }
 
     /** Report = block the member 1:1-wide, then leave the group. */
     fun reportMember(userId: String) {
+        if (!beginWork()) return
         viewModelScope.launch {
-            _uiState.update { it.copy(isWorking = true, error = null) }
             // Fail-closed BEFORE blocking: a last-admin leave would fail after
             // the block already landed, stranding a block with no exit.
             val m = repository.syncGroup(groupId).getOrNull()
@@ -292,8 +311,8 @@ class WhisperGroupInfoViewModel @Inject constructor(
     }
 
     fun setPicture(bytes: ByteArray, mime: String) {
+        if (!beginWork()) return
         viewModelScope.launch {
-            _uiState.update { it.copy(isWorking = true, error = null) }
             repository.setGroupPicture(groupId, bytes, mime)
                 .onSuccess { load() }
                 .onFailure { e -> _uiState.update { it.copy(isWorking = false, error = err(e)) } }
@@ -315,8 +334,8 @@ class WhisperGroupInfoViewModel @Inject constructor(
     }
 
     fun leave() {
+        if (!beginWork()) return
         viewModelScope.launch {
-            _uiState.update { it.copy(isWorking = true, error = null) }
             repository.leaveGroup(groupId)
                 .onSuccess { _uiState.update { it.copy(isWorking = false, left = true) } }
                 .onFailure { e -> _uiState.update { it.copy(isWorking = false, error = err(e)) } }
@@ -325,8 +344,8 @@ class WhisperGroupInfoViewModel @Inject constructor(
 
     /** Deletes the whole group (last-member-only, server-enforced). */
     fun disband() {
+        if (!beginWork()) return
         viewModelScope.launch {
-            _uiState.update { it.copy(isWorking = true, error = null) }
             repository.disbandGroup(groupId)
                 .onSuccess { _uiState.update { it.copy(isWorking = false, left = true) } }
                 .onFailure { e -> _uiState.update { it.copy(isWorking = false, error = err(e)) } }

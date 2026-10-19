@@ -8,10 +8,12 @@ the client, and the user experience — well enough that a reader who has never
 seen the codebase can reason about it.
 
 **How to read this document.** It describes the codebase as of the 1.1.7
-release (October 2026). The working tree is the source of truth; this document
-is not machine-checked against code, so treat any specific constant or file
-name as a pointer to verify, not a guarantee. Sections about cryptography name
-exact primitives and constants on purpose; "server" means the Supabase project
+release (October 2026), including the six client-side hardening rounds that
+followed the initial release cut (§6, §9, §11.7, §12, §13 — October 2026).
+The working tree is the source of truth; this document is not
+machine-checked against code, so treat any specific constant or file name as a
+pointer to verify, not a guarantee. Sections about cryptography name exact
+primitives and constants on purpose; "server" means the Supabase project
 Whisper operates (database, Row Level Security policies, trigger functions,
 and hosted edge functions).
 
@@ -548,6 +550,12 @@ derive it; its job is to hide image bytes from the hosting provider and
 casual third parties, not from holders of the (public) key. On-disk caches
 (either for avatar or chat images) remain encrypted containers with
 generation-scoped guards so a signed-out state cannot keep population artifacts.
+The avatar loader also keeps a **bounded negative cache** (per URL, ten-minute
+re-eligibility, wiped on sign-out): a permanently dead remote avatar (its
+hosted image was deleted) is remembered as failed instead of re-hitting the
+network on every re-render — the honest consequence is a silent
+rendered-initials fallback for at most ten minutes after a transient outage
+or reconnect.
 
 ---
 
@@ -772,6 +780,16 @@ message ID for dedupe. Tapping opens the relevant surface; combined with the
 master mute switch and per-chat mutes, the user controls exactly which
 surfaces can wake the phone.
 
+Group events ride the same discipline, verified line-by-line during the
+October 2026 hardening: group message and event notifications honor the
+per-group notification toggle and the master mute inside the notification
+manager, are suppressed while the app is in the foreground *with the relevant
+surface already open*, carry their own dedupe keys (never two pings for one
+group event), post at `VISIBILITY_PRIVATE` so lock screens see "Whisper
+message" rather than content, and every inward tap is deep-linked through
+validated actions — a malformed or foreign payload routes to an honest
+dead-end screen, never a crash or a wrong surface.
+
 ---
 
 ## 10. Background work and app wiring
@@ -916,6 +934,13 @@ does something smarter than "refetch on ping":
   changes and wipes still full-reload, because those *are* structural.
 - **Name resolution rides a TTL cache** (60 s) so the message path never pays
   two server round trips to relearn what has not changed.
+- **Reloads are coalesced, and watchers self-heal.** Bursty triggers (open,
+  join, realtime pings, quiet resyncs) collapse into one in-flight pass plus
+  at most one queued re-run — concurrent full-load passes whose state writes
+  interleave were a real interleaving bug class, now structurally impossible.
+  The six realtime collectors in the group chat (log, messages, deletes,
+  typing, reactions, receipts) resubscribe in a capped-backoff loop after any
+  error instead of going silently dead after the first throw.
 
 ### 11.6 Server rules
 
@@ -983,6 +1008,39 @@ exist (in 1:1 either); voice/video/documents require pipelines that neither
 surface has yet. The group outbox drains on open rather than by worker, and
 search decrypts up to 500 rows per query — documented costs, not hidden
 ones.
+
+**1.1.7 hardening (client surfaces).** The post-release review hardened
+every group screen without touching the server plane:
+
+- **Screenshot protection now covers the group surfaces.** Group chat and
+  group info set `FLAG_SECURE`; the chat shares the 1:1's *server-gated*
+  accessibility bypass (the same password-approved override, verified
+  server-side by the 5-per-15-minutes edge check), while info reads plain
+  (no override lane there — same choice as Daily Ups).
+- **Save-to-gallery requires the same explicit confirm (S-3) the 1:1 viewer
+  has.** A group image that leaves the E2EE boundary — chat-bubble
+  fullscreen, hub picture, or shared-photos gallery — is confirmed by the
+  user before any MediaStore write, reusing the 1:1 dialog.
+- **Every structural write is same-frame double-tap-proof in the ViewModel**
+  — group-card navigation, poll votes/closes and poll/photo send
+  confirmations, reactions, permission saves, and every info-screen action
+  (invite, promote, demote, transfer, remove, report, picture set, leave,
+  disband, request approve/deny) hold a one-write-at-a-time guard, so two
+  taps in one frame can never fire two signed events. Send confirmations
+  debounce on payload identity inside a short window instead of a shared
+  busy flag, so a genuinely different send made while an upload is still in
+  flight is never silently dropped. Stories-bar entry rows got the same
+  guard for their two navigation lanes.
+- **Media that fails stays honest:** a failed chat bubble or gallery thumb
+  renders an explicit broken-image state (the gallery thumb is tap-to-retry);
+  a failed gallery *list* shows an honest retry state instead of looking like
+  "no shared photos"; a failed viewer story shows an inline retry instead of
+  an eternal spinner. Decoded bitmaps hold bounded windows (8 in chat, 6 in
+  the viewer) instead of growing unbounded across a session.
+- **Notification taps route through validated actions** — including a
+  "removed-from-group" tap landing on an explicit dead-end card — and group
+  cards/coalesced loads/realtime merges were re-verified against the
+  cross-screen races they opened.
 
 ---
 
@@ -1065,6 +1123,22 @@ deleted/expired what are all resolved server-side (RLS-visible only for
 rows the viewer genuinely may see — the poster sees reaction counts and
 names resolved on-device on demand).
 
+**1.1.7 hardening (viewing surfaces).** The hub pulls to refresh — one
+gesture, coalesced with the open-time sync and the re-open resync through a
+single in-flight guard, so the indicator, the top-bar spinner and the gesture
+share one truth (the hub content scrolls, which the pull also requires). The
+viewer adds **tap navigation** (right two-thirds advances, left third goes
+back; inert while the delete-confirm sheet is up, boundaries included) on top
+of the hold-to-pause. A story image that fails to open renders an inline
+"Couldn't load this up." + Retry instead of a silent eternal spinner, with
+the failure snackbar drawn *above* the fullscreen overlay so it is actually
+visible while viewing. An image released mid-read (deleted elsewhere or
+expired) closes the overlay instead of letting the reader react into the
+void. Reactions are double-tap-guarded (the second tap of one frame can no
+longer toggle the reaction right back off), decoded viewer images hold a
+bounded six-frame window (paging back re-decodes), and the entry bar's
+self/friend rings share the same double-navigation guard as the group cards.
+
 ### 12.5 Publishing
 
 The compose screen opens with the CTA on the hub (and the entry row, and the
@@ -1077,7 +1151,11 @@ disabled (no photo, quota out). Upload chain: preprocess → seal → host →
 one sealed leg per friend → publish RPC → self-sealed own row → opportunistic
 sweep kick. Any failure up-chain maps to a fixed vocabulary of errors; a
 failure *before* the publish RPC leaves zero server truth (nothing partial
-ever exists). Retries keep the draft.
+ever exists). Retries keep the draft. A friends-list load that fails in the
+audience step shows an honest retry state instead of reading as "no friends
+yet", and a failed photo decode cancels the previous decode so the last pick
+always wins (two quick picks could otherwise land the slower, older image
+into the draft).
 
 ### 12.6 Cleanup and honest notes
 
@@ -1125,6 +1203,19 @@ Whisper's cryptography is pinned with a deliberately paranoid test stack:
 - **Instrumented media test** for Daily Ups: a fully geotagged, device-labeled
   test photo must publish with *zero* surviving EXIF/GPS tags on the exact
   publish bytes — device-only, like all Bitmap work.
+- **An enforced per-commit gate for UI work.** The October 2026 hardening
+  cycle (six rounds over the group/Daily-Ups screens and their shared
+  loaders) runs on a fixed invariant: every round compiles with
+  `:app:compileDebugKotlin` and finishes with the exact unit-test baseline —
+  530 tests completed with the same seven pre-existing failures (all in
+  unrelated engine suites, none Whisper-related) — checked before each
+  commit. Nothing behavioral lands outside that gate; the SQL/edge surfaces
+  were deliberately untouched and still belong to the ship-day runbook
+  (`supabase/POST_DEPLOY_SMOKE.md`).
+- **Server-plane invariants unchanged by the cycle.** Client-side hardening
+  changed no cryptography and no SQL: quotas (600/day fan-out, 5/day/IP
+  story, 5/day/IP signup), signed-log verification, epochs, and descriptor
+  shapes are byte-identical to the release cut — the freeze was deliberate.
 
 ---
 
