@@ -29,6 +29,8 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
@@ -46,6 +48,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -79,6 +83,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.WhisperDailyUpsConfig
+import com.frerox.toolz.ui.components.ExpressiveRefreshIndicator
 import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.theme.toolzBackground
@@ -154,6 +159,10 @@ fun WhisperDailyUpsScreen(
     val failedImages by viewModel.failedImages.collectAsStateWithLifecycle()
     val receipts by viewModel.receipts.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
+    // Gesture lane for the same thing the top-bar refresh icon does; the
+    // expressive indicator keeps the pull visual identical to the repo's other
+    // refreshed lists (e.g. DeviceInfo).
+    val pullState = rememberPullToRefreshState()
 
     // One shared failure surface: hub + viewer both funnel through [state.error].
     LaunchedEffect(state.error) {
@@ -216,11 +225,32 @@ fun WhisperDailyUpsScreen(
             )
         },
     ) { padding ->
-        Column(
+        // Pull-to-refresh parity with the chats list (WhisperMainScreen):
+        // the hub syncs on open AND on the pull gesture now. state.loading
+        // IS the refresh flag (it maps _refreshing 1:1 in the VM combiner).
+        PullToRefreshBox(
+            isRefreshing = state.loading,
+            onRefresh = { viewModel.refresh() },
+            state = pullState,
+            indicator = {
+                ExpressiveRefreshIndicator(
+                    state = pullState,
+                    isRefreshing = state.loading,
+                    modifier = Modifier.align(Alignment.TopCenter),
+                )
+            },
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
         ) {
+            // Pre-PTR the hub was a static Column: on small screens the lower
+            // content simply CLIPPED with no way to reach it, and a pull had
+            // nothing to grab — vertical scroll fixes both.
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState()),
+            ) {
             // Quota as a quiet pill: green-ish secondary when there is room,
             // error tonal once exhausted. The server is the real ceiling; this
             // is only the honest mirror of it.
@@ -277,6 +307,7 @@ fun WhisperDailyUpsScreen(
                     onCompose = onNavigateToCompose,
                 )
             }
+        }
         }
     }
 

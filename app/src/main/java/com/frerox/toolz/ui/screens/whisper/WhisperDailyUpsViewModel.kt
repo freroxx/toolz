@@ -27,6 +27,7 @@ import com.frerox.toolz.data.whisper.syncDailyUps
 import com.frerox.toolz.data.whisper.toggleDailyUpReaction
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -107,6 +108,8 @@ class WhisperDailyUpsViewModel @Inject constructor(
     private val _receipts = MutableStateFlow(ReceiptsUi())
     private val _quotaUsed = MutableStateFlow(0)
     private val _refreshing = MutableStateFlow(true)
+    /** Coalescing handle: open-time sync + pull-to-refresh share one flight. */
+    private var refreshJob: Job? = null
     private val _profiles = MutableStateFlow<Map<String, WhisperProfile>>(emptyMap())
 
     /** Minute ticker so "ends in 22h" labels stay honest while parked on the hub. */
@@ -172,10 +175,12 @@ class WhisperDailyUpsViewModel @Inject constructor(
         viewModelScope.launch { collectProfileNames() }
     }
 
-    /** Hub open/refresh: sync server truth + read back the day's quota. */
+    /** Hub open/refresh: sync server truth + read back the day's quota.
+     *  One sync in flight — a pull or re-open landing mid-sync coalesces. */
     fun refresh() {
-        viewModelScope.launch {
-            _refreshing.value = true
+        if (refreshJob?.isActive == true) return
+        _refreshing.value = true
+        refreshJob = viewModelScope.launch {
             repository.syncDailyUps()
                 .onFailure { e -> _error.value = dailyUpErrorText(appContext, e) }
             _quotaUsed.value = repository.dailyUpsPostedToday()
@@ -353,8 +358,14 @@ class WhisperDailyUpsViewModel @Inject constructor(
         }
     }
 
-    /** Optimistic palette toggle; revert + snackbar on failure. */
+    /** Optimistic palette toggle (revert + snackbar on failure). One toggle in
+     *  flight per story: palette double-taps must not flip the reaction right
+     *  back off while the first request settles. */
+    private val reactionInFlight = mutableSetOf<String>()
+
     fun toggleReaction(storyId: String, emoji: String, on: Boolean) {
+        if (storyId in reactionInFlight) return
+        reactionInFlight += storyId
         val myReactions = _receipts.value
         val previous = myReactions.myReactions[storyId]
         _receipts.value = myReactions.copy(
@@ -366,18 +377,22 @@ class WhisperDailyUpsViewModel @Inject constructor(
                 },
         )
         viewModelScope.launch {
-            repository.toggleDailyUpReaction(storyId, emoji, on)
-                .onFailure { e ->
-                    _receipts.value = _receipts.value.copy(
-                        myReactions = _receipts.value.myReactions + (storyId to (previous ?: "")),
-                    )
-                    _error.value = dailyUpErrorText(appContext, e)
-                }
-                .onSuccess {
-                    val v = _viewer.value ?: return@onSuccess
-                    val shown = v.stories.getOrNull(v.index)?.takeIf { it.storyId == storyId }
-                    if (shown?.isMine == true) refreshOwnStats(storyId)
-                }
+            try {
+                repository.toggleDailyUpReaction(storyId, emoji, on)
+                    .onFailure { e ->
+                        _receipts.value = _receipts.value.copy(
+                            myReactions = _receipts.value.myReactions + (storyId to (previous ?: "")),
+                        )
+                        _error.value = dailyUpErrorText(appContext, e)
+                    }
+                    .onSuccess {
+                        val v = _viewer.value ?: return@onSuccess
+                        val shown = v.stories.getOrNull(v.index)?.takeIf { it.storyId == storyId }
+                        if (shown?.isMine == true) refreshOwnStats(storyId)
+                    }
+            } finally {
+                reactionInFlight -= storyId
+            }
         }
     }
 
