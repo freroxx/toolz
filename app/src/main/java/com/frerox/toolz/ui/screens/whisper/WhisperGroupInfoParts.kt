@@ -46,6 +46,7 @@ import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Flag
 import androidx.compose.material.icons.rounded.PersonAdd
 import androidx.compose.material.icons.rounded.PersonRemove
+import androidx.compose.material.icons.rounded.BrokenImage
 import androidx.compose.material.icons.rounded.PhotoLibrary
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.StarBorder
@@ -59,6 +60,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.AlertDialog
+import com.frerox.toolz.ui.components.ToolzOutlinedExpressiveButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -512,16 +514,21 @@ internal fun MemberActionsSheet(
 
 @Composable
 internal fun AddMemberSheet(
-    loadFriends: ((List<WhisperProfile>) -> Unit) -> Unit,
+    loadFriends: ((List<WhisperProfile>, Boolean) -> Unit) -> Unit,
     excludedIds: Set<String>,
     onAdd: (List<String>) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var friends by remember { mutableStateOf<List<WhisperProfile>?>(null) }
+    var friendsFailed by remember { mutableStateOf(false) }
+    var retryKey by remember { mutableStateOf(0) }
     val picked = remember { mutableStateListOf<String>() }
     var query by remember { mutableStateOf("") }
-    LaunchedEffect(Unit) {
-        loadFriends { list -> friends = list.filter { it.id !in excludedIds } }
+    LaunchedEffect(retryKey) {
+        loadFriends { list, failed ->
+            friends = list.filter { it.id !in excludedIds }
+            friendsFailed = failed
+        }
     }
     val visible = remember(friends, query) {
         val q = query.trim().lowercase()
@@ -545,6 +552,26 @@ internal fun AddMemberSheet(
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 when {
                     friends == null -> GroupUiCenterLoading(modifier = Modifier.fillMaxSize())
+                    friendsFailed && friends.orEmpty().isEmpty() -> Column(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        GroupEmptyPanel(
+                            icon = Icons.Rounded.Groups,
+                            message = stringResource(R.string.st_Whisper_Groups_FriendsFail),
+                        )
+                        ToolzExpressiveTextButton(
+                            onClick = {
+                                // Back to the loading branch while the refetch runs.
+                                friends = null
+                                friendsFailed = false
+                                retryKey++
+                            },
+                        ) {
+                            Text(stringResource(R.string.st_Whisper_Groups_Retry), fontWeight = FontWeight.SemiBold)
+                        }
+                    }
                     friends.orEmpty().isEmpty() -> GroupEmptyPanel(
                         icon = Icons.Rounded.Groups,
                         message = stringResource(R.string.st_Whisper_Groups_NoFriendsForGroup),
@@ -679,7 +706,11 @@ internal fun ShareGroupSheet(
 internal fun GroupGalleryDialog(
     photos: List<WhisperGroupInfoViewModel.GalleryItem>,
     bytesById: Map<String, ByteArray>,
+    failedIds: Set<String>,
+    galleryFailed: Boolean,
     onRequestBytes: (WhisperGroupInfoViewModel.GalleryItem) -> Unit,
+    onRetryThumb: (WhisperGroupInfoViewModel.GalleryItem) -> Unit,
+    onRetryGallery: () -> Unit,
     onDismiss: () -> Unit,
     onMessage: (String) -> Unit,
 ) {
@@ -706,10 +737,25 @@ internal fun GroupGalleryDialog(
                 )
                 if (photos.isEmpty()) {
                     GroupEmptyPanel(
-                        icon = Icons.Rounded.PhotoLibrary,
-                        message = stringResource(R.string.st_Whisper_Groups_GalleryEmpty),
+                        icon = if (galleryFailed) Icons.Rounded.BrokenImage else Icons.Rounded.PhotoLibrary,
+                        message = if (galleryFailed) {
+                            stringResource(R.string.st_Whisper_Groups_GalleryFail)
+                        } else {
+                            stringResource(R.string.st_Whisper_Groups_GalleryEmpty)
+                        },
                         modifier = Modifier.padding(top = 48.dp),
                     )
+                    if (galleryFailed) {
+                        ToolzOutlinedExpressiveButton(
+                            onClick = onRetryGallery,
+                            modifier = Modifier
+                                .align(Alignment.CenterHorizontally)
+                                .padding(horizontal = 32.dp)
+                                .fillMaxWidth(),
+                        ) {
+                            Text(stringResource(R.string.st_Whisper_Groups_Retry), fontWeight = FontWeight.SemiBold)
+                        }
+                    }
                 } else {
                     LazyVerticalGrid(
                         state = gridState,
@@ -722,16 +768,19 @@ internal fun GroupGalleryDialog(
                         items(photos, key = { it.rowId }) { item ->
                             LaunchedEffect(item.rowId) { onRequestBytes(item) }
                             val bytes = bytesById[item.rowId]
+                            val failed = item.rowId in failedIds
                             val bitmap = rememberGroupBitmap(bytes, 384)
                             Box(
                                 modifier = Modifier
                                     .aspectRatio(1f)
                                     .clip(RoundedCornerShape(10.dp))
                                     .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                                    .clickable(enabled = bytes != null) { viewer = bytes },
+                                    .clickable(enabled = bytes != null || failed) {
+                                        if (failed) onRetryThumb(item) else viewer = bytes
+                                    },
                                 contentAlignment = Alignment.Center,
                             ) {
-                                Crossfade(targetState = bitmap, label = "galleryThumb") { bmp ->
+                                Crossfade(targetState = bitmap to failed, label = "galleryThumb") { (bmp, isFailed) ->
                                     if (bmp != null) {
                                         Image(
                                             bitmap = bmp,
@@ -740,6 +789,14 @@ internal fun GroupGalleryDialog(
                                             },
                                             modifier = Modifier.fillMaxSize(),
                                             contentScale = ContentScale.Crop,
+                                        )
+                                    } else if (isFailed) {
+                                        // Broken-cell parity with chat bubbles (7.18): an
+                                        // honest failure state instead of an eternal spinner.
+                                        Icon(
+                                            Icons.Rounded.BrokenImage,
+                                            contentDescription = stringResource(R.string.st_Whisper_Groups_CdPhotoRetry),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
                                     } else {
                                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

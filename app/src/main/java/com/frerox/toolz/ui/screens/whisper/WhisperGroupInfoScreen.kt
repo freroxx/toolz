@@ -505,7 +505,11 @@ fun WhisperGroupInfoScreen(
         GroupGalleryDialog(
             photos = state.gallery,
             bytesById = state.galleryBytes,
+            failedIds = state.galleryFailedIds,
+            galleryFailed = state.galleryLoadFailed,
             onRequestBytes = { viewModel.loadGalleryImage(it) },
+            onRetryThumb = { viewModel.retryGalleryItem(it) },
+            onRetryGallery = { viewModel.loadGallery() },
             onDismiss = { showGallery = false },
             onMessage = notify,
         )

@@ -8,6 +8,7 @@ package com.frerox.toolz.ui.screens.whisper
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.WhisperGroupMembership
 import com.frerox.toolz.data.whisper.WhisperGroupNotifPrefs
 import com.frerox.toolz.data.whisper.WhisperMutePreferences
@@ -87,6 +88,10 @@ class WhisperGroupInfoViewModel @Inject constructor(
         /** Shared-photo refs for the gallery (bytes load lazily per thumb). */
         val gallery: List<GalleryItem> = emptyList(),
         val galleryBytes: Map<String, ByteArray> = emptyMap(),
+        /** Thumb rows whose bytes FAILED (broken-cell marker + tap-to-retry). */
+        val galleryFailedIds: Set<String> = emptySet(),
+        /** True when the gallery LIST itself failed to load (honest empty state). */
+        val galleryLoadFailed: Boolean = false,
         val isLoading: Boolean = true,
         val isWorking: Boolean = false,
         val left: Boolean = false,
@@ -105,6 +110,8 @@ class WhisperGroupInfoViewModel @Inject constructor(
             pictureBytes.contentEquals(other.pictureBytes) &&
             requests == other.requests && gallery == other.gallery &&
             galleryBytes.keys == other.galleryBytes.keys &&
+            galleryFailedIds == other.galleryFailedIds &&
+            galleryLoadFailed == other.galleryLoadFailed &&
             isLoading == other.isLoading && isWorking == other.isWorking &&
             left == other.left && degraded == other.degraded && error == other.error
         override fun hashCode(): Int = membership.hashCode()
@@ -208,8 +215,8 @@ class WhisperGroupInfoViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         isWorking = false,
-                        error = if (failed == ids.size) "Couldn't invite anyone. Check your connection and retry."
-                        else "Couldn't invite $failed of ${ids.size} friend(s).",
+                        error = if (failed == ids.size) appContext.getString(R.string.st_Whisper_Groups_InviteFailAll)
+                        else appContext.getString(R.string.st_Whisper_Groups_InviteFailSome, failed, ids.size),
                     )
                 }
                 load()
@@ -349,25 +356,41 @@ class WhisperGroupInfoViewModel @Inject constructor(
     /** Loads shared-photo refs (newest 100 rows); bytes stay lazy per thumb. */
     fun loadGallery() {
         viewModelScope.launch {
-            val items = repository.fetchGroupMessages(groupId, 100).getOrNull().orEmpty()
+            val res = repository.fetchGroupMessages(groupId, 100)
+            val items = res.getOrNull().orEmpty()
                 .filter { it.image != null }
                 .map { GalleryItem(rowId = it.id, ref = it.image!!, caption = it.body) }
-            _uiState.update { it.copy(gallery = items) }
+            // List failure must be distinguishable from "no shared photos" — the
+            // dialog renders an honest Retry empty state instead (7.18 pattern).
+            _uiState.update { it.copy(gallery = items, galleryLoadFailed = res.isFailure) }
         }
     }
 
     fun loadGalleryImage(item: GalleryItem) {
         if (_uiState.value.galleryBytes[item.rowId] != null) return
         viewModelScope.launch {
-            repository.openGroupImage(item.ref, "gmsg:${item.rowId}").getOrNull()?.let { bytes ->
+            val bytes = repository.openGroupImage(item.ref, "gmsg:${item.rowId}").getOrNull()
+            if (bytes != null) {
                 _uiState.update { it.copy(galleryBytes = it.galleryBytes + (item.rowId to bytes)) }
+            } else {
+                // Thumb failure must not spin forever (chat-bubble failed branch parity):
+                // mark the cell broken; tapping it retries.
+                _uiState.update { it.copy(galleryFailedIds = it.galleryFailedIds + item.rowId) }
             }
         }
     }
 
-    fun loadFriends(onResult: (List<WhisperProfile>) -> Unit) {
+    fun retryGalleryItem(item: GalleryItem) {
+        _uiState.update { it.copy(galleryFailedIds = it.galleryFailedIds - item.rowId) }
+        loadGalleryImage(item)
+    }
+
+    fun loadFriends(onResult: (List<WhisperProfile>, Boolean) -> Unit) {
         viewModelScope.launch {
-            onResult(repository.getFriends().getOrNull().orEmpty())
+            val res = repository.getFriends()
+            // Failure/empty distinction (7.18 pattern): a network blip must not
+            // present as "add friends first" — the sheet shows an honest Retry.
+            onResult(res.getOrNull().orEmpty(), res.isFailure)
         }
     }
 

@@ -3932,6 +3932,11 @@
     <string name="st_Whisper_Groups_CdLatest">Jump to latest</string>
     <string name="st_Whisper_Groups_Retry">Retry</string>
     <string name="st_Whisper_Groups_ImgFailed">Couldn\'t load this photo.</string>
+    <string name="st_Whisper_Groups_CdPhotoRetry">Photo couldn\'t load. Tap to retry.</string>
+    <string name="st_Whisper_Groups_InviteFailAll">Couldn\'t invite anyone. Check your connection and retry.</string>
+    <string name="st_Whisper_Groups_InviteFailSome">Couldn\'t invite %1$d of %2$d friend(s).</string>
+    <string name="st_Whisper_Groups_FriendsFail">Couldn\'t load friends. Check your connection and retry.</string>
+    <string name="st_Whisper_Groups_GalleryFail">Couldn\'t load this gallery. Check your connection and retry.</string>
     <string name="st_Whisper_Groups_Member">Member</string>
     <string name="st_Whisper_Groups_NoFriendsForGroup">Add friends first — groups are friends-only. Find people in Discover.</string>
     <string name="st_Whisper_Groups_InvalidId">That doesn\u2019t look like a group ID.</string>
