@@ -10,7 +10,6 @@ package com.frerox.toolz.ui.screens.whisper
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -21,7 +20,6 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -150,7 +148,6 @@ import com.frerox.toolz.ui.components.ExpressiveLinearProgressIndicator
 import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.components.ToolzExpressiveIconButton
-import com.frerox.toolz.ui.components.ToolzExpressiveIconToggleButton
 import com.frerox.toolz.ui.components.ToolzExpressiveTextButton
 import com.frerox.toolz.ui.components.rememberToolzHapticFeedback
 
@@ -468,14 +465,13 @@ internal fun GroupMessageItem(
                 Spacer(Modifier.width(6.dp))
             }
             Column(
-                modifier = Modifier.widthIn(max = 300.dp),
+                modifier = Modifier.weight(0.85f, fill = false).widthIn(max = 320.dp),
                 horizontalAlignment = if (msg.mine) Alignment.End else Alignment.Start,
                 verticalArrangement = Arrangement.spacedBy(3.dp),
             ) {
                 MessageBubble(
                     msg = msg,
                     first = item.first,
-                    last = item.last,
                     imageBytes = imageBytes,
                     imageExpired = imageExpired,
                     seenCount = seenCount,
@@ -549,7 +545,6 @@ private fun SwipeToReply(onReply: () -> Unit, content: @Composable () -> Unit) {
 private fun MessageBubble(
     msg: WhisperGroupChatMessage,
     first: Boolean,
-    last: Boolean,
     imageBytes: ByteArray?,
     imageExpired: Boolean,
     seenCount: Int,
@@ -568,9 +563,12 @@ private fun MessageBubble(
     val scheme = MaterialTheme.colorScheme
     val mine = msg.mine
     val mentionedMe = !mine && myId.isNotBlank() && myId in msg.mentions
+    // Colors: mine/other match the 1:1 exactly (primaryContainer vs
+    // surfaceContainerHigh). Search-highlight uses the 1:1's primary stance;
+    // mention tint stays group-only (a semantic the 1:1 cannot have).
     val bg by animateColorAsState(
         when {
-            highlighted -> scheme.secondaryContainer
+            highlighted -> scheme.primary
             mentionedMe -> scheme.tertiaryContainer
             mine -> scheme.primaryContainer
             else -> scheme.surfaceContainerHigh
@@ -579,26 +577,20 @@ private fun MessageBubble(
     )
     val fg by animateColorAsState(
         when {
-            highlighted -> scheme.onSecondaryContainer
+            highlighted -> scheme.onPrimary
             mentionedMe -> scheme.onTertiaryContainer
             mine -> scheme.onPrimaryContainer
             else -> scheme.onSurface
         },
         tween(280), label = "bubbleFg",
     )
-    val big = 20.dp
-    val small = 6.dp
-    val tail = 4.dp
+    // 1:1 bubble anatomy (WhisperChatScreen#MessageBubble): the silhouette is
+    // fixed per side — a 4dp notch on the outer top corner, everything else
+    // 20dp. No stacked-corner variants; group rows gate avatars instead.
     val shape = if (mine) {
-        RoundedCornerShape(
-            topStart = big, topEnd = if (first) big else small,
-            bottomEnd = if (last) tail else small, bottomStart = big,
-        )
+        RoundedCornerShape(20.dp, 4.dp, 20.dp, 20.dp)
     } else {
-        RoundedCornerShape(
-            topStart = if (first) big else small, topEnd = big,
-            bottomEnd = big, bottomStart = if (last) tail else small,
-        )
+        RoundedCornerShape(4.dp, 20.dp, 20.dp, 20.dp)
     }
     val hasImage = msg.image != null
     val poll = msg.poll
@@ -613,7 +605,7 @@ private fun MessageBubble(
             .clip(shape)
             .background(bg)
             .combinedClickable(onClick = {}, onLongClick = onLongPress)
-            .padding(if (hasImage) PaddingValues(4.dp) else PaddingValues(horizontal = 12.dp, vertical = 8.dp)),
+            .padding(if (hasImage) PaddingValues(4.dp) else PaddingValues(12.dp)),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         if (showName) {
@@ -882,34 +874,25 @@ private fun ReactionRow(
     myId: String,
     onReact: (String) -> Unit,
 ) {
-    val scheme = MaterialTheme.colorScheme
-    val haptic = rememberToolzHapticFeedback()
+    // 1:1 parity (WhisperChatScreen): circular mini-pills with "emoji + count"
+    // text only — no "mine" styling, no borders, tap toggles the emoji.
     Row(
-        modifier = Modifier.animateContentSize(),
+        modifier = Modifier.padding(top = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         reactions.entries.filter { it.value.isNotEmpty() }.sortedBy { it.key }.take(6).forEach { (emoji, users) ->
-            val mine = myId in users
             Surface(
-                onClick = { haptic.tick(); onReact(emoji) },
-                shape = RoundedCornerShape(12.dp),
-                color = if (mine) scheme.primaryContainer else scheme.surfaceContainerHighest,
-                border = if (mine) BorderStroke(1.dp, scheme.primary) else null,
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                modifier = Modifier.clickable { onReact(emoji) },
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Text(emoji, style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        "${users.size}",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = if (mine) FontWeight.Bold else FontWeight.Medium,
-                        color = if (mine) scheme.onPrimaryContainer else scheme.onSurfaceVariant,
-                    )
-                }
+                Text(
+                    "$emoji ${if (users.size > 1) users.size else ""}",
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontSize = 10.sp,
+                )
             }
         }
     }
@@ -1625,19 +1608,27 @@ internal fun MessageActionsSheet(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp),
         )
+        // Quick Emoji Reaction Bar — 1:1 parity (the 1:1 DeleteMessageSheet):
+        // a rounded surfaceContainerHigh bar with circular transparent taps.
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                .padding(horizontal = 8.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically,
         ) {
             GROUP_REACTION_EMOJI.forEach { emoji ->
-                val mine = reactions[emoji]?.contains(myId) == true
-                ToolzExpressiveIconToggleButton(
-                    checked = mine,
-                    onCheckedChange = { onReact(emoji); close() },
-                    modifier = Modifier.size(48.dp),
+                Surface(
+                    onClick = { onReact(emoji); close() },
+                    shape = CircleShape,
+                    color = Color.Transparent,
+                    modifier = Modifier.size(42.dp),
                 ) {
-                    Text(emoji, fontSize = 22.sp)
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(emoji, fontSize = 24.sp)
+                    }
                 }
             }
         }

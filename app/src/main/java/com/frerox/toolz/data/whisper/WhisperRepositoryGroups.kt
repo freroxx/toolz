@@ -1769,7 +1769,7 @@ suspend fun WhisperRepository.sendGroupMessage(groupId: String, plaintext: Strin
  * current member. The frame carries `wg1:<json>`; legacy bare-text readers
  * still see `t`.
  */
-suspend fun WhisperRepository.sendGroupContent(groupId: String, content: WhisperGroupContent): Result<Unit> = runCatching {
+suspend fun WhisperRepository.sendGroupContent(groupId: String, content: WhisperGroupContent): Result<String> = runCatching {
     requireGroupsEnabled()
     val me = requireMe()
     val m = syncGroup(groupId).getOrThrow()
@@ -1830,6 +1830,9 @@ suspend fun WhisperRepository.sendGroupImage(
         exp = expiresAfterSeconds?.let { (System.currentTimeMillis() / 1000) + it },
     )
     sendGroupContent(groupId, WhisperGroupContent(t = caption.trim(), img = ref)).getOrThrow()
+    // sendGroupContent returns the row's clientId now; image sends only need
+    // the success/failure boundary, so the block still closes as Unit.
+    Unit
 }
 
 /** Seals one frame per member and publishes the row (shared by text/image/poll paths). */
@@ -1839,7 +1842,7 @@ private suspend fun WhisperRepository.sealAndPublishContent(
     me: String,
     frameBody: String,
     msgKind: String = "chat",
-): Result<Unit> = runCatching {
+): Result<String> = runCatching {
     val targets = m.members.keys.sorted()
     val frames = mutableMapOf<String, String>()
     val failed = mutableListOf<String>()
@@ -1894,7 +1897,7 @@ private suspend fun WhisperRepository.sealAndPublishContent(
             ),
         )
     }
-    if (insertResult.isSuccess) return@runCatching
+    if (insertResult.isSuccess) return@runCatching clientId
     val insertErr = insertResult.exceptionOrNull()
     // Permanent rejections (quota, stale epoch, full, non-member) will fail
     // the drain too — surface them, don't queue. Anything else (offline,
@@ -1926,21 +1929,28 @@ suspend fun WhisperRepository.fetchGroupMessages(
     limit: Int = 50,
     /** Pagination cursor: only rows strictly older than this created_at. */
     before: String? = null,
+    /** Skip the per-call membership sync when the caller just synced. */
+    membership: WhisperGroupMembership? = null,
 ): Result<List<WhisperGroupChatMessage>> = runCatching {
     requireGroupsEnabled()
     requireMe()
-    groupIo { fetchGroupMessagesInner(groupId, limit, before).getOrThrow() }
+    groupIo { fetchGroupMessagesInner(groupId, limit, before, membership).getOrThrow() }
 }
 
-/** Bounded inner (see [groupIo]): sync + selects must never hang the timeline. */
+/**
+ * Bounded inner (see [groupIo]): selects + decrypt must never hang the
+ * timeline. When [membership] is preset, opening reads cost ONE select —
+ * callers that just synced (chat open, head refreshes) skip the lane-2 sync.
+ */
 private suspend fun WhisperRepository.fetchGroupMessagesInner(
     groupId: String,
     limit: Int,
     before: String?,
+    membership: WhisperGroupMembership? = null,
 ): Result<List<WhisperGroupChatMessage>> = runCatching {
     requireGroupsEnabled()
     val me = requireMe()
-    val m = syncGroup(groupId).getOrThrow()
+    val m = membership ?: syncGroup(groupId).getOrThrow()
     require(m.isMember(me)) { "You are no longer a member of this group." }
     val rows = db.from("whisper_group_messages").select {
         filter {
@@ -1954,40 +1964,84 @@ private suspend fun WhisperRepository.fetchGroupMessagesInner(
         order("created_at", Order.DESCENDING)
         limit(limit.toLong())
     }.decodeList<GroupMessageRow>()
-    val names = getFriends().getOrNull().orEmpty().associate { it.id to it.effectiveName }
+    // Names ride the 60s TTL map: getFriends() costs two server round trips
+    // and timeline refreshes fire far more often than friendships change.
+    val names = friendNameMap()
     rows.sortedWith(compareBy({ it.createdAt ?: "" }, { it.id }))
         .distinctBy { it.id }
-        .mapNotNull { row ->
-            if (deletedStore.isMessageDeleted(groupTombstoneKey(row.clientId))) return@mapNotNull null
-            if (!m.isMemberAt(row.senderId, row.epoch) || !m.isMemberAt(me, row.epoch)) return@mapNotNull null
-            val body = decodeGroupRow(row.content) ?: return@mapNotNull null
-            if (body.g != groupId || body.e != row.epoch) return@mapNotNull null
-            val frame = body.frames[me] ?: return@mapNotNull null
-            // Own rows open through the self-leg anchor (the ratchet path has no
-            // session with myself — see [WhisperSelfLegCrypto]).
-            val inner = (if (row.senderId == me) openGroupSelfFrame(me, frame)
-            else openV3Frame(frame, row.senderId, row.senderId, me))
-                ?: return@mapNotNull null
-            val opened = openGroupFrameBody(groupId, row.epoch, inner) ?: return@mapNotNull null
-            val content = parseGroupContentBody(opened)
-            WhisperGroupChatMessage(
-                id = row.id,
-                groupId = groupId,
-                clientId = row.clientId,
-                senderId = row.senderId,
-                senderName = if (row.senderId == me) "You" else names[row.senderId] ?: "Member",
-                body = content.t,
-                createdAt = row.createdAt ?: "",
-                epoch = row.epoch,
-                mine = row.senderId == me,
-                image = content.img,
-                reply = content.reply,
-                poll = content.poll,
-                vote = content.vote,
-                pollClose = content.pollClose,
-                mentions = content.mentions,
-            )
+        .mapNotNull { row -> openGroupRowToMessage(row, groupId, m, me, names) }
+}
+
+/**
+ * Opens ONE encrypted group message row into a chat message — the single
+ * decrypt path shared by bulk fetches, the realtime ingest and the send
+ * echo swap. Returns null for tombstoned / epoch-locked / unopenable rows,
+ * exactly the same filter chain the bulk reader applies.
+ */
+internal suspend fun WhisperRepository.openGroupRowToMessage(
+    row: GroupMessageRow,
+    groupId: String,
+    m: WhisperGroupMembership,
+    me: String,
+    names: Map<String, String>,
+): WhisperGroupChatMessage? {
+    if (deletedStore.isMessageDeleted(groupTombstoneKey(row.clientId))) return null
+    if (!m.isMemberAt(row.senderId, row.epoch) || !m.isMemberAt(me, row.epoch)) return null
+    val body = decodeGroupRow(row.content) ?: return null
+    if (body.g != groupId || body.e != row.epoch) return null
+    val frame = body.frames[me] ?: return null
+    // Own rows open through the self-leg anchor (the ratchet path has no
+    // session with myself — see [WhisperSelfLegCrypto]).
+    val inner = (if (row.senderId == me) openGroupSelfFrame(me, frame)
+    else openV3Frame(frame, row.senderId, row.senderId, me))
+        ?: return null
+    val opened = openGroupFrameBody(groupId, row.epoch, inner) ?: return null
+    val content = parseGroupContentBody(opened)
+    return WhisperGroupChatMessage(
+        id = row.id,
+        groupId = groupId,
+        clientId = row.clientId,
+        senderId = row.senderId,
+        senderName = if (row.senderId == me) "You" else names[row.senderId] ?: "Member",
+        body = content.t,
+        createdAt = row.createdAt ?: "",
+        epoch = row.epoch,
+        mine = row.senderId == me,
+        image = content.img,
+        reply = content.reply,
+        poll = content.poll,
+        vote = content.vote,
+        pollClose = content.pollClose,
+        mentions = content.mentions,
+    )
+}
+
+/**
+ * One row by client id — the send-echo swap: a fresh send needs only its own
+ * row back (no full reload, no membership re-sync when [membership] carries
+ * the just-synced state).
+ */
+internal suspend fun WhisperRepository.fetchGroupMessageByClientId(
+    groupId: String,
+    clientId: String,
+    membership: WhisperGroupMembership? = null,
+): Result<WhisperGroupChatMessage?> = runCatching {
+    requireGroupsEnabled()
+    val me = requireMe()
+    val m = membership ?: syncGroup(groupId).getOrThrow()
+    require(m.isMember(me)) { "You are no longer a member of this group." }
+    groupIo {
+        val rows = db.from("whisper_group_messages").select {
+            filter {
+                eq("group_id", groupId)
+                eq("client_id", clientId)
+            }
+            limit(1)
+        }.decodeList<GroupMessageRow>()
+        rows.firstOrNull()?.let { row ->
+            openGroupRowToMessage(row, groupId, m, me, friendNameMap())
         }
+    }
 }
 
 /**
@@ -2074,6 +2128,34 @@ suspend fun WhisperRepository.markGroupSeen(groupId: String, clientIds: List<Str
     }
 }
 
+/** Live seen receipts for one group (the "seen by n" ticks update in place). */
+internal fun WhisperRepository.observeGroupReceiptEvents(groupId: String): kotlinx.coroutines.flow.Flow<GroupReceiptRow> =
+    kotlinx.coroutines.flow.callbackFlow {
+        requireGroupsEnabled()
+        if (groupId.isBlank()) { close(); return@callbackFlow }
+        val channel = groupChannel("grouppg_receipt_$groupId")
+        val changes = channel.postgresChangeFlow<io.github.jan.supabase.realtime.PostgresAction>(schema = "public") {
+            table = "whisper_group_receipts"
+            filter("group_id", io.github.jan.supabase.postgrest.query.filter.FilterOperator.EQ, groupId)
+        }
+        val job = launch {
+            changes.collect { action ->
+                val row = when (action) {
+                    is io.github.jan.supabase.realtime.PostgresAction.Insert ->
+                        runCatching { action.decodeRecord<GroupReceiptRow>() }.getOrNull()
+                    is io.github.jan.supabase.realtime.PostgresAction.Update ->
+                        runCatching { action.decodeRecord<GroupReceiptRow>() }.getOrNull()
+                    else -> null
+                }
+                if (row != null) trySend(row)
+            }
+        }
+        awaitClose {
+            job.cancel()
+            launch { runCatchingCE { realtime.removeChannel(channel) } }
+        }
+    }
+
 // ── Reactions (one emoji per user per message; upsert replaces) ──────
 
 @Serializable
@@ -2140,8 +2222,20 @@ suspend fun WhisperRepository.fetchGroupReactions(groupId: String): Result<Map<S
         }
     }
 
-/** Live reaction changes for one group (chat refreshes chips on this). */
-fun WhisperRepository.observeGroupReactions(groupId: String): kotlinx.coroutines.flow.Flow<Unit> =
+/**
+ * One realtime reaction change for the open chat: chips merge locally with
+ * zero refetch. [Removed] carries the (message,user) pair without the emoji,
+ * [Refetch] is the rare unresolvable lane (delete without a decodable old
+ * record — replica identity gaps) that falls back to the bulk read.
+ */
+internal sealed interface WhisperGroupReactionEvent {
+    data class Applied(val messageId: String, val userId: String, val emoji: String) : WhisperGroupReactionEvent
+    data class Removed(val messageId: String, val userId: String) : WhisperGroupReactionEvent
+    data object Refetch : WhisperGroupReactionEvent
+}
+
+/** Live reaction events for one group (chat refreshes chips on this). */
+internal fun WhisperRepository.observeGroupReactionEvents(groupId: String): kotlinx.coroutines.flow.Flow<WhisperGroupReactionEvent> =
     kotlinx.coroutines.flow.callbackFlow {
         requireGroupsEnabled()
         if (groupId.isBlank()) { close(); return@callbackFlow }
@@ -2151,7 +2245,25 @@ fun WhisperRepository.observeGroupReactions(groupId: String): kotlinx.coroutines
             filter("group_id", io.github.jan.supabase.postgrest.query.filter.FilterOperator.EQ, groupId)
         }
         val job = launch {
-            changes.collect { trySend(Unit) }
+            changes.collect { action ->
+                val record = when (action) {
+                    is io.github.jan.supabase.realtime.PostgresAction.Insert ->
+                        runCatching { action.decodeRecord<GroupReactionRow>() }.getOrNull()
+                    is io.github.jan.supabase.realtime.PostgresAction.Update ->
+                        runCatching { action.decodeRecord<GroupReactionRow>() }.getOrNull()
+                    is io.github.jan.supabase.realtime.PostgresAction.Delete ->
+                        runCatching { action.decodeOldRecord<GroupReactionRow>() }.getOrNull()
+                    else -> null
+                }
+                val event = when {
+                    record is GroupReactionRow && action is io.github.jan.supabase.realtime.PostgresAction.Delete ->
+                        WhisperGroupReactionEvent.Removed(record.messageId, record.userId)
+                    record is GroupReactionRow ->
+                        WhisperGroupReactionEvent.Applied(record.messageId, record.userId, record.emoji)
+                    else -> WhisperGroupReactionEvent.Refetch
+                }
+                trySend(event)
+            }
         }
         awaitClose {
             job.cancel()
@@ -2631,17 +2743,23 @@ internal fun WhisperRepository.observeGroupLog(groupId: String): kotlinx.corouti
         }
     }
 
-/** Public ping for a new group message row (no ciphertext leaves the row). */
-data class WhisperGroupMessagePing(
+/**
+ * Ping for a new group message row: the notification lane reads the fields,
+ * the open chat ingests [row] directly (local decrypt of the carried frame —
+ * no refetch). No ciphertext leaves the repository boundary unencrypted.
+ */
+internal data class WhisperGroupMessagePing(
     val groupId: String,
     val senderId: String,
     val clientId: String,
     /** Traffic class: vote pings stay notification-silent (tally only). */
     val kind: String = "chat",
+    /** The full sealed row as inserted; null only for exotic payloads. */
+    val row: GroupMessageRow? = null,
 )
 
 /** Fires with every new message row of one group (foreground message pings). */
-fun WhisperRepository.observeGroupMessagesLive(groupId: String): kotlinx.coroutines.flow.Flow<WhisperGroupMessagePing> =
+internal fun WhisperRepository.observeGroupMessagesLive(groupId: String): kotlinx.coroutines.flow.Flow<WhisperGroupMessagePing> =
     kotlinx.coroutines.flow.callbackFlow {
         requireGroupsEnabled()
         if (groupId.isBlank()) { close(); return@callbackFlow }
@@ -2657,7 +2775,9 @@ fun WhisperRepository.observeGroupMessagesLive(groupId: String): kotlinx.corouti
                         runCatching { action.decodeRecord<GroupMessageRow>() }.getOrNull()
                     else -> null
                 }
-                if (row != null) trySend(WhisperGroupMessagePing(groupId, row.senderId, row.clientId, row.msgKind))
+                if (row != null) {
+                    trySend(WhisperGroupMessagePing(groupId, row.senderId, row.clientId, row.msgKind, row))
+                }
             }
         }
         awaitClose {

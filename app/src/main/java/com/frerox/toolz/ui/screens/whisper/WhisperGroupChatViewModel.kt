@@ -18,6 +18,7 @@ import com.frerox.toolz.data.whisper.clearGroupTyping
 import com.frerox.toolz.data.whisper.deleteGroupMessageForEveryone
 import com.frerox.toolz.data.whisper.deleteGroupMessageForMe
 import com.frerox.toolz.data.whisper.fetchGroupMessages
+import com.frerox.toolz.data.whisper.fetchGroupMessageByClientId
 import com.frerox.toolz.data.whisper.fetchGroupReceipts
 import com.frerox.toolz.data.whisper.friendNameMap
 import com.frerox.toolz.data.whisper.flushGroupOutbox
@@ -26,8 +27,11 @@ import com.frerox.toolz.data.whisper.markGroupSeen
 import com.frerox.toolz.data.whisper.observeGroupLog
 import com.frerox.toolz.data.whisper.observeGroupMessageDeletes
 import com.frerox.toolz.data.whisper.observeGroupMessagesLive
+import com.frerox.toolz.data.whisper.GroupMessageRow
+import com.frerox.toolz.data.whisper.observeGroupReceiptEvents
 import com.frerox.toolz.data.whisper.observeGroupTyping
 import com.frerox.toolz.data.whisper.openGroupImage
+import com.frerox.toolz.data.whisper.openGroupRowToMessage
 import com.frerox.toolz.data.whisper.GroupPoll
 import com.frerox.toolz.data.whisper.GroupReplyRef
 import com.frerox.toolz.data.whisper.GroupVote
@@ -35,7 +39,8 @@ import com.frerox.toolz.data.whisper.WhisperGroupContent
 import com.frerox.toolz.data.whisper.GROUP_REACTION_EMOJI
 import com.frerox.toolz.data.whisper.cachedGroupSystemEvents
 import com.frerox.toolz.data.whisper.fetchGroupReactions
-import com.frerox.toolz.data.whisper.observeGroupReactions
+import com.frerox.toolz.data.whisper.WhisperGroupReactionEvent
+import com.frerox.toolz.data.whisper.observeGroupReactionEvents
 import com.frerox.toolz.data.whisper.sendGroupContent
 import com.frerox.toolz.data.whisper.toggleGroupReaction
 import com.frerox.toolz.data.whisper.sendGroupImage
@@ -155,10 +160,14 @@ class WhisperGroupChatViewModel @Inject constructor(
         val logJob = viewModelScope.launch {
             runCatching { repository.observeGroupLog(groupId).collect { load() } }
         }
-        // New rows AND sender wipes refresh the open chat (no pings here —
-        // notifications stay with the section watcher + open-chat suppression).
+        // New rows ARRIVE with their sealed frame: the insert is ingested
+        // locally (decrypt + merge, zero refetch). Wipes and pings without a
+        // decodable row still fall back to the full reload lane.
         val msgJob = viewModelScope.launch {
-            runCatching { repository.observeGroupMessagesLive(groupId).collect { load() } }
+            runCatching { repository.observeGroupMessagesLive(groupId).collect { ping ->
+                val row = ping.row
+                if (row != null) ingestRow(row) else load()
+            } }
         }
         val delJob = viewModelScope.launch {
             runCatching { repository.observeGroupMessageDeletes(groupId).collect { load() } }
@@ -171,10 +180,33 @@ class WhisperGroupChatViewModel @Inject constructor(
                 }
             }
         }
+        // Reaction chips merge in place (Applied/Removed); Refetch is the rare
+        // unresolvable delete that falls back to the bulk read.
         val reactJob = viewModelScope.launch {
-            runCatching { repository.observeGroupReactions(groupId).collect { refreshReactions() } }
+            runCatching {
+                repository.observeGroupReactionEvents(groupId).collect { evt ->
+                    when (evt) {
+                        is WhisperGroupReactionEvent.Applied ->
+                            applyReaction(evt.messageId, evt.userId, evt.emoji)
+                        is WhisperGroupReactionEvent.Removed ->
+                            applyReaction(evt.messageId, evt.userId, null)
+                        WhisperGroupReactionEvent.Refetch -> refreshReactions()
+                    }
+                }
+            }
         }
-        watchJobs = listOf(logJob, msgJob, delJob, typingJob, reactJob)
+        val receiptJob = viewModelScope.launch {
+            runCatching {
+                repository.observeGroupReceiptEvents(groupId).collect { row ->
+                    if (row.userId == repository.myId) return@collect
+                    _uiState.update { s ->
+                        val users = s.receipts[row.messageId].orEmpty().filter { it != row.userId } + row.userId
+                        s.copy(receipts = s.receipts + (row.messageId to users))
+                    }
+                }
+            }
+        }
+        watchJobs = listOf(logJob, msgJob, delJob, typingJob, reactJob, receiptJob)
     }
 
     override fun onCleared() {
@@ -334,10 +366,36 @@ class WhisperGroupChatViewModel @Inject constructor(
                 )
             }
             result
-                .onSuccess {
-                    // Swap the optimistic row for the real one in one beat.
-                    load().join()
-                    _uiState.update { s -> s.copy(pending = s.pending.filterNot { it.localId == p.localId }) }
+                .onSuccess { clientId ->
+                    // Swap the optimistic row for the real one in one beat:
+                    // a single targeted select decodes the pending entry —
+                    // never the full reload burst (the realtime ingest of the
+                    // same row dedupes by id anyway).
+                    viewModelScope.launch {
+                        val real = repository
+                            .fetchGroupMessageByClientId(groupId, clientId, _uiState.value.membership)
+                            .getOrNull()
+                        _uiState.update { s ->
+                            val merged = if (real != null) {
+                                (s.messages + real).distinctBy { it.id }
+                                    .sortedWith(compareBy({ it.createdAt }, { it.id }))
+                            } else {
+                                s.messages
+                            }
+                            s.copy(
+                                messages = merged,
+                                pending = s.pending.filterNot { it.localId == p.localId },
+                                isSending = false,
+                            )
+                        }
+                        if (real == null) refreshTimelineHead()
+                        // The open screen counts MY message as seen, exactly
+                        // like a reload used to do.
+                        real?.clientId?.let {
+                            runCatching { repository.markGroupSeen(groupId, listOf(it)) }
+                        }
+                        real?.createdAt?.takeIf { it.isNotBlank() }?.let { readStore.markRead(groupId, it) }
+                    }
                 }
                 .onFailure { e ->
                     _uiState.update { s ->
@@ -371,7 +429,10 @@ class WhisperGroupChatViewModel @Inject constructor(
             _uiState.update { it.copy(isSending = true, error = null) }
             val poll = GroupPoll(id = java.util.UUID.randomUUID().toString(), q = q, opts = opts)
             repository.sendGroupContent(groupId, WhisperGroupContent(t = "\ud83d\udcca $q", poll = poll))
-                .onSuccess { load() }
+                .onSuccess {
+                    _uiState.update { it.copy(isSending = false) }
+                    refreshTimelineHead()
+                }
                 .onFailure { e ->
                     _uiState.update { it.copy(isSending = false, error = err(e)) }
                 }
@@ -384,7 +445,7 @@ class WhisperGroupChatViewModel @Inject constructor(
         if (pollId in _uiState.value.closedPolls) return
         viewModelScope.launch {
             repository.sendGroupContent(groupId, WhisperGroupContent(vote = GroupVote(pollId, opt)))
-                .onSuccess { load() }
+                .onSuccess { refreshTimelineHead() }
                 .onFailure { e -> _uiState.update { it.copy(error = err(e)) } }
         }
     }
@@ -395,7 +456,7 @@ class WhisperGroupChatViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(error = null) }
             repository.sendGroupContent(groupId, WhisperGroupContent(t = "poll closed", pollClose = pollId))
-                .onSuccess { load() }
+                .onSuccess { refreshTimelineHead() }
                 .onFailure { e -> _uiState.update { it.copy(error = err(e)) } }
         }
     }
@@ -403,10 +464,18 @@ class WhisperGroupChatViewModel @Inject constructor(
     /** Emoji tap: same emoji removes, anything else replaces. */
     fun toggleReaction(msg: WhisperGroupChatMessage, emoji: String) {
         if (emoji !in GROUP_REACTION_EMOJI || msg.clientId.isBlank()) return
+        val me = repository.myId
+        // Optimistic flip first — the chip reacts instantly, the realtime
+        // channel confirms with the authoritative event; failures roll the
+        // map back with a bulk refetch.
+        val mine = _uiState.value.reactions[msg.clientId]?.get(emoji)?.contains(me) == true
+        applyReaction(msg.clientId, me, if (mine) null else emoji)
         viewModelScope.launch {
             repository.toggleGroupReaction(groupId, msg.clientId, emoji)
-                .onSuccess { refreshReactions() }
-                .onFailure { e -> _uiState.update { it.copy(error = err(e)) } }
+                .onFailure { e ->
+                    _uiState.update { it.copy(error = err(e)) }
+                    refreshReactions()
+                }
         }
     }
 
@@ -417,12 +486,105 @@ class WhisperGroupChatViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Realtime ingest: a freshly arrived row is decrypted locally and merged —
+     * no outbox flush, no membership sync, no bulk refetch. The realtime
+     * Insert already carries the sealed frame, so a new message lands with a
+     * single decrypt. Anything the ingest cannot settle in this state (no
+     * membership yet, undecodable payload) falls back to the full [load].
+     */
+    private fun ingestRow(row: GroupMessageRow) {
+        viewModelScope.launch {
+            val s = _uiState.value
+            if (s.messages.any { it.id == row.id || it.clientId == row.clientId }) return@launch
+            val m = s.membership ?: run { load(); return@launch }
+            val me = repository.myId
+            val msg = runCatching {
+                repository.openGroupRowToMessage(row, groupId, m, me, s.memberNames)
+            }.getOrNull()
+            if (msg == null) {
+                load()
+                return@launch
+            }
+            // Watermark BEFORE any read-mark, exactly like a reload would do.
+            val markBefore = readStore.readAt(groupId)
+            _uiState.update { st ->
+                val merged = (st.messages + msg).distinctBy { it.id }
+                    .sortedWith(compareBy({ it.createdAt }, { it.id }))
+                val unread = merged.filter { it.createdAt > markBefore && it.senderId != me }
+                st.copy(
+                    messages = merged,
+                    pollTallies = tallyPolls(merged, me),
+                    closedPolls = closedPollIds(merged),
+                    firstUnreadId = st.firstUnreadId ?: unread.firstOrNull()?.id,
+                    unreadCount = unread.size,
+                )
+            }
+            // The open screen counts as read, same as a reload does.
+            runCatching { repository.markGroupSeen(groupId, listOf(msg.clientId)) }
+            msg.createdAt.takeIf { it.isNotBlank() }?.let { readStore.markRead(groupId, it) }
+        }
+    }
+
+    /** One reaction changes hands or flips away; patch the map in place. */
+    private fun applyReaction(messageId: String, userId: String, emoji: String?) {
+        _uiState.update { s ->
+            val current = s.reactions[messageId].orEmpty()
+            // Replace semantics: a user holds at most one emoji per message.
+            val stripped = current.entries
+                .mapNotNull { (e, users) -> e to users.filter { it != userId } }
+                .toMap()
+                .filterValues { it.isNotEmpty() }
+            val next = if (emoji != null) {
+                stripped + (emoji to (stripped[emoji].orEmpty() + userId))
+            } else {
+                stripped
+            }
+            s.copy(reactions = s.reactions + (messageId to next))
+        }
+    }
+
+    /**
+     * Head-only refetch (one bounded select — never the full 5-call reload).
+     * The belt-and-suspenders lane for sends/votes when the realtime echo
+     * misses (cold subscribe, channel down): the next 16 rows cover the tail
+     * of activity without re-syncing membership.
+     */
+    private fun refreshTimelineHead() {
+        viewModelScope.launch {
+            val membership = _uiState.value.membership ?: return@launch
+            // fetchGroupMessages is already a Result — no outer runCatching
+            // (double-wrapping would hide the list type from the chain).
+            val head = repository
+                .fetchGroupMessages(groupId, TIMELINE_HEAD_PAGE, membership = membership)
+                .getOrNull()
+                .orEmpty()
+            if (head.isEmpty()) return@launch
+            _uiState.update { s ->
+                val merged = (head + s.messages).distinctBy { it.id }
+                    .sortedWith(compareBy({ it.createdAt }, { it.id }))
+                s.copy(
+                    messages = merged,
+                    pollTallies = tallyPolls(merged, repository.myId),
+                    closedPolls = closedPollIds(merged),
+                )
+            }
+        }
+    }
+
     fun sendImage(bytes: ByteArray, mime: String, expiresAfterSeconds: Long? = null) {
         viewModelScope.launch { repository.clearGroupTyping(groupId) }
         viewModelScope.launch {
             _uiState.update { it.copy(isUploadingImage = true, error = null) }
             repository.sendGroupImage(groupId, bytes, mime, expiresAfterSeconds = expiresAfterSeconds)
-                .onSuccess { load() }
+                .onSuccess {
+                    // The image row arrives via the realtime ingest; this is
+                    // only the belt lane when the echo misses. The spinner
+                    // always clears here — the head refetch may be a no-op.
+                    _uiState.update { it.copy(isUploadingImage = false) }
+                    refreshTimelineHead()
+                    if (_uiState.value.membership == null) load()
+                }
                 .onFailure { e ->
                     _uiState.update { it.copy(isUploadingImage = false, error = err(e)) }
                 }
@@ -523,6 +685,9 @@ class WhisperGroupChatViewModel @Inject constructor(
         /** Group mutes reuse the 1:1 mute store under a reserved namespace. */
         fun muteKey(groupId: String) = "group:$groupId"
         const val PAGE_SIZE = 50
+
+        /** Bounded head refetch for send/vote echo fallbacks (see [refreshTimelineHead]). */
+        const val TIMELINE_HEAD_PAGE = 16
 
         /** Poll ids frozen by an admin close (any close row wins, latest wins ties). */
         fun closedPollIds(messages: List<WhisperGroupChatMessage>): Set<String> =

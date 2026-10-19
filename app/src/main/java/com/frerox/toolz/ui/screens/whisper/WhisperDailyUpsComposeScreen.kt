@@ -366,11 +366,14 @@ private fun ShareButton(
             Spacer(Modifier.size(10.dp))
             Text(stringResource(R.string.st_Whisper_DailyUp_Posting))
         } else {
+            // Disabled buttons explain themselves: no photo → what to do next,
+            // exhausted quota → the limit. Same action, honest feedback.
             Text(
-                text = if (state.remaining > 0) {
-                    stringResource(R.string.st_Whisper_DailyUp_PostLabel)
-                } else {
-                    stringResource(R.string.st_Whisper_DailyUp_ErrQuota)
+                text = when {
+                    state.remaining <= 0 -> stringResource(R.string.st_Whisper_DailyUp_ErrQuota)
+                    // Requires no new string: the photo slot's own invite copy.
+                    state.photo == null -> stringResource(R.string.st_Whisper_DailyUp_PickPhoto)
+                    else -> stringResource(R.string.st_Whisper_DailyUp_PostLabel)
                 },
                 fontWeight = FontWeight.SemiBold,
             )

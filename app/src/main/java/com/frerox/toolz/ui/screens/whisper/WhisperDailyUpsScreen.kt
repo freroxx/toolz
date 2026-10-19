@@ -37,6 +37,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.AddCircle
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Timer
@@ -79,6 +80,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.WhisperDailyUpsConfig
+import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.theme.toolzBackground
 import kotlinx.coroutines.delay
 import kotlin.math.max
@@ -180,6 +182,14 @@ fun WhisperDailyUpsScreen(
                     }
                 },
                 actions = {
+                    // The compose entry is the hub's primary affordance — top
+                    // bar action AND the "+" ring below, never one alone.
+                    IconButton(onClick = onNavigateToCompose) {
+                        Icon(
+                            Icons.Rounded.AddCircle,
+                            contentDescription = stringResource(R.string.st_Whisper_DailyUp_AddCd),
+                        )
+                    }
                     if (state.loading) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(20.dp),
@@ -237,6 +247,17 @@ fun WhisperDailyUpsScreen(
                     title = stringResource(R.string.st_Whisper_DailyUp_EmptyTitle),
                     subtitle = stringResource(R.string.st_Whisper_DailyUp_EmptySub),
                 )
+                // An empty day is a call to action, not a wall — the CTA sits
+                // right under the copy, same action as the "+" ring.
+                ToolzExpressiveButton(
+                    onClick = onNavigateToCompose,
+                    modifier = Modifier.align(Alignment.CenterHorizontally),
+                ) {
+                    Text(
+                        text = stringResource(R.string.st_Whisper_DailyUp_NewUp),
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
             }
             RingStrip(
                 heading = stringResource(R.string.st_Whisper_DailyUp_Mine),
