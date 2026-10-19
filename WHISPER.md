@@ -1201,6 +1201,14 @@ Whisper's cryptography is pinned with a deliberately paranoid test stack:
   broader signal-compat review remains on the roadmap (§14.5).
 - **Model invariants & UI plumbing** — serialization round-trips, ordering,
   tombstone behavior, chat reactions, error vocabularies.
+- **UI navigation and honest-state pins.** `WhisperUiGuardsTest` fixes the
+  1.2 s `ElapsedTapGate` window (first accept, same-frame reject, exact
+  boundary accept, boundary-minus-one reject, reset re-arm). The gate is owned
+  by the Groups and Daily Ups view models, so a double tap cannot push the same
+  destination twice across recompositions, and neither screen carries a
+  composition-locked timer anymore. Hub sync failures render inline (failure
+  panel with no cache, banner over stale content with a cache); only
+  viewer-scoped failures reach the snackbar.
 - **Instrumented media test** for Daily Ups: a fully geotagged, device-labeled
   test photo must publish with *zero* surviving EXIF/GPS tags on the exact
   publish bytes — device-only, like all Bitmap work.
@@ -1208,11 +1216,11 @@ Whisper's cryptography is pinned with a deliberately paranoid test stack:
   cycle (six rounds over the group/Daily-Ups screens and their shared
   loaders) runs on a fixed invariant: every round compiles with
   `:app:compileDebugKotlin` and finishes with the exact unit-test baseline —
-  530 tests completed with the same seven pre-existing failures (all in
-  unrelated engine suites, none Whisper-related) — checked before each
-  commit. Nothing behavioral lands outside that gate; the SQL/edge surfaces
-  were deliberately untouched and still belong to the ship-day runbook
-  (`supabase/POST_DEPLOY_SMOKE.md`).
+  535 tests completed (the original 530 plus five tap-gate tests) with the same
+  seven pre-existing failures (all in unrelated engine suites, none
+  Whisper-related) — checked before each commit. Nothing behavioral lands
+  outside that gate; the SQL/edge surfaces were deliberately untouched and
+  still belong to the ship-day runbook (`supabase/POST_DEPLOY_SMOKE.md`).
 - **Server-plane invariants unchanged by the cycle.** Client-side hardening
   changed no cryptography and no SQL: quotas (600/day fan-out, 5/day/IP
   story, 5/day/IP signup), signed-log verification, epochs, and descriptor

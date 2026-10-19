@@ -5,6 +5,7 @@
 
 package com.frerox.toolz.ui.screens.whisper
 
+import android.os.SystemClock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.whisper.GroupInviteInfo
@@ -75,6 +76,12 @@ class WhisperGroupsViewModel @Inject constructor(
     private val readStore: WhisperGroupReadStore,
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) : ViewModel() {
+
+    /** Screen-owned navigation gate: survives recomposition; one push per window. */
+    private val navGate = ElapsedTapGate()
+
+    fun acceptNavigation(nowMs: Long = SystemClock.elapsedRealtime()): Boolean =
+        navGate.tryAccept(nowMs)
 
     /** Latest-message preview + unread for one group row (all String-safe equals). */
     data class GroupPreview(

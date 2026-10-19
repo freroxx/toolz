@@ -154,8 +154,12 @@ fun WhisperGroupsSection(
         // Instagram-stories circles first (own + live friends), then the groups
         // header — the strip owns the very top like stories sit above the feed.
         DailyUpsStoriesBar(
-            onCompose = onNavigateToDailyUpsCompose,
-            onOpenHub = onNavigateToDailyUps,
+            onCompose = {
+                if (viewModel.acceptNavigation()) onNavigateToDailyUpsCompose()
+            },
+            onOpenHub = {
+                if (viewModel.acceptNavigation()) onNavigateToDailyUps()
+            },
         )
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -232,7 +236,9 @@ fun WhisperGroupsSection(
                         memberCount = state.memberCounts[group.id] ?: 0,
                         preview = state.previews[group.id],
                         picture = pictures[group.id],
-                        onOpen = { onNavigateToGroup(group.id) },
+                        onOpen = {
+                            if (viewModel.acceptNavigation()) onNavigateToGroup(group.id)
+                        },
                     )
                 }
             }
@@ -384,14 +390,6 @@ private fun GroupRowCard(
     val unread = preview?.unread ?: 0
     val hasUnread = unread > 0
 
-    // Double-tap guard: two fast taps on the same card must not push the
-    // chat destination twice (users then swipe back through a ghost copy).
-    var openLock by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        kotlinx.coroutines.delay(1_200)
-        openLock = false
-    }
-
     val photoLabel = stringResource(R.string.st_Whisper_Groups_Photo)
     val pollLabel = stringResource(R.string.st_Whisper_Groups_Poll)
     val membersLabel = stringResource(R.string.st_Whisper_Groups_Members)
@@ -419,11 +417,8 @@ private fun GroupRowCard(
 
     ExpressiveCard(
         onClick = {
-            if (!openLock) {
-                openLock = true
-                haptic.click()
-                onOpen()
-            }
+            haptic.click()
+            onOpen()
         },
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(28.dp),

@@ -5,6 +5,7 @@
 
 package com.frerox.toolz.ui.screens.whisper
 
+import android.os.SystemClock
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import android.graphics.BitmapFactory
@@ -50,7 +51,9 @@ import javax.inject.Inject
  * Server truth arrives through [refresh] (pull): stories deliberately have no
  * realtime channel — the content-free push ping re-opens the hub instead.
  *
- * Failed loads resolve to SNACKBAR errors only; no dialog, no retry queue —
+ * Failed loads are scoped honestly: a hub sync failure renders INLINE above
+ * the rail (it must never masquerade as an empty day), while viewer failures
+ * (image, reaction, delete) surface as a snackbar. No dialog, no retry queue —
  * the pull-retry is the load interaction itself (any refresh re-runs sync).
  */
 @HiltViewModel
@@ -58,6 +61,12 @@ class WhisperDailyUpsViewModel @Inject constructor(
     private val repository: WhisperRepository,
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) : ViewModel() {
+
+    /** Screen-owned navigation gate: survives recomposition; one push per window. */
+    private val navGate = ElapsedTapGate()
+
+    fun acceptNavigation(nowMs: Long = SystemClock.elapsedRealtime()): Boolean =
+        navGate.tryAccept(nowMs)
 
     /** One fully-presented ring entry (mine or a friend's). */
     data class StoryItem(
@@ -76,7 +85,10 @@ class WhisperDailyUpsViewModel @Inject constructor(
         val mine: List<StoryItem> = emptyList(),
         val friends: List<StoryItem> = emptyList(),
         val quotaUsed: Int = 0,
+        /** Hub-scoped sync failure: inline banner, never a snackbar. */
         val error: String? = null,
+        /** Viewer-scoped failure (image/receipt/delete): snackbar, never inline. */
+        val viewerError: String? = null,
     )
 
     /** Full-screen viewer overlay; null = hidden. Flat list, one paged page per story. */
@@ -100,7 +112,10 @@ class WhisperDailyUpsViewModel @Inject constructor(
         val myReactions: Map<String, String> = emptyMap(),
     )
 
+    /** Hub-scoped sync failure. Inline banner; cleared on refresh start/success. */
     private val _error = MutableStateFlow<String?>(null)
+    /** Viewer-scoped failure. Snackbar; cleared when the snackbar is dismissed. */
+    private val _viewerError = MutableStateFlow<String?>(null)
     private val _viewer = MutableStateFlow<ViewerState?>(null)
     private val _images = MutableStateFlow<Map<String, ImageBitmap>>(emptyMap())
     /** Story ids whose image decode failed (inline retry affordance in the viewer). */
@@ -155,13 +170,15 @@ class WhisperDailyUpsViewModel @Inject constructor(
         _refreshing,
         _quotaUsed,
         _error,
-    ) { items, refreshing, quotaUsed, error ->
+        _viewerError,
+    ) { items, refreshing, quotaUsed, error, viewerError ->
         HubUiState(
             loading = refreshing,
             mine = items.first,
             friends = items.second,
             quotaUsed = quotaUsed,
             error = error,
+            viewerError = viewerError,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HubUiState())
 
@@ -179,6 +196,9 @@ class WhisperDailyUpsViewModel @Inject constructor(
      *  One sync in flight — a pull or re-open landing mid-sync coalesces. */
     fun refresh() {
         if (refreshJob?.isActive == true) return
+        // A new attempt owns the banner: stale failures must not linger while
+        // the retry is in flight. Success simply leaves this null.
+        _error.value = null
         _refreshing.value = true
         refreshJob = viewModelScope.launch {
             repository.syncDailyUps()
@@ -188,8 +208,14 @@ class WhisperDailyUpsViewModel @Inject constructor(
         }
     }
 
+    /** Manual dismiss for the hub's inline failure banner. */
     fun clearError() {
         _error.value = null
+    }
+
+    /** Dismiss the viewer snackbar (called after it has been shown). */
+    fun clearViewerError() {
+        _viewerError.value = null
     }
 
     /** One profile batch per new poster; names across the hub + viewer. */
@@ -286,12 +312,12 @@ class WhisperDailyUpsViewModel @Inject constructor(
                         insertViewerImage(storyId, bmp)
                     } else {
                         _failedImages.value = _failedImages.value + storyId
-                        _error.value = appContext.getString(R.string.st_Whisper_DailyUp_ErrCorrupt)
+                        _viewerError.value = appContext.getString(R.string.st_Whisper_DailyUp_ErrCorrupt)
                     }
                 }
                 .onFailure { e ->
                     _failedImages.value = _failedImages.value + storyId
-                    _error.value = dailyUpErrorText(appContext, e)
+                    _viewerError.value = dailyUpErrorText(appContext, e)
                 }
             inFlightImages.value = inFlightImages.value - storyId
         }
@@ -387,7 +413,7 @@ class WhisperDailyUpsViewModel @Inject constructor(
                         _receipts.value = _receipts.value.copy(
                             myReactions = _receipts.value.myReactions + (storyId to (previous ?: "")),
                         )
-                        _error.value = dailyUpErrorText(appContext, e)
+                        _viewerError.value = dailyUpErrorText(appContext, e)
                     }
                     .onSuccess {
                         val v = _viewer.value ?: return@onSuccess
@@ -417,7 +443,7 @@ class WhisperDailyUpsViewModel @Inject constructor(
                     _viewer.value = null
                     _quotaUsed.value = repository.dailyUpsPostedToday()
                 }
-                .onFailure { e -> _error.value = dailyUpErrorText(appContext, e) }
+                .onFailure { e -> _viewerError.value = dailyUpErrorText(appContext, e) }
         }
     }
 

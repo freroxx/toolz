@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -58,6 +59,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -164,11 +166,13 @@ fun WhisperDailyUpsScreen(
     // refreshed lists (e.g. DeviceInfo).
     val pullState = rememberPullToRefreshState()
 
-    // One shared failure surface: hub + viewer both funnel through [state.error].
-    LaunchedEffect(state.error) {
-        state.error?.let {
+    // Viewer-scoped failures only. The hub's sync failure renders inline in the
+    // body: routing it here would clear it into a snackbar and then let the
+    // screen fall through to "Nothing shared today yet" (false empty state).
+    LaunchedEffect(state.viewerError) {
+        state.viewerError?.let {
             snackbar.showSnackbar(it)
-            viewModel.clearError()
+            viewModel.clearViewerError()
         }
     }
 
@@ -201,8 +205,13 @@ fun WhisperDailyUpsScreen(
                 },
                 actions = {
                     // The compose entry is the hub's primary affordance — top
-                    // bar action AND the "+" ring below, never one alone.
-                    IconButton(onClick = onNavigateToCompose) {
+                    // bar action AND the "+" ring below, never one alone. The
+                    // VM gate survives recomposition and stops a double push.
+                    IconButton(
+                        onClick = {
+                            if (viewModel.acceptNavigation()) onNavigateToCompose()
+                        },
+                    ) {
                         Icon(
                             Icons.Rounded.AddCircle,
                             contentDescription = stringResource(R.string.st_Whisper_DailyUp_AddCd),
@@ -279,33 +288,72 @@ fun WhisperDailyUpsScreen(
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
                 )
             }
-            if (!state.loading && state.mine.isEmpty() && state.friends.isEmpty()) {
-                WhisperEmptyState(
-                    icon = Icons.Rounded.Timer,
-                    title = stringResource(R.string.st_Whisper_DailyUp_EmptyTitle),
-                    subtitle = stringResource(R.string.st_Whisper_DailyUp_EmptySub),
-                )
-                // An empty day is a call to action, not a wall — the CTA sits
-                // right under the copy, same action as the "+" ring.
-                ToolzExpressiveButton(
-                    onClick = onNavigateToCompose,
-                    modifier = Modifier.align(Alignment.CenterHorizontally),
-                ) {
-                    Text(
-                        text = stringResource(R.string.st_Whisper_DailyUp_NewUp),
-                        fontWeight = FontWeight.SemiBold,
+            // Branch order is the honesty contract: a failed sync with no cache
+            // is a FAILURE panel, never the "nothing shared today" empty state.
+            val hasData = state.mine.isNotEmpty() || state.friends.isNotEmpty()
+            when {
+                state.loading && !hasData -> {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 48.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator()
+                    }
+                }
+                state.error != null && !hasData -> {
+                    GroupUiDeadEnd(
+                        message = stringResource(R.string.st_Whisper_DailyUp_ErrSync),
+                        onBack = onNavigateBack,
+                        onRetry = { viewModel.refresh() },
                     )
                 }
-            } else {
-                // One quiet rail; the hub reading order === viewer reading
-                // order: "+" to upload, then MY ups, then friends' — no
-                // section headers (rings already carry who + how long).
-                TodayRail(
-                    mine = state.mine,
-                    friends = state.friends,
-                    onOpen = viewModel::openViewer,
-                    onCompose = onNavigateToCompose,
-                )
+                else -> {
+                    // Cached content survives a failed refresh: keep the stale
+                    // rail on screen and say the sync failed above it.
+                    GroupUiBanner(
+                        message = state.error.orEmpty(),
+                        visible = state.error != null,
+                        isError = true,
+                        actionLabel = stringResource(R.string.st_Whisper_DailyUp_Retry),
+                        onAction = { viewModel.refresh() },
+                        onDismiss = { viewModel.clearError() },
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                    )
+                    if (!state.loading && state.error == null && !hasData) {
+                        WhisperEmptyState(
+                            icon = Icons.Rounded.Timer,
+                            title = stringResource(R.string.st_Whisper_DailyUp_EmptyTitle),
+                            subtitle = stringResource(R.string.st_Whisper_DailyUp_EmptySub),
+                        )
+                        // An empty day is a call to action, not a wall — the CTA sits
+                        // right under the copy, same action as the "+" ring.
+                        ToolzExpressiveButton(
+                            onClick = {
+                                if (viewModel.acceptNavigation()) onNavigateToCompose()
+                            },
+                            modifier = Modifier.align(Alignment.CenterHorizontally),
+                        ) {
+                            Text(
+                                text = stringResource(R.string.st_Whisper_DailyUp_NewUp),
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+                    } else {
+                        // One quiet rail; the hub reading order === viewer reading
+                        // order: "+" to upload, then MY ups, then friends' — no
+                        // section headers (rings already carry who + how long).
+                        TodayRail(
+                            mine = state.mine,
+                            friends = state.friends,
+                            onOpen = viewModel::openViewer,
+                            onCompose = {
+                                if (viewModel.acceptNavigation()) onNavigateToCompose()
+                            },
+                        )
+                    }
+                }
             }
         }
         }
@@ -605,6 +653,7 @@ private fun StoryViewerOverlay(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
+                    .navigationBarsPadding()
                     .padding(bottom = 32.dp, start = 16.dp, end = 16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
@@ -736,30 +785,39 @@ private fun ReactionPalette(
     currentEmoji: String,
     onToggle: (String, Boolean) -> Unit,
 ) {
+    // Six 48dp targets do not fit a 320dp phone with fixed spacing. Weighting
+    // the cells keeps the full 48dp touch target on every supported width and
+    // lets the palette fill the row cleanly instead of clipping the last emoji.
     Row(
         modifier = Modifier
+            .fillMaxWidth()
             .clip(RoundedCornerShape(24.dp))
             .background(Color.White.copy(alpha = 0.12f))
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+            .padding(horizontal = 4.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         WhisperDailyUpsConfig.REACTION_EMOJIS.forEach { emoji ->
             val active = emoji == currentEmoji
-            val emojiModifier = Modifier
-                .clip(CircleShape)
-                .clickable {
-                    onToggle(emoji, !active)
-                }
-                .then(
-                    if (active) {
-                        Modifier.background(Color.White.copy(alpha = 0.24f))
-                    } else {
-                        Modifier
-                    },
-                )
-                .padding(4.dp)
-            Text(text = emoji, fontSize = 26.sp, modifier = emojiModifier)
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .minimumInteractiveComponentSize()
+                    .clip(CircleShape)
+                    .clickable {
+                        onToggle(emoji, !active)
+                    }
+                    .then(
+                        if (active) {
+                            Modifier.background(Color.White.copy(alpha = 0.24f))
+                        } else {
+                            Modifier
+                        },
+                    )
+                    .padding(4.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(text = emoji, fontSize = 26.sp)
+            }
         }
     }
 }
