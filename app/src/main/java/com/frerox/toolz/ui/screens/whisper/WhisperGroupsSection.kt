@@ -51,6 +51,7 @@ import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.NotificationsOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -63,6 +64,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -849,6 +851,7 @@ fun GroupImageViewer(bytes: ByteArray, onDismiss: () -> Unit, onMessage: (String
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
     var chromeVisible by remember { mutableStateOf(true) }
+    var showSaveConfirm by remember { mutableStateOf(false) }
     var boxSize by remember { mutableStateOf(IntSize.Zero) }
 
     Dialog(
@@ -916,17 +919,7 @@ fun GroupImageViewer(bytes: ByteArray, onDismiss: () -> Unit, onMessage: (String
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     IconButton(
-                        onClick = {
-                            saveScope.launch {
-                                val ok = saveGroupImageToGallery(context, bytes)
-                                onMessage(
-                                    context.getString(
-                                        if (ok) R.string.st_Whisper_Groups_SavedToGallery
-                                        else R.string.st_Whisper_Groups_SaveFailed,
-                                    ),
-                                )
-                            }
-                        },
+                        onClick = { showSaveConfirm = true },
                         colors = IconButtonDefaults.iconButtonColors(
                             containerColor = Color.Black.copy(alpha = 0.5f),
                             contentColor = Color.White,
@@ -945,6 +938,37 @@ fun GroupImageViewer(bytes: ByteArray, onDismiss: () -> Unit, onMessage: (String
                     }
                 }
             }
+        }
+        // S-3 parity: saving exports the DECRYPTED image out of the E2EE
+        // boundary — the user confirms explicitly, exactly like the 1:1
+        // viewer. The saved bytes leave the device's protected sandbox.
+        if (showSaveConfirm) {
+            AlertDialog(
+                onDismissRequest = { showSaveConfirm = false },
+                title = { Text(stringResource(R.string.st_Whisper_SaveToGallery_Title)) },
+                text = { Text(stringResource(R.string.st_Whisper_SaveToGallery_Desc)) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showSaveConfirm = false
+                        saveScope.launch {
+                            val ok = saveGroupImageToGallery(context, bytes)
+                            onMessage(
+                                context.getString(
+                                    if (ok) R.string.st_Whisper_Groups_SavedToGallery
+                                    else R.string.st_Whisper_Groups_SaveFailed,
+                                ),
+                            )
+                        }
+                    }) {
+                        Text(stringResource(R.string.st_Whisper_Save))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showSaveConfirm = false }) {
+                        Text(stringResource(R.string.st_Whisper_Cancel))
+                    }
+                },
+            )
         }
     }
 }

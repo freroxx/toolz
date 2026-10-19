@@ -416,7 +416,9 @@ class WhisperGroupChatViewModel @Inject constructor(
         val clean = text.trim()
         if (clean.isBlank()) return
         if (clean.length > WhisperRepository.MAX_MESSAGE_CHARS) {
-            _uiState.update { it.copy(error = "Message is too long.") }
+            _uiState.update {
+                it.copy(error = appContext.getString(com.frerox.toolz.R.string.st_Whisper_Groups_MsgTooLong))
+            }
             return
         }
         viewModelScope.launch { repository.clearGroupTyping(groupId) }
@@ -502,7 +504,9 @@ class WhisperGroupChatViewModel @Inject constructor(
         val q = question.trim()
         val opts = options.map { it.trim() }.filter { it.isNotBlank() }.take(6)
         if (q.isBlank() || opts.size < 2) {
-            _uiState.update { it.copy(error = "A poll needs a question and at least 2 options.") }
+            _uiState.update {
+                it.copy(error = appContext.getString(com.frerox.toolz.R.string.st_Whisper_Groups_PollInvalid))
+            }
             return
         }
         viewModelScope.launch {
