@@ -113,10 +113,10 @@ follows from this split.
 
 | Adversary | What the design denies them |
 |---|---|
-| **The backend operator** | Message/poll/story content and keys. The operator can always bypass RLS (they run the database), so the defense against them is cryptography, not policies — sealed payloads and client-verified signatures they cannot forge (§11.1). |
+| **The backend operator** | Message/poll/story content and keys. The operator can always bypass RLS (they run the database), so the defense against them is cryptography, not policies — sealed payloads and client-verified signatures they cannot forge (§11.1). Two honest residuals the operator *can* do: (a) they serve profiles and key bundles, so for a pair that has never verified safety numbers, first contact is TOFU-pinned *to what the operator serves* — only safety-number verification removes the operator from that path (§3.6); (b) they can withhold, delete, or truncate server rows undetectably — e.g. hide the tail of a group event log so a sender keeps sealing to a removed member. Censoring is a residual, not a confidentiality break (§14.4). |
 | **A network adversary** | Everything on every hop: DB connections run over TLS, edge calls over HTTPS, and push payloads are either Web-Push-encrypted or name-scrubbed to IDs (§9). |
 | **A malicious friend or group member** | A legitimate protocol participant who can read their own copies, screenshot them, and forward them — that is inherent and this design does not pretend otherwise (screenshots are a product surface, §11.7, not a security boundary). What they cannot do is open anyone else's legs (per-member keys), forge group events (signatures), or resurrect content the poster deleted. |
-| **A thief with the device** | Nothing, if the device is unlocked and the app open — the app state *is* the plaintext window. Honest consequence: the ratchet's forward secrecy does not undo already-received traffic from a device compromise, because out-of-order tolerance deliberately persists consumed message keys (§3.4). Keystore-wrapped key material still resists extraction from a *locked* device. |
+| **A thief with the device** | Nothing, if the device is unlocked and the app open — the app state *is* the plaintext window. Honest consequence: the ratchet's forward secrecy does not undo already-received traffic from a device compromise, because out-of-order tolerance deliberately persists consumed message keys (§3.4). Keystore-held keys are generated in the TEE and never exportable in plaintext — but the wrapping key has no user-authentication gate, so code running in the app's context while the device is unlocked can unwrap session state. The protection is against *keystore extraction*, not against local app compromise; the latter is the same residual the forward-secrecy honesty above covers. |
 | **A repackager** | Not anymore than the build gate makes them (§8.3) — that gate is an availability speed bump, not a trust boundary. |
 
 **Non-goals, stated as non-goals:** Whisper does not defend against metadata
@@ -305,20 +305,27 @@ After the handshake, every frame advances a Double Ratchet:
 - **Out-of-order and replay tolerance:** up to 400 skipped (unused) message
   keys are held per chain with *no eviction* — a message further away than
   that window fails loudly instead of discarding honest keys under pressure from
-  a flood. Consumed message keys are remembered so that a duplicate delivery
-  re-opens the same frame. Both collections persist with the session snapshot,
-  so offline catch-up and duplicate deliveries survive process death.
+  a flood. Consumed message keys are **retained, not erased**, so that a
+  duplicate delivery re-opens the same frame — within a bounded FIFO of 400
+  keys per session (same constant as the skipped window). Both collections
+  persist with the session snapshot, so offline catch-up and duplicate
+  deliveries survive process death.
 - **What is on disk:** the entire session snapshot (X3DH secret, ratchet
   state, all skipped and consumed keys) is serialized and wrapped with the
   Keystore AES wrapper before being written. The honest framing of forward
-  secrecy here, given that choice: a full device compromise *can* decrypt
-  already-received traffic (the snapshot plus the ciphertext-only Room cache
-  is enough). What the ratchet buys is (a) a later leak of long-term identity
-  keys never retroactively opens ratchet traffic, and (b) after an attacker
-  loses device access, they cannot open frames whose keys are derived later —
-  message keys are erased after use and re-derivable only from chain state the
-  attacker no longer holds. "FS protects future traffic" is precisely right:
-  it is post-compromise protection, not snapshot resistance.
+  secrecy here, given that choice:
+  - A full device compromise *can* decrypt already-received traffic (the
+    snapshot plus the ciphertext-only Room cache is enough), and an attacker
+    who has stolen the chain state keeps decrypting captured traffic until
+    the next DH ratchet step brings in a fresh secret they lack.
+  - A later leak of long-term identity keys never retroactively opens
+    ratchet traffic.
+  - "FS protects future traffic" is post-compromise protection, not snapshot
+    resistance.
+  Retention is bounded (the 400-key consumed window above), so that window is
+  also how far back a re-open can reach; beyond it the honest locked
+  placeholder applies. The render path memoizes decrypted text in memory, so
+  ordinary scrolling does not depend on key retention.
 
 Unrecoverable gaps raise `WhisperRatchetLostMessage`, rendered as an honest
 locked placeholder: "this message could not be opened because part of the
@@ -401,21 +408,35 @@ gap; without it every group send would fail on its own leg first).
 
 Design, deliberately degenerate — one fresh session per frame:
 
-- A **per-install X25519 anchor keypair** is generated once; the private half
-  is Keystore-wrapped in this module's own preferences, the same protection
-  tier as prekey private halves. A dedicated anchor (rather than the live
-  signed prekey) means weekly SPK rotation and OPK consumption can never
-  orphan an already-sent self frame.
+- A **per-install X25519 anchor keypair** is generated once. To be precise
+  about what "Keystore" means here (the same nuance as every wrapped secret
+  in §3.1/§3.4): the anchor private is an ordinary *software* X25519 key; its
+  wrapped form lives in this module's own preferences, wrapped by the shared
+  Keystore AES key of §3.1, and it is unwrapped into memory whenever a
+  seal/open runs. A dedicated anchor (rather than the live signed prekey)
+  means weekly SPK rotation and OPK consumption can never orphan an
+  already-sent self frame.
 - Each frame gets a **fresh random 32-byte session key**, anchored through
   the standard ratchet initiator (DH'd against the sender's own anchor
   public key) and opened by rebuilding the responder from the same raw
   session key plus the anchor private — X25519 symmetry makes both halves
   derive identical chains, so the frame opens on the first receive key. No
   ratchet state advances or persists on open, so re-rendering cached history
-  reopens the row deterministically forever.
-- The session key itself is persisted Keystore-wrapped; possession of the
-  wrapped copy alone opens nothing — the anchor private stays behind hardware
-  Keystore.
+  reopens the row deterministically forever. Honest note on the
+  construction: since the per-frame key is persisted anyway (the point is
+  permanent re-openability), the DH-to-anchor adds no extra secrecy property
+  beyond what the wrap provides — the ratchet framing is reused for its
+  AEAD/AAD machinery and key symmetry, which are already correct and tested.
+  An equivalent design (a Keystore-wrapped per-install AES key with
+  groupId/seq bound into its AAD) would work equally well; that is a
+  simplification candidate, not a security gap.
+- Each per-frame key is persisted **Keystore-wrapped** in the module prefs
+  (`sk:<uid>:<sid>`, one small blob per frame). There is **no pruning
+  today** — blobs accumulate (on the order of a hundred bytes per frame) —
+  and, honestly, the account wipe (§7) does not currently clear this store
+  either. Keys are user-scoped, so one account cannot use another's blobs,
+  but the wrapped leftovers linger until reinstall or an OS data-clear. A
+  prune-and-wipe pass for this prefs file belongs on the hygiene list.
 - Session IDs carry the `sg1-` prefix and the open path refuses anything
   else, so a genuine peer frame can never be demoted into this path.
 
@@ -555,8 +576,13 @@ of the *health* machinery are worth naming:
 
 - **Identity republish:** startup verifies that the local identity matches
   what the server has, repairing a divergent row before anything else writes.
-- **Prekey health:** failed prekey publishes retry later; a terminated OPK
-  pool causes a *loud* envelope fallback path (§3.2), never a silent failure.
+- **Prekey health:** failed prekey publishes retry later. An **exhausted
+  peer OPK pool does not block anything**: establishment proceeds with the
+  three DHs and no OPK factor (§3.3 is explicit that the OPK slot is
+  optional), and a received handshake that *names* a consumed or
+  no-longer-held OPK hard-fails (§3.3's missing-OPK rule). There is never a
+  silent acceptance on either branch — but "empty OPK pool → envelope
+  fallback" is *not* what happens, and this document no longer claims it.
 
 ### 6.2 What lives on the device
 
@@ -735,6 +761,12 @@ Wake logic is coordinated over **UnifiedPush** with an embedded FCM fallback:
 - Dead endpoints (404/410) are pruned so a stale phone does not generate push
   noise forever. The push function never logs tokens or payloads.
 
+One deployment dependency stated openly: the encryption and the name-scrub
+live in the *deployed* edge function, not in the client. An outdated
+`whisper-push-send` deploy silently reverts both to payload behavior this
+document doesn't describe; the post-deploy smoke runbook
+(`supabase/POST_DEPLOY_SMOKE.md`) exists to catch exactly that.
+
 Incoming pings show a generic, content-free notification keyed by sender and
 message ID for dedupe. Tapping opens the relevant surface; combined with the
 master mute switch and per-chat mutes, the user controls exactly which
@@ -792,6 +824,11 @@ cert belongs to the actor's published set. So if the group creator reinstalls
 the old log its predecessor signed, because both devices' certs are in the
 published set. Never-published certs fail, no matter how well-formed the
 signature.
+
+The same deployment caveat as §9 applies: the archive trigger is the canonical
+SQL baseline and the history serving lives in the deployed
+`whisper-bundle-fetch`; a stale edge deploy silently drops reinstall-proofing.
+The post-deploy smoke runbook verifies this pairing.
 
 Applying is **tolerant**: a bad event does not brick the group — the client
 truncates to the verified prefix and flags the membership "degraded"
@@ -1001,7 +1038,8 @@ six-emoji whitelist rendered verbatim by the client), `whisper_story_cleanup`
 (leases), and `whisper_story_publish_quota` (poster + UTC day, ≤5, enforced
 on the row update itself).
 
-Actions are all **version-gated** to the release floor:
+Actions are all **version-gated** to the release floor (see §11.6 for what
+that caveat is honestly worth — the value is client-supplied):
 `whisper_story_publish` (atomic: story + audience + quota in one transaction;
 idempotent on `client_id`, so a retry neither re-charges quota nor reshapes
 the audience; bounded housekeeping in-transaction); `whisper_story_view`
@@ -1115,7 +1153,11 @@ A few design constraints documented as *decisions*, not surprises:
    boundary of last resort; but content forgeries still require signing keys
    the operator never has. Pre-1.1.7 dev groups may keep unresolvable
    histories from before the archive trigger existed (accepted: groups were
-   not public before this release).
+   not public before this release). A candidate hardening for a later
+   release, recorded here so it isn't lost: seal the verified log head
+   (sequence number + hash) inside the AEAD plaintext next to groupId and
+   epoch, so members could *detect* a divergent view of the log (the
+   truncation residual §2.1 admits). Not implemented in 1.1.7.
 5. **External review before any "audited" claim.** Whisper uses a custom
    end-to-end construction; it must not be publicly described as
    "audited"/"secure" until either a third-party security review or a
