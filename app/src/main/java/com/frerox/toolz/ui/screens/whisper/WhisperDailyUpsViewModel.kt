@@ -15,12 +15,14 @@ import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.WhisperDailyUpsConfig
 import com.frerox.toolz.data.whisper.WhisperProfile
 import com.frerox.toolz.data.whisper.WhisperRepository
+import com.frerox.toolz.data.whisper.WhisperStorySeenStore
 import com.frerox.toolz.data.whisper.dailyUpErrorText
 import com.frerox.toolz.data.whisper.dailyUpsPostedToday
 import com.frerox.toolz.data.whisper.deleteDailyUp
 import com.frerox.toolz.data.whisper.downloadDailyUpImage
 import com.frerox.toolz.data.whisper.fetchDailyUpReceipts
 import com.frerox.toolz.data.whisper.fetchMyDailyUpReactions
+import com.frerox.toolz.data.whisper.getMyProfile
 import com.frerox.toolz.data.whisper.markDailyUpViewed
 import com.frerox.toolz.data.whisper.observeFriendDailyUps
 import com.frerox.toolz.data.whisper.observeMyDailyUps
@@ -37,6 +39,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
@@ -46,8 +49,10 @@ import javax.inject.Inject
  *
  * Everything is LOCAL-CACHE DRIVEN: Room rows (sealed envelopes + lifecycle
  * metadata) flow into the hub; the viewer opens envelopes on demand and holds
- * decoded images only in memory ("seen" state is intentionally NOT tracked —
- * stories replay every open, exactly like tapping any message again).
+ * decoded images only in memory. Seen state is device-local only
+ * ([WhisperStorySeenStore]): opaque story ids + expiry, used for ring
+ * brightness and first-unseen entry, never synced to the server. Re-opening an
+ * all-seen ring starts at its first story and still replays it.
  * Server truth arrives through [refresh] (pull): stories deliberately have no
  * realtime channel — the content-free push ping re-opens the hub instead.
  *
@@ -59,6 +64,7 @@ import javax.inject.Inject
 @HiltViewModel
 class WhisperDailyUpsViewModel @Inject constructor(
     private val repository: WhisperRepository,
+    private val seenStore: WhisperStorySeenStore,
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) : ViewModel() {
 
@@ -79,11 +85,14 @@ class WhisperDailyUpsViewModel @Inject constructor(
         val remainingMs: Long,
     )
 
-    /** Everything the hub strip renders. */
+    /** Everything the hub renders: poster-grouped rings + honest sync state. */
     data class HubUiState(
         val loading: Boolean = true,
-        val mine: List<StoryItem> = emptyList(),
-        val friends: List<StoryItem> = emptyList(),
+        /** Mine first, then friends unseen-first (exactly one entry per poster). */
+        val posterGroups: List<StoryPoster> = emptyList(),
+        val seenIds: Set<String> = emptySet(),
+        val myId: String = "",
+        val myName: String = "",
         val quotaUsed: Int = 0,
         /** Hub-scoped sync failure: inline banner, never a snackbar. */
         val error: String? = null,
@@ -135,47 +144,42 @@ class WhisperDailyUpsViewModel @Inject constructor(
         }
     }
 
-    /** Rows→items join; poster names land via [collectProfileNames]. */
-    private val hubItems = combine(
+    private data class HubData(
+        val groups: List<StoryPoster>,
+        val seenIds: Set<String>,
+        val myId: String,
+        val myName: String,
+    )
+
+    /** Rows→poster groups; names land via [collectProfileNames], seen via the store. */
+    private val hubData = combine(
         repository.observeMyDailyUps(),
         repository.observeFriendDailyUps(),
         _profiles,
+        seenStore.seen,
         ticker,
-    ) { myRows, friendRows, profiles, nowMs ->
-        val mine = myRows.map { row ->
-            StoryItem(
-                storyId = row.storyId,
-                ownerId = row.ownerId,
-                ownerName = if (row.ownerId == repository.myId) "" else profiles[row.ownerId]?.effectiveName ?: "…",
-                isMine = true,
-                receiptsEnabled = row.receiptsEnabled,
-                remainingMs = (row.expiresAtMs - nowMs).coerceAtLeast(0L),
-            )
-        }
-        val others = friendRows.map { row ->
-            StoryItem(
-                storyId = row.storyId,
-                ownerId = row.ownerId,
-                ownerName = profiles[row.ownerId]?.effectiveName ?: "…",
-                isMine = false,
-                receiptsEnabled = row.receiptsEnabled,
-                remainingMs = (row.expiresAtMs - nowMs).coerceAtLeast(0L),
-            )
-        }
-        mine to others
+    ) { myRows, friendRows, profiles, seen, nowMs ->
+        HubData(
+            groups = buildPosterGroups(myRows, friendRows, profiles, seen.keys, nowMs),
+            seenIds = seen.keys.toSet(),
+            myId = repository.myId,
+            myName = profiles[repository.myId]?.effectiveName.orEmpty(),
+        )
     }
 
     val uiState: StateFlow<HubUiState> = combine(
-        hubItems,
+        hubData,
         _refreshing,
         _quotaUsed,
         _error,
         _viewerError,
-    ) { items, refreshing, quotaUsed, error, viewerError ->
+    ) { data, refreshing, quotaUsed, error, viewerError ->
         HubUiState(
             loading = refreshing,
-            mine = items.first,
-            friends = items.second,
+            posterGroups = data.groups,
+            seenIds = data.seenIds,
+            myId = data.myId,
+            myName = data.myName,
             quotaUsed = quotaUsed,
             error = error,
             viewerError = viewerError,
@@ -203,6 +207,9 @@ class WhisperDailyUpsViewModel @Inject constructor(
         refreshJob = viewModelScope.launch {
             repository.syncDailyUps()
                 .onFailure { e -> _error.value = dailyUpErrorText(appContext, e) }
+            // Drop seen ids whose story expired while the app was away. Runs on
+            // both success and failure: the local clock is authority for expiry.
+            seenStore.prune(System.currentTimeMillis())
             _quotaUsed.value = repository.dailyUpsPostedToday()
             _refreshing.value = false
         }
@@ -221,21 +228,23 @@ class WhisperDailyUpsViewModel @Inject constructor(
     /** One profile batch per new poster; names across the hub + viewer. */
     private suspend fun collectProfileNames() {
         val me = repository.myId
+        // My own profile powers the Your-day card even on a day with no ups.
+        repository.getMyProfile()
+            .onSuccess { profile -> _profiles.update { it + (me to profile) } }
         combine(repository.observeMyDailyUps(), repository.observeFriendDailyUps()) { mine, friends ->
-            (mine.map { it.ownerId } + friends.map { it.ownerId })
-                .filter { it != me }
-                .distinct()
+            (mine.map { it.ownerId } + friends.map { it.ownerId }).distinct()
         }.collect { ids ->
-            val resolved = _profiles.value
-            if (ids.any { it !in resolved }) {
-                // batchProfilesById deliberately propagates network faults
-                // (R-H2). Unguarded here, a single flaky batch would kill this
-                // collector AND the whole viewModelScope coroutine (app crash
-                // on open). The collector must survive; the next row emission
-                // (any hub change) retries the missing names.
-                runCatching { repository.batchProfilesById(ids) }
+            // batchProfilesById deliberately propagates network faults (R-H2).
+            // Unguarded here, a single flaky batch would kill this collector AND
+            // the whole viewModelScope coroutine (app crash on open). The
+            // collector must survive; the next row emission retries the names.
+            val missing = ids.filter { it != me && it !in _profiles.value }
+            if (missing.isNotEmpty()) {
+                runCatching { repository.batchProfilesById(missing) }
                     .onSuccess { (blocked, fetched) ->
-                        _profiles.value = resolved + fetched.filterKeys { it !in blocked }
+                        _profiles.update { current ->
+                            current + fetched.filterKeys { it !in blocked }
+                        }
                     }
             }
         }
@@ -243,14 +252,56 @@ class WhisperDailyUpsViewModel @Inject constructor(
 
     // ── Viewer ─────────────────────────────────────────────────────────────
 
-    /** Viewer reading order mirrors the hub rail: my ups first, then friends'. */
-    fun openViewer(storyId: String) {
+    /**
+     * Opens the in-place viewer for [ownerId] (null = hub order: mine, then
+     * friends), starting at [startStoryId] when it is still live or else at
+     * that poster's first unseen story. Unknown or expired owners are a silent
+     * no-op, so a stale deep link never opens an empty black overlay.
+     */
+    fun openViewerForOwner(ownerId: String? = null, startStoryId: String? = null) {
         val state = uiState.value
-        val flat = state.mine + state.friends
-        val index = flat.indexOfFirst { it.storyId == storyId }
-        if (index < 0) return
-        _viewer.value = ViewerState(stories = flat, index = index)
+        val order = viewerOrderFor(state.posterGroups, ownerId)
+        if (order.isEmpty()) return
+        val nowMs = System.currentTimeMillis()
+        val flat = order.flatMap { poster -> poster.toStoryItems(nowMs, state.myId) }
+        if (flat.isEmpty()) return
+
+        val explicitIndex = startStoryId
+            ?.let { id -> flat.indexOfFirst { it.storyId == id } }
+            ?: -1
+        val index = if (explicitIndex >= 0) {
+            explicitIndex
+        } else {
+            val selected = if (ownerId != null) {
+                order.firstOrNull { it.ownerId == ownerId }
+            } else {
+                order.firstOrNull()
+            }
+            val offset = selected
+                ?.let { pick -> order.takeWhile { it.ownerId != pick.ownerId }.sumOf { it.stories.size } }
+                ?: 0
+            offset + (selected?.let { startIndexIn(it, state.seenIds) } ?: 0)
+        }
+        _viewer.value = ViewerState(stories = flat, index = index.coerceIn(flat.indices))
     }
+
+    /** My own ups only: never pages into friends from my card. */
+    fun openMyViewer() {
+        val mine = uiState.value.posterGroups.firstOrNull { it.isMine } ?: return
+        openViewerForOwner(mine.ownerId)
+    }
+
+    private fun StoryPoster.toStoryItems(nowMs: Long, myId: String): List<StoryItem> =
+        stories.map { row ->
+            StoryItem(
+                storyId = row.storyId,
+                ownerId = row.ownerId,
+                ownerName = if (row.ownerId == myId) "" else ownerName.orEmpty(),
+                isMine = isMine,
+                receiptsEnabled = row.receiptsEnabled,
+                remainingMs = (row.expiresAtMs - nowMs).coerceAtLeast(0L),
+            )
+        }
 
     fun closeViewer() {
         _viewer.value = null
@@ -278,7 +329,13 @@ class WhisperDailyUpsViewModel @Inject constructor(
         val v = _viewer.value ?: return
         val item = v.stories.getOrNull(v.index)?.takeIf { it.storyId == storyId } ?: return
         ensureImage(storyId)
-        if (!item.isMine) markViewedOnce(storyId)
+        if (!item.isMine) {
+            // The ring clears as soon as the story is actually on screen; the
+            // absolute expiry comes from the viewer's own snapshot.
+            val nowMs = System.currentTimeMillis()
+            seenStore.markSeen(storyId, nowMs + item.remainingMs, nowMs)
+            markViewedOnce(storyId)
+        }
         if (item.isMine && item.receiptsEnabled) refreshOwnStats(storyId)
         viewModelScope.launch {
             val friendStoryIds = v.stories.filter { !it.isMine }.map { it.storyId }

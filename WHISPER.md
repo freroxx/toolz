@@ -603,6 +603,7 @@ Local state is split across purpose-built stores, all read in full by the app
 | `whisper_sessions/` | one wrapped session snapshot per peer | anything that cannot be Keystore-wrapped |
 | Key trust store | pinned/verified fingerprints + rotation counters | private halves |
 | Mute/hidden-chats/delete-for-me/undo/preferences stores | UX state with expiries (24h eviction for delete-for-me, 30s undo window, hidden chat auto-return) | — |
+| Daily Ups seen store (`whisper_story_seen`) | opaque `storyId → expiresAtMs` pairs for device-local ring state, capped at 512, expired entries filtered on load and pruned on refresh/write | who viewed what; account id; media or keys |
 | Access-file backup (`WhisperAubupManager`) | credential-only payload (username, auth type, credential, display name) | session/ratchet state, key material — never |
 | Sealed image disk caches | encrypted containers keyed by URL hash, generation-guarded | plaintext pixels |
 
@@ -976,8 +977,11 @@ verified log.
 
 **Entry.** The Chats tab's Groups section lists rows with picture,
 time-stamped last-message preview, unread badge, an "@You" mention chip, and
-pinned invite cards. A stories bar above it shows self + friend "Daily Ups"
-rings (§12.4). Creation offers friend picking, an optional picture, and an
+pinned invite cards. A stories bar above it shows my "Daily Ups" bubble with
+a bottom-right `+`, then one bubble per live friend poster — unseen rings
+bright, ≥2-unseen count badge — horizontally scrollable (§12.4). Tapping a
+friend bubble routes to the hub already aimed at that poster; the `+` opens
+the composer directly. Creation offers friend picking, an optional picture, and an
 invite-mode choice that is fixed at creation (see the permissions edge note
 below).
 
@@ -1030,8 +1034,8 @@ every group screen without touching the server plane:
   taps in one frame can never fire two signed events. Sheeted confirmations
   debounce on payload identity inside a short window instead of a shared
   busy flag, so a genuinely different send made while an upload is still in
-  flight is never silently dropped. Stories-bar entry rows got the same
-  guard for their two navigation lanes.
+  flight is never silently dropped. The stories-bar poster/compose lanes use
+  the same ViewModel-owned navigation gate.
 - **Media that fails stays honest:** a failed chat bubble or gallery thumb
   renders an explicit broken-image state (the gallery thumb is tap-to-retry);
   a failed gallery *list* shows an honest retry state instead of looking like
@@ -1113,21 +1117,42 @@ itself recorded.
 
 ### 12.4 Viewing, receipts, reactions
 
-The **hub** shows my ring (with a `+ New up` entry), friends' rings rendered
-as initials (the hub never decrypts media — identity chips stay
-business-agnostic until the viewer is opened), a quota chip, and the
-empty state. Opening a ring launches the in-place **viewer overlay**:
-horizontal paging, 7-second auto-advance paused under the user's finger,
-progress segments, decrypt-on-demand images, and one failure snackbar across
-hub + viewer. **View receipts (optional per poster)**, reactions, and who
+The **hub** opens with a **Your day** card — my avatar, a live-up count
+("`N` live today") or a one-line share prompt, `View` only when I have a live
+up, `Add` always, and the day's quota line exactly once. Below it is one
+64dp ring per live friend **poster** (not per story): initials only, unseen
+rings bright, a count badge when two or more are unseen, one line when
+nobody else has shared. The old full-width empty panel and separate quota
+chip are gone; a successful empty day still shows the card, while a failed
+sync with no cache is an explicit dead-end panel with Retry. Opening a ring
+launches the in-place **viewer overlay**: horizontal paging, 7-second
+auto-advance paused under the user's finger, progress segments,
+decrypt-on-demand images, and one failure snackbar across hub + viewer.
+**View receipts (optional per poster)**, reactions, and who
 deleted/expired what are all resolved server-side (RLS-visible only for
 rows the viewer genuinely may see — the poster sees reaction counts and
 names resolved on-device on demand).
 
+**Poster-grouped viewing.** The viewer is ordered per open gesture: my card
+opens only my own ups; a friend's ring starts with that friend and then the
+other friends in rail order (never crossing into my stories); an owner-less
+open (no UI entry today) keeps mine-first rail order. The selected poster
+starts at its first unseen story (else its first story). "Seen" here is
+**device-local only** — an opaque `storyId → expiresAtMs` entry capped at
+512, filtered on load, pruned from disk on every hub refresh and write, and
+cleared on account deletion. It is ring state, not a synced read receipt:
+another device may still show the ring bright, and the server learns nothing
+from it. A friend's ring clears once a story is actually displayed in the
+viewer, not when the ring is tapped.
+
 **1.1.7 hardening (viewing surfaces).** The hub pulls to refresh — one
 gesture, coalesced with the open-time sync and the re-open resync through a
 single in-flight guard, so the indicator, the top-bar spinner and the gesture
-share one truth (the hub content scrolls, which the pull also requires). The
+share one truth (the hub content scrolls, which the pull also requires). A
+stories-bar tap carries the owner into the hub route and opens that poster
+exactly once after the first reconcile; a cold frame can never consume the
+hand-off before Room has the rows, and a failed cold sync leaves it pending
+for Retry. The
 viewer adds **tap navigation** (right two-thirds advances, left third goes
 back; inert while the delete-confirm sheet is up, boundaries included) on top
 of the hold-to-pause. A story image that fails to open renders an inline
@@ -1137,8 +1162,9 @@ visible while viewing. An image released mid-read (deleted elsewhere or
 expired) closes the overlay instead of letting the reader react into the
 void. Reactions are double-tap-guarded (the second tap of one frame can no
 longer toggle the reaction right back off), decoded viewer images hold a
-bounded six-frame window (paging back re-decodes), and the entry bar's
-self/friend rings share the same double-navigation guard as the group cards.
+bounded six-frame window (paging back re-decodes), and the hub's own/compose
+lanes plus the Chats-bar poster/compose lanes use the same ViewModel-owned
+navigation gate as the group cards.
 
 ### 12.5 Publishing
 
@@ -1300,6 +1326,7 @@ Paths relative to `app/src/main/java/com/frerox/toolz/`.
 `WhisperAuthManager.kt`, `WhisperModels.kt` (shared data models),
 `WhisperGroupEntities.kt`, `WhisperGroupPolicy.kt`,
 `WhisperGroupNotifications.kt`, `WhisperGroupReadStore.kt`,
+`WhisperStorySeenStore.kt` (device-local Daily Ups seen set + pure codec),
 `WhisperStoryLocalEntity.kt`, `WhisperDailyUpPhotoPreprocessor.kt`,
 `WhisperOutgoingQueue.kt` (Room outbox + delivery), `WhisperDeliveryScheduler.kt`,
 `WhisperMessageDao.kt`/`WhisperMessageEntity.kt`/
@@ -1324,7 +1351,8 @@ cards), `ChatMessageMerger.kt`; `WhisperChatScreen.kt` +
 `WhisperGroupsSection.kt` + `WhisperGroupsViewModel.kt` (Chats-tab section),
 `WhisperDailyUpsScreen.kt` + `WhisperDailyUpsViewModel.kt`,
 `WhisperDailyUpsComposeScreen.kt` + `WhisperDailyUpsComposeViewModel.kt`,
-`WhisperDailyUpsStoriesBar.kt`, `WhisperProfileTab.kt`,
+`WhisperDailyUpsStoriesBar.kt`, `WhisperStoryGrouping.kt` (pure poster
+grouping, rail order, viewer order), `WhisperProfileTab.kt`,
 `WhisperUserProfileScreen.kt` + `WhisperUserProfileViewModel.kt`,
 `WhisperVerifyQrDialog.kt`, `WhisperAuthScreen.kt` +
 `WhisperAuthViewModel.kt`, `WhisperOnboardingScreen.kt`,

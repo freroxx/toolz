@@ -21,7 +21,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -41,28 +40,32 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.WhisperDailyUpsConfig
-import com.frerox.toolz.data.whisper.WhisperProfile
 import com.frerox.toolz.ui.components.rememberToolzHapticFeedback
 
 /**
  * Instagram-stories-style circles ABOVE the groups list (v1.1.7 round): my
  * profile bubble — with a bottom-right "+" that starts the daily-up upload —
- * FIRST, then one circle per live friend poster, horizontally scrollable.
+ * FIRST, then one circle per live friend POSTER (not per story), horizontally
+ * scrollable.
  *
  * Deliberately the cheapest daily-ups surface in the app: Room observes only —
  * no media decrypt, no story-server round trip, no image fetch (media stays in
- * the hub, same posture as [RingStrip]). Liverness follows the VM's 60s ticker,
- * so expired circles vanish within a minute without a ghost day.
+ * the hub, same posture as [RingStrip]). Ring brightness and the ≥2 badge come
+ * from the device-local seen store; expired circles vanish within the VM's 60s
+ * ticker, never leaving a ghost day.
  */
 @Composable
 internal fun DailyUpsStoriesBar(
     viewModel: WhisperGroupsViewModel = hiltViewModel(),
     onCompose: () -> Unit,
-    onOpenHub: () -> Unit,
+    onOpenPoster: (String) -> Unit,
 ) {
     if (!WhisperDailyUpsConfig.ENABLED) return
     val strip by viewModel.dailyUpsStrip.collectAsStateWithLifecycle()
     val haptic = rememberToolzHapticFeedback()
+    val youLabel = stringResource(R.string.st_Whisper_You)
+    val someone = stringResource(R.string.st_Whisper_DailyUp_Someone)
+    val newUpLabel = stringResource(R.string.st_Whisper_DailyUp_NewUp)
 
     // The own bubble is ALWAYS present: it is the compose entry, exactly like
     // Instagram keeps "your story" on an empty day.
@@ -74,33 +77,31 @@ internal fun DailyUpsStoriesBar(
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalAlignment = Alignment.Top,
     ) {
+        val ownName = strip.me?.effectiveName?.takeIf { it.isNotBlank() } ?: youLabel
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
                 .width(64.dp)
                 .clip(RoundedCornerShape(14.dp))
-                .clickable(
-                    onClickLabel = stringResource(R.string.st_Whisper_DailyUp_AddCd),
-                    onClick = {
-                        haptic.click()
-                        onCompose()
-                    },
-                )
+                .clickable(onClickLabel = newUpLabel) {
+                    haptic.click()
+                    onCompose()
+                }
                 .padding(vertical = 4.dp),
         ) {
             StoryBubble(
-                profile = strip.me,
+                ownerId = strip.me?.id ?: "daily_ups_me",
+                name = ownName,
                 ringColor = if (strip.mineLive) {
                     MaterialTheme.colorScheme.primary
                 } else {
                     MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
                 },
                 plusBadge = true,
-                fallbackInitial = null,
-                contentDescription = stringResource(R.string.st_Whisper_DailyUp_AddCd),
+                badgeCount = 0,
             )
             Text(
-                text = stringResource(R.string.st_Whisper_DailyUp_NewUp),
+                text = newUpLabel,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -110,29 +111,31 @@ internal fun DailyUpsStoriesBar(
             )
         }
         strip.friendPosters.forEach { poster ->
+            val name = poster.name.ifBlank { someone }
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
                     .width(64.dp)
                     .clip(RoundedCornerShape(14.dp))
-                    .clickable(
-                        onClickLabel = poster.effectiveName,
-                        onClick = {
-                            haptic.click()
-                            onOpenHub()
-                        },
-                    )
+                    .clickable(onClickLabel = name) {
+                        haptic.click()
+                        onOpenPoster(poster.ownerId)
+                    }
                     .padding(vertical = 4.dp),
             ) {
                 StoryBubble(
-                    profile = poster,
-                    ringColor = MaterialTheme.colorScheme.primary,
+                    ownerId = poster.ownerId,
+                    name = name,
+                    ringColor = if (poster.unseenCount > 0) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.outlineVariant
+                    },
                     plusBadge = false,
-                    fallbackInitial = poster.effectiveName.take(1).uppercase(),
-                    contentDescription = poster.effectiveName,
+                    badgeCount = poster.unseenCount,
                 )
                 Text(
-                    text = poster.effectiveName,
+                    text = name,
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
@@ -145,17 +148,16 @@ internal fun DailyUpsStoriesBar(
 }
 
 /**
- * One story circle: 2dp ring + avatar with initials fallback (this lane never
- * decrypts avatars that fail resolution — mirrors the hub's ring language),
- * optional "+" badge pinned bottom-right (own bubble only).
+ * One story circle: 2dp ring + stable initial avatar, optional "+" badge pinned
+ * bottom-right (own bubble only) or an unseen-count badge (≥2) at top-right.
  */
 @Composable
 private fun StoryBubble(
-    profile: WhisperProfile?,
+    ownerId: String,
+    name: String,
     ringColor: Color,
     plusBadge: Boolean,
-    fallbackInitial: String?,
-    contentDescription: String,
+    badgeCount: Int,
 ) {
     Box(
         modifier = Modifier
@@ -164,36 +166,16 @@ private fun StoryBubble(
             .padding(3.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Surface(
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.primaryContainer,
-            modifier = Modifier.size(48.dp),
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                if (profile != null) {
-                    WhisperAvatar(profile = profile, size = 48.dp)
-                } else if (fallbackInitial != null) {
-                    Text(
-                        text = fallbackInitial,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Black,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        maxLines = 1,
-                    )
-                } else {
-                    Icon(
-                        Icons.Rounded.Person,
-                        contentDescription = contentDescription,
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-            }
-        }
+        GroupAvatar(
+            name = name,
+            groupId = ownerId,
+            size = 48.dp,
+        )
         if (plusBadge) {
             Surface(
                 shape = CircleShape,
                 color = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
                 modifier = Modifier
                     .size(20.dp)
                     .align(Alignment.BottomEnd),
@@ -204,6 +186,24 @@ private fun StoryBubble(
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onPrimary,
                         modifier = Modifier.size(14.dp),
+                    )
+                }
+            }
+        }
+        if (badgeCount >= 2) {
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+                modifier = Modifier
+                    .size(20.dp)
+                    .align(Alignment.TopEnd),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        text = badgeCount.toString(),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
                     )
                 }
             }

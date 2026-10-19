@@ -955,7 +955,7 @@ fun ToolzNavHost(
         }
         // 2d. Daily Ups deep link (no extras to validate; the screen is flag-gated).
         if (latestIntent.action == "com.frerox.toolz.OPEN_WHISPER_DAILY_UPS") {
-            navController.navigate(Screen.WhisperDailyUps.route)
+            navController.navigate(Screen.WhisperDailyUps.createRoute())
             return@LaunchedEffect
         }
 
@@ -1695,8 +1695,8 @@ fun ToolzNavHost(
                     onNavigateToGroup = { groupId ->
                         navController.navigate(Screen.WhisperGroupChat.createRoute(groupId))
                     },
-                    onNavigateToDailyUps = {
-                        navController.navigate(Screen.WhisperDailyUps.route)
+                    onNavigateToDailyUps = { ownerId ->
+                        navController.navigate(Screen.WhisperDailyUps.createRoute(ownerId))
                     },
                     onNavigateToDailyUpsCompose = {
                         navController.navigate(Screen.WhisperDailyUpsCompose.route)
@@ -1739,19 +1739,29 @@ fun ToolzNavHost(
                 onNavigateBack = { toolOnBack() },
             )
         }
-        composable(Screen.WhisperDailyUps.route) {
+        composable(
+            route = Screen.WhisperDailyUps.route,
+            arguments = listOf(
+                navArgument("ownerId") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
+            ),
+        ) { backStackEntry ->
             com.frerox.toolz.ui.screens.whisper.WhisperDailyUpsScreen(
                 onNavigateBack = { toolOnBack() },
                 onNavigateToCompose = {
                     navController.navigate(Screen.WhisperDailyUpsCompose.route)
                 },
+                ownerArg = backStackEntry.arguments?.getString("ownerId"),
             )
         }
         composable(Screen.WhisperDailyUpsCompose.route) {
             com.frerox.toolz.ui.screens.whisper.WhisperDailyUpsComposeScreen(
                 onNavigateBack = { toolOnBack() },
                 onOpenHub = {
-                    navController.navigate(Screen.WhisperDailyUps.route)
+                    navController.navigate(Screen.WhisperDailyUps.createRoute())
                 },
             )
         }

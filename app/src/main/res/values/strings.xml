@@ -4059,8 +4059,13 @@
     <string name="st_Whisper_DailyUp_Mine">Mine</string>
     <string name="st_Whisper_DailyUp_NewUp">New up</string>
     <string name="st_Whisper_DailyUp_AddCd">Share a Daily Up</string>
-    <string name="st_Whisper_DailyUp_EmptyTitle">Nothing shared today yet.</string>
-    <string name="st_Whisper_DailyUp_EmptySub">Ups vanish after 24 hours — friends added later never see them.</string>
+    <string name="st_Whisper_DailyUp_YourDay">Your day</string>
+    <string name="st_Whisper_DailyUp_YourDayLive">%1$d live today</string>
+    <string name="st_Whisper_DailyUp_YourDayEmpty">Share a photo that disappears in 24 hours.</string>
+    <string name="st_Whisper_DailyUp_View">View</string>
+    <string name="st_Whisper_DailyUp_Add">Add</string>
+    <string name="st_Whisper_DailyUp_NoFriendUps">No friend Daily Ups yet today.</string>
+    <string name="st_Whisper_DailyUp_Someone">Someone</string>
     <string name="st_Whisper_DailyUp_QuotaLeft">%1$d of %2$d left today</string>
     <string name="st_Whisper_DailyUp_RefreshCd">Refresh</string>
     <string name="st_Whisper_DailyUp_ViewsCount">%1$d views</string>

@@ -119,8 +119,9 @@ import kotlinx.coroutines.launch
 @Composable
 fun WhisperGroupsSection(
     onNavigateToGroup: (String) -> Unit,
-    // Daily Ups stories strip: friend circles open the hub, own "+" opens compose.
-    onNavigateToDailyUps: () -> Unit = {},
+    // Daily Ups stories strip: a friend circle opens that poster in the hub,
+    // the own "+" opens compose.
+    onNavigateToDailyUps: (String) -> Unit = {},
     onNavigateToDailyUpsCompose: () -> Unit = {},
     viewModel: WhisperGroupsViewModel = hiltViewModel(),
 ) {
@@ -157,8 +158,8 @@ fun WhisperGroupsSection(
             onCompose = {
                 if (viewModel.acceptNavigation()) onNavigateToDailyUpsCompose()
             },
-            onOpenHub = {
-                if (viewModel.acceptNavigation()) onNavigateToDailyUps()
+            onOpenPoster = { ownerId ->
+                if (viewModel.acceptNavigation()) onNavigateToDailyUps(ownerId)
             },
         )
         Row(

@@ -103,6 +103,8 @@ class WhisperRepository @Inject constructor(
     private val keyTrustStore: WhisperKeyTrustStore,
     private val hiddenChatsStore: WhisperHiddenChatsStore,
     private val mutePrefs: WhisperMutePreferences,
+    // Daily Ups local seen set: cleared with the rest of the account's local data.
+    private val storySeenStore: WhisperStorySeenStore,
     // H-1 FIX (reviewwhisper.md): channel teardown must run even though the flow's
     // ProducerScope is already cancelled when awaitClose fires — a plain `launch {}`
     // there never executes. This app-lifetime scope survives collection cancellation.
@@ -3479,6 +3481,7 @@ class WhisperRepository @Inject constructor(
         keyTrustStore.clearAll()
         hiddenChatsStore.clearAll()
         mutePrefs.clearAll()
+        storySeenStore.clearAll()
         profileCache.clear(); profileCacheTs.clear()
         peerKeys.value = emptyMap()
         blockedIds.value = emptySet()

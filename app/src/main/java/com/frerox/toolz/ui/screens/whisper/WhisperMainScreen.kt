@@ -108,7 +108,7 @@ fun WhisperMainScreen(
     onNavigateToChat: (String) -> Unit,
     onNavigateToProfile: (String) -> Unit,
     onNavigateToGroup: (String) -> Unit = {},
-    onNavigateToDailyUps: () -> Unit = {},
+    onNavigateToDailyUps: (String) -> Unit = {},
     // v1.1.7: the groups-list stories strip's "+" opens the composer directly.
     onNavigateToDailyUpsCompose: () -> Unit = {},
     onLoggedOut: () -> Unit,
@@ -831,7 +831,7 @@ private fun MergedChatsAndFriendsTab(
     onNavigateToChat: (String) -> Unit,
     onNavigateToProfile: (String) -> Unit,
     onNavigateToGroup: (String) -> Unit = {},
-    onNavigateToDailyUps: () -> Unit = {},
+    onNavigateToDailyUps: (String) -> Unit = {},
     onNavigateToDailyUpsCompose: () -> Unit = {},
     onLongClickConvo: (WhisperConversation) -> Unit,
     onLongClickFriend: (WhisperProfile) -> Unit,

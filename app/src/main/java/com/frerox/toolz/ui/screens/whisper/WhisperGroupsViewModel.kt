@@ -20,6 +20,7 @@ import com.frerox.toolz.data.whisper.WhisperMutePreferences
 import com.frerox.toolz.data.whisper.WhisperNotificationManager
 import com.frerox.toolz.data.whisper.WhisperProfile
 import com.frerox.toolz.data.whisper.WhisperRepository
+import com.frerox.toolz.data.whisper.WhisperStorySeenStore
 import com.frerox.toolz.data.whisper.cachedGroupMembers
 import com.frerox.toolz.data.whisper.cachedGroups
 import com.frerox.toolz.data.whisper.countGroupUnread
@@ -74,6 +75,7 @@ class WhisperGroupsViewModel @Inject constructor(
     private val notificationManager: WhisperNotificationManager,
     private val notifPrefs: WhisperGroupNotifPrefs,
     private val readStore: WhisperGroupReadStore,
+    private val seenStore: WhisperStorySeenStore,
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) : ViewModel() {
 
@@ -127,8 +129,12 @@ class WhisperGroupsViewModel @Inject constructor(
         val me: WhisperProfile? = null,
         /** ≥1 of my daily ups is still live → the own ring lights up. */
         val mineLive: Boolean = false,
-        /** Distinct live-poster profiles, oldest-expiring first (hub order). */
-        val friendPosters: List<WhisperProfile> = emptyList(),
+        /** Live own-ups count (reserved for the ring's semantics). */
+        val myCount: Int = 0,
+        /** Soonest own expiry, or null when nothing of mine is live. */
+        val mySoonestExpiryMs: Long? = null,
+        /** One ring per live friend, unseen-first then oldest-expiring. */
+        val friendPosters: List<StoryPosterRing> = emptyList(),
     )
 
     private val stripTicker = flow {
@@ -138,20 +144,41 @@ class WhisperGroupsViewModel @Inject constructor(
         }
     }
 
-    val dailyUpsStrip: StateFlow<DailyUpsStripState> = combine(
+    private val stripRows = combine(
         repository.observeMyDailyUps(),
         repository.observeFriendDailyUps(),
+        seenStore.seen,
+    ) { mine, friends, seen -> Triple(mine, friends, seen) }
+
+    val dailyUpsStrip: StateFlow<DailyUpsStripState> = combine(
+        stripRows,
         _uiState,
         _myProfile,
         stripTicker,
-    ) { mine, friendRows, ui, me, now ->
+    ) { (mine, friendRows, seen), ui, me, now ->
+        val groups = buildPosterGroups(
+            mine = mine,
+            friends = friendRows,
+            profiles = ui.friends.associateBy { it.id },
+            seen = seen.keys,
+            nowMs = now,
+        )
+        val mineGroup = groups.firstOrNull { it.isMine }
         DailyUpsStripState(
             me = me,
-            mineLive = mine.any { it.expiresAtMs > now },
-            friendPosters = friendRows
-                .filter { it.expiresAtMs > now }
-                .distinctBy { it.ownerId }
-                .mapNotNull { row -> ui.friends.firstOrNull { it.id == row.ownerId } },
+            mineLive = mineGroup != null,
+            myCount = mineGroup?.stories?.size ?: 0,
+            mySoonestExpiryMs = mineGroup?.soonestExpiryMs,
+            friendPosters = groups.filterNot { it.isMine }.map { poster ->
+                StoryPosterRing(
+                    ownerId = poster.ownerId,
+                    name = poster.ownerName.orEmpty(),
+                    picture = poster.picture,
+                    storyCount = poster.stories.size,
+                    unseenCount = poster.unseenCount,
+                    soonestExpiryMs = poster.soonestExpiryMs,
+                )
+            },
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DailyUpsStripState())
 
