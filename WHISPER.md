@@ -10,9 +10,10 @@ seen the codebase can reason about it.
 **How to read this document.** It describes the codebase as of the 1.1.7
 release (October 2026). The working tree is the source of truth; this document
 is not machine-checked against code, so treat any specific constant or file
-name as a pointer to verify, not a guarantee. Key material describes
-cryptography; "server" means the Supabase project Whisper operates (database,
-Row Level Security policies, trigger functions, and hosted edge functions).
+name as a pointer to verify, not a guarantee. Sections about cryptography name
+exact primitives and constants on purpose; "server" means the Supabase project
+Whisper operates (database, Row Level Security policies, trigger functions,
+and hosted edge functions).
 
 Contents:
 
@@ -73,11 +74,15 @@ Feature surface at 1.1.7:
 
 These principles explain most specific decisions later in the document.
 
-1. **The server is untrusted for confidentiality.** The Postgres database is
-   allowed to store *ciphertext, user IDs, timestamps, and friendship edges* —
-   nothing more that could reveal content. Every server-side rule that guards
-   content is enforced with Row Level Security and triggers, so a malfunction
-   or modification of client behavior can leak presence and topology, never
+1. **The server is untrusted for confidentiality — and that means two
+   adversaries.** A *malicious client* is fenced with Row Level Security and
+   triggers (server-enforced invariants a foreign user or modified app
+   cannot bypass). A *malicious operator* bypasses RLS by definition — they
+   run the database — so the defense there is cryptography alone: sealed
+   payloads and client-verified signatures the operator cannot forge (§2.1).
+   The Postgres database is allowed to store *ciphertext, user IDs,
+   timestamps, and friendship edges* — nothing more that could reveal
+   content; a rule or client bug can leak presence and topology, never
    plaintext.
 2. **Fail closed everywhere.** When verification is ambiguous — a bad
    signature, an unknown key, an unparseable event, a missing one-time prekey —
@@ -104,13 +109,34 @@ These principles explain most specific decisions later in the document.
 This is the section to internalize first. Everything else in the design
 follows from this split.
 
+### 2.1 The adversaries the design assumes
+
+| Adversary | What the design denies them |
+|---|---|
+| **The backend operator** | Message/poll/story content and keys. The operator can always bypass RLS (they run the database), so the defense against them is cryptography, not policies — sealed payloads and client-verified signatures they cannot forge (§11.1). |
+| **A network adversary** | Everything on every hop: DB connections run over TLS, edge calls over HTTPS, and push payloads are either Web-Push-encrypted or name-scrubbed to IDs (§9). |
+| **A malicious friend or group member** | A legitimate protocol participant who can read their own copies, screenshot them, and forward them — that is inherent and this design does not pretend otherwise (screenshots are a product surface, §11.7, not a security boundary). What they cannot do is open anyone else's legs (per-member keys), forge group events (signatures), or resurrect content the poster deleted. |
+| **A thief with the device** | Nothing, if the device is unlocked and the app open — the app state *is* the plaintext window. Honest consequence: the ratchet's forward secrecy does not undo already-received traffic from a device compromise, because out-of-order tolerance deliberately persists consumed message keys (§3.4). Keystore-wrapped key material still resists extraction from a *locked* device. |
+| **A repackager** | Not anymore than the build gate makes them (§8.3) — that gate is an availability speed bump, not a trust boundary. |
+
+**Non-goals, stated as non-goals:** Whisper does not defend against metadata
+analysis. Who talks to whom, when, how often, who is online, and who read what
+are all visible to the operator by design — they are the feature model
+(presence, receipts) and the routing model (§2.2). There is no cover traffic,
+no batching to obscure timing. A friends-only messenger that hid its social
+graph from its own operator could not deliver envelopes at all.
+
+### 2.2 What the server can and cannot see
+
 **Never visible to the server (and therefore to anyone but the endpoints):**
 
 - Message and image content. All of it is ciphertext until the recipient's
   device opens it.
-- Private keys. Keystore-bound hardware keys never leave the device; software
-  private halves (session keys, prekey halves, ratchet snapshots) exist on the
-  server only as public halves wrapped locally with a Keystore AES key.
+- Private keys. Keystore-bound hardware keys never leave the device. Software
+  private halves (session keys, prekey halves, ratchet snapshots) never reach
+  the server in any form either — the server stores only their *public*
+  halves, while the private halves sit on-device wrapped with a Keystore AES
+  key.
 - Group message text, poll votes, mention targets — group payloads are the
   same wire frames as 1:1 messages, sealed per member.
 - Story photo bytes and their AES keys — stories carry one sealed descriptor
@@ -153,11 +179,10 @@ Three nuances worth calling out:
   human parts from its own local caches. So a third-party distribution server
   learns "device X was pinged because of event kind Y in entity Z", and
   nothing about humans or content.
-- **Image hosts see opaque PNGs.** Chat images, group pictures, and stories
-  are re-encoded into encrypted, lossless PNG wrappers, so the hosting
-  service (ImgBB or Supabase Storage) sees picture files with meaningful
-  pixels but no plaintext content beyond what any image viewer would show —
-  which is, by construction, noise pixels from ciphertext.
+- **Image hosts see opaque PNGs.** Sealed containers (chat images, group
+  pictures, stories) re-encode ciphertext into lossless PNG pixels, so the
+  hosting service sees noise, not a picture. The one deliberate exception is
+  avatars, which are real pictures under key-derived obfuscation (§5).
 
 ---
 
@@ -210,9 +235,13 @@ without the device's secure hardware.
   compromise of either identity key exposes all v2 traffic ever sent between
   the pair; the 30-day rotation cycle bounds that window.
 - **v3 ratchet frames** — Signal-style Double Ratchet messages, with an X3DH
-  handshake on the first frame. Every frame is sealed under a chaotically
-  advancing symmetric chain; compromise of today's file does not open
-  yesterday's traffic.
+  handshake on the first frame. Every frame is sealed under its own advancing
+  symmetric chain. Honest scope of its forward secrecy: it defeats a *later*
+  compromise of long-term identity keys and, once an attacker loses device
+  access, frames derived after that point. It does **not** offer
+  snapshot-resistance on a live device, because out-of-order tolerance
+  deliberately persists consumed message keys (§3.4) — a full snapshot of the
+  running app can decrypt already-received traffic.
 
 The negotiation policy lives in a pure, fully-tested decision module
 (`WireProtocol`): new contacts and live ratchet sessions use v3; an
@@ -242,8 +271,9 @@ then computes three Diffie-Hellman
 shared secrets (identity→SPK, ephemeral→identity, ephemeral→SPK), plus a
 fourth through the consumed OPK when one is available.
 
-KDF framing: the shared secrets are concatenated after a 32-byte `0xFF` pad
-between each, run through HKDF-SHA256 with a zero salt and info string
+KDF framing: one 32-byte `0xFF` pad is **prefixed once** to the concatenation
+of the DH shared secrets (Signal-spec framing: `0xFF‖DH₁‖DH₂‖DH₃‖DH₄?`), run
+through HKDF-SHA256 with a zero salt and info string
 `WhisperX3DH-v1`, yielding a 32-byte root session key and a session ID that
 both sides derive identically (the ID is what binds every later frame to the
 session). The handshake header `{ik, ek, spkKid, opkKid}` rides on the first
@@ -280,11 +310,15 @@ After the handshake, every frame advances a Double Ratchet:
   so offline catch-up and duplicate deliveries survive process death.
 - **What is on disk:** the entire session snapshot (X3DH secret, ratchet
   state, all skipped and consumed keys) is serialized and wrapped with the
-  Keystore AES wrapper before being written. Honest framing of the
-  forward-secrecy corollary: a compromised device yields that wrapped
-  snapshot, so FS protects keys derived *after* the compromise (future
-  traffic); messages whose keys were already on disk at compromise time are
-  not protected by it.
+  Keystore AES wrapper before being written. The honest framing of forward
+  secrecy here, given that choice: a full device compromise *can* decrypt
+  already-received traffic (the snapshot plus the ciphertext-only Room cache
+  is enough). What the ratchet buys is (a) a later leak of long-term identity
+  keys never retroactively opens ratchet traffic, and (b) after an attacker
+  loses device access, they cannot open frames whose keys are derived later —
+  message keys are erased after use and re-derivable only from chain state the
+  attacker no longer holds. "FS protects future traffic" is precisely right:
+  it is post-compromise protection, not snapshot resistance.
 
 Unrecoverable gaps raise `WhisperRatchetLostMessage`, rendered as an honest
 locked placeholder: "this message could not be opened because part of the
@@ -338,9 +372,9 @@ matter more than the hashes they live in:
   banner until the user takes action. The one automatic re-acceptance path is
   a **rotation certificate** — a signed statement `ROTv2:<prev>:<new>:<counter>:<timestamp>`
   signed by the *old* key, with an anti-replay counter that must strictly
-  increase per peer. Verified-verified peers (users who explicitly compared
-  safety numbers) always re-verify manually even with a valid cert: an
-  automatic acceptance would reduce verification to decoration.
+  increase per peer. Peers the user explicitly verified always re-verify
+  manually even with a valid cert: an automatic acceptance would reduce
+  verification to decoration.
 - The same trust store maintains the counters used for anti-replay, so a
   spoofed cert replayed weeks later neither verifies nor advances the counter.
 
@@ -354,6 +388,42 @@ and every peer's policy engine consumes those certificates, so rotation is a
 content-verified event rather than a trust gesture. A process-local
 diagnostics buffer (last 60 protocol events, IDs and key material scrubbed)
 aids support diagnostics without logging secrets.
+
+### 3.8 The self-leg: how you receive your own group messages
+
+One gap the 1:1 machinery cannot solve on its own: in group fan-out the
+*sender is always one of the recipients* (their own copy is what renders their
+history on this device, from the server rows, without a plaintext cache).
+That leg cannot ride the normal ratchet path, because session establishment
+fetches the peer's prekey bundle from the edge — and the edge refuses
+self-bundles by contract (`WhisperSelfLegCrypto` exists to close exactly this
+gap; without it every group send would fail on its own leg first).
+
+Design, deliberately degenerate — one fresh session per frame:
+
+- A **per-install X25519 anchor keypair** is generated once; the private half
+  is Keystore-wrapped in this module's own preferences, the same protection
+  tier as prekey private halves. A dedicated anchor (rather than the live
+  signed prekey) means weekly SPK rotation and OPK consumption can never
+  orphan an already-sent self frame.
+- Each frame gets a **fresh random 32-byte session key**, anchored through
+  the standard ratchet initiator (DH'd against the sender's own anchor
+  public key) and opened by rebuilding the responder from the same raw
+  session key plus the anchor private — X25519 symmetry makes both halves
+  derive identical chains, so the frame opens on the first receive key. No
+  ratchet state advances or persists on open, so re-rendering cached history
+  reopens the row deterministically forever.
+- The session key itself is persisted Keystore-wrapped; possession of the
+  wrapped copy alone opens nothing — the anchor private stays behind hardware
+  Keystore.
+- Session IDs carry the `sg1-` prefix and the open path refuses anything
+  else, so a genuine peer frame can never be demoted into this path.
+
+Honest properties: there is **no forward-secrecy chain across self frames**
+(each frame's key is independent — that is the point, it buys permanent
+re-renderability), and reinstall or data wipe locks past self frames with no
+server fallback, same parity as the 1:1 "reinstall loses old sealed frames"
+posture.
 
 ---
 
@@ -375,16 +445,22 @@ Alice's keyboard to Bob's screen.
    - If no session exists, the X3DH handshake runs first (fetching Bob's
      bundle, consuming one OPK if available) and the frame goes out with the
      handshake header.
-   - If both fail after the block threshold, an attempt to send is explicit:
-     the message is enqueued *as ciphertext* and the engine retries when
-     connectivity or key state heals. The queue never holds plaintext.
+   - If both fail after the block threshold, the send **fails loudly and
+     nothing is queued — there is no ciphertext to queue.** The send error is
+     explicit (v3-downgrade blocked / no key / repeated-handshake), shown to
+     the user as a key-state problem, and retried by hand once the session or
+     key state heals. The outbox never holds plaintext, and never pretends a
+     send happened.
 3. **Queue and deliver.** The sealed row enters the local outbox (FIFO,
    capped) with a client-generated UUID used for idempotent delivery: a
    retried send cannot double-post. A network-constrained scheduler with
    exponential backoff drains the queue; the database `INSERT` carries the
-   sender ID, receiver ID, timestamps, and the formatted ciphertext. Once the
-   server acknowledges the insert, the outbox row is settled — no further
-   round-trip is needed for delivery.
+   sender ID, receiver ID, timestamps, and the formatted ciphertext. If the
+   INSERT itself fails (offline, server error), the already-sealed ciphertext
+   row goes to the outbox and is retried by the delivery scheduler — that is
+   the queue-and-retry path, and it only ever applies after sealing
+   succeeded. Once the server acknowledges the insert, the outbox row is
+   settled — no further round-trip is needed for delivery.
 
 **On the server:**
 
@@ -490,7 +566,7 @@ Local state is split across purpose-built stores, all read in full by the app
 | Store | Holds | Notably does NOT hold |
 |---|---|---|
 | Room (messages, local tombstones, outbox) | ciphertext-only messages (latest 500), delete-for-me tombstones, FIFO outbox (cap 100, 200-entry drop ledger) | plaintext before render; no key material |
-| `whisper_sessions/` | one wrapped session snapshot per peer | anything unwappable (Keystore gate) |
+| `whisper_sessions/` | one wrapped session snapshot per peer | anything that cannot be Keystore-wrapped |
 | Key trust store | pinned/verified fingerprints + rotation counters | private halves |
 | Mute/hidden-chats/delete-for-me/undo/preferences stores | UX state with expiries (24h eviction for delete-for-me, 30s undo window, hidden chat auto-return) | — |
 | Access-file backup (`WhisperAubupManager`) | credential-only payload (username, auth type, credential, display name) | session/ratchet state, key material — never |
@@ -729,12 +805,11 @@ old clients will not be corrupted by it.
 ### 11.2 Sealing: pairwise fan-out and epochs
 
 The sender fans out one inner frame **per member, including self**, sealing
-through the *unmodified 1:1 machinery*: the sender→peer Double Ratchet. The
-self leg does not pass through the edge function (peer bundles refuse
-requests for one's own bundle); a dedicated per-install self-leg anchor spins
-up the sender's own symmetric chain without touching the shared
-infrastructure, so a solo-owner group — or a second account on the same
-device — can send at all. Group ID and epoch ride *inside* the AEAD plaintext,
+through the 1:1 machinery: the sender→peer Double Ratchet for peers, and the
+dedicated self-leg anchor for the sender's own frame (§3.8 — the self leg
+cannot use the standard path because the edge refuses self-bundles, so
+`WhisperSelfLegCrypto` seals it with a per-install anchor and a fresh
+per-frame session key). Group ID and epoch ride *inside* the AEAD plaintext,
 so a frame cannot be retargeted from one group to another.
 
 Opening is equally strict: a member opens only the frame addressed to them
@@ -826,8 +901,14 @@ guarded by triggers that make the client's rules server-enforced:
 - direct-add events accepted only in historic rows (legacy degrade, never
   resurrect).
 
-Server-side group writes additionally require a minimum client version code
-(the release floor), so old clients that predate signatures cannot inject.
+Server-side group writes additionally require rows to declare a minimum
+client version code (a SQL `CHECK` on `client_version_code`). Being honest
+about what that is worth: the value is client-supplied, so it is the same
+tier as the build gate (§8.3) — it fences honest-but-outdated clients, nothing
+stronger. The integrity guarantee against a *modified* client is not this
+column; it is that honest clients reject events whose signatures or signer
+certificates fail verification (§11.1), so an injected row never enters a
+verified log.
 
 ### 11.7 In the app
 
@@ -890,8 +971,8 @@ through the same machinery and carries the `a` capability, since a story's
 owner retains delete rights no one else does.
 
 Ids are deliberately absent from the descriptor: identifiers always come from
-server rows, which are the source of truth (so a client cannot hallucinate a
-story by forging its own id story).
+server rows, which are the source of truth (a client cannot fabricate an
+identifier and have the server trust it).
 
 ### 12.2 The photo pipeline
 
@@ -1043,6 +1124,15 @@ A few design constraints documented as *decisions*, not surprises:
    limits listed — and an explicit honesty note in-app: uses *custom E2EE,
    not independently audited*. This document's job is to state the
    architecture plainly enough that such a review can find its way around.
+6. **Unconditional presence and typing is the design's most debatable
+   product stance.** Last-seen, typing, and read receipts are deliberately
+   uniform — no per-user opt-out (§8.1). Every serious reviewer will cite
+   this first against a privacy messenger, and that is acknowledged rather
+   than buried here: the reversal path exists (the opt-out columns were once
+   in the schema and can be re-introduced without touching the crypto),
+   nothing in §2.1's "never visible" list depends on these signals being
+   unconditional. It is a product calibration call, owned by the operator,
+   not an architectural constraint.
 
 Deployment/operational runbooks (rollout, smoke tests, edge redeploys) live
 outside this document, on purpose: `supabase/POST_DEPLOY_SMOKE.md` and the
