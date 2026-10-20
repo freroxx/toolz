@@ -32,6 +32,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -66,6 +68,8 @@ internal fun DailyUpsStoriesBar(
     val youLabel = stringResource(R.string.st_Whisper_You)
     val someone = stringResource(R.string.st_Whisper_DailyUp_Someone)
     val newUpLabel = stringResource(R.string.st_Whisper_DailyUp_NewUp)
+    val seenLabel = stringResource(R.string.st_Whisper_DailyUp_SeenState)
+    val unseenLabel = stringResource(R.string.st_Whisper_DailyUp_UnseenState)
 
     // The own bubble is ALWAYS present: it is the compose entry, exactly like
     // Instagram keeps "your story" on an empty day.
@@ -83,6 +87,7 @@ internal fun DailyUpsStoriesBar(
             modifier = Modifier
                 .width(64.dp)
                 .clip(RoundedCornerShape(14.dp))
+                .semantics(mergeDescendants = true) {}
                 .clickable(onClickLabel = newUpLabel) {
                     haptic.click()
                     onCompose()
@@ -112,12 +117,23 @@ internal fun DailyUpsStoriesBar(
         }
         strip.friendPosters.forEach { poster ->
             val name = poster.name.ifBlank { someone }
+            val openLabel = stringResource(
+                if (poster.storyCount == 1) {
+                    R.string.st_Whisper_DailyUp_RailLabelOne
+                } else {
+                    R.string.st_Whisper_DailyUp_RailLabel
+                },
+                name,
+                poster.storyCount,
+                if (poster.unseenCount > 0) unseenLabel else seenLabel,
+            )
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
                     .width(64.dp)
                     .clip(RoundedCornerShape(14.dp))
-                    .clickable(onClickLabel = name) {
+                    .semantics(mergeDescendants = true) {}
+                    .clickable(onClickLabel = openLabel) {
                         haptic.click()
                         onOpenPoster(poster.ownerId)
                     }
@@ -163,7 +179,8 @@ private fun StoryBubble(
         modifier = Modifier
             .size(56.dp)
             .border(2.dp, ringColor, CircleShape)
-            .padding(3.dp),
+            .padding(3.dp)
+            .clearAndSetSemantics {},
         contentAlignment = Alignment.Center,
     ) {
         GroupAvatar(

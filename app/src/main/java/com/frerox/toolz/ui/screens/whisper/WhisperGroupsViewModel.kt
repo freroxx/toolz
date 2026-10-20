@@ -480,6 +480,8 @@ class WhisperGroupsViewModel @Inject constructor(
         logWatchJobs.forEach { it.cancel() }
         val me = repository.myId
         if (me.isBlank()) return
+        val defaultGroupName =
+            appContext.getString(com.frerox.toolz.R.string.st_Whisper_Groups_DefaultName)
         logWatchJobs = lastMemberships.flatMap { m ->
             listOf(
                 watchLiveForever("groupl:${m.groupId}") {
@@ -507,7 +509,7 @@ class WhisperGroupsViewModel @Inject constructor(
                         }
                         notificationManager.showGroupEventNotification(
                             groupId = m.groupId,
-                            title = group?.name?.ifBlank { "Group" } ?: "Group",
+                            title = group?.name?.ifBlank { defaultGroupName } ?: defaultGroupName,
                             text = text,
                             dedupeKey = "msg:${ping.clientId}",
                         )
@@ -524,8 +526,12 @@ class WhisperGroupsViewModel @Inject constructor(
     ) {
         if (row.actor == me) return
         val group = lastGroups.firstOrNull { it.id == m.groupId }
-        val groupName = group?.name?.ifBlank { "Group" } ?: "Group"
-        val actorName = lastFriendNames[row.actor] ?: "Someone"
+        val defaultGroupName =
+            appContext.getString(com.frerox.toolz.R.string.st_Whisper_Groups_DefaultName)
+        val someoneName =
+            appContext.getString(com.frerox.toolz.R.string.st_Whisper_SomeoneDefault)
+        val groupName = group?.name?.ifBlank { defaultGroupName } ?: defaultGroupName
+        val actorName = lastFriendNames[row.actor] ?: someoneName
         // Admin-action events behave like message pings: mute + self only,
         // no event-toggle gate (the manager still enforces mute/open-chat).
         when (row.type) {
@@ -533,7 +539,7 @@ class WhisperGroupsViewModel @Inject constructor(
                 val subjectId = row.payload.trim().trim('"').takeIf {
                     it.length >= 10 && it.all { c -> c.isLetterOrDigit() || c == '-' }
                 }.orEmpty()
-                val subjectName = lastFriendNames[subjectId] ?: "Someone"
+                val subjectName = lastFriendNames[subjectId] ?: someoneName
                 val text = when (row.type) {
                     "remove" -> if (subjectId == me) {
                         appContext.getString(com.frerox.toolz.R.string.st_Whisper_Groups_RemovedYou, groupName)

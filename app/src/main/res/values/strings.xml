@@ -4139,6 +4139,10 @@
     <string name="st_Whisper_DailyUp_DiscardConfirm">Discard</string>
     <string name="st_Whisper_DailyUp_KeepEditing">Keep editing</string>
     <string name="st_Whisper_DailyUp_Posted">Posted</string>
+    <string name="st_Whisper_DailyUp_RailLabel">%1$s, %2$d ups, %3$s</string>
+    <string name="st_Whisper_DailyUp_RailLabelOne">%1$s, %2$d up, %3$s</string>
+    <string name="st_Whisper_DailyUp_SeenState">seen</string>
+    <string name="st_Whisper_DailyUp_UnseenState">unseen</string>
     <string name="st_AppSkin_section_title">APP SKIN</string>
     <string name="st_AppSkin_screen_title">App Skin</string>
     <string name="st_AppSkin_screen_subtitle">Icons, colors &amp; community skins</string>

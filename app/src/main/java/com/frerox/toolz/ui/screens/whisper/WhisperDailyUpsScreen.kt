@@ -8,6 +8,7 @@ package com.frerox.toolz.ui.screens.whisper
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animate
@@ -107,7 +108,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.R
@@ -303,9 +303,12 @@ fun WhisperDailyUpsScreen(
                         onDismiss = { viewModel.clearError() },
                         modifier = Modifier.padding(horizontal = 16.dp),
                     )
-                    val ownCount =
+                    val ownCount = remember(state.posterGroups) {
                         state.posterGroups.firstOrNull { it.isMine }?.stories?.size ?: 0
-                    val friendPosters = state.posterGroups.filterNot { it.isMine }
+                    }
+                    val friendPosters = remember(state.posterGroups) {
+                        state.posterGroups.filterNot { it.isMine }
+                    }
                     val quotaLeft =
                         (WhisperDailyUpsConfig.DAILY_LIMIT - state.quotaUsed).coerceAtLeast(0)
 
@@ -471,6 +474,8 @@ private fun FriendsRail(
     onOpen: (String) -> Unit,
 ) {
     val someone = stringResource(R.string.st_Whisper_DailyUp_Someone)
+    val seenLabel = stringResource(R.string.st_Whisper_DailyUp_SeenState)
+    val unseenLabel = stringResource(R.string.st_Whisper_DailyUp_UnseenState)
     LazyRow(
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
@@ -478,16 +483,30 @@ private fun FriendsRail(
     ) {
         items(items = posters, key = { it.ownerId }) { poster ->
             val name = poster.ownerName?.takeIf { it.isNotBlank() } ?: someone
+            val storyCount = poster.stories.size
+            val openLabel = stringResource(
+                if (storyCount == 1) {
+                    R.string.st_Whisper_DailyUp_RailLabelOne
+                } else {
+                    R.string.st_Whisper_DailyUp_RailLabel
+                },
+                name,
+                storyCount,
+                if (poster.unseenCount > 0) unseenLabel else seenLabel,
+            )
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
                     .width(72.dp)
                     .clip(RoundedCornerShape(14.dp))
-                    .clickable(onClickLabel = name) { onOpen(poster.ownerId) }
+                    .semantics(mergeDescendants = true) {}
+                    .clickable(onClickLabel = openLabel) { onOpen(poster.ownerId) }
                     .padding(vertical = 4.dp),
             ) {
                 Box(
-                    modifier = Modifier.size(64.dp),
+                    modifier = Modifier
+                        .size(64.dp)
+                        .clearAndSetSemantics {},
                     contentAlignment = Alignment.Center,
                 ) {
                     Box(
@@ -578,7 +597,7 @@ private fun StoryViewerOverlay(
     BackHandler(onBack = closeWithHaptic)
 
     val current = viewer.currentStory
-    val segmentStories = viewer.currentSegment?.stories.orEmpty()
+    val segmentStoryCount = viewer.currentSegment?.stories?.size ?: 0
     val flatStories = remember(viewer.segments) { viewer.segments.flatMap { it.stories } }
     val pagerState = rememberPagerState(
         initialPage = viewer.flatPosition,
@@ -817,40 +836,12 @@ private fun StoryViewerOverlay(
                     .pointerInput(Unit) { detectTapGestures(onTap = {}) }
                     .padding(horizontal = 12.dp, vertical = 8.dp),
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .semantics { stateDescription = storyOf },
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    segmentStories.forEachIndexed { i, _ ->
-                        val fill = when {
-                            i < viewer.storyIndex -> 1f
-                            i == viewer.storyIndex -> progress.value
-                            else -> 0f
-                        }
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(3.dp)
-                                .clip(RoundedCornerShape(2.dp))
-                                .background(Color.White.copy(alpha = 0.25f)),
-                        ) {
-                            if (fill > 0f) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxHeight()
-                                        .fillMaxWidth(fill.coerceIn(0f, 1f))
-                                        .background(
-                                            Color.White.copy(
-                                                alpha = if (i < viewer.storyIndex) 0.85f else 1f,
-                                            ),
-                                        ),
-                                )
-                            }
-                        }
-                    }
-                }
+                ViewerProgressBar(
+                    progress = progress,
+                    storyIndex = viewer.storyIndex,
+                    segmentCount = segmentStoryCount,
+                    storyOf = storyOf,
+                )
                 Spacer(Modifier.height(8.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1021,6 +1012,54 @@ private fun StoryViewerOverlay(
     }
 }
 
+/**
+ * Isolates the animated fill from the viewer's composition. Reading
+ * [progress] here means only this thin row recomposes on every animation
+ * frame; the pager, header, and bottom chrome stay untouched.
+ */
+@Composable
+private fun ViewerProgressBar(
+    progress: Animatable<Float, AnimationVector1D>,
+    storyIndex: Int,
+    segmentCount: Int,
+    storyOf: String,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics { stateDescription = storyOf },
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        repeat(segmentCount) { i ->
+            val fill = when {
+                i < storyIndex -> 1f
+                i == storyIndex -> progress.value
+                else -> 0f
+            }
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(3.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(Color.White.copy(alpha = 0.25f)),
+            ) {
+                if (fill > 0f) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .fillMaxWidth(fill.coerceIn(0f, 1f))
+                            .background(
+                                Color.White.copy(
+                                    alpha = if (i < storyIndex) 0.85f else 1f,
+                                ),
+                            ),
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun StoryPage(
     story: WhisperDailyUpsViewModel.StoryItem,
@@ -1112,6 +1151,9 @@ private fun ReactionPalette(
     // Six 48dp targets do not fit a 320dp phone with fixed spacing. Weighting
     // the cells keeps the full 48dp touch target on every supported width and
     // lets the palette fill the row cleanly instead of clipping the last emoji.
+    // Emoji are graphics, not reading text: keep them at 26dp physical size so
+    // the six 48dp targets still fit when the user doubles the font scale.
+    val emojiFontSize = with(LocalDensity.current) { 26.dp.toSp() }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1150,7 +1192,7 @@ private fun ReactionPalette(
                     .padding(4.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(text = emoji, fontSize = 26.sp)
+                Text(text = emoji, fontSize = emojiFontSize)
             }
         }
     }

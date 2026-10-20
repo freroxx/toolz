@@ -16,6 +16,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -184,6 +186,7 @@ internal fun SettingSwitchRow(
 // Hero + quick actions
 // ─────────────────────────────────────────────────────────────────────────────
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun GroupHero(
     name: String,
@@ -203,6 +206,8 @@ internal fun GroupHero(
     val scheme = MaterialTheme.colorScheme
     val context = LocalContext.current
     val tooBig = stringResource(R.string.st_Whisper_Error_ImageTooLarge)
+    val pictureLabel = GroupCd.picture()
+    val editDescriptionLabel = stringResource(R.string.st_Whisper_Groups_EditDescription)
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         runCatching {
@@ -221,7 +226,11 @@ internal fun GroupHero(
             Box(
                 modifier = Modifier
                     .clip(CircleShape)
-                    .clickable(enabled = canChangePicture, role = Role.Button) { picker.launch("image/*") },
+                    .clickable(
+                        enabled = canChangePicture,
+                        role = Role.Button,
+                        onClickLabel = pictureLabel,
+                    ) { picker.launch("image/*") },
             ) {
                 GroupAvatar(name = name, groupId = groupId, size = 112.dp, picture = pictureBytes)
             }
@@ -237,7 +246,7 @@ internal fun GroupHero(
                     Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
                         Icon(
                             Icons.Rounded.AddPhotoAlternate,
-                            contentDescription = GroupCd.picture(),
+                            contentDescription = pictureLabel,
                             modifier = Modifier.size(20.dp),
                         )
                     }
@@ -264,7 +273,10 @@ internal fun GroupHero(
                 }
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             InfoChip(
                 icon = Icons.Rounded.Groups,
                 text = "$memberCount " + stringResource(
@@ -282,7 +294,12 @@ internal fun GroupHero(
                 modifier = Modifier
                     .padding(horizontal = 24.dp, vertical = 4.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .clickable(enabled = canEditDescription, onClick = onEditDescription)
+                    .clickable(
+                        enabled = canEditDescription,
+                        role = Role.Button,
+                        onClickLabel = editDescriptionLabel,
+                        onClick = onEditDescription,
+                    )
                     .padding(horizontal = 8.dp, vertical = 4.dp),
             )
         }
@@ -337,8 +354,9 @@ internal fun QuickActionTile(
                 label,
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.Bold,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
             )
             if (!supporting.isNullOrBlank()) {
                 Text(

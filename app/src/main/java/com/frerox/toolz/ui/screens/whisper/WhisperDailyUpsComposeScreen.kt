@@ -68,6 +68,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -250,7 +251,8 @@ private fun PhotoSlot(
             border = border,
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(DAILY_UP_PREVIEW_ASPECT),
+                .aspectRatio(DAILY_UP_PREVIEW_ASPECT)
+                .semantics(mergeDescendants = true) {},
         ) {
             Column(
                 modifier = Modifier.fillMaxSize(),
@@ -282,7 +284,8 @@ private fun PhotoSlot(
                 border = border,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .aspectRatio(DAILY_UP_PREVIEW_ASPECT),
+                    .aspectRatio(DAILY_UP_PREVIEW_ASPECT)
+                    .semantics(mergeDescendants = true) {},
             ) {
                 Box(Modifier.fillMaxSize()) {
                     Image(
@@ -498,6 +501,7 @@ private fun AudienceSheet(
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .weight(1f, fill = false)
                             .heightIn(max = 420.dp),
                     ) {
                         items(filtered, key = { it.id }) { friend ->
@@ -525,7 +529,7 @@ private fun AudienceSheet(
                                     modifier = Modifier
                                         .weight(1f)
                                         .padding(horizontal = 12.dp),
-                                    maxLines = 1,
+                                    maxLines = 2,
                                     overflow = TextOverflow.Ellipsis,
                                 )
                                 Checkbox(checked = included, onCheckedChange = null)
@@ -614,7 +618,7 @@ private fun ComposeShareBar(
                         onClick = onShare,
                         enabled = enabled,
                         modifier = Modifier
-                            .height(52.dp)
+                            .heightIn(min = 52.dp)
                             .widthIn(min = 132.dp),
                     ) {
                         if (state.publishing) {

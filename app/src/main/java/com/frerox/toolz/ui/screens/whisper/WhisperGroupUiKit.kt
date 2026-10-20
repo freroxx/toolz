@@ -88,6 +88,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -576,13 +577,14 @@ fun GroupAvatar(
         modifier = modifier
             .size(size)
             .clip(CircleShape)
-            .background(bg),
+            .background(bg)
+            .clearAndSetSemantics {},
         contentAlignment = Alignment.Center,
     ) {
         if (bitmap != null) {
             Image(
                 bitmap = bitmap,
-                contentDescription = GroupCd.picture(),
+                contentDescription = null,
                 modifier = Modifier.size(size),
                 contentScale = ContentScale.Crop,
             )
@@ -838,6 +840,7 @@ fun GroupSearchField(
                         style = MaterialTheme.typography.bodyLarge,
                         color = scheme.onSurfaceVariant,
                         maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     )
                 }
                 BasicTextField(

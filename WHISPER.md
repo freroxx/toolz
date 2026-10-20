@@ -982,11 +982,13 @@ verified log.
 time-stamped last-message preview, unread badge, an "@You" mention chip, and
 pinned invite cards. A stories bar above it shows my "Daily Ups" bubble with
 a bottom-right `+`, then one bubble per live friend poster — unseen rings
-bright, ≥2-unseen count badge — horizontally scrollable (§12.4). Tapping a
-friend bubble routes to the hub already aimed at that poster; the `+` opens
-the composer directly. Creation offers friend picking, an optional picture, and an
-invite-mode choice that is fixed at creation (see the permissions edge note
-below).
+bright, ≥2-unseen count badge — horizontally scrollable (§12.4). Both Daily
+Ups rails expose each friend bubble as one merged TalkBack node labelled
+"name, N live ups, seen/unseen", with the ring and count badge treated as
+decorative. Tapping a friend bubble routes to the hub already aimed at that
+poster; the `+` opens the composer directly. Creation offers friend picking,
+an optional picture, and an invite-mode choice that is fixed at creation (see
+the permissions edge note below).
 
 **Hub controls and states.** The groups header keeps the title/count to one
 ellipsized line and puts exactly two actions at the end: a tonal Add icon
@@ -1030,7 +1032,12 @@ with durations, per-group notification toggle, the settings card
 (admin-only-send, member-edit, description), share sheet with QR of the group
 ID, a shared-photos gallery, leave, and owner-flow disband. Actions are
 admin-gated client-side AND server-side where the server can see the rule
-(which is nearly everywhere structural).
+(which is nearly everywhere structural). Names fall back through the shared
+`You` / `Member` / `Group` / `Someone` strings; the hero picture and
+description edits carry explicit action labels, the member-count and invite
+chips wrap instead of overflowing at 200% font scale, and decorative avatars
+are removed from the accessibility tree so the adjacent title is not
+duplicated.
 
 **Permissions v1 edge accepted:** invite mode is fixed at creation; QR/ID
 join makes a *request*, not a token-link auto-join; message editing does not
@@ -1146,11 +1153,14 @@ itself recorded.
 The **hub** opens with a **Your day** card — my avatar, a live-up count
 ("`N` live today") or a one-line share prompt, `View` only when I have a live
 up, `Add` always, and the day's quota line exactly once. Below it is one
-64dp ring per live friend **poster** (not per story): initials only, unseen
-rings bright, a count badge when two or more are unseen, one line when
-nobody else has shared. The old full-width empty panel and separate quota
-chip are gone; a successful empty day still shows the card, while a failed
-sync with no cache is an explicit dead-end panel with Retry. Opening a ring
+64dp ring per live friend **poster** (not per story): the poster's picture
+with the stable initials fallback, unseen rings bright, a count badge when
+two or more are unseen, one line when nobody else has shared. Each ring is one
+merged TalkBack node whose action label carries the name, live-story count,
+and `seen`/`unseen` state; the ring and badge themselves are decorative. The
+old full-width empty panel and separate quota chip are gone; a successful
+empty day still shows the card, while a failed sync with no cache is an
+explicit dead-end panel with Retry. Opening a ring
 launches the in-place **viewer overlay**: a flat horizontal pager over an
 immutable poster order, one progress segment per story of the current poster,
 5-second ready-gated auto-advance, decrypt-on-demand images with next-story
@@ -1169,12 +1179,13 @@ story that disappears underneath the reader closes the overlay instead of
 letting them react into the void. "Seen" here is **device-local only** — an
 opaque `storyId → expiresAtMs` entry capped at 512, filtered on load, pruned
 from disk on every hub refresh and write, and cleared on account deletion. It
-is ring state, not a synced read receipt: another device may still show the
-ring bright, and the server learns nothing from it. A friend's story is marked
-seen only once its decoded pixels are ready, the pager has settled on it, and
-it is still current; failed/loading pages and my own ups never write. The same
-moment sends at most one view receipt per open (when the poster enabled
-receipts), which is separate from the local seen set.
+holds no names, account ids, media, or view receipts — only ids and expiry
+timestamps (§6.2). It is ring state, not a synced read receipt: another device
+may still show the ring bright, and the server learns nothing from it. A
+friend's story is marked seen only once its decoded pixels are ready, the
+pager has settled on it, and it is still current; failed/loading pages and my
+own ups never write. The same moment sends at most one view receipt per open
+(when the poster enabled receipts), which is separate from the local seen set.
 
 **Viewer mechanics.** The overlay is a flat pager over the immutable order
 built at open. The top progress row has one segment per story of the CURRENT
@@ -1207,8 +1218,10 @@ and never a fabricated "0 views"; delete always keeps its confirm dialog. On a
 friend's story, the reaction palette appears only after that image is ready
 (never while loading or failed, so a reaction cannot claim a view that never
 appeared), with six 48dp targets, `selected` semantics, and "React with
-<emoji>" descriptions. The `Paused` pill uses `surfaceContainerHigh`/
-`labelSmall` as a fixed overlay, so pausing never shifts the chrome.
+<emoji>" descriptions. The emoji glyphs themselves keep a 26dp physical size
+at any font scale, so the six targets still fit at 200%. The `Paused` pill uses
+`surfaceContainerHigh`/`labelSmall` as a fixed overlay, so pausing never shifts
+the chrome.
 
 **1.1.7 hardening (viewing surfaces).** The hub pulls to refresh — one
 gesture, coalesced with the open-time sync and the re-open resync through a
@@ -1233,16 +1246,21 @@ stories strip (the old Chats-tab entry row is gone). Its photo canvas mirrors
 the viewer's 9:16 Fit framing on `surfaceContainerHighest`, with a 24 dp radius
 and a 1 dp `outlineVariant` border — a letterboxed portrait is not cropped into
 a different promise. Tapping the canvas re-opens the picker, and the bottom-end
-"Tap to change" chip says so. The pick is read with a bounded 12-MiB stream
-(mirroring the pipeline), decoded into an in-memory oriented preview, and never
-written to disk before the publish pipeline. Receipts stay an explicit switch.
+"Tap to change" chip says so; the canvas is one merged accessibility node, so
+TalkBack announces the chip together with the tap action. The pick is read with
+a bounded 12-MiB stream (mirroring the pipeline), decoded into an in-memory
+oriented preview, and never written to disk before the publish pipeline.
+Receipts stay an explicit switch.
 
 Audience is **all current friends minus explicit exclusions**. A summary row
 always shows the final count and opens a searchable modal sheet with avatar,
 checkbox rows, Select all and Done; sheet edits write straight to the
 ViewModel. Loading is a small inline spinner, a failed load is an honest retry
-row, and zero friends is distinct from either. The primary action is pinned in
-the Scaffold bottom bar with the quota label; its own label never changes
+row, and zero friends is distinct from either. At 200% font scale friend names
+wrap to two lines and the list takes only the sheet's remaining height, so
+Select all and Done stay reachable. The primary action is pinned in the
+Scaffold bottom bar with the quota label; it keeps a 52dp minimum height and
+grows with the text instead of clipping. Its own label never changes
 (`Share`), publishing swaps in a spinner + `Sharing…`, and a short reason line
 appears only for the first blocker in Busy → NoPhoto → NoAudience → NoQuota
 order (missing photo, an all-excluded audience, or exhausted quota — each
@@ -1275,7 +1293,10 @@ a viewer who somehow acquired it still cannot delete (poster-only RPC +
 ledger-only sweep), so capability possession is not authority. Quota is
 server-enforced; a stale local counter can neither permit nor deny a publish.
 And: received ups keep their sealed bytes for the 24 hours, and there is no
-"keep forever" tier — 24 hours is the whole contract, for everyone.
+"keep forever" tier — 24 hours is the whole contract, for everyone. W6's
+accessibility and font-scale pass changed no wire format, RLS policy, or server
+endpoint: the seen index stays device-local, and view receipts remain the
+optional per-poster server row described above.
 
 Story push pings carry poster ID and story ID; the poster's name rides only inside
 encrypted Web Push payloads on the FCM-fallback path (external distributors
@@ -1324,6 +1345,19 @@ Whisper's cryptography is pinned with a deliberately paranoid test stack:
   bodies are not. The screen combines that predicate with poll/vote/close
   exclusion, and the action sheet takes the resulting flag rather than
   re-deriving it.
+- **W6 accessibility, font-scale, and recomposition review.** Both Daily Ups
+  rails merge each ring into one node whose action label carries the name,
+  live-story count and seen state; composer previews announce the "Tap to
+  change" chip as part of the canvas; group avatars are decorative beside their
+  titles; and the info hero actions carry explicit labels. At 200% font scale
+  the share CTA grows from a 52dp minimum, audience names wrap, the info chips
+  wrap, and the six reaction emoji keep a 26dp physical size. The hub's
+  own/friend split is remembered per `posterGroups` emission, and the viewer's
+  progress fill lives in its own row, so the pager and chrome do not recompose
+  on every animation frame. This is a static code/constraint audit, not a
+  device frame-rate measurement; the six-frame decoded viewer window and
+  one-frame preload are unchanged, and no performance numbers are promised
+  from it.
 - **Instrumented media test** for Daily Ups: a fully geotagged, device-labeled
   test photo must publish with *zero* surviving EXIF/GPS tags on the exact
   publish bytes — device-only, like all Bitmap work.
@@ -1333,8 +1367,9 @@ Whisper's cryptography is pinned with a deliberately paranoid test stack:
   `:app:compileDebugKotlin` and finishes with the same seven pre-existing
   failures (all in unrelated engine suites, none Whisper-related). The frozen
   starting point was 530 tests; each wave records its exact total in its gate
-  log, and no new name may fail. W5 lands at 561 tests with the same frozen
-  seven. Nothing behavioral lands outside that gate;
+  log, and no new name may fail. W5 and W6 land at 561 tests with the same
+  frozen seven (W6 adds no tests, so the total is unchanged). Nothing
+  behavioral lands outside that gate;
   the SQL/edge surfaces were deliberately untouched and still belong to the
   ship-day runbook (`supabase/POST_DEPLOY_SMOKE.md`).
 - **Server-plane invariants unchanged by the cycle.** Client-side hardening

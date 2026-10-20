@@ -158,6 +158,7 @@ fun WhisperGroupsSection(
     var showMore by remember { mutableStateOf(false) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
     val showSearch = state.groups.size >= GROUP_SEARCH_THRESHOLD
+    val defaultGroupName = stringResource(R.string.st_Whisper_Groups_DefaultName)
     val visibleGroups = remember(state.groups, state.previews, searchQuery, showSearch) {
         if (showSearch) {
             state.groups.filter { group ->
@@ -303,7 +304,7 @@ fun WhisperGroupsSection(
                     onToggleMute = { viewModel.toggleMute(group.id) },
                 ) {
                     GroupRowCard(
-                        name = group.name.ifBlank { "Group" },
+                        name = group.name.ifBlank { defaultGroupName },
                         groupId = group.id,
                         muted = muted,
                         memberCount = state.memberCounts[group.id] ?: 0,
