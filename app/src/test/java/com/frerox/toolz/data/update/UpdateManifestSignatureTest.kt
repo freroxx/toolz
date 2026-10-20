@@ -8,6 +8,7 @@ package com.frerox.toolz.data.update
 import java.security.KeyPairGenerator
 import java.security.Signature
 import java.util.Base64
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -83,9 +84,16 @@ class UpdateManifestSignatureTest {
     }
 
     @Test
-    fun unprovisionedPlaceholderKeyFailsClosed() {
-        // Until a real keypair replaces REPLACE_ME_ED25519_PUBKEY,
-        // nothing may verify — the gate must fail closed, not open.
+    fun embeddedKeyIsProvisioned() {
+        // The gate is only meaningful with a real, raw 32-byte Ed25519 key
+        // embedded; a placeholder would silently reject everything.
+        val raw = Base64.getDecoder().decode(UpdateRepository.ED25519_PUBLIC_KEY_B64)
+        assertEquals(32, raw.size)
+    }
+
+    @Test
+    fun signatureFromUnknownKeyIsRejectedByEmbeddedKey() {
+        // A key the app doesn't ship must never pass the embedded-key gate.
         val (_, privateKey) = generateKeyPair()
         val signature = sign(privateKey, canonical)
         assertFalse(UpdateRepository.verifyManifestSignature(canonical, signature))
