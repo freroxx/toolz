@@ -100,11 +100,27 @@ class WhisperDailyUpsViewModel @Inject constructor(
         val viewerError: String? = null,
     )
 
-    /** Full-screen viewer overlay; null = hidden. Flat list, one paged page per story. */
-    data class ViewerState(
+    /** One poster's stories inside the viewer. Immutable for one open gesture. */
+    data class ViewerSegment(
+        val ownerId: String,
+        val ownerName: String?,
+        val isMine: Boolean,
         val stories: List<StoryItem>,
-        val index: Int,
     )
+
+    /** Full-screen viewer overlay; null = hidden. Immutable per open gesture. */
+    data class ViewerState(
+        val segments: List<ViewerSegment>,
+        val segmentIndex: Int,
+        val storyIndex: Int,
+    ) {
+        val segmentSizes: List<Int> get() = segments.map { it.stories.size }
+        val currentSegment: ViewerSegment? get() = segments.getOrNull(segmentIndex)
+        val currentStory: StoryItem? get() = currentSegment?.stories?.getOrNull(storyIndex)
+        val flatTotal: Int get() = segments.sumOf { it.stories.size }
+        val flatPosition: Int
+            get() = viewerFlatPosition(segmentSizes, segmentIndex, storyIndex) ?: 0
+    }
 
     /** Snapshot of one of MY stories in the viewer's bottom bar. */
     data class OwnStoryStats(
@@ -254,35 +270,51 @@ class WhisperDailyUpsViewModel @Inject constructor(
 
     /**
      * Opens the in-place viewer for [ownerId] (null = hub order: mine, then
-     * friends), starting at [startStoryId] when it is still live or else at
-     * that poster's first unseen story. Unknown or expired owners are a silent
-     * no-op, so a stale deep link never opens an empty black overlay.
+     * friends), starting at [startStoryId] when it is still live in that
+     * poster or else at that poster's first unseen story. Unknown or expired
+     * owners are a silent no-op, so a stale deep link never opens an empty
+     * black overlay.
      */
     fun openViewerForOwner(ownerId: String? = null, startStoryId: String? = null) {
         val state = uiState.value
         val order = viewerOrderFor(state.posterGroups, ownerId)
         if (order.isEmpty()) return
         val nowMs = System.currentTimeMillis()
-        val flat = order.flatMap { poster -> poster.toStoryItems(nowMs, state.myId) }
-        if (flat.isEmpty()) return
-
-        val explicitIndex = startStoryId
-            ?.let { id -> flat.indexOfFirst { it.storyId == id } }
-            ?: -1
-        val index = if (explicitIndex >= 0) {
-            explicitIndex
-        } else {
-            val selected = if (ownerId != null) {
-                order.firstOrNull { it.ownerId == ownerId }
+        val segments = order.mapNotNull { poster ->
+            val items = poster.toStoryItems(nowMs, state.myId)
+            if (items.isEmpty()) {
+                null
             } else {
-                order.firstOrNull()
+                ViewerSegment(
+                    ownerId = poster.ownerId,
+                    ownerName = if (poster.isMine) null else poster.ownerName,
+                    isMine = poster.isMine,
+                    stories = items,
+                )
             }
-            val offset = selected
-                ?.let { pick -> order.takeWhile { it.ownerId != pick.ownerId }.sumOf { it.stories.size } }
-                ?: 0
-            offset + (selected?.let { startIndexIn(it, state.seenIds) } ?: 0)
         }
-        _viewer.value = ViewerState(stories = flat, index = index.coerceIn(flat.indices))
+        if (segments.isEmpty()) return
+        val segmentIndex = if (ownerId != null) {
+            segments.indexOfFirst { it.ownerId == ownerId }
+        } else {
+            0
+        }
+        if (segmentIndex !in segments.indices) return
+        val segment = segments[segmentIndex]
+        val explicit = startStoryId
+            ?.let { id -> segment.stories.indexOfFirst { it.storyId == id } }
+            ?: -1
+        val firstUnseen = segment.stories.indexOfFirst { it.storyId !in state.seenIds }
+        val storyIndex = if (explicit >= 0) explicit else firstUnseen.coerceAtLeast(0)
+        receiptedStories.clear()
+        reactionLookups.clear()
+        _viewer.value = ViewerState(
+            segments = segments,
+            segmentIndex = segmentIndex,
+            storyIndex = storyIndex.coerceIn(segment.stories.indices),
+        )
+        // Pre-warm the first frame so the 5 s clock starts on pixels, not on a spinner.
+        segment.stories.getOrNull(storyIndex)?.let { ensureImage(it.storyId) }
     }
 
     /** My own ups only: never pages into friends from my card. */
@@ -305,48 +337,99 @@ class WhisperDailyUpsViewModel @Inject constructor(
 
     fun closeViewer() {
         _viewer.value = null
+        receiptedStories.clear()
+        reactionLookups.clear()
     }
 
-    fun moveViewer(delta: Int) {
+    /** Advance one story; crossing a poster boundary is part of one open order. */
+    fun viewerNext() {
         val v = _viewer.value ?: return
-        val next = v.index + delta
-        _viewer.value = if (next in v.stories.indices) v.copy(index = next) else null
+        val next = viewerNextPosition(v.segmentSizes, v.segmentIndex, v.storyIndex)
+        if (next == null) {
+            closeViewer()
+        } else {
+            _viewer.value = v.copy(segmentIndex = next.first, storyIndex = next.second)
+        }
     }
 
-    /** Absolute seek from the pager (drag settles); out-of-range closes. */
+    /** Back one story; the very first story clamps instead of closing. */
+    fun viewerPrev() {
+        val v = _viewer.value ?: return
+        val prev = viewerPrevPosition(v.segmentSizes, v.segmentIndex, v.storyIndex) ?: return
+        _viewer.value = v.copy(segmentIndex = prev.first, storyIndex = prev.second)
+    }
+
+    /** Absolute seek from the settled pager; out-of-range closes defensively. */
     fun seekViewer(page: Int) {
         val v = _viewer.value ?: return
-        _viewer.value = if (page in v.stories.indices) v.copy(index = page) else null
+        val position = viewerPositionAtFlat(v.segmentSizes, page)
+        if (position == null) {
+            closeViewer()
+        } else if (position.first != v.segmentIndex || position.second != v.storyIndex) {
+            _viewer.value = v.copy(segmentIndex = position.first, storyIndex = position.second)
+        }
+    }
+
+    /** Pre-warms the next story's decrypted frame; failures surface as usual. */
+    fun preloadStory(storyId: String) {
+        ensureImage(storyId)
     }
 
     private val inFlightImages = MutableStateFlow(emptySet<String>())
 
+    /** Stories already credited with a view receipt in this viewer session. */
+    private val receiptedStories = mutableSetOf<String>()
+
+    /**
+     * Friend stories whose "my reaction" row was already looked up this open.
+     * The query returns only existing reactions, so without this marker every
+     * page turn would re-fetch the whole list for the reactions that are
+     * legitimately absent.
+     */
+    private val reactionLookups = mutableSetOf<String>()
+
     /**
      * Called by the UI when a story is CURRENTLY on screen: loads its image
-     * (decrypt-once), records the view receipt, and refreshes own-story stats.
+     * (decrypt-once) and owns the receipt/reaction reads for this open.
+     * Local seen + view receipt are separate: only [markCurrentSeen] fires
+     * them, and only once the image is actually ready.
      */
     fun onStoryDisplayed(storyId: String) {
         val v = _viewer.value ?: return
-        val item = v.stories.getOrNull(v.index)?.takeIf { it.storyId == storyId } ?: return
+        val item = v.currentStory?.takeIf { it.storyId == storyId } ?: return
         ensureImage(storyId)
-        if (!item.isMine) {
-            // The ring clears as soon as the story is actually on screen; the
-            // absolute expiry comes from the viewer's own snapshot.
-            val nowMs = System.currentTimeMillis()
-            seenStore.markSeen(storyId, nowMs + item.remainingMs, nowMs)
-            markViewedOnce(storyId)
-        }
         if (item.isMine && item.receiptsEnabled) refreshOwnStats(storyId)
+        val missing = v.segments
+            .flatMap { segment -> segment.stories }
+            .filter { !it.isMine }
+            .map { it.storyId }
+            .filter { it !in reactionLookups && it !in _receipts.value.myReactions }
+            .distinct()
+        if (missing.isEmpty()) return
+        reactionLookups += missing
         viewModelScope.launch {
-            val friendStoryIds = v.stories.filter { !it.isMine }.map { it.storyId }
-            val missing = friendStoryIds.filter { it !in _receipts.value.myReactions }
-            if (missing.isNotEmpty()) {
-                repository.fetchMyDailyUpReactions(missing)
-                    .onSuccess { loaded ->
-                        _receipts.value = _receipts.value.copy(myReactions = _receipts.value.myReactions + loaded)
-                    }
-            }
+            repository.fetchMyDailyUpReactions(missing)
+                .onSuccess { loaded ->
+                    _receipts.value = _receipts.value.copy(myReactions = _receipts.value.myReactions + loaded)
+                }
+                .onFailure {
+                    // Transient read failure: allow the next page turn to retry.
+                    reactionLookups -= missing.toSet()
+                }
         }
+    }
+
+    /**
+     * Marks the current story seen exactly when its pixels are ready. Mine is
+     * never written; loading/failed pages never write. The ring clears on the
+     * next hub frame and the server receipt is sent at most once per open.
+     */
+    fun markCurrentSeen() {
+        val item = _viewer.value?.currentStory ?: return
+        if (item.isMine) return
+        val nowMs = System.currentTimeMillis()
+        seenStore.markSeen(item.storyId, nowMs + item.remainingMs, nowMs)
+        if (receiptedStories.add(item.storyId)) markViewedOnce(item.storyId)
     }
 
     /** One story image failed to load; the viewer page offers an inline retry. */
@@ -474,7 +557,7 @@ class WhisperDailyUpsViewModel @Inject constructor(
                     }
                     .onSuccess {
                         val v = _viewer.value ?: return@onSuccess
-                        val shown = v.stories.getOrNull(v.index)?.takeIf { it.storyId == storyId }
+                        val shown = v.currentStory?.takeIf { it.storyId == storyId }
                         if (shown?.isMine == true) refreshOwnStats(storyId)
                     }
             } finally {

@@ -1125,25 +1125,64 @@ rings bright, a count badge when two or more are unseen, one line when
 nobody else has shared. The old full-width empty panel and separate quota
 chip are gone; a successful empty day still shows the card, while a failed
 sync with no cache is an explicit dead-end panel with Retry. Opening a ring
-launches the in-place **viewer overlay**: horizontal paging, 7-second
-auto-advance paused under the user's finger, progress segments,
-decrypt-on-demand images, and one failure snackbar across hub + viewer.
-**View receipts (optional per poster)**, reactions, and who
-deleted/expired what are all resolved server-side (RLS-visible only for
-rows the viewer genuinely may see — the poster sees reaction counts and
-names resolved on-device on demand).
+launches the in-place **viewer overlay**: a flat horizontal pager over an
+immutable poster order, one progress segment per story of the current poster,
+5-second ready-gated auto-advance, decrypt-on-demand images with next-story
+preload, and one failure snackbar across hub + viewer. **View receipts
+(optional per poster)**, reactions, and who deleted/expired what are all
+resolved server-side (RLS-visible only for rows the viewer genuinely may see —
+the poster sees reaction counts and names resolved on-device on demand).
 
 **Poster-grouped viewing.** The viewer is ordered per open gesture: my card
 opens only my own ups; a friend's ring starts with that friend and then the
 other friends in rail order (never crossing into my stories); an owner-less
 open (no UI entry today) keeps mine-first rail order. The selected poster
-starts at its first unseen story (else its first story). "Seen" here is
-**device-local only** — an opaque `storyId → expiresAtMs` entry capped at
-512, filtered on load, pruned from disk on every hub refresh and write, and
-cleared on account deletion. It is ring state, not a synced read receipt:
-another device may still show the ring bright, and the server learns nothing
-from it. A friend's ring clears once a story is actually displayed in the
-viewer, not when the ring is tapped.
+starts at its first unseen story, or at `startStoryId` when that story is
+still live in the poster, else its first story. Each open is a snapshot; a
+story that disappears underneath the reader closes the overlay instead of
+letting them react into the void. "Seen" here is **device-local only** — an
+opaque `storyId → expiresAtMs` entry capped at 512, filtered on load, pruned
+from disk on every hub refresh and write, and cleared on account deletion. It
+is ring state, not a synced read receipt: another device may still show the
+ring bright, and the server learns nothing from it. A friend's story is marked
+seen only once its decoded pixels are ready, the pager has settled on it, and
+it is still current; failed/loading pages and my own ups never write. The same
+moment sends at most one view receipt per open (when the poster enabled
+receipts), which is separate from the local seen set.
+
+**Viewer mechanics.** The overlay is a flat pager over the immutable order
+built at open. The top progress row has one segment per story of the CURRENT
+poster only: past solid, current animated, future a 25% track; its
+accessibility state reads "Story x of y" over the whole open order. The header
+carries the poster avatar, name (or "Your day" for my own), relative expiry
+("3h left"), and a 48dp top-right X; status and navigation insets are
+respected. A story's 5-second clock starts only when its image is decoded AND
+the pager has settled; a spinner shows until then, and a failed image shows
+honest inline copy + Retry with no timer. Holding anywhere on the image pauses
+at the exact fraction and shows a `Paused` pill; release resumes with only the
+remaining time, never from zero. Scrolling, swipe-down, and the delete-confirm
+dialog also hold the clock. At the end of the last story the overlay closes —
+no loop and no long delay. Next-story preload warms one frame inside the same
+immutable order (segment boundary included), still inside the six-frame
+decoded window.
+
+**Gestures, stats, and accessibility.** Tap right two-thirds = next (closes
+after the last story), left third = previous (clamps at the very first); taps
+land on loading and failed pages too, while the header and bottom chrome
+swallow their own taps. Next/Previous are exposed as custom accessibility
+actions; each segment cross and every explicit close path (X, back, swipe,
+end) ticks haptics. Swipe down
+translates the content with damping past 280dp while the scrim fades; release
+past 120dp or at >1000px/s closes, otherwise a spring returns it. The
+horizontal pager keeps horizontal drags. On my own up, the bottom bar is inset
+for navigation bars: receipts on → "N views" plus a reaction count ("No
+reactions yet." at zero); receipts off → `View receipts are off for this up.`
+and never a fabricated "0 views"; delete always keeps its confirm dialog. On a
+friend's story, the reaction palette appears only after that image is ready
+(never while loading or failed, so a reaction cannot claim a view that never
+appeared), with six 48dp targets, `selected` semantics, and "React with
+<emoji>" descriptions. The `Paused` pill uses `surfaceContainerHigh`/
+`labelSmall` as a fixed overlay, so pausing never shifts the chrome.
 
 **1.1.7 hardening (viewing surfaces).** The hub pulls to refresh — one
 gesture, coalesced with the open-time sync and the re-open resync through a
@@ -1152,15 +1191,10 @@ share one truth (the hub content scrolls, which the pull also requires). A
 stories-bar tap carries the owner into the hub route and opens that poster
 exactly once after the first reconcile; a cold frame can never consume the
 hand-off before Room has the rows, and a failed cold sync leaves it pending
-for Retry. The
-viewer adds **tap navigation** (right two-thirds advances, left third goes
-back; inert while the delete-confirm sheet is up, boundaries included) on top
-of the hold-to-pause. A story image that fails to open renders an inline
-"Couldn't load this up." + Retry instead of a silent eternal spinner, with
-the failure snackbar drawn *above* the fullscreen overlay so it is actually
-visible while viewing. An image released mid-read (deleted elsewhere or
-expired) closes the overlay instead of letting the reader react into the
-void. Reactions are double-tap-guarded (the second tap of one frame can no
+for Retry. A story image that fails to open renders an inline "Couldn't load
+this up." + Retry instead of a silent eternal spinner, with the failure
+snackbar drawn *above* the fullscreen overlay so it is actually visible while
+viewing. Reactions are double-tap-guarded (the second tap of one frame can no
 longer toggle the reaction right back off), decoded viewer images hold a
 bounded six-frame window (paging back re-decodes), and the hub's own/compose
 lanes plus the Chats-bar poster/compose lanes use the same ViewModel-owned

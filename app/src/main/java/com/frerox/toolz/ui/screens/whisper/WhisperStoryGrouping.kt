@@ -80,6 +80,71 @@ internal fun startIndexIn(poster: StoryPoster, seen: Set<String>): Int {
     return if (firstUnseen >= 0) firstUnseen else 0
 }
 
+/**
+ * Next viewer position across poster segments. `null` means the last story of
+ * the last segment finished and the viewer must close. Empty segments are
+ * skipped defensively; the grouping layer never builds them.
+ */
+internal fun viewerNextPosition(
+    segmentSizes: List<Int>,
+    segmentIndex: Int,
+    storyIndex: Int,
+): Pair<Int, Int>? {
+    val size = segmentSizes.getOrNull(segmentIndex) ?: return null
+    if (storyIndex !in 0 until size) return null
+    if (storyIndex + 1 < size) return segmentIndex to storyIndex + 1
+    var next = segmentIndex + 1
+    while (next < segmentSizes.size && segmentSizes[next] <= 0) next++
+    return if (next < segmentSizes.size) next to 0 else null
+}
+
+/**
+ * Previous viewer position. `null` means the very first story is showing and
+ * the viewer stays there (clamp, not close). Crossing back into an earlier
+ * segment is allowed only inside the order that was built for this open.
+ */
+internal fun viewerPrevPosition(
+    segmentSizes: List<Int>,
+    segmentIndex: Int,
+    storyIndex: Int,
+): Pair<Int, Int>? {
+    val size = segmentSizes.getOrNull(segmentIndex) ?: return null
+    if (storyIndex !in 0 until size) return null
+    if (storyIndex > 0) return segmentIndex to storyIndex - 1
+    var prev = segmentIndex - 1
+    while (prev >= 0 && segmentSizes[prev] <= 0) prev--
+    return if (prev >= 0) prev to (segmentSizes[prev] - 1) else null
+}
+
+/** Zero-based story index across the whole immutable viewer order. */
+internal fun viewerFlatPosition(
+    segmentSizes: List<Int>,
+    segmentIndex: Int,
+    storyIndex: Int,
+): Int? {
+    val size = segmentSizes.getOrNull(segmentIndex) ?: return null
+    if (storyIndex !in 0 until size) return null
+    var flat = storyIndex
+    for (i in 0 until segmentIndex) flat += segmentSizes[i].coerceAtLeast(0)
+    return flat
+}
+
+/** Maps a settled pager page back to `(segmentIndex, storyIndex)`. */
+internal fun viewerPositionAtFlat(
+    segmentSizes: List<Int>,
+    flatIndex: Int,
+): Pair<Int, Int>? {
+    if (flatIndex < 0) return null
+    var remaining = flatIndex
+    for (segment in segmentSizes.indices) {
+        val size = segmentSizes[segment]
+        if (size <= 0) continue
+        if (remaining < size) return segment to remaining
+        remaining -= size
+    }
+    return null
+}
+
 private val railOrder = compareByDescending<StoryPoster> { it.unseenCount > 0 }
     .thenBy { it.soonestExpiryMs }
     .thenBy { it.ownerName.orEmpty() }
