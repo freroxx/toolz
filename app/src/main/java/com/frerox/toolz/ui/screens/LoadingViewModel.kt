@@ -29,7 +29,7 @@ import com.frerox.toolz.data.device.DeviceSpecsRepository
 import com.frerox.toolz.data.news.NewsRepository
 import com.frerox.toolz.data.notepad.NoteDao
 import com.frerox.toolz.data.settings.SettingsRepository
-import com.frerox.toolz.data.update.UpdateRepository
+import com.frerox.toolz.data.update.UpdateManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -46,7 +46,7 @@ import javax.inject.Inject
 class LoadingViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val settingsRepository: SettingsRepository,
-    private val updateRepository: UpdateRepository,
+    private val updateManager: UpdateManager,
     private val specsRepository: DeviceSpecsRepository,
     private val newsRepository: NewsRepository,
     private val noteDao: NoteDao,
@@ -126,8 +126,8 @@ class LoadingViewModel @Inject constructor(
             try {
                 val lastCheck = settingsRepository.lastUpdateCheck.first()
                 if (currentTime - lastCheck > 24 * 60 * 60 * 1000L) {
-                    updateRepository.checkForUpdates()
-                    settingsRepository.setLastUpdateCheck(System.currentTimeMillis())
+                    // The manager persists any offer and stamps lastUpdateCheck.
+                    updateManager.check(showNotification = false)
                 }
             } catch (_: Exception) { /* Non-fatal */ }
 

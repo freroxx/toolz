@@ -571,14 +571,17 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
             24, TimeUnit.HOURS
         ).setConstraints(
             Constraints.Builder()
-                .setRequiredNetworkType(NetworkType.UNMETERED)
+                // Checks run on any network; the worker only auto-downloads
+                // when the network is unmetered (critical updates exempt).
+                .setRequiredNetworkType(NetworkType.CONNECTED)
                 .setRequiresBatteryNotLow(true)
                 .build()
         ).build()
 
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
             "UpdateCheck",
-            ExistingPeriodicWorkPolicy.KEEP,
+            // UPDATE so constraint/policy changes reach existing installs.
+            ExistingPeriodicWorkPolicy.UPDATE,
             updateCheckRequest
         )
     }

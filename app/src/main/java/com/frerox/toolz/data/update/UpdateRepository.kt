@@ -17,310 +17,431 @@
 
 package com.frerox.toolz.data.update
 
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.util.Log
-import androidx.core.app.NotificationCompat
-import com.frerox.toolz.MainActivity
 import com.frerox.toolz.R
 import com.frerox.toolz.data.settings.SettingsRepository
-import com.frerox.toolz.util.NotificationHelper
+import com.squareup.moshi.Moshi
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.flow.first
-import org.json.JSONObject
 import java.security.KeyFactory
 import java.security.Signature
 import java.security.spec.X509EncodedKeySpec
 import java.util.Base64
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.first
+import org.json.JSONObject
 
+/**
+ * Resolves the newest installable update from two independent sources:
+ *
+ *  1. the GitHub release feed (dynamic, but unsigned), and
+ *  2. the statically hosted update manifest (Ed25519-signed).
+ *
+ * Both requests run in parallel. The manifest wins ties because it carries
+ * versionCode, size, digest and criticality. A signed manifest with an
+ * invalid signature is ignored for release selection, and only a verified
+ * manifest may raise the Whisper version floor.
+ *
+ * The verified/last-successful manifest is cached so an offline check can
+ * still offer a known update, and the Whisper gate keeps working offline.
+ */
 @Singleton
 class UpdateRepository @Inject constructor(
     private val updateService: UpdateService,
     private val settingsRepository: SettingsRepository,
-    @ApplicationContext private val context: Context
+    private val moshi: Moshi,
+    @ApplicationContext private val context: Context,
 ) {
-    suspend fun checkForUpdates(showNotification: Boolean = false): UpdateCheckResult {
-        return try {
-            // 1. Try GitHub Release API (dynamic)
-            val response = try {
-                updateService.getLatestRelease(
-                    UpdateConstants.GITHUB_OWNER,
-                    UpdateConstants.GITHUB_REPO
-                )
-            } catch (e: Exception) {
-                null
-            }
+    private val manifestAdapter by lazy { moshi.adapter(UpdateManifest::class.java) }
 
-            if (response?.isSuccessful == true) {
-                val release = response.body()
-                if (release != null) {
-                    val currentVersion = getCurrentVersionName()
-                    val latestVersion = release.tagName.removePrefix("v")
+    private val manifestPrefs
+        get() = context.getSharedPreferences(MANIFEST_CACHE_PREFS, Context.MODE_PRIVATE)
 
-                    if (isNewerVersion(currentVersion, latestVersion)) {
-                        val preferredAbi = settingsRepository.preferredAbi.first()
-                        val bestAsset = UpdateHelper.getBestAsset(release.assets, preferredAbi)
-                        
-                        if (bestAsset != null) {
-                            val result = UpdateCheckResult.NewUpdate(
-                                version = latestVersion,
-                                changelog = release.body ?: "Bug fixes and performance improvements.",
-                                downloadUrl = bestAsset.downloadUrl,
-                                isCritical = false
-                            )
-                            saveUpdateInfo(result)
-                            if (showNotification) {
-                                showUpdateNotification(latestVersion)
-                            }
-                            return result
-                        }
-                    } else {
-                        return UpdateCheckResult.UpToDate
-                    }
-                }
-            }
-
-            // 2. Fallback to Manifest (statically controlled)
-            val manifestResponse = try {
-                updateService.getUpdateManifest(UpdateConstants.MANIFEST_URL)
-            } catch (e: Exception) {
-                null
-            }
-            
-            if (manifestResponse?.isSuccessful == true) {
-                val manifest = manifestResponse.body()
-                if (manifest != null) {
-                    // Fail-closed manifest authentication: when the manifest
-                    // is signed, a missing/invalid Ed25519 signature means
-                    // NO UPDATE — a mod or MITM can never forge a
-                    // minimumVersionCode bump or swap a download URL.
-                    if (manifest.signature != null) {
-                        val rawBytes = try {
-                            updateService.getUpdateManifestRaw(UpdateConstants.MANIFEST_URL)
-                                .body()?.bytes()
-                        } catch (e: Exception) {
-                            null
-                        }
-                        val verified = rawBytes != null && verifyManifestSignature(
-                            canonicalManifestBytes(rawBytes),
-                            manifest.signature
-                        )
-                        if (!verified) {
-                            Log.w(
-                                TAG,
-                                "Update manifest signature missing or invalid — " +
-                                    "treating as no-update (fail-closed)"
-                            )
-                            return UpdateCheckResult.UpToDate
-                        }
-                        // Only a signature-verified manifest may seed the
-                        // LOCAL Whisper gate's cached version floor.
-                        cacheManifestFloor(manifest)
-                    }
-                    val currentVersion = getCurrentVersionName()
-                    if (isNewerVersion(currentVersion, manifest.versionName)) {
-                        val preferredAbi = settingsRepository.preferredAbi.first()
-                        val bestRelease = manifest.releases?.let { UpdateHelper.getBestRelease(it, preferredAbi) }
-                        
-                        if (bestRelease != null) {
-                            val result = UpdateCheckResult.NewUpdate(
-                                version = manifest.versionName,
-                                changelog = manifest.changelog ?: "New version available with improvements.",
-                                downloadUrl = bestRelease.downloadUrl,
-                                isCritical = manifest.isCritical ?: false
-                            )
-                            saveUpdateInfo(result)
-                            if (showNotification) {
-                                showUpdateNotification(manifest.versionName)
-                            }
-                            return result
-                        }
-                    } else {
-                        return UpdateCheckResult.UpToDate
-                    }
-                }
-            }
-            
-            UpdateCheckResult.Error("Could not fetch update information")
-        } catch (e: Exception) {
-            UpdateCheckResult.Error(e.message ?: "Unknown error during update check")
-        }
-    }
-
-    private var updateApkUrlInternal: String? = null
-
-    private suspend fun saveUpdateInfo(update: UpdateCheckResult.NewUpdate) {
-        updateApkUrlInternal = update.downloadUrl
-        settingsRepository.setAvailableUpdate(
-            update.version,
-            update.changelog,
-            update.downloadUrl
+    private data class Candidate(
+        val version: String,
+        val versionCode: Int,
+        val changelog: String,
+        val downloadUrl: String,
+        val sizeBytes: Long?,
+        val sha256: String?,
+        val isCritical: Boolean,
+        val abi: String,
+        val source: String,
+    ) {
+        fun toPending(): PendingUpdate = PendingUpdate(
+            version = version,
+            versionCode = versionCode,
+            changelog = changelog,
+            downloadUrl = downloadUrl,
+            sizeBytes = sizeBytes,
+            sha256 = sha256,
+            isCritical = isCritical,
+            abi = abi,
+            source = source,
         )
     }
 
-    private fun showUpdateNotification(version: String) {
-        // Periodic UpdateCheckWorker runs with showNotification=true every time:
-        // collapse re-notifies for the same version so the shade holds one row.
-        val prefs = context.getSharedPreferences("toolz_update_notifs", Context.MODE_PRIVATE)
-        if (prefs.getString("notified_version", null) == version) return
-        prefs.edit().putString("notified_version", version).apply()
-        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        NotificationHelper.createAllChannels(context)
+    private data class SourceResult(
+        val candidate: Candidate? = null,
+        /** True when the source answered authoritatively (even "no update"). */
+        val answered: Boolean = false,
+        /** True when a newer release exists but has no matching APK. */
+        val sawNewerWithoutAsset: Boolean = false,
+        val error: UpdateError? = null,
+    )
 
-        // 1. Content Intent: Open Update Screen
-        val contentIntent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-            putExtra("show_update_dialog", true)
-            putExtra("navigate_to", "update_settings")
-        }
-        val contentPendingIntent = PendingIntent.getActivity(context, 8001, contentIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+    private data class ParsedManifest(
+        val manifest: UpdateManifest,
+        val rawJson: String,
+        val verified: Boolean,
+    )
 
-        // 2. Action: Download Now
-        val downloadUrl = updateApkUrlInternal ?: ""
-        val downloadIntent = Intent(context, com.frerox.toolz.worker.UpdateReceiver::class.java).apply {
-            action = "com.frerox.toolz.DOWNLOAD_UPDATE"
-            putExtra("url", downloadUrl)
-            putExtra("version", version)
-        }
-        val downloadPendingIntent = PendingIntent.getBroadcast(context, 8002, downloadIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-
-        // 3. Action: View Changelog
-        val changelogIntent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-            putExtra("navigate_to", "update_settings")
-        }
-        val changelogPendingIntent = PendingIntent.getActivity(context, 8003, changelogIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-
-        val notification = NotificationHelper.baseBuilder(context, NotificationHelper.CHANNEL_APP_UPDATES)
-            .setSmallIcon(R.drawable.ic_stat_toolz)
-            .setContentTitle("New Version Available: $version")
-            .setContentText("A new version of Toolz is ready for deployment. Tap to see what's new.")
-            .setStyle(NotificationCompat.BigTextStyle().bigText("Toolz $version is available with bug fixes and new features. Download now to stay up to date."))
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setContentIntent(contentPendingIntent)
-            .setAutoCancel(true)
-            .setCategory(NotificationCompat.CATEGORY_SYSTEM)
-            .addAction(R.drawable.ic_stat_toolz, "Download", downloadPendingIntent)
-            .addAction(R.drawable.ic_stat_toolz, "Details", changelogPendingIntent)
-            .build()
-
-        notificationManager.notify(NotificationHelper.ID_APP_UPDATE, notification)
-    }
-
-    fun getCurrentVersionName(): String {
+    /**
+     * Check both sources. Never throws: failures are classified as
+     * [UpdateCheckResult.Error].
+     */
+    suspend fun checkForUpdates(): UpdateCheckResult {
+        val current = getCurrentVersionName()
+        val preferredAbi = preferredAbi()
         return try {
-            val packageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                context.packageManager.getPackageInfo(context.packageName, PackageManager.PackageInfoFlags.of(0))
-            } else {
-                @Suppress("DEPRECATION")
-                context.packageManager.getPackageInfo(context.packageName, 0)
+            val (gitHub, manifest) = coroutineScope {
+                val gitHubDeferred = async { fetchGitHub(current, preferredAbi) }
+                val manifestDeferred = async { fetchManifest(current, preferredAbi) }
+                gitHubDeferred.await() to manifestDeferred.await()
             }
-            packageInfo.versionName ?: "0.0.0"
+
+            val manifestCandidate = manifest.candidate
+            val gitHubCandidate = gitHub.candidate
+            val best = when {
+                manifestCandidate != null && gitHubCandidate != null ->
+                    if (UpdateVersion.compare(manifestCandidate.version, gitHubCandidate.version) >= 0) {
+                        manifestCandidate
+                    } else {
+                        gitHubCandidate
+                    }
+                else -> manifestCandidate ?: gitHubCandidate
+            }
+
+            if (best != null) {
+                // A manifest-sourced candidate is preferred at equal version.
+                // If it lost to a newer unsigned GitHub build, still prefer a
+                // cached verified manifest when that one is newer.
+                val cached = cachedCandidate(preferredAbi)
+                val chosen = if (
+                    best.source == "github" &&
+                    cached != null &&
+                    UpdateVersion.compare(cached.version, best.version) > 0
+                ) {
+                    cached
+                } else {
+                    best
+                }
+                return UpdateCheckResult.NewUpdate(chosen.toPending())
+            }
+
+            if (gitHub.answered || manifest.answered) {
+                // A newer release exists but no APK matched this device.
+                if (gitHub.sawNewerWithoutAsset || manifest.sawNewerWithoutAsset) {
+                    return UpdateCheckResult.Error(UpdateError.NoCompatibleBuild)
+                }
+                return UpdateCheckResult.UpToDate
+            }
+
+            // Both online sources failed: offer the last verified manifest
+            // instead of an error when it still contains a newer release.
+            cachedCandidate(preferredAbi)?.let {
+                return UpdateCheckResult.NewUpdate(it.toPending())
+            }
+
+            val errors = listOfNotNull(gitHub.error, manifest.error)
+            UpdateCheckResult.Error(pickError(errors))
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            "0.0.0"
+            Log.w(TAG, "check failed: ${e.message}")
+            UpdateCheckResult.Error(UpdateError.fromThrowable(e))
         }
     }
 
-    private fun isNewerVersion(current: String, latest: String): Boolean {
-        if (current == latest) return false
-        val currentParts = current.split(".").mapNotNull { it.toIntOrNull() }
-        val latestParts = latest.split(".").mapNotNull { it.toIntOrNull() }
-        
-        val maxLength = maxOf(currentParts.size, latestParts.size)
-        for (i in 0 until maxLength) {
-            val curr = currentParts.getOrElse(i) { 0 }
-            val lat = latestParts.getOrElse(i) { 0 }
-            if (lat > curr) return true
-            if (lat < curr) return false
+    private suspend fun fetchGitHub(current: String, preferredAbi: String): SourceResult {
+        val response = try {
+            updateService.getLatestRelease(
+                UpdateConstants.GITHUB_OWNER,
+                UpdateConstants.GITHUB_REPO,
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            return SourceResult(error = UpdateError.fromThrowable(e))
         }
-        return false
+        if (!response.isSuccessful) {
+            return SourceResult(error = UpdateError.fromHttp(response.code()))
+        }
+        val release = response.body()
+            ?: return SourceResult(error = UpdateError.Http(response.code()))
+        val latest = UpdateVersion.normalize(release.tagName)
+        if (!UpdateVersion.isNewer(current, latest)) {
+            return SourceResult(answered = true)
+        }
+        val asset = UpdateHelper.getBestAsset(release.assets, preferredAbi)
+            ?: return SourceResult(answered = true, sawNewerWithoutAsset = true)
+        val abi = UpdateHelper.ABI_FILTERS.firstOrNull {
+            asset.name.contains(it, ignoreCase = true)
+        } ?: "universal"
+        return SourceResult(
+            candidate = Candidate(
+                version = latest,
+                versionCode = 0,
+                changelog = release.body?.trim().orEmpty()
+                    .ifBlank { context.getString(R.string.st_Update_DefaultChangelog) },
+                downloadUrl = asset.downloadUrl,
+                sizeBytes = null,
+                sha256 = null,
+                isCritical = false,
+                abi = abi,
+                source = "github",
+            ),
+            answered = true,
+        )
     }
+
+    private suspend fun fetchManifest(current: String, preferredAbi: String): SourceResult {
+        val rawBytes = try {
+            val response = updateService.getUpdateManifestRaw(UpdateConstants.MANIFEST_URL)
+            if (!response.isSuccessful) {
+                return SourceResult(error = UpdateError.fromHttp(response.code()))
+            }
+            response.body()?.bytes()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            return SourceResult(error = UpdateError.fromThrowable(e))
+        }
+        if (rawBytes == null) {
+            return SourceResult(error = UpdateError.Http(200))
+        }
+
+        val parsed = parseManifest(rawBytes)
+            ?: return SourceResult(
+                error = UpdateError.Verification(
+                    overrideMessageRes = R.string.st_Update_ErrorNotVerified,
+                )
+            )
+
+        // Cache the raw bytes so offline checks and the Whisper floor keep
+        // working. Only a verified manifest may touch the version floor.
+        cacheManifest(parsed)
+
+        if (!UpdateVersion.isNewer(current, parsed.manifest.versionName)) {
+            return SourceResult(answered = true)
+        }
+        val release = parsed.manifest.releases
+            ?.let { UpdateHelper.getBestRelease(it, preferredAbi) }
+            ?: return SourceResult(answered = true, sawNewerWithoutAsset = true)
+
+        return SourceResult(
+            candidate = Candidate(
+                version = UpdateVersion.normalize(parsed.manifest.versionName),
+                versionCode = parsed.manifest.versionCode,
+                changelog = parsed.manifest.changelog?.trim().orEmpty()
+                    .ifBlank { context.getString(R.string.st_Update_DefaultChangelog) },
+                downloadUrl = release.downloadUrl,
+                sizeBytes = release.effectiveSizeBytes?.takeIf { it > 0L },
+                sha256 = release.sha256?.takeIf { it.isNotBlank() },
+                isCritical = parsed.manifest.isCritical == true,
+                abi = release.abi,
+                source = "manifest",
+            ),
+            answered = true,
+        )
+    }
+
+    /**
+     * Parses and, when signed, verifies a manifest. Returns null for
+     * malformed JSON or an invalid signature (fail-closed).
+     */
+    private fun parseManifest(rawBytes: ByteArray): ParsedManifest? = try {
+        val json = String(rawBytes, Charsets.UTF_8)
+        val manifest = manifestAdapter.fromJson(json) ?: return null
+        val signature = manifest.signature
+        val verified = signature != null && verifyManifestSignature(
+            canonicalManifestBytes(rawBytes),
+            signature,
+        )
+        if (signature != null && !verified) {
+            Log.w(TAG, "manifest signature invalid — ignoring this manifest")
+            null
+        } else {
+            ParsedManifest(manifest, json, verified)
+        }
+    } catch (e: Exception) {
+        Log.w(TAG, "manifest parse failed: ${e.message}")
+        null
+    }
+
+    private fun cacheManifest(parsed: ParsedManifest) {
+        val editor = manifestPrefs.edit()
+            .putString(KEY_CACHED_MANIFEST, parsed.rawJson)
+            .putBoolean(KEY_CACHED_MANIFEST_VERIFIED, parsed.verified)
+        if (parsed.verified) {
+            editor.putInt(
+                KEY_CACHED_MINIMUM_VERSION_CODE,
+                parsed.manifest.minimumVersionCode ?: 0,
+            )
+        }
+        editor.apply()
+    }
+
+    private fun cachedCandidate(preferredAbi: String): Candidate? {
+        val rawJson = manifestPrefs.getString(KEY_CACHED_MANIFEST, null) ?: return null
+        val manifest = try {
+            manifestAdapter.fromJson(rawJson)
+        } catch (e: Exception) {
+            null
+        } ?: return null
+        if (!UpdateVersion.isNewer(getCurrentVersionName(), manifest.versionName)) return null
+        val release = manifest.releases
+            ?.let { UpdateHelper.getBestRelease(it, preferredAbi) }
+            ?: return null
+        return Candidate(
+            version = UpdateVersion.normalize(manifest.versionName),
+            versionCode = manifest.versionCode,
+            changelog = manifest.changelog?.trim().orEmpty()
+                .ifBlank { context.getString(R.string.st_Update_DefaultChangelog) },
+            downloadUrl = release.downloadUrl,
+            sizeBytes = release.effectiveSizeBytes?.takeIf { it > 0L },
+            sha256 = release.sha256?.takeIf { it.isNotBlank() },
+            isCritical = manifest.isCritical == true,
+            abi = release.abi,
+            source = "manifest",
+        )
+    }
+
+    private fun pickError(errors: List<UpdateError>): UpdateError =
+        errors.firstOrNull { it is UpdateError.Offline }
+            ?: errors.firstOrNull { it is UpdateError.Timeout }
+            ?: errors.firstOrNull { it is UpdateError.RateLimited }
+            ?: errors.firstOrNull { it is UpdateError.Verification }
+            ?: errors.firstOrNull()
+            ?: UpdateError.Unknown()
+
+    private suspend fun preferredAbi(): String = try {
+        settingsRepository.preferredAbi.first()
+    } catch (e: Exception) {
+        "AUTO"
+    }
+
+    fun getCurrentVersionName(): String = try {
+        packageInfo().versionName ?: "0.0.0"
+    } catch (e: Exception) {
+        "0.0.0"
+    }
+
+    fun getCurrentVersionCode(): Long = try {
+        packageInfo().longVersionCode
+    } catch (e: Exception) {
+        0L
+    }
+
+    private fun packageInfo() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        context.packageManager.getPackageInfo(
+            context.packageName,
+            PackageManager.PackageInfoFlags.of(0),
+        )
+    } else {
+        @Suppress("DEPRECATION")
+        context.packageManager.getPackageInfo(context.packageName, 0)
+    }
+
+    /** Kept for compatibility; delegates to the shared comparator. */
+    fun isNewerVersion(current: String, latest: String): Boolean =
+        UpdateVersion.isNewer(current, latest)
 
     // ── Anti-mod update-lock ────────────────────────────────────────────
-    // Whisper nav gate (WhisperBuildGate) calls [checkWhisperBlocked]: while the
-    // installed build is below the manifest floor — or a critical release is
-    // newer than the install — Whisper screens show a blocking "Update
-    // required" card instead of chat UI. Fail-open on network error so offline
-    // users are never bricked by an unreachable manifest.
-
-    fun getCurrentVersionCode(): Long {
-        return try {
-            val packageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                context.packageManager.getPackageInfo(context.packageName, PackageManager.PackageInfoFlags.of(0))
-            } else {
-                @Suppress("DEPRECATION")
-                context.packageManager.getPackageInfo(context.packageName, 0)
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                packageInfo.longVersionCode
-            } else {
-                @Suppress("DEPRECATION")
-                packageInfo.versionCode.toLong()
-            }
-        } catch (e: Exception) {
-            0L
-        }
-    }
+    // Whisper nav gate (WhisperBuildGate) calls [checkWhisperBlocked]: while
+    // the installed build is below the manifest floor — or a critical release
+    // is newer than the install — Whisper screens show a blocking "Update
+    // required" card instead of chat UI. Fail-open when no verified manifest
+    // is reachable, so offline users are never bricked.
 
     /** Pure rule — unit-testable without Android. */
     fun isWhisperBlockedByManifest(installedCode: Long, manifest: UpdateManifest): Boolean {
         val floor = manifest.minimumVersionCode?.toLong() ?: 0L
-        if (floor > 0 && installedCode < floor) return true
-        // Reuse isCritical: a critical release newer than the install also
-        // pauses Whisper until the user updates.
+        if (floor > 0L && installedCode < floor) return true
         if (manifest.isCritical == true && installedCode < manifest.versionCode.toLong()) return true
         return false
     }
 
     suspend fun checkWhisperBlocked(): WhisperBlockState {
-        return try {
-            val res = updateService.getUpdateManifest(UpdateConstants.MANIFEST_URL)
-            if (!res.isSuccessful) return WhisperBlockState.NotBlocked
-            val manifest = res.body() ?: return WhisperBlockState.NotBlocked
-            if (isWhisperBlockedByManifest(getCurrentVersionCode(), manifest)) {
-                WhisperBlockState.Blocked(
-                    latestVersionName = manifest.versionName,
-                    latestVersionCode = manifest.versionCode,
-                    isCritical = manifest.isCritical == true,
-                )
-            } else {
-                WhisperBlockState.NotBlocked
+        val installedCode = getCurrentVersionCode()
+        try {
+            val response = updateService.getUpdateManifestRaw(UpdateConstants.MANIFEST_URL)
+            if (response.isSuccessful) {
+                val bytes = response.body()?.bytes()
+                val parsed = bytes?.let { parseManifest(it) }
+                if (parsed != null && parsed.verified) {
+                    cacheManifest(parsed)
+                    if (isWhisperBlockedByManifest(installedCode, parsed.manifest)) {
+                        return WhisperBlockState.Blocked(
+                            latestVersionName = parsed.manifest.versionName,
+                            latestVersionCode = parsed.manifest.versionCode,
+                            isCritical = parsed.manifest.isCritical == true,
+                        )
+                    }
+                }
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            WhisperBlockState.NotBlocked
+            Log.w(TAG, "whisper gate check failed: ${e.message}")
+        }
+
+        // Offline fallback: only a cached signature-verified manifest counts.
+        val cached = cachedVerifiedManifest()
+        if (cached != null && isWhisperBlockedByManifest(installedCode, cached)) {
+            return WhisperBlockState.Blocked(
+                latestVersionName = cached.versionName,
+                latestVersionCode = cached.versionCode,
+                isCritical = cached.isCritical == true,
+            )
+        }
+        return WhisperBlockState.NotBlocked
+    }
+
+    private fun cachedVerifiedManifest(): UpdateManifest? {
+        if (!manifestPrefs.getBoolean(KEY_CACHED_MANIFEST_VERIFIED, false)) return null
+        val rawJson = manifestPrefs.getString(KEY_CACHED_MANIFEST, null) ?: return null
+        return try {
+            manifestAdapter.fromJson(rawJson)
+        } catch (e: Exception) {
+            null
         }
     }
 
-    // ── Offline update-manifest signature gate ──────────────────
-    // The manifest is the ONLY channel that can raise the Whisper
-    // minimumVersionCode floor, so it must be authenticated. The
-    // Ed25519 public half is embedded at build time; the private
-    // half stays with the release signer. java.security Ed25519
-    // (JDK/Android API 28+) — no new dependency.
+    /** Last signature-verified manifest floor; null when never cached. */
+    fun cachedMinimumVersionCode(): Int? {
+        val floor = manifestPrefs.getInt(KEY_CACHED_MINIMUM_VERSION_CODE, 0)
+        return floor.takeIf { it > 0 }
+    }
 
     companion object {
         private const val TAG = "UpdateRepository"
         private const val MANIFEST_CACHE_PREFS = "toolz_update_manifest"
+        private const val KEY_CACHED_MANIFEST = "cached_manifest_json"
+        private const val KEY_CACHED_MANIFEST_VERIFIED = "cached_manifest_verified"
         private const val KEY_CACHED_MINIMUM_VERSION_CODE = "minimum_version_code"
 
         /**
-         * Official update-manifest Ed25519 public key — raw 32-byte
-         * key, base64.
+         * Official update-manifest Ed25519 public key — raw 32-byte key, base64.
          *
-         * REPLACE_ME — generate a keypair and embed the public half:
-         *   python3 -c "from cryptography.hazmat.primitives.asymmetric import ed25519; from cryptography.hazmat.primitives import serialization; import base64; k = ed25519.Ed25519PrivateKey.generate(); print(base64.b64encode(k.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)).decode())"
-         * or with openssl:
-         *   openssl genpkey -algorithm Ed25519 -out ed25519-priv.pem
-         *   openssl pkey -in ed25519-priv.pem -pubout -outform DER | tail -c 32 | openssl base64 -A
-         * Keep the private key offline; sign every released
-         * update_manifest.json with it (see verifyManifestSignature).
+         * Keep the private half offline; sign every released
+         * update_manifest.json with it (see [verifyManifestSignature]).
          */
         const val ED25519_PUBLIC_KEY_B64 = "pLIOx0vcMq4/JWQhrsNl97x8cTIYHvtYwP7NGnLkYBM="
 
@@ -330,23 +451,8 @@ class UpdateRepository @Inject constructor(
         )
 
         /**
-         * Verify the Ed25519 signature of an update manifest against
-         * the embedded [ED25519_PUBLIC_KEY_B64].
-         *
-         * @param manifestJsonBytesWithoutSignatureField canonical manifest
-         *        bytes — the raw manifest JSON with the `signature` and
-         *        `_comment` fields removed, minified (no whitespace),
-         *        keys in original order. See [canonicalManifestBytes].
-         * @param signatureB64 base64 Ed25519 signature (64 bytes).
-         * @return true only when the signature verifies; false on ANY
-         *         error (fail-closed).
-         *
-         * Release-signing tool (both produce the same 64-byte signature
-         * over the canonical bytes):
-         *   python:
-         *     python3 -c "import json,base64;from cryptography.hazmat.primitives.asymmetric import ed25519; m=json.load(open('update_manifest.json')); m.pop('signature',None); m.pop('_comment',None); c=json.dumps(m,separators=(',',':')).encode(); k=ed25519.Ed25519PrivateKey.from_private_bytes(base64.b64decode(open('priv.key.b64').read())); print(base64.b64encode(k.sign(c)).decode())"
-         *   openssl (canonical.json = manifest minus signature/_comment, minified):
-         *     openssl pkeyutl -sign -inkey ed25519-priv.pem -rawin -in canonical.json | openssl base64 -A
+         * Verify the Ed25519 signature of an update manifest against the
+         * embedded [ED25519_PUBLIC_KEY_B64]. Fails closed on any error.
          */
         fun verifyManifestSignature(
             manifestJsonBytesWithoutSignatureField: ByteArray,
@@ -355,37 +461,30 @@ class UpdateRepository @Inject constructor(
             manifestJsonBytesWithoutSignatureField, signatureB64, ED25519_PUBLIC_KEY_B64
         )
 
-        /**
-         * Same as [verifyManifestSignature] with an explicit raw-32-byte
-         * base64 public key — exposed for unit tests (internal).
-         */
+        /** Same as [verifyManifestSignature] with an explicit key (tests). */
         internal fun verifyManifestSignatureWithKey(
             manifestJsonBytesWithoutSignatureField: ByteArray,
             signatureB64: String,
             publicKeyB64: String,
-        ): Boolean {
-            return try {
-                val publicKey = KeyFactory.getInstance("Ed25519").generatePublic(
-                    X509EncodedKeySpec(
-                        ED25519_X509_PREFIX + Base64.getDecoder().decode(publicKeyB64)
-                    )
+        ): Boolean = try {
+            val publicKey = KeyFactory.getInstance("Ed25519").generatePublic(
+                X509EncodedKeySpec(
+                    ED25519_X509_PREFIX + Base64.getDecoder().decode(publicKeyB64)
                 )
-                val signature = Signature.getInstance("Ed25519").apply {
-                    initVerify(publicKey)
-                    update(manifestJsonBytesWithoutSignatureField)
-                }
-                signature.verify(Base64.getDecoder().decode(signatureB64))
-            } catch (e: Exception) {
-                false // fail-closed: bad key, bad signature, bad base64
+            )
+            Signature.getInstance("Ed25519").run {
+                initVerify(publicKey)
+                update(manifestJsonBytesWithoutSignatureField)
+                verify(Base64.getDecoder().decode(signatureB64))
             }
+        } catch (e: Exception) {
+            false // fail-closed: bad key, bad signature, bad base64
         }
 
         /**
-         * Canonical manifest bytes for signature verification: the raw
-         * JSON with the `signature` and `_comment` fields removed,
-         * re-serialized compactly (org.json preserves key order).
-         * Signers MUST produce identical bytes — python equivalent:
-         *   json.dumps(m, separators=(',',':'))
+         * Canonical manifest bytes for signature verification: raw JSON with
+         * `signature` and `_comment` removed, re-serialized compactly
+         * (org.json preserves key order).
          */
         fun canonicalManifestBytes(manifestJsonBytes: ByteArray): ByteArray {
             val json = JSONObject(String(manifestJsonBytes, Charsets.UTF_8))
@@ -393,29 +492,6 @@ class UpdateRepository @Inject constructor(
             json.remove("_comment")
             return json.toString().toByteArray(Charsets.UTF_8)
         }
-    }
-
-    /**
-     * Remember the manifest's minimumVersionCode — only from
-     * signature-verified manifests — so the LOCAL Whisper gate
-     * (WhisperBuildGate.gateWhisperAccess) can enforce the floor
-     * while offline.
-     */
-    private fun cacheManifestFloor(manifest: UpdateManifest) {
-        manifest.minimumVersionCode?.let { floor ->
-            context.getSharedPreferences(MANIFEST_CACHE_PREFS, Context.MODE_PRIVATE)
-                .edit()
-                .putInt(KEY_CACHED_MINIMUM_VERSION_CODE, floor)
-                .apply()
-        }
-    }
-
-    /** Last signature-verified manifest floor; null when never cached. */
-    fun cachedMinimumVersionCode(): Int? {
-        val floor = context
-            .getSharedPreferences(MANIFEST_CACHE_PREFS, Context.MODE_PRIVATE)
-            .getInt(KEY_CACHED_MINIMUM_VERSION_CODE, 0)
-        return floor.takeIf { it > 0 }
     }
 }
 
@@ -432,13 +508,17 @@ sealed interface WhisperBlockState {
     ) : WhisperBlockState
 }
 
-sealed class UpdateCheckResult {
-    data class NewUpdate(
-        val version: String,
-        val changelog: String,
-        val downloadUrl: String,
-        val isCritical: Boolean
-    ) : UpdateCheckResult()
-    object UpToDate : UpdateCheckResult()
-    data class Error(val message: String) : UpdateCheckResult()
+sealed interface UpdateCheckResult {
+    data class NewUpdate(val update: PendingUpdate) : UpdateCheckResult {
+        val version: String get() = update.version
+        val changelog: String get() = update.changelog
+        val downloadUrl: String get() = update.downloadUrl
+        val isCritical: Boolean get() = update.isCritical
+    }
+
+    data object UpToDate : UpdateCheckResult
+
+    data class Error(val error: UpdateError) : UpdateCheckResult {
+        val messageRes: Int get() = error.messageRes
+    }
 }

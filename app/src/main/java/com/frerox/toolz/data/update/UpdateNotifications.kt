@@ -32,6 +32,9 @@ import java.io.File
 /**
  * All update-surface notifications. Every entry point is wrapped in
  * try/catch and must never crash the caller (workers, receivers).
+ *
+ * Visibility is gated by the caller through the `appUpdateNotifications`
+ * setting; this object only draws what it is asked to draw.
  */
 object UpdateNotifications {
     const val ID_UPDATE_DOWNLOAD = 8003
@@ -54,7 +57,6 @@ object UpdateNotifications {
     private fun updateScreenIntent(context: Context, requestCode: Int): PendingIntent {
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-            putExtra("navigate_to", "update_settings")
             putExtra("show_update_dialog", true)
         }
         return PendingIntent.getActivity(context, requestCode, intent, flags())
@@ -64,7 +66,7 @@ object UpdateNotifications {
         context: Context,
         action: String,
         requestCode: Int,
-        extras: Intent.() -> Unit = {}
+        extras: Intent.() -> Unit = {},
     ): PendingIntent {
         val intent = Intent(context, UpdateReceiver::class.java).apply {
             this.action = action
@@ -80,25 +82,38 @@ object UpdateNotifications {
         return if (joined.length <= 220) joined else joined.take(217) + "..."
     }
 
-    /** "New Toolz vX ready" row with Download / Details actions. */
+    /** "Toolz 1.2.0 is available" row with Download / Details actions. */
     fun showAvailable(context: Context, update: PendingUpdate) {
         try {
             NotificationHelper.createAllChannels(context)
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            val title = "New Toolz v${update.version} ready" +
-                if (update.isCritical) " • Critical" else ""
-            val notification = NotificationHelper.baseBuilder(context, NotificationHelper.CHANNEL_APP_UPDATES)
+            val title = context.getString(
+                if (update.isCritical) R.string.st_Update_NotifAvailableCriticalTitle
+                else R.string.st_Update_NotifAvailableTitle,
+                update.version,
+            )
+            val notification = NotificationHelper.baseBuilder(
+                context, NotificationHelper.CHANNEL_APP_UPDATES
+            )
                 .setSmallIcon(R.drawable.ic_stat_toolz)
                 .setContentTitle(title)
-                .setContentText("Tap to see what's new in this release.")
-                .setStyle(NotificationCompat.BigTextStyle().bigText(changelogSnippet(update.changelog)))
+                .setContentText(context.getString(R.string.st_Update_NotifAvailableBody))
+                .setStyle(
+                    NotificationCompat.BigTextStyle().bigText(
+                        changelogSnippet(
+                            update.changelog.ifBlank {
+                                context.getString(R.string.st_Update_DefaultChangelog)
+                            }
+                        )
+                    )
+                )
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setCategory(NotificationCompat.CATEGORY_SYSTEM)
                 .setContentIntent(updateScreenIntent(context, REQ_CONTENT))
                 .setAutoCancel(true)
                 .addAction(
                     R.drawable.ic_stat_toolz,
-                    "Download",
+                    context.getString(R.string.st_Update_ActionDownload),
                     receiverIntent(context, ACTION_DOWNLOAD_UPDATE, REQ_DOWNLOAD) {
                         putExtra("url", update.downloadUrl)
                         putExtra("version", update.version)
@@ -106,7 +121,7 @@ object UpdateNotifications {
                 )
                 .addAction(
                     R.drawable.ic_stat_toolz,
-                    "Details",
+                    context.getString(R.string.st_Update_ActionDetails),
                     updateScreenIntent(context, REQ_DETAILS)
                 )
                 .build()
@@ -123,29 +138,39 @@ object UpdateNotifications {
         progress: Int,
         bytesDownloaded: Long,
         total: Long,
-        speedBps: Long = 0L
+        speedBps: Long = 0L,
     ) {
         try {
             NotificationHelper.createAllChannels(context)
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             val pct = progress.coerceIn(0, 100)
             val sizeText = if (total > 0) {
-                "${formatBytes(bytesDownloaded)} / ${formatBytes(total)}"
+                context.getString(
+                    R.string.st_Update_Of,
+                    formatBytes(bytesDownloaded),
+                    formatBytes(total),
+                )
             } else {
                 formatBytes(bytesDownloaded)
             }
-            val speedText = if (speedBps > 0) " • ${formatSpeed(speedBps)}" else ""
+            val progressText = context.getString(R.string.st_Update_NotifProgress, pct, sizeText)
+            val line = if (speedBps > 0) {
+                progressText + " • " +
+                    context.getString(R.string.st_Update_PerSecond, formatBytes(speedBps))
+            } else {
+                progressText
+            }
             val notification = NotificationHelper.progressBuilder(
                 context,
                 NotificationHelper.CHANNEL_APP_UPDATES,
-                "Downloading v${update.version} $pct%",
-                "$sizeText$speedText",
-                pct
+                context.getString(R.string.st_Update_NotifDownloadingTitle, update.version),
+                line,
+                pct,
             )
                 .setContentIntent(updateScreenIntent(context, REQ_CONTENT))
                 .addAction(
                     android.R.drawable.ic_menu_close_clear_cancel,
-                    "Cancel",
+                    context.getString(R.string.st_Update_ActionCancel),
                     receiverIntent(context, ACTION_CANCEL_UPDATE, REQ_CANCEL)
                 )
                 .build()
@@ -163,21 +188,28 @@ object UpdateNotifications {
             val install = receiverIntent(context, ACTION_INSTALL_UPDATE, REQ_INSTALL) {
                 putExtra("apk_path", apkFile.absolutePath)
             }
-            val notification = NotificationHelper.baseBuilder(context, NotificationHelper.CHANNEL_APP_UPDATES)
+            val notification = NotificationHelper.baseBuilder(
+                context, NotificationHelper.CHANNEL_APP_UPDATES
+            )
                 .setSmallIcon(R.drawable.ic_stat_toolz)
-                .setContentTitle("Update ready — tap to install")
-                .setContentText("Toolz v${update.version} downloaded. Tap to complete the update.")
+                .setContentTitle(
+                    context.getString(R.string.st_Update_NotifReadyTitle, update.version)
+                )
+                .setContentText(context.getString(R.string.st_Update_NotifReadyBody))
                 .setStyle(
                     NotificationCompat.BigTextStyle().bigText(
-                        "Toolz v${update.version} is downloaded and verified. " +
-                            "Tap Install now (you will confirm on the system installer screen)."
+                        context.getString(R.string.st_Update_NotifReadyBig, update.version)
                     )
                 )
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setCategory(NotificationCompat.CATEGORY_SYSTEM)
                 .setContentIntent(install)
                 .setAutoCancel(true)
-                .addAction(R.drawable.ic_stat_toolz, "Install now", install)
+                .addAction(
+                    R.drawable.ic_stat_toolz,
+                    context.getString(R.string.st_Update_ActionInstall),
+                    install,
+                )
                 .build()
             manager.notify(NotificationHelper.ID_UPDATE_READY, notification)
             try { manager.cancel(NotificationHelper.ID_APP_UPDATE) } catch (_: Exception) {}
@@ -191,12 +223,17 @@ object UpdateNotifications {
         try {
             NotificationHelper.createAllChannels(context)
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val title = if (version.isBlank()) {
+                context.getString(R.string.st_Update_InstalledTitle)
+            } else {
+                context.getString(R.string.st_Update_NotifInstalledTitle, version)
+            }
             val notification = NotificationHelper.terminalBuilder(
                 context,
                 NotificationHelper.CHANNEL_APP_UPDATES,
-                "Toolz updated to v$version",
-                "You're on the latest release. Enjoy the new improvements.",
-                highPriority = false
+                title,
+                context.getString(R.string.st_Update_NotifInstalledBody),
+                highPriority = false,
             )
                 .setContentIntent(updateScreenIntent(context, REQ_CONTENT))
                 .build()
@@ -210,13 +247,13 @@ object UpdateNotifications {
         try {
             NotificationHelper.createAllChannels(context)
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            val text = "$message. Tap to retry."
+            val text = context.getString(R.string.st_Update_NotifErrorBody, message)
             val notification = NotificationHelper.terminalBuilder(
                 context,
                 NotificationHelper.CHANNEL_APP_UPDATES,
-                "Update failed",
+                context.getString(R.string.st_Update_NotifErrorTitle),
                 text,
-                highPriority = true
+                highPriority = true,
             )
                 .setStyle(NotificationCompat.BigTextStyle().bigText(text))
                 .setContentIntent(updateScreenIntent(context, REQ_ERROR))
@@ -224,6 +261,15 @@ object UpdateNotifications {
             manager.notify(NotificationHelper.ID_APP_UPDATE, notification)
         } catch (e: Exception) {
             Log.w(TAG, "showError failed: ${e.message}")
+        }
+    }
+
+    fun cancelDownload(context: Context) {
+        try {
+            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.cancel(ID_UPDATE_DOWNLOAD)
+        } catch (e: Exception) {
+            Log.w(TAG, "cancelDownload failed: ${e.message}")
         }
     }
 

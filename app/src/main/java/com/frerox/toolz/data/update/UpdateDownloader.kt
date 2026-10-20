@@ -24,6 +24,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.net.SocketTimeoutException
 import java.security.MessageDigest
 import java.util.Locale
 import java.util.concurrent.TimeUnit
@@ -33,28 +34,58 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.json.JSONObject
 
 /**
- * Resumable APK downloader over OkHttp with progress, speed,
- * size and SHA-256 verification. No DownloadManager involved.
+ * Resumable APK downloader over OkHttp with progress, speed, size and
+ * SHA-256 verification. No DownloadManager involved.
+ *
+ * Resume state lives in a `.meta` sidecar next to the partial file
+ * (source URL, total size, ETag/Last-Modified, expected digest). A range
+ * request is only sent when the sidecar belongs to the same URL, and
+ * `If-Range` protects against a changed file being spliced onto an old
+ * prefix. When the server ignores the range, the partial is truncated and
+ * the download restarts cleanly.
  */
 @Singleton
 class UpdateDownloader @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val okHttpClient: OkHttpClient
+    private val okHttpClient: OkHttpClient,
 ) {
     sealed interface DownloadResult {
         data class Success(val file: File, val sha256: String?) : DownloadResult
-        data class Error(val message: String) : DownloadResult
+        data class Failure(
+            val kind: FailureKind,
+            val httpCode: Int? = null,
+            val detail: String? = null,
+        ) : DownloadResult
     }
 
+    enum class FailureKind {
+        Cancelled,
+        Network,
+        Timeout,
+        Http,
+        SizeMismatch,
+        Integrity,
+        Storage,
+    }
+
+    private data class Meta(
+        val url: String,
+        val totalBytes: Long?,
+        val etag: String?,
+        val lastModified: String?,
+        val sha256: String?,
+    )
+
     /**
-     * Download [url] into [destFile], resuming via `Range` when a partial
-     * file and a known [expectedSize] exist.
+     * Download [url] into [destFile], resuming when a matching partial and
+     * sidecar exist.
      *
-     * @param onProgress invoked throttled (~200ms) plus once at completion.
-     * @param isCancelled polled each buffer; on true the partial file is
-     *        KEPT for resume and [DownloadResult.Error]("Cancelled") returns.
+     * @param onProgress throttled (~200 ms) plus once at completion.
+     * @param isCancelled polled during the copy; a cancelled download keeps
+     *        the partial file for the next attempt.
      */
     suspend fun download(
         url: String,
@@ -62,123 +93,217 @@ class UpdateDownloader @Inject constructor(
         expectedSize: Long?,
         expectedSha256: String?,
         onProgress: (downloaded: Long, total: Long, speedBps: Long) -> Unit,
-        isCancelled: () -> Boolean
+        isCancelled: () -> Boolean,
     ): DownloadResult = withContext(Dispatchers.IO) {
+        if (url.isBlank()) {
+            return@withContext DownloadResult.Failure(
+                FailureKind.Network, detail = "The update has no download link."
+            )
+        }
         try {
-            destFile.parentFile?.mkdirs()
-            var existing = if (destFile.exists()) destFile.length() else 0L
-            val knownSize = expectedSize?.takeIf { it > 0 }
-            var resume = existing > 0 && knownSize != null && existing < knownSize
-
-            val client = okHttpClient.newBuilder()
-                .followRedirects(true)
-                .followSslRedirects(true)
-                .connectTimeout(30, TimeUnit.SECONDS)
-                .build()
-
-            val requestBuilder = Request.Builder().url(url).get()
-            if (resume) requestBuilder.addHeader("Range", "bytes=$existing-")
-            val response = client.newCall(requestBuilder.build()).execute()
-            response.use { res ->
-                if (!res.isSuccessful) {
-                    return@withContext DownloadResult.Error("Download failed: HTTP ${res.code}")
-                }
-                // Server ignored Range (200 instead of 206): restart clean.
-                if (resume && res.code != 206) {
-                    destFile.delete()
-                    existing = 0L
-                    resume = false
-                }
-                val body = res.body ?: return@withContext DownloadResult.Error("Empty response body")
-                val remaining = body.contentLength() // -1 when unknown
-                val total = knownSize ?: if (remaining > 0) existing + remaining else -1L
-
-                val digest = MessageDigest.getInstance("SHA-256")
-                if (resume && existing > 0) {
-                    // Seed the hash with the already-written prefix so the
-                    // final digest covers the whole file.
-                    try {
-                        destFile.inputStream().use { input ->
-                            val buf = ByteArray(8192)
-                            var read: Int
-                            var left = existing
-                            while (left > 0) {
-                                read = input.read(buf, 0, minOf(buf.size.toLong(), left).toInt())
-                                if (read == -1) break
-                                digest.update(buf, 0, read)
-                                left -= read
-                            }
-                        }
-                    } catch (e: IOException) {
-                        destFile.delete()
-                        return@withContext DownloadResult.Error("Corrupt partial file: ${e.message}")
-                    }
-                }
-
-                var downloaded = existing
-                var lastEmitAt = 0L
-                var windowBytes = 0L
-                var windowStartNs = System.nanoTime()
-                var speedBps = 0L
-                try {
-                    body.byteStream().use { input ->
-                        FileOutputStream(destFile, resume).use { output ->
-                            val buf = ByteArray(8192)
-                            while (true) {
-                                if (isCancelled()) {
-                                    return@withContext DownloadResult.Error("Cancelled")
-                                }
-                                val read = input.read(buf)
-                                if (read == -1) break
-                                output.write(buf, 0, read)
-                                digest.update(buf, 0, read)
-                                downloaded += read
-                                windowBytes += read
-                                val nowMs = System.currentTimeMillis()
-                                if (nowMs - lastEmitAt >= PROGRESS_THROTTLE_MS) {
-                                    val elapsedNs = System.nanoTime() - windowStartNs
-                                    if (elapsedNs > 0) {
-                                        speedBps = (windowBytes * 1_000_000_000L / elapsedNs)
-                                    }
-                                    windowBytes = 0L
-                                    windowStartNs = System.nanoTime()
-                                    lastEmitAt = nowMs
-                                    onProgress(downloaded, total, speedBps)
-                                }
-                            }
-                            output.fd.sync()
-                        }
-                    }
-                } catch (e: IOException) {
-                    if (isCancelled()) return@withContext DownloadResult.Error("Cancelled")
-                    return@withContext DownloadResult.Error("Network error: ${e.message}")
-                }
-                onProgress(downloaded, total, speedBps)
-
-                if (knownSize != null && downloaded != knownSize) {
-                    destFile.delete()
-                    return@withContext DownloadResult.Error(
-                        "Size mismatch: got ${formatBytes(downloaded)}, expected ${formatBytes(knownSize)}"
-                    )
-                }
-                val hex = digest.digest().joinToString("") { "%02x".format(it) }
-                if (!expectedSha256.isNullOrBlank() && !hex.equals(expectedSha256, ignoreCase = true)) {
-                    destFile.delete()
-                    return@withContext DownloadResult.Error("SHA-256 mismatch — file rejected")
-                }
-                DownloadResult.Success(destFile, hex)
+            if (!destFile.parentFile.exists() && !destFile.parentFile.mkdirs()) {
+                return@withContext DownloadResult.Failure(
+                    FailureKind.Storage, detail = "Couldn't create the update folder."
+                )
             }
-        } catch (e: IOException) {
-            DownloadResult.Error(e.message ?: "Download failed")
         } catch (e: Exception) {
-            if (e is kotlinx.coroutines.CancellationException) throw e
-            DownloadResult.Error(e.message ?: "Download failed")
+            return@withContext DownloadResult.Failure(FailureKind.Storage, detail = e.message)
+        }
+
+        val metaFile = metaFileFor(destFile)
+        val meta = readMeta(metaFile)?.takeIf { it.url == url }
+        // A sidecar from another URL means a different build: start over.
+        if (meta == null && destFile.exists()) {
+            destFile.delete()
+        }
+
+        var existing = if (destFile.exists()) destFile.length() else 0L
+        val knownSize = expectedSize?.takeIf { it > 0L } ?: meta?.totalBytes?.takeIf { it > 0L }
+
+        // Completed file from a previous attempt: verify and reuse.
+        if (knownSize != null && existing == knownSize) {
+            val sha = sha256Of(destFile)
+            if (expectedSha256.isNullOrBlank() || sha.equals(expectedSha256, ignoreCase = true)) {
+                metaFile.delete()
+                return@withContext DownloadResult.Success(destFile, sha)
+            }
+            destFile.delete()
+            metaFile.delete()
+            existing = 0L
+        }
+        // A partial bigger than the expected file is unusable.
+        if (knownSize != null && existing > knownSize) {
+            destFile.delete()
+            metaFile.delete()
+            existing = 0L
+        }
+
+        var resume = existing > 0L && knownSize != null && existing < knownSize
+        val requestBuilder = Request.Builder().url(url).get()
+        if (resume) {
+            requestBuilder.addHeader("Range", "bytes=$existing-")
+            val validator = meta?.etag?.takeIf { it.isNotBlank() }
+                ?: meta?.lastModified?.takeIf { it.isNotBlank() }
+            if (validator != null) requestBuilder.addHeader("If-Range", validator)
+        } else {
+            // No usable partial: make sure a stale file cannot be appended to.
+            if (existing > 0L) {
+                destFile.delete()
+                metaFile.delete()
+                existing = 0L
+                resume = false
+            }
+        }
+
+        val client = okHttpClient.newBuilder()
+            .followRedirects(true)
+            .followSslRedirects(true)
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .build()
+
+        val response = try {
+            client.newCall(requestBuilder.build()).execute()
+        } catch (e: SocketTimeoutException) {
+            return@withContext DownloadResult.Failure(FailureKind.Timeout, detail = e.message)
+        } catch (e: IOException) {
+            return@withContext DownloadResult.Failure(FailureKind.Network, detail = e.message)
+        }
+
+        response.use { res ->
+            if (isCancelled()) {
+                return@withContext DownloadResult.Failure(FailureKind.Cancelled)
+            }
+            if (!res.isSuccessful) {
+                if (res.code == 416) {
+                    // Range no longer satisfiable (file changed server-side).
+                    destFile.delete()
+                    metaFile.delete()
+                }
+                return@withContext DownloadResult.Failure(
+                    FailureKind.Http,
+                    httpCode = res.code,
+                    detail = res.message.ifBlank { "HTTP ${res.code}" },
+                )
+            }
+
+            // Server ignored the range: truncate and write the full body.
+            if (resume && res.code != 206) {
+                destFile.delete()
+                existing = 0L
+                resume = false
+            }
+
+            val body = res.body
+                ?: return@withContext DownloadResult.Failure(
+                    FailureKind.Network, detail = "The server sent an empty response."
+                )
+            val remaining = body.contentLength()
+            val total = when {
+                resume && res.code == 206 -> knownSize ?: (existing + remaining).takeIf { remaining > 0 }
+                remaining > 0 -> remaining
+                else -> knownSize
+            }
+
+            // Persist the resume contract before bytes land on disk.
+            writeMeta(
+                metaFile,
+                Meta(
+                    url = url,
+                    totalBytes = total,
+                    etag = res.header("ETag"),
+                    lastModified = res.header("Last-Modified"),
+                    sha256 = expectedSha256,
+                )
+            )
+
+            var downloaded = existing
+            var speedBps = 0L
+            var windowBytes = 0L
+            var windowStartNs = System.nanoTime()
+            var lastEmitAt = 0L
+
+            try {
+                body.byteStream().use { input ->
+                    FileOutputStream(destFile, resume).use { output ->
+                        val buffer = ByteArray(16 * 1024)
+                        while (true) {
+                            if (isCancelled()) {
+                                return@withContext DownloadResult.Failure(FailureKind.Cancelled)
+                            }
+                            val read = input.read(buffer)
+                            if (read == -1) break
+                            output.write(buffer, 0, read)
+                            downloaded += read
+                            windowBytes += read
+                            val now = System.currentTimeMillis()
+                            if (now - lastEmitAt >= PROGRESS_THROTTLE_MS) {
+                                val elapsedNs = System.nanoTime() - windowStartNs
+                                if (elapsedNs > 0L) {
+                                    speedBps = windowBytes * 1_000_000_000L / elapsedNs
+                                }
+                                windowBytes = 0L
+                                windowStartNs = System.nanoTime()
+                                lastEmitAt = now
+                                onProgress(downloaded, total ?: 0L, speedBps)
+                            }
+                        }
+                        output.flush()
+                        output.fd.sync()
+                    }
+                }
+            } catch (e: IOException) {
+                if (isCancelled()) {
+                    return@withContext DownloadResult.Failure(FailureKind.Cancelled)
+                }
+                val message = e.message.orEmpty()
+                val storageIssue = message.contains("space", ignoreCase = true) ||
+                    message.contains("ENOSPC", ignoreCase = true) ||
+                    message.contains("read-only", ignoreCase = true)
+                return@withContext DownloadResult.Failure(
+                    if (storageIssue) FailureKind.Storage else FailureKind.Network,
+                    detail = message.ifBlank { "Connection lost." },
+                )
+            }
+
+            onProgress(downloaded, total ?: 0L, speedBps)
+
+            if (total != null && downloaded != total) {
+                destFile.delete()
+                metaFile.delete()
+                return@withContext DownloadResult.Failure(
+                    FailureKind.SizeMismatch,
+                    detail = "Got ${formatBytes(downloaded)}, expected ${formatBytes(total)}.",
+                )
+            }
+
+            val sha = sha256Of(destFile)
+            if (!expectedSha256.isNullOrBlank() && !sha.equals(expectedSha256, ignoreCase = true)) {
+                destFile.delete()
+                metaFile.delete()
+                return@withContext DownloadResult.Failure(
+                    FailureKind.Integrity,
+                    detail = "The checksum didn't match the release manifest.",
+                )
+            }
+            if (sha == null) {
+                destFile.delete()
+                metaFile.delete()
+                return@withContext DownloadResult.Failure(
+                    FailureKind.Storage, detail = "Couldn't read the downloaded file."
+                )
+            }
+
+            metaFile.delete()
+            DownloadResult.Success(destFile, sha)
         }
     }
 
     companion object {
         private const val TAG = "UpdateDownloader"
         private const val PROGRESS_THROTTLE_MS = 200L
+
+        private fun metaFileFor(destFile: File): File = File(destFile.parentFile, "${destFile.name}.meta")
 
         /** Cache-home for sideloaded APKs: `<cache>/updates/toolz_update_<version>.apk`. */
         fun defaultDestFile(context: Context, version: String): File {
@@ -197,7 +322,7 @@ class UpdateDownloader @Inject constructor(
                 ?: return null
             dir.listFiles { f ->
                 f.isFile && f.name.startsWith("toolz_update_") && f.name.endsWith(".apk")
-            }?.maxByOrNull { it.lastModified() }?.takeIf { it.exists() && it.length() > 0 }
+            }?.maxByOrNull { it.lastModified() }?.takeIf { it.exists() && it.length() > 0L }
         } catch (e: Exception) {
             Log.w(TAG, "legacy scan failed: ${e.message}")
             null
@@ -207,34 +332,77 @@ class UpdateDownloader @Inject constructor(
         fun sha256Of(file: File): String? = try {
             val digest = MessageDigest.getInstance("SHA-256")
             file.inputStream().use { input ->
-                val buf = ByteArray(8192)
+                val buffer = ByteArray(16 * 1024)
                 var read: Int
-                while (input.read(buf).also { read = it } != -1) {
-                    digest.update(buf, 0, read)
+                while (input.read(buffer).also { read = it } != -1) {
+                    digest.update(buffer, 0, read)
                 }
             }
-            String.format(Locale.US, "%064x", java.math.BigInteger(1, digest.digest()))
+            digest.digest().joinToString("") { "%02x".format(Locale.US, it) }
         } catch (e: Exception) {
             Log.w(TAG, "sha256 failed: ${e.message}")
             null
         }
 
-        /** Delete every cached update APK except [keep]. */
-        fun pruneCache(context: Context, keep: File?, maxAgeMs: Long = 7L * 24 * 60 * 60 * 1000) {
+        /** Removes the resume sidecar for [file] (if any). */
+        fun deleteSidecar(file: File) {
+            try {
+                metaFileFor(file).delete()
+            } catch (_: Exception) {
+            }
+        }
+
+        /**
+         * Delete cached update files except [keep] and its sidecar.
+         *
+         * [maxAgeMs] defaults to 0: everything else is removed immediately.
+         */
+        fun pruneCache(context: Context, keep: File?, maxAgeMs: Long = 0L) {
             try {
                 val dir = File(context.cacheDir, "updates")
-                val files = dir.listFiles { f ->
-                    f.isFile && f.name.startsWith("toolz_update_")
-                } ?: return
+                val files = dir.listFiles() ?: return
+                val keepMeta = keep?.let { metaFileFor(it).name }
                 val now = System.currentTimeMillis()
-                for (f in files) {
-                    if (keep != null && f.absolutePath == keep.absolutePath) continue
-                    if (now - f.lastModified() > maxAgeMs) {
-                        f.delete()
+                for (file in files) {
+                    if (keep != null && file.absolutePath == keep.absolutePath) continue
+                    if (keep != null && file.name == keepMeta) continue
+                    if (now - file.lastModified() >= maxAgeMs) {
+                        file.delete()
                     }
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "prune failed: ${e.message}")
+            }
+        }
+
+        private fun readMeta(file: File): Meta? = try {
+            if (!file.isFile) null
+            else {
+                val json = JSONObject(file.readText(Charsets.UTF_8))
+                Meta(
+                    url = json.optString("url"),
+                    totalBytes = json.optLong("total", 0L).takeIf { it > 0L },
+                    etag = json.optString("etag").takeIf { it.isNotBlank() },
+                    lastModified = json.optString("lastModified").takeIf { it.isNotBlank() },
+                    sha256 = json.optString("sha256").takeIf { it.isNotBlank() },
+                )
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "meta read failed: ${e.message}")
+            null
+        }
+
+        private fun writeMeta(file: File, meta: Meta) {
+            try {
+                val json = JSONObject()
+                    .put("url", meta.url)
+                    .put("total", meta.totalBytes ?: 0L)
+                    .put("etag", meta.etag ?: "")
+                    .put("lastModified", meta.lastModified ?: "")
+                    .put("sha256", meta.sha256 ?: "")
+                file.writeText(json.toString(), Charsets.UTF_8)
+            } catch (e: Exception) {
+                Log.w(TAG, "meta write failed: ${e.message}")
             }
         }
     }

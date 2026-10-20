@@ -18,6 +18,7 @@
 package com.frerox.toolz.worker
 
 import android.content.Context
+import android.util.Log
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
@@ -25,32 +26,42 @@ import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.data.update.UpdateManager
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 
+/**
+ * Daily background check. The work itself only needs any connection;
+ * automatic downloading is deferred until the network is unmetered
+ * (critical updates are exempt).
+ */
 @HiltWorker
 class UpdateCheckWorker @AssistedInject constructor(
     @Assisted context: Context,
     @Assisted params: WorkerParameters,
     private val settingsRepository: SettingsRepository,
-    private val updateManager: UpdateManager
+    private val updateManager: UpdateManager,
 ) : CoroutineWorker(context, params) {
 
-    override suspend fun doWork(): Result {
-        return try {
-            val update = updateManager.check(showNotification = true)
-            settingsRepository.setLastUpdateCheck(System.currentTimeMillis())
-            if (update != null) {
-                val autoUpdate = try { settingsRepository.autoUpdateEnabled.first() } catch (_: Exception) { false }
-                if (autoUpdate) {
-                    // Foreground download with auto-install chaining; progress
-                    // surfaces via UpdateNotifications.showProgress.
-                    updateManager.download(update, autoInstall = true)
-                }
+    override suspend fun doWork(): Result = try {
+        val update = updateManager.check(showNotification = true)
+        if (update != null) {
+            val autoUpdate = runCatching {
+                settingsRepository.autoUpdateEnabled.first()
+            }.getOrDefault(false)
+            if (autoUpdate && updateManager.canAutoDownloadNow(update)) {
+                // Progress and the install prompt surface through the manager.
+                updateManager.download(update, autoInstall = true)
             }
-            Result.success()
-        } catch (e: Exception) {
-            android.util.Log.e("UpdateCheck", "Update check failed", e)
-            Result.retry()
         }
+        Result.success()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Log.e(TAG, "update check failed: ${e.message}", e)
+        Result.retry()
+    }
+
+    private companion object {
+        const val TAG = "UpdateCheckWorker"
     }
 }

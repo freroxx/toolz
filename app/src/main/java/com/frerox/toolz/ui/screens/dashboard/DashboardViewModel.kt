@@ -34,7 +34,7 @@ import com.frerox.toolz.data.ai.ChatRepository
 import com.frerox.toolz.data.notepad.NoteDao
 import com.frerox.toolz.data.todo.TaskDao
 import com.frerox.toolz.data.settings.SettingsRepository
-import com.frerox.toolz.data.update.UpdateRepository
+import com.frerox.toolz.data.update.UpdateManager
 import com.frerox.toolz.ui.navigation.Screen
 import com.frerox.toolz.util.OfflineManager
 import com.frerox.toolz.util.OfflineState
@@ -94,7 +94,7 @@ class DashboardViewModel @Inject constructor(
     private val taskDao: TaskDao,
     private val aiDao: com.frerox.toolz.data.ai.AiDao,
     private val settingsRepository: SettingsRepository,
-    private val updateRepository: UpdateRepository,
+    private val updateManager: UpdateManager,
     private val offlineManager: OfflineManager,
 ) : ViewModel() {
 
@@ -413,7 +413,7 @@ class DashboardViewModel @Inject constructor(
     }
 
     fun dismissUpdate() {
-        viewModelScope.launch { settingsRepository.setAvailableUpdate(null, null, null) }
+        updateManager.dismissOffer()
     }
 
     fun togglePerformanceMode(enabled: Boolean) {
@@ -456,7 +456,9 @@ class DashboardViewModel @Inject constructor(
         viewModelScope.launch {
             val lastCheck = settingsRepository.lastUpdateCheck.first()
             if (System.currentTimeMillis() - lastCheck > 12 * 60 * 60 * 1000L) {
-                updateRepository.checkForUpdates()
+                // Background checks only notify; the manager also stamps the
+                // last-check time and persists the offer for later.
+                updateManager.check(showNotification = true)
             }
         }
     }

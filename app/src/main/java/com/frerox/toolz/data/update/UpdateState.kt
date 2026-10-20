@@ -18,12 +18,13 @@
 package com.frerox.toolz.data.update
 
 import java.io.File
+import java.util.Locale
 
 /**
  * A single update candidate resolved by [UpdateManager.check].
  *
  * @param source "github" when resolved from the GitHub release feed,
- *        "manifest" when enriched with the signed update manifest.
+ *        "manifest" when resolved from the signed update manifest.
  */
 data class PendingUpdate(
     val version: String,
@@ -34,55 +35,115 @@ data class PendingUpdate(
     val sha256: String?,
     val isCritical: Boolean,
     val abi: String,
-    val source: String
-)
+    val source: String,
+) {
+    val hasReleaseNotes: Boolean get() = changelog.isNotBlank()
+}
 
 /** Single source of truth for the in-app update flow UI. */
 sealed interface UpdateManagerState {
     data object Idle : UpdateManagerState
     data object Checking : UpdateManagerState
+
     data class Available(val update: PendingUpdate) : UpdateManagerState
+
     data class Downloading(
         val update: PendingUpdate,
         val bytesDownloaded: Long,
         val totalBytes: Long,
         val speedBps: Long,
         /** 0..100 */
-        val progress: Float
+        val progress: Float,
     ) : UpdateManagerState
-    data class ReadyToInstall(val update: PendingUpdate, val apkFile: File) : UpdateManagerState
-    data class Installing(val update: PendingUpdate) : UpdateManagerState
-    data class Error(val message: String, val retryable: Boolean) : UpdateManagerState
+
+    data class Verifying(
+        val update: PendingUpdate,
+        val apkFile: File? = null,
+    ) : UpdateManagerState
+
+    data class ReadyToInstall(
+        val update: PendingUpdate,
+        val apkFile: File,
+        val needsPermission: Boolean = false,
+    ) : UpdateManagerState
+
+    data class Installing(
+        val update: PendingUpdate,
+        val apkFile: File,
+    ) : UpdateManagerState
+
+    data class Error(
+        val error: UpdateError,
+        /** True when retrying should re-download instead of re-checking. */
+        val retryDownload: Boolean = false,
+    ) : UpdateManagerState {
+        val retryable: Boolean get() = error.retryable
+    }
+
     data object UpToDate : UpdateManagerState
-    data object Installed : UpdateManagerState
+
+    data class Installed(val version: String) : UpdateManagerState
 }
+
+/** The candidate owned by a live state, when there is one. */
+fun UpdateManagerState.pendingUpdate(): PendingUpdate? = when (this) {
+    is UpdateManagerState.Available -> update
+    is UpdateManagerState.Downloading -> update
+    is UpdateManagerState.Verifying -> update
+    is UpdateManagerState.ReadyToInstall -> update
+    is UpdateManagerState.Installing -> update
+    else -> null
+}
+
+private fun formatUnit(bytes: Double, unit: String): String =
+    String.format(Locale.US, "%.1f %s", bytes, unit)
 
 /** Human-readable byte count: "512 B", "3.2 MB". */
 fun formatBytes(bytes: Long): String {
     if (bytes < 0) return "--"
     if (bytes < 1024) return "$bytes B"
     val kb = bytes / 1024.0
-    if (kb < 1024) return "%.1f KB".format(kb)
+    if (kb < 1024) return formatUnit(kb, "KB")
     val mb = kb / 1024.0
-    if (mb < 1024) return "%.1f MB".format(mb)
-    return "%.2f GB".format(mb / 1024.0)
+    if (mb < 1024) return formatUnit(mb, "MB")
+    return String.format(Locale.US, "%.2f GB", mb / 1024.0)
 }
 
-/** Human-readable throughput: "512 B/s", "3.2 MB/s". */
-fun formatSpeed(bps: Long): String {
-    if (bps <= 0) return "--"
-    return "${formatBytes(bps)}/s"
+/** Compact duration pieces the UI turns into a localized string. */
+sealed interface Eta {
+    data class Seconds(val seconds: Long) : Eta
+    data class Minutes(val minutes: Long, val seconds: Long) : Eta
+    data class Hours(val hours: Long, val minutes: Long) : Eta
 }
 
 /**
- * Human-readable ETA: "--" when unknown, "12s", "3m 12s", "1h 05m".
+ * Splits the remaining download time into localized pieces, or null when
+ * throughput is not known yet.
  */
-fun formatEta(remainingBytes: Long, bps: Long): String {
-    if (remainingBytes <= 0) return "0s"
-    if (bps <= 0) return "--"
-    val seconds = remainingBytes / bps
-    if (seconds < 60) return "${seconds}s"
+fun etaOf(remainingBytes: Long, bps: Long): Eta? {
+    if (bps <= 0) return null
+    val seconds = if (remainingBytes <= 0) 0 else remainingBytes / bps
+    if (seconds < 60) return Eta.Seconds(seconds)
     val minutes = seconds / 60
-    if (minutes < 60) return "%dm %02ds".format(minutes, seconds % 60)
-    return "%dh %02dm".format(minutes / 60, minutes % 60)
+    if (minutes < 60) return Eta.Minutes(minutes, seconds % 60)
+    return Eta.Hours(minutes / 60, minutes % 60)
+}
+
+/** Coarse relative age; the UI picks the matching plural string. */
+sealed interface RelativeAge {
+    data object JustNow : RelativeAge
+    data class Minutes(val minutes: Long) : RelativeAge
+    data class Hours(val hours: Long) : RelativeAge
+    data class Days(val days: Long) : RelativeAge
+}
+
+fun relativeAge(ageMs: Long): RelativeAge {
+    if (ageMs < 0) return RelativeAge.JustNow
+    val minutes = ageMs / 60_000L
+    return when {
+        minutes < 1 -> RelativeAge.JustNow
+        minutes < 60 -> RelativeAge.Minutes(minutes)
+        minutes < 24 * 60 -> RelativeAge.Hours(minutes / 60)
+        else -> RelativeAge.Days(minutes / (24 * 60))
+    }
 }

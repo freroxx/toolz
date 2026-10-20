@@ -24,7 +24,7 @@ import com.frerox.toolz.data.ai.AiSettingsManager
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.util.DeviceSpecHelper
 import com.frerox.toolz.data.update.UpdateCheckResult
-import com.frerox.toolz.data.update.UpdateRepository
+import com.frerox.toolz.data.update.UpdateManager
 import com.frerox.toolz.util.shizuku.ShizukuHelper
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -40,7 +40,7 @@ class OnboardingViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val settingsRepository: SettingsRepository,
     private val aiSettingsManager: AiSettingsManager,
-    private val updateRepository: UpdateRepository,
+    private val updateManager: UpdateManager,
     private val launcherIconManager: com.frerox.toolz.data.skin.LauncherIconManager
 ) : ViewModel() {
 
@@ -154,7 +154,7 @@ class OnboardingViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(updateState = null) }
             delay(1500) // Aesthetic delay for animation
-            val result = updateRepository.checkForUpdates(false)
+            val result = updateManager.checkForResult(showNotification = false, force = true)
             _uiState.update { it.copy(updateState = result) }
         }
     }

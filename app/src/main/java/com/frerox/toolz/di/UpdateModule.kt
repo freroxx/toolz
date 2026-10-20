@@ -26,6 +26,7 @@ import dagger.hilt.components.SingletonComponent
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 import com.squareup.moshi.Moshi
+import java.util.concurrent.TimeUnit
 import okhttp3.OkHttpClient
 import javax.inject.Singleton
 
@@ -35,10 +36,18 @@ object UpdateModule {
 
     @Provides
     @Singleton
-    fun provideUpdateService(okHttpClient: OkHttpClient, moshi: Moshi): UpdateService {
+    fun provideUpdateService(appClient: OkHttpClient, moshi: Moshi): UpdateService {
+        // Update checks must never hang the UI or a worker. The shared app
+        // client has long media timeouts, so derive a short-lived clone.
+        val updateClient = appClient.newBuilder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
+            .writeTimeout(15, TimeUnit.SECONDS)
+            .callTimeout(20, TimeUnit.SECONDS)
+            .build()
         return Retrofit.Builder()
             .baseUrl(UpdateConstants.GITHUB_API_BASE_URL)
-            .client(okHttpClient)
+            .client(updateClient)
             .addConverterFactory(MoshiConverterFactory.create(moshi))
             .build()
             .create(UpdateService::class.java)
