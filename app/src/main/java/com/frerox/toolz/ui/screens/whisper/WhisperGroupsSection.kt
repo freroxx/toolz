@@ -32,8 +32,10 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -45,15 +47,20 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AddPhotoAlternate
 import androidx.compose.material.icons.rounded.BarChart
+import androidx.compose.material.icons.rounded.BrokenImage
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.Image
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.NotificationsOff
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -71,11 +78,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -110,6 +119,20 @@ import com.frerox.toolz.ui.components.rememberToolzHapticFeedback
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+private const val GROUP_SEARCH_THRESHOLD = 6
+
+/**
+ * Hub search matches the group name or its latest preview, case-insensitively.
+ * A blank/whitespace query always passes so clearing the field restores the
+ * unfiltered list immediately.
+ */
+internal fun groupMatches(query: String, name: String, preview: String?): Boolean {
+    val trimmed = query.trim()
+    if (trimmed.isEmpty()) return true
+    return name.contains(trimmed, ignoreCase = true) ||
+        preview?.contains(trimmed, ignoreCase = true) == true
+}
+
 /**
  * Groups hub: the Chats-tab section (flag-gated) + the create / join flows.
  * Renders nothing at all while the flag is off. Rows keep the 1:1
@@ -132,6 +155,21 @@ fun WhisperGroupsSection(
     val pictures by viewModel.pictures.collectAsStateWithLifecycle()
     var showCreate by remember { mutableStateOf(false) }
     var showJoinId by remember { mutableStateOf(false) }
+    var showMore by remember { mutableStateOf(false) }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    val showSearch = state.groups.size >= GROUP_SEARCH_THRESHOLD
+    val visibleGroups = remember(state.groups, state.previews, searchQuery, showSearch) {
+        if (showSearch) {
+            state.groups.filter { group ->
+                groupMatches(searchQuery, group.name, state.previews[group.id]?.text)
+            }
+        } else {
+            state.groups
+        }
+    }
+    LaunchedEffect(showSearch) {
+        if (!showSearch) searchQuery = ""
+    }
 
     LaunchedEffect(state.createdGroupId) {
         state.createdGroupId?.let {
@@ -164,29 +202,48 @@ fun WhisperGroupsSection(
         )
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
             SectionHeader(
-                if (state.groups.isEmpty()) stringResource(R.string.st_Whisper_Groups_Title)
-                else "${stringResource(R.string.st_Whisper_Groups_Title)} (${state.groups.size})",
+                text = if (state.groups.isEmpty()) {
+                    stringResource(R.string.st_Whisper_Groups_Title)
+                } else {
+                    "${stringResource(R.string.st_Whisper_Groups_Title)} (${state.groups.size})"
+                },
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
             )
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            FilledTonalIconButton(
+                onClick = { showCreate = true },
+                modifier = Modifier.size(48.dp),
             ) {
-                ToolzExpressiveTextButton(onClick = { showJoinId = true }) {
-                    Text(stringResource(R.string.st_Whisper_Groups_JoinById))
-                }
-                ToolzTonalExpressiveButton(
-                    onClick = { showCreate = true },
-                    contentPadding = ButtonDefaults.ButtonWithIconContentPadding,
+                Icon(
+                    Icons.Rounded.Add,
+                    contentDescription = stringResource(R.string.st_Whisper_Groups_New),
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+            Box {
+                IconButton(
+                    onClick = { showMore = true },
+                    modifier = Modifier.size(48.dp),
                 ) {
-                    Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-                    Text(
-                        stringResource(R.string.st_Whisper_Groups_New),
-                        style = MaterialTheme.typography.labelLarge,
+                    Icon(
+                        Icons.Rounded.MoreVert,
+                        contentDescription = stringResource(R.string.st_Whisper_Groups_More),
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
+                DropdownMenu(
+                    expanded = showMore,
+                    onDismissRequest = { showMore = false },
+                ) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.st_Whisper_Groups_JoinById)) },
+                        onClick = {
+                            showMore = false
+                            showJoinId = true
+                        },
                     )
                 }
             }
@@ -204,6 +261,13 @@ fun WhisperGroupsSection(
             actionLabel = stringResource(R.string.st_Whisper_Groups_Retry),
             onAction = { viewModel.load() },
         )
+        if (showSearch) {
+            GroupSearchField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                placeholder = stringResource(R.string.st_Whisper_Groups_SearchGroupsHint),
+            )
+        }
         if (state.isLoading && state.groups.isEmpty()) {
             repeat(2) { ConversationSkeleton() }
         }
@@ -211,6 +275,8 @@ fun WhisperGroupsSection(
             GroupEmptyPanel(
                 icon = Icons.Rounded.Groups,
                 message = stringResource(R.string.st_Whisper_Groups_Empty),
+                actionLabel = stringResource(R.string.st_Whisper_Groups_New),
+                onAction = { showCreate = true },
             )
         }
         state.invites.forEach { invite ->
@@ -223,7 +289,13 @@ fun WhisperGroupsSection(
                 )
             }
         }
-        state.groups.forEach { group ->
+        if (showSearch && visibleGroups.isEmpty()) {
+            GroupEmptyPanel(
+                icon = Icons.Rounded.Search,
+                message = stringResource(R.string.st_Whisper_Groups_NoGroupsFound),
+            )
+        }
+        visibleGroups.forEach { group ->
             key(group.id) {
                 val muted = group.id in mutedIds
                 SwipeToMuteRow(
@@ -841,9 +913,10 @@ private fun JoinByIdSheet(onDismiss: () -> Unit, onRequest: (String) -> Unit) {
  */
 @Composable
 fun GroupImageViewer(bytes: ByteArray, onDismiss: () -> Unit, onMessage: (String) -> Unit = {}) {
-    val bitmap = rememberGroupBitmap(bytes, 2048)
     val context = LocalContext.current
     val saveScope = rememberCoroutineScope()
+    var reloadKey by remember { mutableIntStateOf(0) }
+    val imageState = rememberGroupBitmapState(bytes, maxDim = 2048, reloadKey = reloadKey)
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
     var chromeVisible by remember { mutableStateOf(true) }
@@ -859,36 +932,82 @@ fun GroupImageViewer(bytes: ByteArray, onDismiss: () -> Unit, onMessage: (String
                 .fillMaxSize()
                 .background(Color.Black)
                 .onSizeChanged { boxSize = it }
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onTap = { chromeVisible = !chromeVisible },
-                        onDoubleTap = {
-                            if (scale > 1.05f) {
-                                scale = 1f
-                                offset = Offset.Zero
-                            } else {
-                                scale = 2.5f
-                            }
-                        },
-                    )
-                }
-                .pointerInput(Unit) {
-                    detectTransformGestures { _, pan, zoom, _ ->
-                        val next = (scale * zoom).coerceIn(1f, 5f)
-                        val maxX = boxSize.width * (next - 1f) / 2f
-                        val maxY = boxSize.height * (next - 1f) / 2f
-                        offset = if (next <= 1f) Offset.Zero else Offset(
-                            (offset.x + pan.x).coerceIn(-maxX, maxX),
-                            (offset.y + pan.y).coerceIn(-maxY, maxY),
+                .pointerInput(imageState is GroupBitmapState.Ready) {
+                    if (imageState is GroupBitmapState.Ready) {
+                        detectTapGestures(
+                            onTap = { chromeVisible = !chromeVisible },
+                            onDoubleTap = {
+                                if (scale > 1.05f) {
+                                    scale = 1f
+                                    offset = Offset.Zero
+                                } else {
+                                    scale = 2.5f
+                                }
+                            },
                         )
-                        scale = next
+                    }
+                }
+                .pointerInput(imageState is GroupBitmapState.Ready) {
+                    if (imageState is GroupBitmapState.Ready) {
+                        detectTransformGestures { _, pan, zoom, _ ->
+                            val next = (scale * zoom).coerceIn(1f, 5f)
+                            val maxX = boxSize.width * (next - 1f) / 2f
+                            val maxY = boxSize.height * (next - 1f) / 2f
+                            offset = if (next <= 1f) Offset.Zero else Offset(
+                                (offset.x + pan.x).coerceIn(-maxX, maxX),
+                                (offset.y + pan.y).coerceIn(-maxY, maxY),
+                            )
+                            scale = next
+                        }
                     }
                 },
             contentAlignment = Alignment.Center,
         ) {
-            if (bitmap != null) {
-                Image(
-                    bitmap = bitmap,
+            when (imageState) {
+                GroupBitmapState.Loading -> Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    GroupUiCenterLoading()
+                }
+                GroupBitmapState.Failed -> Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                        .padding(32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Icon(
+                        Icons.Rounded.BrokenImage,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(56.dp),
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        stringResource(R.string.st_Whisper_Groups_ImageLoadFailed),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ToolzTonalExpressiveButton(onClick = { reloadKey++ }) {
+                            Text(
+                                stringResource(R.string.st_Whisper_Groups_Retry),
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                        ToolzExpressiveTextButton(onClick = onDismiss) {
+                            Text(GroupCd.close())
+                        }
+                    }
+                }
+                is GroupBitmapState.Ready -> Image(
+                    bitmap = imageState.bitmap,
                     contentDescription = stringResource(R.string.st_Whisper_Groups_Photo),
                     modifier = Modifier
                         .fillMaxSize()
@@ -900,28 +1019,28 @@ fun GroupImageViewer(bytes: ByteArray, onDismiss: () -> Unit, onMessage: (String
                         },
                     contentScale = ContentScale.Fit,
                 )
-            } else {
-                GroupUiCenterLoading()
             }
             AnimatedVisibility(
-                visible = chromeVisible,
+                visible = chromeVisible || imageState !is GroupBitmapState.Ready,
                 enter = fadeIn(),
                 exit = fadeOut(),
                 modifier = Modifier.align(Alignment.TopEnd),
             ) {
                 Row(
-                    modifier = Modifier.padding(12.dp),
+                    modifier = Modifier.statusBarsPadding().padding(12.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    IconButton(
-                        onClick = { showSaveConfirm = true },
-                        colors = IconButtonDefaults.iconButtonColors(
-                            containerColor = Color.Black.copy(alpha = 0.5f),
-                            contentColor = Color.White,
-                        ),
-                    ) {
-                        Icon(Icons.Rounded.Download, contentDescription = GroupCd.save())
+                    if (imageState is GroupBitmapState.Ready) {
+                        IconButton(
+                            onClick = { showSaveConfirm = true },
+                            colors = IconButtonDefaults.iconButtonColors(
+                                containerColor = Color.Black.copy(alpha = 0.5f),
+                                contentColor = Color.White,
+                            ),
+                        ) {
+                            Icon(Icons.Rounded.Download, contentDescription = GroupCd.save())
+                        }
                     }
                     IconButton(
                         onClick = onDismiss,

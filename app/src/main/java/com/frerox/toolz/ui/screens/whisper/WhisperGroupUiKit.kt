@@ -327,6 +327,8 @@ fun GroupEmptyPanel(
     icon: ImageVector,
     message: String?,
     modifier: Modifier = Modifier,
+    actionLabel: String? = null,
+    onAction: (() -> Unit)? = null,
 ) {
     Column(
         modifier = modifier
@@ -356,6 +358,11 @@ fun GroupEmptyPanel(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
             )
+        }
+        if (!actionLabel.isNullOrBlank() && onAction != null) {
+            ToolzTonalExpressiveButton(onClick = onAction) {
+                Text(actionLabel, fontWeight = FontWeight.Bold)
+            }
         }
     }
 }
@@ -483,30 +490,67 @@ private object GroupBitmapCache {
     }
 }
 
+/** Discriminates the fullscreen viewer's honest loading / failure states. */
+internal sealed interface GroupBitmapState {
+    data object Loading : GroupBitmapState
+    data class Ready(val bitmap: ImageBitmap) : GroupBitmapState
+    data object Failed : GroupBitmapState
+}
+
 /**
  * Decodes off the main thread and caches by content, so lazy items that
- * scroll away and back don't decode again. Returns null until ready.
+ * scroll away and back don't decode again. [reloadKey] lets the viewer retry
+ * corrupt bytes without inventing a new cache entry.
  */
 @Composable
-internal fun rememberGroupBitmap(bytes: ByteArray?, maxDim: Int = 1024): ImageBitmap? {
-    val key = remember(bytes, maxDim) {
+internal fun rememberGroupBitmapState(
+    bytes: ByteArray?,
+    maxDim: Int = 1024,
+    reloadKey: Int = 0,
+): GroupBitmapState {
+    val cacheKey = remember(bytes, maxDim) {
         bytes?.let { "${it.size}:${it.contentHashCode()}:$maxDim" }
     }
-    val state = produceState<ImageBitmap?>(
-        initialValue = key?.let { GroupBitmapCache.get(it) },
-        key,
+    val loadKey = remember(cacheKey, reloadKey) { cacheKey to reloadKey }
+    val state = produceState<GroupBitmapState>(
+        initialValue = when {
+            cacheKey == null -> GroupBitmapState.Failed
+            else -> GroupBitmapCache.get(cacheKey)
+                ?.let { GroupBitmapState.Ready(it) }
+                ?: GroupBitmapState.Loading
+        },
+        loadKey,
     ) {
-        if (key == null || bytes == null) {
-            value = null
+        if (cacheKey == null || bytes == null) {
+            value = GroupBitmapState.Failed
             return@produceState
         }
-        val hit = GroupBitmapCache.get(key)
-        value = hit ?: withContext(Dispatchers.Default) {
+        value = GroupBitmapState.Loading
+        val hit = GroupBitmapCache.get(cacheKey)
+        if (hit != null) {
+            value = GroupBitmapState.Ready(hit)
+            return@produceState
+        }
+        val decoded = withContext(Dispatchers.Default) {
             decodeGroupBitmap(bytes, maxDim)?.asImageBitmap()
-        }?.also { GroupBitmapCache.put(key, it) }
+        }
+        value = if (decoded != null) {
+            GroupBitmapCache.put(cacheKey, decoded)
+            GroupBitmapState.Ready(decoded)
+        } else {
+            GroupBitmapState.Failed
+        }
     }
     return state.value
 }
+
+/**
+ * Existing avatar/list call sites keep their contract: null means no picture,
+ * still loading, or undecodable, so the initials fallback stays in place.
+ */
+@Composable
+internal fun rememberGroupBitmap(bytes: ByteArray?, maxDim: Int = 1024): ImageBitmap? =
+    (rememberGroupBitmapState(bytes, maxDim) as? GroupBitmapState.Ready)?.bitmap
 
 /**
  * Deterministic group / member avatar: the decrypted picture when given,

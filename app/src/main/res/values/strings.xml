@@ -3849,6 +3849,10 @@
     <!-- Whisper: groups (Phase 2, v1.1.7 dev) -->
     <string name="st_Whisper_Groups_Title">Groups</string>
     <string name="st_Whisper_Groups_New">New group</string>
+    <string name="st_Whisper_Groups_More">More</string>
+    <string name="st_Whisper_Groups_SearchGroupsHint">Search groups</string>
+    <string name="st_Whisper_Groups_NoGroupsFound">No groups match your search.</string>
+    <string name="st_Whisper_Groups_ImageLoadFailed">Couldn\'t load this photo.</string>
     <string name="st_Whisper_Groups_CreateTitle">New group</string>
     <string name="st_Whisper_Groups_NameHint">Group name</string>
     <string name="st_Whisper_Groups_AddMembers">Add members (friends only)</string>

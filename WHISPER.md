@@ -985,6 +985,21 @@ the composer directly. Creation offers friend picking, an optional picture, and 
 invite-mode choice that is fixed at creation (see the permissions edge note
 below).
 
+**Hub controls and states.** The groups header keeps the title/count to one
+ellipsized line and puts exactly two actions at the end: a tonal Add icon
+button ("New group") and a More overflow whose only item is Join with ID (the
+paste sheet and its validation are unchanged). With six or more groups, an
+inline search field appears under the header and filters rows live on group
+name or latest preview text, case-insensitively and after trimming; invites
+stay visible and unfiltered, and clearing restores the list. The empty hub
+offers a New group button inside its panel; a query with no matches shows a
+search-specific empty panel with no action. The fullscreen group image viewer
+distinguishes loading, ready, and decode failure: loading is a centered
+indicator on `surfaceContainerHigh`, corrupt bytes land on BrokenImage +
+"Couldn't load this photo" with Retry and Close, the top chrome respects
+status-bar insets, and Save is offered only after decoded pixels exist.
+Avatars keep their initials fallback through the same loading/failure path.
+
 **Chat screen.** Mirrors the 1:1 experience deliberately — same composer
 shape, send-button anatomy, and bubble geometry (fixed per-side corner
 shapes, uniform padding, width-capped bubbles with sender names), because the
@@ -1290,6 +1305,9 @@ Whisper's cryptography is pinned with a deliberately paranoid test stack:
   CTA precedence — Busy (publishing or published) wins over NoPhoto, which wins
   over NoAudience, which wins over NoQuota; only a ready draft returns None.
   This is pure state math, no ViewModel or device required.
+- **Groups hub search pins.** `WhisperGroupSearchTest` fixes the pure predicate:
+  blank/whitespace always passes, name matches ignore case and surrounding
+  space, the latest preview matches, and an unrelated query rejects.
 - **Instrumented media test** for Daily Ups: a fully geotagged, device-labeled
   test photo must publish with *zero* surviving EXIF/GPS tags on the exact
   publish bytes — device-only, like all Bitmap work.
