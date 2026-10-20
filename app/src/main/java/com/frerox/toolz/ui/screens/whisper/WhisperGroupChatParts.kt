@@ -997,12 +997,18 @@ private fun PollCard(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .heightIn(min = 48.dp)
                     .clip(RoundedCornerShape(14.dp))
                     .background(fg.copy(alpha = 0.08f))
-                    .clickable(enabled = !closed, role = Role.RadioButton) {
+                    .selectable(
+                        selected = selected,
+                        enabled = !closed,
+                        role = Role.RadioButton,
+                    ) {
                         haptic.tick()
                         onVote(idx)
                     },
+                contentAlignment = Alignment.Center,
             ) {
                 Box(modifier = Modifier.matchParentSize()) {
                     Box(
@@ -1137,7 +1143,10 @@ internal fun GroupSearchResults(
                 GroupUiInlineLoading()
             }
         } else if (!loading && results != null && list.isEmpty()) {
-            GroupEmptyPanel(icon = Icons.Rounded.Search, message = null)
+            GroupEmptyPanel(
+                icon = Icons.Rounded.Search,
+                message = stringResource(R.string.st_Whisper_Groups_NoSearchResults),
+            )
         }
         LazyColumn(
             state = listState,
@@ -1633,6 +1642,7 @@ internal fun MessageActionsSheet(
     msg: WhisperGroupChatMessage,
     reactions: Map<String, List<String>>,
     myId: String,
+    canCopy: Boolean,
     onDismiss: () -> Unit,
     onReact: (String) -> Unit,
     onReply: () -> Unit,
@@ -1681,7 +1691,7 @@ internal fun MessageActionsSheet(
             label = stringResource(R.string.st_Whisper_Groups_Reply),
             onClick = { onReply(); close() },
         )
-        if (msg.body.isNotBlank()) {
+        if (canCopy) {
             GroupActionRow(
                 icon = Icons.Rounded.ContentCopy,
                 label = stringResource(R.string.st_Whisper_Groups_Copy),

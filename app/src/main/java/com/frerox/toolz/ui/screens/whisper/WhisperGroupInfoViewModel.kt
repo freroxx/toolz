@@ -146,13 +146,15 @@ class WhisperGroupInfoViewModel @Inject constructor(
             membership.onSuccess { m ->
                 val names = repository.friendNameMap()
                 val muteKey = WhisperGroupChatViewModel.muteKey(groupId)
+                val youLabel = appContext.getString(R.string.st_Whisper_You)
+                val memberLabel = appContext.getString(R.string.st_Whisper_Groups_Member)
                 _uiState.update {
                     it.copy(
                         membership = m,
                         members = m.members.entries.map { (uid, role) ->
                             MemberEntry(
                                 userId = uid,
-                                name = if (uid == me) "You" else names[uid] ?: "Member",
+                                name = if (uid == me) youLabel else names[uid] ?: memberLabel,
                                 role = role.wire,
                                 isMe = uid == me,
                             )
@@ -160,7 +162,7 @@ class WhisperGroupInfoViewModel @Inject constructor(
                         pending = m.pendingInvites.sorted().map { uid ->
                             MemberEntry(
                                 userId = uid,
-                                name = names[uid] ?: "Member",
+                                name = names[uid] ?: memberLabel,
                                 role = "invited",
                                 isMe = false,
                             )

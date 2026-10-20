@@ -9,6 +9,7 @@ import android.util.Log
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.frerox.toolz.R
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.data.whisper.WhisperGroupChatMessage
 import com.frerox.toolz.data.whisper.WhisperGroupMembership
@@ -231,7 +232,13 @@ class WhisperGroupChatViewModel @Inject constructor(
         val typingJob = watchLive("typing") {
             repository.observeGroupTyping(groupId).collect { ids ->
                 val names = _uiState.value.memberNames
-                _uiState.update { it.copy(typingNames = ids.map { id -> names[id] ?: "Someone" }) }
+                _uiState.update {
+                    it.copy(
+                        typingNames = ids.map { id ->
+                            names[id] ?: appContext.getString(R.string.st_Whisper_Groups_Someone)
+                        },
+                    )
+                }
             }
         }
         // Reaction chips merge in place (Applied/Removed); Refetch is the rare
@@ -576,7 +583,13 @@ class WhisperGroupChatViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 _uiState.update { it.copy(error = null) }
-                repository.sendGroupContent(groupId, WhisperGroupContent(t = "poll closed", pollClose = pollId))
+                repository.sendGroupContent(
+                    groupId,
+                    WhisperGroupContent(
+                        t = appContext.getString(R.string.st_Whisper_Groups_PollClosedEvent),
+                        pollClose = pollId,
+                    ),
+                )
                     .onSuccess { refreshTimelineHead() }
                     .onFailure { e -> _uiState.update { it.copy(error = err(e)) } }
             } finally {
@@ -821,23 +834,45 @@ class WhisperGroupChatViewModel @Inject constructor(
         names: Map<String, String>,
         me: String,
     ): String? {
-        fun name(id: String): String = if (id == me) "You" else names[id] ?: "Someone"
+        val you = appContext.getString(R.string.st_Whisper_You)
+        val someone = appContext.getString(R.string.st_Whisper_Groups_Someone)
+        fun name(id: String): String = if (id == me) you else names[id] ?: someone
         fun subject(): String = payload.trim().trim('"').takeIf {
             it.length >= 10 && it.all { c -> c.isLetterOrDigit() || c == '-' }
-        }?.let { name(it) } ?: "Someone"
+        }?.let { name(it) } ?: someone
         return when (type) {
-            "create" -> "${name(actor)} created the group"
-            "join" -> "${name(actor)} joined"
-            "leave" -> "${name(actor)} left"
-            "remove" -> "${name(actor)} removed ${subject()}"
-            "promote" -> "${name(actor)} made ${subject()} an admin"
-            "demote" -> "${name(actor)} removed ${subject()} as admin"
-            "rename" -> "${name(actor)} changed the group name"
-            "picture" -> "${name(actor)} updated the group picture"
-            "settings" -> "${name(actor)} updated the group settings"
-            "decline" -> "${name(actor)} declined the invite"
-            "cancel" -> "${name(actor)} revoked an invite for ${subject()}"
-            "invite" -> "${name(actor)} invited ${subject()}"
+            "create" -> appContext.getString(R.string.st_Whisper_Groups_SysCreated, name(actor))
+            "join" -> appContext.getString(R.string.st_Whisper_Groups_SysJoined, name(actor))
+            "leave" -> appContext.getString(R.string.st_Whisper_Groups_SysLeft, name(actor))
+            "remove" -> appContext.getString(
+                R.string.st_Whisper_Groups_SysRemoved,
+                name(actor),
+                subject(),
+            )
+            "promote" -> appContext.getString(
+                R.string.st_Whisper_Groups_SysMadeAdmin,
+                name(actor),
+                subject(),
+            )
+            "demote" -> appContext.getString(
+                R.string.st_Whisper_Groups_SysRemovedAdmin,
+                name(actor),
+                subject(),
+            )
+            "rename" -> appContext.getString(R.string.st_Whisper_Groups_SysRenamed, name(actor))
+            "picture" -> appContext.getString(R.string.st_Whisper_Groups_SysPicture, name(actor))
+            "settings" -> appContext.getString(R.string.st_Whisper_Groups_SysSettings, name(actor))
+            "decline" -> appContext.getString(R.string.st_Whisper_Groups_SysDeclined, name(actor))
+            "cancel" -> appContext.getString(
+                R.string.st_Whisper_Groups_SysRevokedInvite,
+                name(actor),
+                subject(),
+            )
+            "invite" -> appContext.getString(
+                R.string.st_Whisper_Groups_SysInvited,
+                name(actor),
+                subject(),
+            )
             else -> null
         }
     }

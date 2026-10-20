@@ -115,7 +115,8 @@ fun WhisperGroupInfoScreen(
     val canApproveRequests = membership?.allows(me, WhisperGroupCapability.APPROVE_JOIN_REQUESTS) == true
     val canEditInfo = membership?.allows(me, WhisperGroupCapability.EDIT_INFO) == true
     val canEditPicture = membership?.allows(me, WhisperGroupCapability.EDIT_PICTURE) == true
-    val groupName = membership?.name?.ifBlank { "Group" } ?: "Group"
+    val defaultGroupName = stringResource(R.string.st_Whisper_Groups_DefaultName)
+    val groupName = membership?.name?.ifBlank { defaultGroupName } ?: defaultGroupName
     val adminCount = membership?.members?.count { it.value.wire == "admin" } ?: 0
 
     val mq = memberQuery.trim().lowercase()

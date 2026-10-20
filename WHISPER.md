@@ -906,7 +906,10 @@ image references (with optional expiries), reply quotes, poll cards and votes,
 poll closes, and mention lists. Everything stays client-side:
 
 - **Polls** tally on the client (latest vote per sender wins; admin close
-  freezes the tally) — no server table, no server semantics.
+  freezes the tally) — no server table, no server semantics. An admin close
+  is confirmed in an `AlertDialog` first; the sealed close marker carries the
+  poll id (which, not its human text, drives the frozen state) and takes that
+  text from a string resource.
 - **@mentions** render as highlighted chips with an on-device picker; the
   server cannot read them, so they ride message payloads. Badge chips ("you
   were mentioned") are computed locally from recent decrypted rows.
@@ -1009,7 +1012,15 @@ log events, the unread separator with jump-to-latest FAB, reaction chips with
 an emoji picker, long-press actions (quote, react, poll vote, close for
 admins), full-history search (decrypts page-by-page; the server never sees a
 plaintext lookup), draft persistence, and a degraded-history banner when the
-log could not be fully verified. Seen-by info is available per message.
+log could not be fully verified. Seen-by info is available per message. An
+empty conversation lands on a centered "No messages yet — say hello." panel
+while the composer stays visible and usable; a search with no hits says "No
+messages match your search." instead of leaving a blank list. Copy is a
+text-only action: it is absent for image-only messages, poll cards, votes, and
+close markers, and the "Copied" notice appears only after the clipboard write.
+Admins close a poll through a confirmation dialog; a closed card keeps the
+"Closed" label, disables every option, and exposes selected state to TalkBack
+through `selectable` rows with 48 dp targets.
 
 **Info screen.** The power surface: picture header with permission-gated
 edit, description, rename (admin; enforced server-side too), add/invite with
@@ -1308,6 +1319,11 @@ Whisper's cryptography is pinned with a deliberately paranoid test stack:
 - **Groups hub search pins.** `WhisperGroupSearchTest` fixes the pure predicate:
   blank/whitespace always passes, name matches ignore case and surrounding
   space, the latest preview matches, and an unrelated query rejects.
+- **Group chat copy pins.** `WhisperGroupChatCopyTest` fixes the text-only
+  clipboard predicate: a non-blank body is copyable; blank or whitespace-only
+  bodies are not. The screen combines that predicate with poll/vote/close
+  exclusion, and the action sheet takes the resulting flag rather than
+  re-deriving it.
 - **Instrumented media test** for Daily Ups: a fully geotagged, device-labeled
   test photo must publish with *zero* surviving EXIF/GPS tags on the exact
   publish bytes — device-only, like all Bitmap work.
@@ -1317,7 +1333,8 @@ Whisper's cryptography is pinned with a deliberately paranoid test stack:
   `:app:compileDebugKotlin` and finishes with the same seven pre-existing
   failures (all in unrelated engine suites, none Whisper-related). The frozen
   starting point was 530 tests; each wave records its exact total in its gate
-  log, and no new name may fail. Nothing behavioral lands outside that gate;
+  log, and no new name may fail. W5 lands at 561 tests with the same frozen
+  seven. Nothing behavioral lands outside that gate;
   the SQL/edge surfaces were deliberately untouched and still belong to the
   ship-day runbook (`supabase/POST_DEPLOY_SMOKE.md`).
 - **Server-plane invariants unchanged by the cycle.** Client-side hardening

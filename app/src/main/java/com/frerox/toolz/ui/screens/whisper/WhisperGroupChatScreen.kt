@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
@@ -94,12 +96,16 @@ fun WhisperGroupChatScreen(
     var menuMsg by remember { mutableStateOf<WhisperGroupChatMessage?>(null) }
     var infoMsg by remember { mutableStateOf<WhisperGroupChatMessage?>(null) }
     var confirmWipe by remember { mutableStateOf<WhisperGroupChatMessage?>(null) }
+    var confirmClosePoll by remember { mutableStateOf<WhisperGroupChatMessage?>(null) }
     var viewerBytes by remember { mutableStateOf<ByteArray?>(null) }
     var showAttach by remember { mutableStateOf(false) }
     var showPoll by remember { mutableStateOf(false) }
     var pendingImage by remember { mutableStateOf<Pair<ByteArray, String>?>(null) }
 
     val membership = state.membership
+    val defaultGroupName = stringResource(R.string.st_Whisper_Groups_DefaultName)
+    val photoLabel = stringResource(R.string.st_Whisper_Groups_Photo)
+    val memberFallback = stringResource(R.string.st_Whisper_Groups_Member)
     // Authorization is the reconstructed POLICY state, not a role check: the
     // owner may delegate send (or poll rights) to members through a signed
     // POLICY event, and a member without send locks exactly as before.
@@ -232,7 +238,7 @@ fun WhisperGroupChatScreen(
             GroupReplyRef(
                 id = it.clientId,
                 sender = it.senderName,
-                text = (it.poll?.q ?: it.body.ifBlank { "Photo" }).take(140),
+                text = (it.poll?.q ?: it.body.ifBlank { photoLabel }).take(140),
             )
         }
         viewModel.send(draft, reply = ref, mentionIds = resolveMentionIds(draft, state.memberNames))
@@ -257,7 +263,7 @@ fun WhisperGroupChatScreen(
         topBar = {
             GroupChatTopBar(
                 groupId = viewModel.groupId,
-                title = membership?.name?.ifBlank { "Group" } ?: "Group",
+                title = membership?.name?.ifBlank { defaultGroupName } ?: defaultGroupName,
                 subtitle = memberLabel,
                 typing = typing,
                 searching = searching,
@@ -333,6 +339,14 @@ fun WhisperGroupChatScreen(
                         },
                     )
                 }
+                !state.isLoading && feed.isEmpty() -> {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        GroupEmptyPanel(
+                            icon = Icons.Rounded.ChatBubbleOutline,
+                            message = stringResource(R.string.st_Whisper_Groups_EmptyChat),
+                        )
+                    }
+                }
                 else -> {
                     Box(modifier = Modifier.fillMaxSize()) {
                         LazyColumn(
@@ -375,7 +389,7 @@ fun WhisperGroupChatScreen(
                                             onReply = { replyTarget = msg },
                                             onQuoteClick = { qid -> jumpTo { it.clientId == qid } },
                                             onVote = { opt -> msg.poll?.let { viewModel.vote(it.id, opt) } },
-                                            onClosePoll = { msg.poll?.let { viewModel.closePoll(it.id) } },
+                                            onClosePoll = { if (msg.poll != null) confirmClosePoll = msg },
                                             onReact = { emoji -> viewModel.toggleReaction(msg, emoji) },
                                         )
                                     }
@@ -418,16 +432,21 @@ fun WhisperGroupChatScreen(
 
     // ── Sheets & dialogs ─────────────────────────────────────────────────────
     menuMsg?.let { msg ->
+        val canCopy = msg.poll == null && msg.vote == null && msg.pollClose == null &&
+            groupMessageCopyable(msg.body)
         MessageActionsSheet(
             msg = msg,
             reactions = state.reactions[msg.clientId].orEmpty(),
             myId = myId,
+            canCopy = canCopy,
             onDismiss = { menuMsg = null },
             onReact = { emoji -> viewModel.toggleReaction(msg, emoji) },
             onReply = { replyTarget = msg },
             onCopy = {
-                clipboard.setText(AnnotatedString(msg.body))
-                scope.launch { snackbar.showGroupNotice(context.getString(R.string.st_Whisper_Groups_Copied)) }
+                if (canCopy) {
+                    clipboard.setText(AnnotatedString(msg.body))
+                    scope.launch { snackbar.showGroupNotice(context.getString(R.string.st_Whisper_Groups_Copied)) }
+                }
             },
             onInfo = { infoMsg = msg },
             onDeleteForMe = { viewModel.deleteForMe(msg) },
@@ -446,12 +465,27 @@ fun WhisperGroupChatScreen(
         )
     }
 
+    confirmClosePoll?.let { msg ->
+        msg.poll?.let { poll ->
+            GroupConfirmDialog(
+                title = stringResource(R.string.st_Whisper_Groups_ClosePollTitle),
+                text = stringResource(R.string.st_Whisper_Groups_ClosePollBody),
+                confirmLabel = stringResource(R.string.st_Whisper_Groups_ClosePollConfirm),
+                onConfirm = {
+                    viewModel.closePoll(poll.id)
+                    confirmClosePoll = null
+                },
+                onDismiss = { confirmClosePoll = null },
+            )
+        }
+    }
+
     infoMsg?.let { msg ->
         val names = state.memberNames
         MessageInfoSheet(
             seen = state.receipts[msg.clientId].orEmpty()
                 .filter { it != msg.senderId }
-                .map { id -> id to (names[id] ?: "Member") },
+                .map { id -> id to (names[id] ?: memberFallback) },
             onDismiss = { infoMsg = null },
         )
     }
@@ -508,6 +542,9 @@ private fun msgTimeMs(iso: String): Long = runCatching {
 private fun dayOf(ms: Long): String = runCatching {
     java.time.Instant.ofEpochMilli(ms).atZone(java.time.ZoneId.systemDefault()).toLocalDate().toString()
 }.getOrDefault("")
+
+/** Copy is a text-only action; callers also exclude polls/votes/close rows. */
+internal fun groupMessageCopyable(body: String): Boolean = body.isNotBlank()
 
 /**
  * Oldest-first feed: day dividers, verified activity lines, the unread

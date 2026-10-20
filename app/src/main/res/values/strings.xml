@@ -3848,6 +3848,7 @@
     <string name="st_Whisper_UpdateRequired_Local">This Toolz build is below the minimum required version, so Whisper is disabled. Update to keep chatting.</string>
     <!-- Whisper: groups (Phase 2, v1.1.7 dev) -->
     <string name="st_Whisper_Groups_Title">Groups</string>
+    <string name="st_Whisper_Groups_DefaultName">Group</string>
     <string name="st_Whisper_Groups_New">New group</string>
     <string name="st_Whisper_Groups_More">More</string>
     <string name="st_Whisper_Groups_SearchGroupsHint">Search groups</string>
@@ -3874,6 +3875,8 @@
     <string name="st_Whisper_Groups_MessageHint">Message</string>
     <string name="st_Whisper_Groups_SearchHint">Search friends</string>
     <string name="st_Whisper_Groups_NoFriendsFound">No friends match your search.</string>
+    <string name="st_Whisper_Groups_NoSearchResults">No messages match your search.</string>
+    <string name="st_Whisper_Groups_EmptyChat">No messages yet — say hello.</string>
     <string name="st_Whisper_Groups_Info">Group info</string>
     <string name="st_Whisper_Groups_BlockConfirm">Block this member? You will stop receiving their messages everywhere, not just here.</string>
     <string name="st_Whisper_Groups_Removed">You are no longer a member of this group.</string>
@@ -3913,6 +3916,18 @@
     <string name="st_Whisper_Groups_Renamed">%1$s updated the group</string>
     <string name="st_Whisper_Groups_PictureUpdated">%1$s updated the group picture</string>
     <string name="st_Whisper_Groups_SettingsUpdated">%1$s updated the group settings</string>
+    <string name="st_Whisper_Groups_SysCreated">%1$s created the group</string>
+    <string name="st_Whisper_Groups_SysJoined">%1$s joined</string>
+    <string name="st_Whisper_Groups_SysLeft">%1$s left</string>
+    <string name="st_Whisper_Groups_SysRemoved">%1$s removed %2$s</string>
+    <string name="st_Whisper_Groups_SysMadeAdmin">%1$s made %2$s an admin</string>
+    <string name="st_Whisper_Groups_SysRemovedAdmin">%1$s removed %2$s as admin</string>
+    <string name="st_Whisper_Groups_SysRenamed">%1$s changed the group name</string>
+    <string name="st_Whisper_Groups_SysPicture">%1$s updated the group picture</string>
+    <string name="st_Whisper_Groups_SysSettings">%1$s updated the group settings</string>
+    <string name="st_Whisper_Groups_SysDeclined">%1$s declined the invite</string>
+    <string name="st_Whisper_Groups_SysRevokedInvite">%1$s revoked an invite for %2$s</string>
+    <string name="st_Whisper_Groups_SysInvited">%1$s invited %2$s</string>
     <string name="st_Whisper_Groups_Save">Save</string>
     <string name="st_Whisper_Groups_SavedToGallery">Saved to gallery</string>
     <string name="st_Whisper_Groups_SaveFailed">Couldn\u2019t save. Try again.</string>
@@ -3942,10 +3957,15 @@
     <string name="st_Whisper_Groups_FriendsFail">Couldn\'t load friends. Check your connection and retry.</string>
     <string name="st_Whisper_Groups_GalleryFail">Couldn\'t load this gallery. Check your connection and retry.</string>
     <string name="st_Whisper_Groups_Member">Member</string>
+    <string name="st_Whisper_Groups_Someone">Someone</string>
     <string name="st_Whisper_Groups_NoFriendsForGroup">Add friends first — groups are friends-only. Find people in Discover.</string>
     <string name="st_Whisper_Groups_InvalidId">That doesn\u2019t look like a group ID.</string>
     <string name="st_Whisper_Groups_PollClosed">Closed</string>
+    <string name="st_Whisper_Groups_PollClosedEvent">Poll closed</string>
     <string name="st_Whisper_Groups_ClosePoll">Close poll</string>
+    <string name="st_Whisper_Groups_ClosePollTitle">Close this poll?</string>
+    <string name="st_Whisper_Groups_ClosePollBody">Voting stops for everyone. This can\'t be undone.</string>
+    <string name="st_Whisper_Groups_ClosePollConfirm">Close</string>
     <string name="st_Whisper_Groups_JoinById">Join with ID</string>
     <string name="st_Whisper_Groups_JoinByIdHint">Paste a group ID</string>
     <string name="st_Whisper_Groups_JoinByIdHelp">Where do I find one? A member of the group opens the group profile, taps Share, then Copy ID — send that here. Your request lands on their screen as an invite and a group admin approves it.</string>
