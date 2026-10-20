@@ -1398,7 +1398,7 @@
     <string name="st_BmiScreen_u7v9">CANCEL QUIZ</string>
 
     <!-- CalculatorScreen -->
-    <string name="st_CalculatorScreen_f1a2">Math Engine</string>
+    <string name="st_CalculatorScreen_f1a2">Calculator</string>
     <string name="st_CalculatorScreen_3d5b">Back</string>
     <string name="st_CalculatorScreen_9e2c">Calculation history</string>
     <string name="st_CalculatorScreen_1a2b">tap to copy</string>
@@ -1422,7 +1422,7 @@
     <string name="st_CalculatorScreen_o5p6">Gas const.</string>
 
     <!-- EquationSolverScreen -->
-    <string name="st_EquationSolverScreen_f1a2">EQUATION SOLVER</string>
+    <string name="st_EquationSolverScreen_f1a2">Equation Solver</string>
     <string name="st_EquationSolverScreen_3d5b">Complex algebraic resolution</string>
     <string name="st_EquationSolverScreen_9e2c">Back</string>
     <string name="st_EquationSolverScreen_1a2b">History</string>
