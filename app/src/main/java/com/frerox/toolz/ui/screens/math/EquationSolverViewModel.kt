@@ -24,45 +24,148 @@ import com.frerox.toolz.data.math.MathHistory
 import com.frerox.toolz.data.math.MathHistoryDao
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import net.objecthunter.exp4j.ExpressionBuilder
-import java.util.Locale
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
 import javax.inject.Inject
-import kotlin.math.abs
-import kotlin.math.sqrt
 
-enum class EquationType {
-    LINEAR, QUADRATIC, CUBIC, QUARTIC, SYSTEM2
+/* ───────────────────────────── UI models ───────────────────────────── */
+
+/** A physical constant usable in any field. [insert] is the name the engine understands. */
+data class ConstantItem(val name: String, val symbol: String, val insert: String, val unit: String)
+
+val SolverConstants = listOf(
+    ConstantItem("Light speed", "c", "c", "m/s"),
+    ConstantItem("Gravitational", "G", "G", "N·m²/kg²"),
+    ConstantItem("Planck", "h", "h", "J·s"),
+    ConstantItem("Boltzmann", "k", "kB", "J/K"),
+    ConstantItem("Avogadro", "Nₐ", "NA", "mol⁻¹"),
+    ConstantItem("Gas constant", "R", "R", "J/(mol·K)"),
+    ConstantItem("Elem. charge", "qₑ", "qe", "C")
+)
+
+/** Everything the user is editing. The engine only ever sees [toProblem]. */
+data class SolverForm(
+    val mode: SolverMode = SolverMode.POLYNOMIAL,
+    val degree: Int = 2,
+    val size: Int = 2,
+    val inputs: Map<String, String> = emptyMap(),
+    val active: String? = "p0",
+    val searchRadius: Double? = null
+) {
+    val keys: List<String> get() = Slots.order(Problem(mode, degree, size))
+
+    fun toProblem(): Problem {
+        val k = keys.toSet()
+        return Problem(mode, degree, size, inputs.filterKeys { it in k }.filterValues { it.isNotEmpty() }, searchRadius)
+    }
+
+    val isEmpty: Boolean get() = keys.all { inputs[it].isNullOrEmpty() }
 }
 
-data class ConstantItem(val name: String, val value: String, val symbol: String, val description: String)
+/** A finished solve, paired with the problem it answers (so the UI can tell fresh from stale). */
+class Computed(val problem: Problem, val report: SolveReport)
 
-data class SolverState(
-    val selectedType: EquationType = EquationType.LINEAR,
-    val coefficients: Map<String, String> = mapOf("a" to "", "b" to "", "c" to "", "d" to "", "e" to "", "f" to ""),
-    val result: String = "",
-    val steps: List<String> = emptyList(),
-    val error: String? = null,
-    val isSolving: Boolean = false,
-    val selectedCoefficient: String? = null,
-    val constants: List<ConstantItem> = listOf(
-        ConstantItem("Pi", "pi", "π", "3.14159"),
-        ConstantItem("Euler", "e", "e", "2.71828"),
-        ConstantItem("Light Speed", "299792458", "c", "m/s"),
-        ConstantItem("Gravitational", "6.67430e-11", "G", "N·m²/kg²"),
-        ConstantItem("Planck", "6.62607e-34", "h", "J·s"),
-        ConstantItem("Boltzmann", "1.38064e-23", "k", "J/K"),
-        ConstantItem("Avogadro", "6.02214e23", "Nₐ", "mol⁻¹"),
-        ConstantItem("Gas Constant", "8.31446", "R", "J/(mol·K)"),
-        ConstantItem("Electron Charge", "1.60217e-19", "qₑ", "C")
+data class SolveRecord(
+    val id: Long,
+    val time: Long,
+    val mode: SolverMode,
+    val degree: Int,
+    val size: Int,
+    val radius: Double?,
+    val inputs: Map<String, String>,
+    val equation: String,
+    val summary: String
+)
+
+data class SolverExample(
+    val label: String,
+    val mode: SolverMode,
+    val degree: Int = 2,
+    val size: Int = 2,
+    val inputs: Map<String, String>
+)
+
+val SolverExamples: Map<SolverMode, List<SolverExample>> = mapOf(
+    SolverMode.POLYNOMIAL to listOf(
+        SolverExample("x² − 5x + 6", SolverMode.POLYNOMIAL, 2, inputs = mapOf("p0" to "1", "p1" to "-5", "p2" to "6")),
+        SolverExample("x² + 2x + 5", SolverMode.POLYNOMIAL, 2, inputs = mapOf("p0" to "1", "p1" to "2", "p2" to "5")),
+        SolverExample("x³ − 3x + 2", SolverMode.POLYNOMIAL, 3, inputs = mapOf("p0" to "1", "p1" to "0", "p2" to "-3", "p3" to "2")),
+        SolverExample("x⁴ − 5x² + 4", SolverMode.POLYNOMIAL, 4, inputs = mapOf("p0" to "1", "p1" to "0", "p2" to "-5", "p3" to "0", "p4" to "4"))
+    ),
+    SolverMode.SYSTEM to listOf(
+        SolverExample(
+            "2x + y = 5, x − y = 1", SolverMode.SYSTEM, size = 2,
+            inputs = mapOf("s00" to "2", "s01" to "1", "s02" to "5", "s10" to "1", "s11" to "-1", "s12" to "1")
+        ),
+        SolverExample(
+            "3 × 3 system", SolverMode.SYSTEM, size = 3,
+            inputs = mapOf(
+                "s00" to "2", "s01" to "1", "s02" to "-1", "s03" to "8",
+                "s10" to "-3", "s11" to "-1", "s12" to "2", "s13" to "-11",
+                "s20" to "-2", "s21" to "1", "s22" to "2", "s23" to "-3"
+            )
+        )
+    ),
+    SolverMode.CUSTOM to listOf(
+        SolverExample("sin x = 0.5", SolverMode.CUSTOM, inputs = mapOf("lhs" to "sin(x)", "rhs" to "0.5")),
+        SolverExample("eˣ = 3x", SolverMode.CUSTOM, inputs = mapOf("lhs" to "exp(x)", "rhs" to "3*x")),
+        SolverExample("cos x = x", SolverMode.CUSTOM, inputs = mapOf("lhs" to "cos(x)", "rhs" to "x")),
+        SolverExample("x³ − 2x = 5", SolverMode.CUSTOM, inputs = mapOf("lhs" to "x^3-2*x", "rhs" to "5"))
     )
 )
+
+/* ───────────────────────────── Keypad logic ───────────────────────────── */
+
+object SolverInput {
+    private const val MAX_LEN = 48
+    private val funcTail = Regex("[A-Za-z][A-Za-z0-9]*\\($")
+
+    fun apply(cur: String, key: String): String = when (key) {
+        "BS" -> if (cur.isEmpty()) cur else funcTail.find(cur)?.let { cur.dropLast(it.value.length) } ?: cur.dropLast(1)
+        "C" -> ""
+        "NEG" -> toggleNeg(cur)
+        "." -> dot(cur)
+        else -> if (cur.length + key.length > MAX_LEN) cur else cur + key
+    }
+
+    private fun toggleNeg(v: String): String = when {
+        v.isEmpty() -> "-"
+        v.startsWith("-(") && v.endsWith(")") -> v.substring(2, v.length - 1)
+        v.startsWith("-") -> v.drop(1)
+        v.any { it in "+-*/^()" } -> "-($v)"
+        else -> "-$v"
+    }
+
+    private fun dot(cur: String): String {
+        var i = cur.length
+        while (i > 0 && (cur[i - 1].isDigit() || cur[i - 1] == '.')) i--
+        val token = cur.substring(i)
+        return when {
+            token.contains('.') -> cur
+            token.isEmpty() -> cur + "0."
+            else -> "$cur."
+        }
+    }
+}
+
+/* ───────────────────────────── ViewModel ───────────────────────────── */
 
 @HiltViewModel
 class EquationSolverViewModel @Inject constructor(
@@ -70,356 +173,165 @@ class EquationSolverViewModel @Inject constructor(
     private val mathHistoryDao: MathHistoryDao
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(SolverState())
-    val uiState: StateFlow<SolverState> = _uiState.asStateFlow()
+    private val prefs = context.getSharedPreferences("equation_solver", Context.MODE_PRIVATE)
 
-    val history: StateFlow<List<MathHistory>> = mathHistoryDao.getAllHistory()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    private val _form = MutableStateFlow(SolverForm())
+    val form: StateFlow<SolverForm> = _form.asStateFlow()
 
-    fun onTypeChange(type: EquationType) {
-        _uiState.update { it.copy(selectedType = type, coefficients = mapOf("a" to "", "b" to "", "c" to "", "d" to "", "e" to "", "f" to ""), result = "", steps = emptyList(), error = null, selectedCoefficient = null) }
-    }
-
-    fun onCoefficientSelected(key: String?) {
-        _uiState.update { it.copy(selectedCoefficient = key) }
-    }
-
-    fun onCoefficientChange(key: String, value: String) {
-        _uiState.update { state ->
-            val newCoeffs = state.coefficients.toMutableMap()
-            newCoeffs[key] = value
-            state.copy(coefficients = newCoeffs, error = null)
+    /** Live results: re-solved ~120 ms after the last edit, off the main thread, cancelling stale work. */
+    @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
+    val computed: StateFlow<Computed?> = _form
+        .map { it.toProblem() }
+        .distinctUntilChanged()
+        .debounce(120)
+        .mapLatest { p ->
+            val job = currentCoroutineContext()[Job]
+            Computed(p, withContext(Dispatchers.Default) { EquationEngine.solve(p) { job?.isActive == false } })
         }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    private val _history = MutableStateFlow(loadHistory())
+    val history: StateFlow<List<SolveRecord>> = _history.asStateFlow()
+
+    /** Bumps every time the user presses Solve, so the screen can scroll to / confirm the result. */
+    private val _solveTick = MutableStateFlow(0)
+    val solveTick: StateFlow<Int> = _solveTick.asStateFlow()
+
+    /* ── form editing ── */
+
+    fun setMode(mode: SolverMode) = _form.update { f ->
+        val n = f.copy(mode = mode)
+        n.copy(active = n.keys.first())
     }
 
-    fun onKeyInput(input: String) {
-        val state = _uiState.value
-        val currentKey = state.selectedCoefficient ?: return
-        val currentValue = state.coefficients[currentKey] ?: ""
-
-        val newValue = when (input) {
-            "BS" -> if (currentValue.isNotEmpty()) currentValue.dropLast(1) else ""
-            "AC" -> ""
-            "+/-" -> if (currentValue.startsWith("-")) currentValue.drop(1) else "-$currentValue"
-            "." -> if (currentValue.contains(".")) currentValue else if (currentValue.isEmpty()) "0." else "$currentValue."
-            else -> currentValue + input
-        }
-
-        onCoefficientChange(currentKey, newValue)
+    fun setDegree(degree: Int) = _form.update { f ->
+        val n = f.copy(degree = degree.coerceIn(Slots.MIN_DEGREE, Slots.MAX_DEGREE))
+        n.copy(active = n.active?.takeIf { it in n.keys } ?: n.keys.first())
     }
+
+    fun setSize(size: Int) = _form.update { f ->
+        val n = f.copy(size = size.coerceIn(2, 3))
+        n.copy(active = n.active?.takeIf { it in n.keys } ?: n.keys.first())
+    }
+
+    fun setSearchRadius(radius: Double?) = _form.update { it.copy(searchRadius = radius) }
+
+    fun select(key: String?) = _form.update { it.copy(active = key) }
+
+    fun hideKeypad() = _form.update { it.copy(active = null) }
+
+    fun onKey(key: String) = _form.update { f ->
+        val k = f.active ?: return@update f
+        val cur = f.inputs[k].orEmpty()
+        val new = SolverInput.apply(cur, key)
+        if (new == cur) f else f.copy(inputs = f.inputs + (k to new))
+    }
+
+    fun next() = _form.update { f ->
+        val keys = f.keys
+        val i = keys.indexOf(f.active)
+        f.copy(active = if (i in 0 until keys.lastIndex) keys[i + 1] else null)
+    }
+
+    fun clearAll() = _form.update { f ->
+        f.copy(inputs = f.inputs - f.keys.toSet(), active = f.keys.first())
+    }
+
+    fun loadExample(ex: SolverExample) = _form.update { f ->
+        val n = f.copy(mode = ex.mode, degree = ex.degree, size = ex.size)
+        n.copy(inputs = f.inputs - n.keys.toSet() + ex.inputs, active = null)
+    }
+
+    fun restore(r: SolveRecord) = _form.update { f ->
+        val n = f.copy(mode = r.mode, degree = r.degree, size = r.size, searchRadius = r.radius)
+        n.copy(inputs = f.inputs - n.keys.toSet() + r.inputs, active = null)
+    }
+
+    /* ── committing ── */
 
     fun solve() {
-        val state = _uiState.value
+        val f = _form.value
+        _form.update { it.copy(active = null) }
+        val problem = f.toProblem()
         viewModelScope.launch {
-            _uiState.update { it.copy(isSolving = true, error = null, result = "", selectedCoefficient = null) }
-            kotlinx.coroutines.delay(1200) // Polished delay for visual feedback
-            try {
-                when (state.selectedType) {
-                    EquationType.LINEAR -> solveLinear(state)
-                    EquationType.QUADRATIC -> solveQuadratic(state)
-                    EquationType.CUBIC -> solveCubic(state)
-                    EquationType.QUARTIC -> solveQuartic(state)
-                    EquationType.SYSTEM2 -> solveSystem2(state)
-                }
-            } catch (e: Exception) {
-                _uiState.update { it.copy(error = "Calculation error. check inputs.") }
-            } finally {
-                _uiState.update { it.copy(isSolving = false) }
+            // Reuse the live result when it already matches; only compute on demand
+            // when the user confirms before the debounce has caught up.
+            val report = computed.value
+                ?.takeIf { it.problem == problem }
+                ?.report
+                ?: withContext(Dispatchers.Default) { EquationEngine.solve(problem) }
+            val solved = report.outcome !is Outcome.Incomplete && report.outcome !is Outcome.Invalid
+            if (solved) {
+                addRecord(f, report)
+                try {
+                    mathHistoryDao.insert(
+                        MathHistory(expression = report.equation.replace("\n", "; "), result = report.summary)
+                    )
+                } catch (_: Exception) { /* shared history is best-effort */ }
             }
+            _solveTick.update { it + 1 }
         }
     }
 
-    private fun solveQuartic(state: SolverState) {
-        val a = parse(state.coefficients["a"] ?: "0")
-        val b = parse(state.coefficients["b"] ?: "0")
-        val c = parse(state.coefficients["c"] ?: "0")
-        val d = parse(state.coefficients["d"] ?: "0")
-        val e = parse(state.coefficients["e"] ?: "0")
+    /* ── history ── */
 
-        if (a == 0.0) {
-            solveCubic(state.copy(coefficients = mapOf("a" to b.toString(), "b" to c.toString(), "c" to d.toString(), "d" to e.toString())))
-            return
-        }
-
-        // Ferrari's Method for Quartic
-        val steps = mutableListOf(
-            "Equation: ${format(a)}x⁴ + ${format(b)}x³ + ${format(c)}x² + ${format(d)}x + ${format(e)} = 0",
-            "1. Normalize the equation by dividing by a: x⁴ + Bx³ + Cx² + Dx + E = 0"
-        )
-
-        val B = b / a
-        val C = c / a
-        val D = d / a
-        val E = e / a
-
-        steps.add("   B=${format(B)}, C=${format(C)}, D=${format(D)}, E=${format(E)}")
-
-        // Reduced form: y⁴ + py² + qy + r = 0, where x = y - B/4
-        val p = C - 3.0 * B * B / 8.0
-        val q = D - B * C / 2.0 + B * B * B / 8.0
-        val r = E - B * D / 4.0 + B * B * C / 16.0 - 3.0 * B * B * B * B / 256.0
-
-        steps.add("2. Reduce to depressed quartic: y⁴ + py² + qy + r = 0 (y = x + B/4)")
-        steps.add("   p=${format(p)}, q=${format(q)}, r=${format(r)}")
-
-        if (abs(q) < 1e-12) {
-            steps.add("3. q ≈ 0, treating as bi-quadratic equation (y²)² + p(y²) + r = 0")
-            val delta = p * p - 4.0 * r
-            if (delta >= 0) {
-                val z1 = (-p + sqrt(delta)) / 2.0
-                val z2 = (-p - sqrt(delta)) / 2.0
-                val rootsY = mutableListOf<Double>()
-                if (z1 >= 0) { rootsY.add(sqrt(z1)); rootsY.add(-sqrt(z1)) }
-                if (z2 >= 0) { rootsY.add(sqrt(z2)); rootsY.add(-sqrt(z2)) }
-                val realRoots = rootsY.map { it - B / 4.0 }.distinct()
-                val result = if (realRoots.isNotEmpty()) "Real roots: " + realRoots.joinToString(", ") { format(it) } else "No real roots"
-                _uiState.update { it.copy(result = result, steps = steps, error = null) }
-                saveToHistory("Quartic: ${format(a)}x⁴ + ...", result)
-                return
-            }
-        }
-
-        // Resolvent cubic: m³ + (5/2 p)m² + (2p² - r)m + (p³/2 - pr/2 - q²/8) = 0
-        // Standard Ferrari resolvent: 2m³ - pm² - 2rm + (rp - q²/4) = 0 (using m instead of y)
-        // Let's use a simpler resolvent: z³ - pz² - 4rz + (4pr - q²) = 0
-        val ra = -p
-        val rb = -4.0 * r
-        val rc = 4.0 * p * r - q * q
-
-        // Solve resolvent cubic for at least one real root m
-        val m = solveCubicForOneRoot(1.0, ra, rb, rc)
-        steps.add("3. Solve resolvent cubic for m: m ≈ ${format(m)}")
-
-        // Roots of the quartic are roots of two quadratics:
-        // y² ± sqrt(2m - p) y + (m ± q / (2 * sqrt(2m-p))) = 0
-        val sqrt2mp = sqrt(abs(2.0 * m - p))
-        val qPart = if (sqrt2mp > 1e-12) q / (2.0 * sqrt2mp) else 0.0
-
-        // Quadratic 1: y² + sqrt2mp*y + (m - qPart) = 0
-        // Quadratic 2: y² - sqrt2mp*y + (m + qPart) = 0
-        val rootsX = mutableListOf<String>()
-        
-        fun solveQuad(qa: Double, qb: Double, qc: Double) {
-            val d2 = qb * qb - 4.0 * qa * qc
-            if (d2 >= 0) {
-                rootsX.add(format((-qb + sqrt(d2)) / (2.0 * qa) - B / 4.0))
-                rootsX.add(format((-qb - sqrt(d2)) / (2.0 * qa) - B / 4.0))
-            } else {
-                val re = -qb / (2.0 * qa) - B / 4.0
-                val im = sqrt(-d2) / (2.0 * qa)
-                rootsX.add("${format(re)} + ${format(im)}i")
-                rootsX.add("${format(re)} - ${format(im)}i")
-            }
-        }
-
-        solveQuad(1.0, sqrt2mp, m - qPart)
-        solveQuad(1.0, -sqrt2mp, m + qPart)
-
-        val result = "Roots: ${rootsX.joinToString(", ")}"
-        steps.add("4. Solved two quadratics derived from resolvent.")
-        
-        _uiState.update { it.copy(result = result, steps = steps, error = null) }
-        saveToHistory("Quartic: ${format(a)}x⁴ + ...", result)
+    fun deleteRecord(id: Long) {
+        _history.update { list -> list.filterNot { it.id == id } }
+        persist()
     }
 
-    private fun solveCubicForOneRoot(a: Double, b: Double, c: Double, d: Double): Double {
-        val A = b / a
-        val B = c / a
-        val C = d / a
-        val Q = (3 * B - A * A) / 9.0
-        val R = (9 * A * B - 27 * C - 2 * A * A * A) / 54.0
-        val D = Q * Q * Q + R * R
-
-        return if (D >= 0) {
-            val S = cubeRoot(R + sqrt(D))
-            val T = cubeRoot(R - sqrt(D))
-            S + T - A / 3.0
-        } else {
-            val theta = Math.acos(R / sqrt(-Q * Q * Q))
-            2 * sqrt(-Q) * Math.cos(theta / 3.0) - A / 3.0
-        }
+    fun clearHistory() {
+        _history.value = emptyList()
+        persist()
     }
 
-    private fun solveLinear(state: SolverState) {
-        val a = parse(state.coefficients["a"] ?: "0")
-        val b = parse(state.coefficients["b"] ?: "0")
-        
-        if (a == 0.0) {
-            _uiState.update { it.copy(error = "Coefficient 'a' cannot be zero.") }
-            return
+    private fun addRecord(f: SolverForm, report: SolveReport) {
+        val p = f.toProblem()
+        val now = System.currentTimeMillis()
+        val rec = SolveRecord(now, now, p.mode, p.degree, p.size, p.searchRadius, p.inputs, report.equation, report.summary)
+        _history.update { list ->
+            val deduped = list.filterNot { it.equation == rec.equation && it.summary == rec.summary }
+            (listOf(rec) + deduped).take(MAX_HISTORY)
         }
-
-        val x = -b / a
-        val res = "x = ${format(x)}"
-        val steps = listOf(
-            "Equation: ${format(a)}x + ${format(b)} = 0",
-            "Subtract ${format(b)} from both sides: ${format(a)}x = ${format(-b)}",
-            "Divide by ${format(a)}: x = ${format(-b)} / ${format(a)}",
-            "Solution: $res"
-        )
-        _uiState.update { it.copy(result = res, steps = steps, error = null) }
-        saveToHistory("${format(a)}x + ${format(b)} = 0", res)
+        persist()
     }
 
-    private fun solveQuadratic(state: SolverState) {
-        val a = parse(state.coefficients["a"] ?: "0")
-        val b = parse(state.coefficients["b"] ?: "0")
-        val c = parse(state.coefficients["c"] ?: "0")
-
-        if (a == 0.0) {
-            solveLinear(SolverState(coefficients = mapOf("a" to b.toString(), "b" to c.toString())))
-            return
+    private fun persist() {
+        val arr = JSONArray()
+        _history.value.forEach { r ->
+            arr.put(
+                JSONObject()
+                    .put("id", r.id).put("t", r.time).put("m", r.mode.name)
+                    .put("d", r.degree).put("n", r.size)
+                    .put("r", r.radius ?: JSONObject.NULL)
+                    .put("eq", r.equation).put("sum", r.summary)
+                    .put("in", JSONObject(r.inputs as Map<*, *>))
+            )
         }
-
-        val delta = b * b - 4 * a * c
-        val steps = mutableListOf(
-            "Equation: ${format(a)}x² + ${format(b)}x + ${format(c)} = 0",
-            "1. Identify coefficients: a=${format(a)}, b=${format(b)}, c=${format(c)}",
-            "2. Calculate Discriminant (Δ): b² - 4ac",
-            "Δ = (${format(b)})² - 4(${format(a)})(${format(c)}) = ${format(delta)}"
-        )
-
-        val res = when {
-            delta > 0 -> {
-                val x1 = (-b + sqrt(delta)) / (2 * a)
-                val x2 = (-b - sqrt(delta)) / (2 * a)
-                steps.add("3. Δ > 0, so there are two real roots:")
-                steps.add("x = (-b ± √Δ) / 2a")
-                steps.add("x₁ = (-${format(b)} + ${format(sqrt(delta))}) / ${format(2 * a)} = ${format(x1)}")
-                steps.add("x₂ = (-${format(b)} - ${format(sqrt(delta))}) / ${format(2 * a)} = ${format(x2)}")
-                "x₁ = ${format(x1)}, x₂ = ${format(x2)}"
-            }
-            delta == 0.0 -> {
-                val x = -b / (2 * a)
-                steps.add("3. Δ = 0, so there is one real double root:")
-                steps.add("x = -b / 2a = -${format(b)} / ${format(2 * a)} = ${format(x)}")
-                "x = ${format(x)}"
-            }
-            else -> {
-                val real = -b / (2 * a)
-                val img = sqrt(-delta) / (2 * a)
-                steps.add("3. Δ < 0, so roots are complex:")
-                steps.add("x = (-b ± i√|Δ|) / 2a")
-                steps.add("x = ${format(real)} ± ${format(img)}i")
-                "x = ${format(real)} ± ${format(img)}i"
-            }
-        }
-        _uiState.update { it.copy(result = res, steps = steps, error = null) }
-        saveToHistory("${format(a)}x² + ${format(b)}x + ${format(c)} = 0", res)
+        prefs.edit().putString(KEY_HISTORY, arr.toString()).apply()
     }
 
-    private fun solveCubic(state: SolverState) {
-        val a = parse(state.coefficients["a"] ?: "0")
-        val b = parse(state.coefficients["b"] ?: "0")
-        val c = parse(state.coefficients["c"] ?: "0")
-        val d = parse(state.coefficients["d"] ?: "0")
-
-        if (a == 0.0) {
-            solveQuadratic(state)
-            return
+    private fun loadHistory(): List<SolveRecord> = try {
+        val arr = JSONArray(prefs.getString(KEY_HISTORY, "[]"))
+        List(arr.length()) { i ->
+            val o = arr.getJSONObject(i)
+            val inObj = o.getJSONObject("in")
+            val inputs = HashMap<String, String>()
+            inObj.keys().forEach { k -> inputs[k] = inObj.getString(k) }
+            SolveRecord(
+                id = o.getLong("id"), time = o.getLong("t"),
+                mode = SolverMode.valueOf(o.getString("m")),
+                degree = o.getInt("d"), size = o.getInt("n"),
+                radius = if (o.isNull("r")) null else o.getDouble("r"),
+                inputs = inputs, equation = o.getString("eq"), summary = o.getString("sum")
+            )
         }
-
-        // x³ + Ax² + Bx + C = 0
-        val A = b / a
-        val B = c / a
-        val C = d / a
-
-        val Q = (3 * B - A * A) / 9.0
-        val R = (9 * A * B - 27 * C - 2 * A * A * A) / 54.0
-        val D = Q * Q * Q + R * R
-
-        val steps = mutableListOf(
-            "Equation: ${format(a)}x³ + ${format(b)}x² + ${format(c)}x + ${format(d)} = 0",
-            "Normalized: x³ + ${format(A)}x² + ${format(B)}x + ${format(C)} = 0",
-            "Calculate Q and R parameters...",
-            "Discriminant (D) = Q³ + R² = ${format(D)}"
-        )
-
-        val result = if (D >= 0) {
-            val S = cubeRoot(R + sqrt(D))
-            val T = cubeRoot(R - sqrt(D))
-            val x1 = S + T - A / 3.0
-            
-            if (abs(D) < 1e-10) { // Three real roots, at least two equal
-                val x2 = -(S + T) / 2.0 - A / 3.0
-                steps.add("D ≈ 0: Three real roots, at least two are equal.")
-                "x₁ = ${format(x1)}, x₂ = ${format(x2)}"
-            } else { // One real root and two complex
-                steps.add("D > 0: One real root and two complex conjugate roots.")
-                "x₁ = ${format(x1)} (Real root)"
-            }
-        } else { // Three distinct real roots
-            val theta = Math.acos(R / sqrt(-Q * Q * Q))
-            val x1 = 2 * sqrt(-Q) * Math.cos(theta / 3.0) - A / 3.0
-            val x2 = 2 * sqrt(-Q) * Math.cos((theta + 2 * Math.PI) / 3.0) - A / 3.0
-            val x3 = 2 * sqrt(-Q) * Math.cos((theta + 4 * Math.PI) / 3.0) - A / 3.0
-            steps.add("D < 0: Three distinct real roots using trigonometric method.")
-            "x₁ = ${format(x1)}, x₂ = ${format(x2)}, x₃ = ${format(x3)}"
-        }
-
-        _uiState.update { it.copy(result = result, steps = steps, error = null) }
-        saveToHistory("${format(a)}x³ + ${format(b)}x² + ${format(c)}x + ${format(d)} = 0", result)
+    } catch (_: Exception) {
+        emptyList()
     }
 
-    private fun cubeRoot(x: Double): Double {
-        return if (x >= 0) Math.pow(x, 1.0 / 3.0) else -Math.pow(-x, 1.0 / 3.0)
-    }
-
-    private fun solveSystem2(state: SolverState) {
-        // a1x + b1y = c1
-        // a2x + b2y = c2
-        // We'll reuse coefficients map creatively or add more
-        val a1 = parse(state.coefficients["a"] ?: "0")
-        val b1 = parse(state.coefficients["b"] ?: "0")
-        val c1 = parse(state.coefficients["c"] ?: "0")
-        val a2 = parse(state.coefficients["d"] ?: "0")
-        val b2 = parse(state.coefficients["e"] ?: "0")
-        val c2 = parse(state.coefficients["f"] ?: "0")
-
-        val det = a1 * b2 - a2 * b1
-        if (det == 0.0) {
-            _uiState.update { it.copy(error = "No unique solution (Determinant is 0)") }
-            return
-        }
-
-        val x = (c1 * b2 - c2 * b1) / det
-        val y = (a1 * c2 - a2 * c1) / det
-        val res = "x = ${format(x)}, y = ${format(y)}"
-        val steps = listOf(
-            "System:",
-            "1) ${format(a1)}x + ${format(b1)}y = ${format(c1)}",
-            "2) ${format(a2)}x + ${format(b2)}y = ${format(c2)}",
-            "Calculate Determinant (D) = a1*b2 - a2*b1 = ${format(det)}",
-            "D_x = c1*b2 - c2*b1 = ${format(c1 * b2 - c2 * b1)}",
-            "D_y = a1*c2 - a2*c1 = ${format(a1 * c2 - a2 * c1)}",
-            "x = D_x / D = ${format(x)}",
-            "y = D_y / D = ${format(y)}"
-        )
-        _uiState.update { it.copy(result = res, steps = steps, error = null) }
-        saveToHistory("System ($a1,$b1,$c1),($a2,$b2,$c2)", res)
-    }
-
-    private fun parse(s: String): Double {
-        if (s.isEmpty()) return 0.0
-        return try {
-            ExpressionBuilder(s.replace("π", "pi")).build().evaluate()
-        } catch (e: Exception) {
-            0.0
-        }
-    }
-
-    private fun format(v: Double): String {
-        return if (abs(v - Math.round(v)) < 1e-10) Math.round(v).toString()
-        else String.format(Locale.US, "%.4f", v).trimEnd('0').trimEnd('.')
-    }
-
-    fun clear() {
-        _uiState.update { SolverState(selectedType = it.selectedType) }
-    }
-
-    private fun saveToHistory(expr: String, res: String) {
-        viewModelScope.launch {
-            mathHistoryDao.insert(MathHistory(expression = expr, result = res))
-        }
+    private companion object {
+        const val KEY_HISTORY = "history_v2"
+        const val MAX_HISTORY = 40
     }
 }
