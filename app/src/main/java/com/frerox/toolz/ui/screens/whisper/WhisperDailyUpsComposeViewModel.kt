@@ -31,6 +31,34 @@ import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 /**
+ * Why the pinned Share button cannot fire. Priority is deliberate and pinned
+ * by unit tests: an in-flight/successful publish is busy regardless of the
+ * draft; a missing photo is the first thing the reader must fix; then an empty
+ * audience; quota is last because it is the only server-owned ceiling.
+ */
+internal enum class ShareBlock {
+    None,
+    NoPhoto,
+    NoAudience,
+    NoQuota,
+    Busy,
+}
+
+internal fun dailyUpShareBlock(
+    hasPhoto: Boolean,
+    remaining: Int,
+    audienceSize: Int,
+    publishing: Boolean,
+    published: Boolean,
+): ShareBlock = when {
+    publishing || published -> ShareBlock.Busy
+    !hasPhoto -> ShareBlock.NoPhoto
+    audienceSize <= 0 -> ShareBlock.NoAudience
+    remaining <= 0 -> ShareBlock.NoQuota
+    else -> ShareBlock.None
+}
+
+/**
  * State for composing ONE Daily Up: photo draft → audience trim → share.
  *
  * The photo draft lives ONLY in memory; nothing touches disk until the
@@ -68,6 +96,18 @@ class WhisperDailyUpsComposeViewModel @Inject constructor(
     ) {
         val remaining: Int get() = (WhisperDailyUpsConfig.DAILY_LIMIT - quotaUsed).coerceAtLeast(0)
         val audienceSize: Int get() = maxOf(friends.size - excluded.size, 0)
+
+        /** A live draft worth protecting from an accidental back gesture. */
+        val hasDraft: Boolean get() = photo != null && !published
+
+        internal val shareBlock: ShareBlock
+            get() = dailyUpShareBlock(
+                hasPhoto = photo != null,
+                remaining = remaining,
+                audienceSize = audienceSize,
+                publishing = publishing,
+                published = published,
+            )
     }
 
     private val _state = MutableStateFlow(ComposeUiState())
@@ -143,7 +183,7 @@ class WhisperDailyUpsComposeViewModel @Inject constructor(
         _state.update { it.copy(receiptsOn = on) }
     }
 
-    fun toggleExcluded(friendId: String) {
+    fun toggleAudience(friendId: String) {
         _state.update {
             it.copy(
                 excluded = if (friendId in it.excluded) {
@@ -153,6 +193,11 @@ class WhisperDailyUpsComposeViewModel @Inject constructor(
                 },
             )
         }
+    }
+
+    /** Restore the all-friends audience from the sheet's Select all action. */
+    fun selectAllAudience() {
+        _state.update { it.copy(excluded = emptySet()) }
     }
 
     fun clearError() {

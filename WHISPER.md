@@ -1202,21 +1202,38 @@ navigation gate as the group cards.
 
 ### 12.5 Publishing
 
-The compose screen opens with the CTA on the hub (and the entry row, and the
-stories bar in the groups section): photo pick (bounded 12-MiB read mirroring
-the pipeline), an in-memory draft + downsampled preview (bytes never touch
-disk before the pipeline runs), receipts switch, audience = **all current
-friends minus explicit exclusions** (a summary line always shows the final
-audience size), and a quota-aware share button that explains itself when
-disabled (no photo, quota out). Upload chain: preprocess → seal → host →
-one sealed leg per friend → publish RPC → self-sealed own row → opportunistic
-sweep kick. Any failure up-chain maps to a fixed vocabulary of errors; a
-failure *before* the publish RPC leaves zero server truth (nothing partial
-ever exists). Retries keep the draft. A friends-list load that fails in the
-audience step shows an honest retry state instead of reading as "no friends
-yet", and a failed photo decode cancels the previous decode so the last pick
-always wins (two quick picks could otherwise land the slower, older image
-into the draft).
+The composer opens from the hub's Add / Your-day actions and the groups
+stories strip (the old Chats-tab entry row is gone). Its photo canvas mirrors
+the viewer's 9:16 Fit framing on `surfaceContainerHighest`, with a 24 dp radius
+and a 1 dp `outlineVariant` border — a letterboxed portrait is not cropped into
+a different promise. Tapping the canvas re-opens the picker, and the bottom-end
+"Tap to change" chip says so. The pick is read with a bounded 12-MiB stream
+(mirroring the pipeline), decoded into an in-memory oriented preview, and never
+written to disk before the publish pipeline. Receipts stay an explicit switch.
+
+Audience is **all current friends minus explicit exclusions**. A summary row
+always shows the final count and opens a searchable modal sheet with avatar,
+checkbox rows, Select all and Done; sheet edits write straight to the
+ViewModel. Loading is a small inline spinner, a failed load is an honest retry
+row, and zero friends is distinct from either. The primary action is pinned in
+the Scaffold bottom bar with the quota label; its own label never changes
+(`Share`), publishing swaps in a spinner + `Sharing…`, and a short reason line
+appears only for the first blocker in Busy → NoPhoto → NoAudience → NoQuota
+order (missing photo, an all-excluded audience, or exhausted quota — each
+stated exactly once). The content scrolls above it, so the action cannot be
+pushed off-screen.
+
+Back (system or top bar) on a picked draft opens Discard / Keep editing instead
+of silently dropping it; a successful publish clears the guard and hands off
+through `onPublished`, which lands on the hub with a confirmation. Upload
+chain: preprocess → seal → host → one sealed leg per friend → publish RPC →
+self-sealed own row → opportunistic sweep kick. Any failure up-chain maps to a
+fixed vocabulary of errors; a failure *before* the publish RPC leaves zero
+server truth (nothing partial ever exists). Retries keep the draft. A
+friends-list load that fails in the audience step shows an honest retry state
+instead of reading as "no friends yet", and a failed photo decode cancels the
+previous decode so the last pick always wins (two quick picks could otherwise
+land the slower, older image into the draft).
 
 ### 12.6 Cleanup and honest notes
 
@@ -1269,18 +1286,22 @@ Whisper's cryptography is pinned with a deliberately paranoid test stack:
   composition-locked timer anymore. Hub sync failures render inline (failure
   panel with no cache, banner over stale content with a cache); only
   viewer-scoped failures reach the snackbar.
+- **Compose share-block pins.** `WhisperComposeCtaTest` fixes the pinned
+  CTA precedence — Busy (publishing or published) wins over NoPhoto, which wins
+  over NoAudience, which wins over NoQuota; only a ready draft returns None.
+  This is pure state math, no ViewModel or device required.
 - **Instrumented media test** for Daily Ups: a fully geotagged, device-labeled
   test photo must publish with *zero* surviving EXIF/GPS tags on the exact
   publish bytes — device-only, like all Bitmap work.
 - **An enforced per-commit gate for UI work.** The October 2026 hardening
   cycle (six rounds over the group/Daily-Ups screens and their shared
   loaders) runs on a fixed invariant: every round compiles with
-  `:app:compileDebugKotlin` and finishes with the exact unit-test baseline —
-  535 tests completed (the original 530 plus five tap-gate tests) with the same
-  seven pre-existing failures (all in unrelated engine suites, none
-  Whisper-related) — checked before each commit. Nothing behavioral lands
-  outside that gate; the SQL/edge surfaces were deliberately untouched and
-  still belong to the ship-day runbook (`supabase/POST_DEPLOY_SMOKE.md`).
+  `:app:compileDebugKotlin` and finishes with the same seven pre-existing
+  failures (all in unrelated engine suites, none Whisper-related). The frozen
+  starting point was 530 tests; each wave records its exact total in its gate
+  log, and no new name may fail. Nothing behavioral lands outside that gate;
+  the SQL/edge surfaces were deliberately untouched and still belong to the
+  ship-day runbook (`supabase/POST_DEPLOY_SMOKE.md`).
 - **Server-plane invariants unchanged by the cycle.** Client-side hardening
   changed no cryptography and no SQL: quotas (600/day fan-out, 5/day/IP
   story, 5/day/IP signup), signed-log verification, epochs, and descriptor

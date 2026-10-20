@@ -7,12 +7,12 @@ package com.frerox.toolz.ui.screens.whisper
 
 import android.content.Context
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,40 +22,54 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.AddPhotoAlternate
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Checkbox
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -63,6 +77,7 @@ import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.WhisperDailyUpsConfig
 import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
+import com.frerox.toolz.ui.components.ToolzExpressiveTextButton
 import com.frerox.toolz.ui.theme.toolzBackground
 import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.Dispatchers
@@ -71,6 +86,9 @@ import kotlinx.coroutines.withContext
 
 /** Hard stop mirrored from the preprocessor (12 MiB pipeline boundary). */
 private const val DAILY_UP_SOURCE_MAX_BYTES = 12 * 1024 * 1024
+
+/** Story aspect ratio: compose letterboxes exactly like the viewer. */
+private const val DAILY_UP_PREVIEW_ASPECT = 9f / 16f
 
 /** Bounded source the picker hands us; nothing allocates full-size beyond it. */
 private sealed interface DailyUpSource {
@@ -83,8 +101,8 @@ private sealed interface DailyUpSource {
 @Composable
 fun WhisperDailyUpsComposeScreen(
     onNavigateBack: () -> Unit,
-    /** The hub ("Daily Ups") — the entry row sits above the photo picker. */
-    onOpenHub: () -> Unit = {},
+    /** Success lands on the hub with a confirmation, never a silent pop. */
+    onPublished: () -> Unit = onNavigateBack,
     viewModel: WhisperDailyUpsComposeViewModel = hiltViewModel(),
 ) {
     if (!WhisperDailyUpsConfig.ENABLED) return
@@ -94,6 +112,8 @@ fun WhisperDailyUpsComposeScreen(
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    var showAudienceSheet by rememberSaveable { mutableStateOf(false) }
+    var showDiscardDialog by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(state.error) {
         state.error?.let {
@@ -102,10 +122,18 @@ fun WhisperDailyUpsComposeScreen(
         }
     }
 
-    // Draft survives exactly one publish: back to the hub after success.
+    // Draft survives exactly one publish; success is reported to the route.
     LaunchedEffect(state.published) {
-        if (state.published) onNavigateBack()
+        if (state.published) onPublished()
     }
+
+    val requestExit: () -> Unit = {
+        if (state.hasDraft) showDiscardDialog = true else onNavigateBack()
+    }
+
+    // Back must never silently dump a live draft. Only a successful publish
+    // clears the guard; an in-flight share asks before cancelling its upload.
+    BackHandler(enabled = state.hasDraft) { requestExit() }
 
     val picker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
@@ -122,6 +150,12 @@ fun WhisperDailyUpsComposeScreen(
         }
     }
 
+    val openPicker: () -> Unit = {
+        picker.launch(
+            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+        )
+    }
+
     Scaffold(
         modifier = Modifier.fillMaxSize().toolzBackground(),
         snackbarHost = { GroupSnackbarHost(state = snackbar) },
@@ -129,11 +163,14 @@ fun WhisperDailyUpsComposeScreen(
             ExpressiveTopAppBar(
                 title = stringResource(R.string.st_Whisper_DailyUp_ComposeTitle),
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
+                    IconButton(onClick = requestExit) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = GroupCd.back())
                     }
                 },
             )
+        },
+        bottomBar = {
+            ComposeShareBar(state = state, onShare = viewModel::publish)
         },
     ) { padding ->
         Column(
@@ -141,46 +178,53 @@ fun WhisperDailyUpsComposeScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = 16.dp)
+                .padding(top = 16.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            // The daily-ups entry: hub access lives HERE, above the photo
-            // picker — there is no separate row under the groups section.
-            WhisperDailyUpsEntryRow(onOpen = onOpenHub)
+            PhotoSlot(photo = state.photo, onPick = openPicker, onClear = viewModel::clearPhoto)
 
-            PhotoSlot(
+            AudienceSummaryRow(
                 state = state,
-                onPick = {
-                    picker.launch(
-                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
-                    )
-                },
-                onClear = viewModel::clearPhoto,
-            )
-
-            ReceiptsRow(on = state.receiptsOn, onChange = viewModel::setReceipts)
-
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-            AudienceSection(
-                state = state,
-                onToggle = viewModel::toggleExcluded,
+                onEdit = { showAudienceSheet = true },
                 onRetryFriends = viewModel::retryFriends,
             )
 
-            Spacer(Modifier.height(8.dp))
-            ShareButton(state = state, onClick = viewModel::publish)
-            // Disabled buttons that don't explain themselves read like a bug —
-            // this only appears in the one case no other copy covers.
-            if (state.photo != null && !state.friendsLoading && state.friends.isNotEmpty() && state.audienceSize <= 0) {
-                Text(
-                    text = stringResource(R.string.st_Whisper_DailyUp_AudienceWarning),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
-            Spacer(Modifier.height(24.dp))
+            ReceiptsRow(on = state.receiptsOn, onChange = viewModel::setReceipts)
         }
+    }
+
+    if (showAudienceSheet) {
+        AudienceSheet(
+            state = state,
+            onToggle = viewModel::toggleAudience,
+            onSelectAll = viewModel::selectAllAudience,
+            onRetryFriends = viewModel::retryFriends,
+            onDismiss = { showAudienceSheet = false },
+        )
+    }
+
+    if (showDiscardDialog) {
+        AlertDialog(
+            onDismissRequest = { showDiscardDialog = false },
+            title = { Text(stringResource(R.string.st_Whisper_DailyUp_DiscardTitle)) },
+            text = { Text(stringResource(R.string.st_Whisper_DailyUp_DiscardBody)) },
+            confirmButton = {
+                ToolzExpressiveTextButton(
+                    onClick = {
+                        showDiscardDialog = false
+                        onNavigateBack()
+                    },
+                ) {
+                    Text(stringResource(R.string.st_Whisper_DailyUp_DiscardConfirm))
+                }
+            },
+            dismissButton = {
+                ToolzExpressiveTextButton(onClick = { showDiscardDialog = false }) {
+                    Text(stringResource(R.string.st_Whisper_DailyUp_KeepEditing))
+                }
+            },
+        )
     }
 }
 
@@ -190,19 +234,23 @@ fun WhisperDailyUpsComposeScreen(
 
 @Composable
 private fun PhotoSlot(
-    state: WhisperDailyUpsComposeViewModel.ComposeUiState,
+    photo: WhisperDailyUpsComposeViewModel.PhotoDraft?,
     onPick: () -> Unit,
     onClear: () -> Unit,
 ) {
-    val photo = state.photo
+    val shape = RoundedCornerShape(24.dp)
+    val border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    val previewHint = stringResource(R.string.st_Whisper_DailyUp_ComposePreviewHint)
+
     if (photo == null) {
         Surface(
-            shape = RoundedCornerShape(20.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant,
+            onClick = onPick,
+            shape = shape,
+            color = MaterialTheme.colorScheme.surfaceContainerHighest,
+            border = border,
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(0.9f)
-                .clickable(onClick = onPick),
+                .aspectRatio(DAILY_UP_PREVIEW_ASPECT),
         ) {
             Column(
                 modifier = Modifier.fillMaxSize(),
@@ -225,18 +273,39 @@ private fun PhotoSlot(
         }
     } else {
         Column {
+            // The same 9:16 Fit canvas the viewer uses: what is letterboxed
+            // here is letterboxed there, instead of a crop that lies.
             Surface(
-                shape = RoundedCornerShape(20.dp),
+                onClick = onPick,
+                shape = shape,
+                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                border = border,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .aspectRatio(0.9f),
+                    .aspectRatio(DAILY_UP_PREVIEW_ASPECT),
             ) {
-                Image(
-                    bitmap = photo.preview,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                )
+                Box(Modifier.fillMaxSize()) {
+                    Image(
+                        bitmap = photo.preview,
+                        contentDescription = null,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        contentColor = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(12.dp),
+                    ) {
+                        Text(
+                            text = previewHint,
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                        )
+                    }
+                }
             }
             Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
                 TextButton(onClick = onClear) {
@@ -270,40 +339,126 @@ private fun ReceiptsRow(on: Boolean, onChange: (Boolean) -> Unit) {
 }
 
 @Composable
-private fun AudienceSection(
+private fun AudienceSummaryRow(
     state: WhisperDailyUpsComposeViewModel.ComposeUiState,
-    onToggle: (String) -> Unit,
-    onRetryFriends: () -> Unit = {},
+    onEdit: () -> Unit,
+    onRetryFriends: () -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-            text = if (state.excluded.isEmpty()) {
-                stringResource(R.string.st_Whisper_DailyUp_AudienceAll)
-            } else {
-                stringResource(
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = stringResource(
                     R.string.st_Whisper_DailyUp_AudienceSummary,
                     state.audienceSize,
+                ),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
+            )
+            when {
+                state.friendsLoading -> CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
                 )
-            },
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.SemiBold,
-        )
+                state.friends.isNotEmpty() -> TextButton(onClick = onEdit) {
+                    Text(stringResource(R.string.st_Whisper_DailyUp_AudienceEdit))
+                }
+            }
+        }
         Text(
             text = stringResource(R.string.st_Whisper_DailyUp_AudienceHint),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         when {
-            state.friendsLoading -> {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(20.dp),
-                    strokeWidth = 2.dp,
+            // Loading wins over a stale failure while a retry is in flight.
+            state.friendsLoading -> Unit
+            state.friendsFailed -> Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = stringResource(R.string.st_Whisper_DailyUp_FriendsFailed),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.weight(1f),
                 )
+                TextButton(onClick = onRetryFriends) {
+                    Text(stringResource(R.string.st_Whisper_DailyUp_Retry))
+                }
             }
-            // Failed load ≠ "no friends yet": the honest copy comes with a
-            // retry, otherwise the composer looks permanently broken.
-            state.friendsFailed && state.friends.isEmpty() -> {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+            state.friends.isEmpty() -> Text(
+                text = stringResource(R.string.st_Whisper_DailyUp_NoFriends),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AudienceSheet(
+    state: WhisperDailyUpsComposeViewModel.ComposeUiState,
+    onToggle: (String) -> Unit,
+    onSelectAll: () -> Unit,
+    onRetryFriends: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var query by remember { mutableStateOf("") }
+    val filtered = remember(state.friends, query) {
+        val needle = query.trim()
+        if (needle.isEmpty()) {
+            state.friends
+        } else {
+            state.friends.filter { it.effectiveName.contains(needle, ignoreCase = true) }
+        }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 640.dp)
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(R.string.st_Whisper_DailyUp_AudienceSheetTitle),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = stringResource(
+                            R.string.st_Whisper_DailyUp_AudienceSelected,
+                            state.audienceSize,
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                TextButton(onClick = onDismiss) {
+                    Text(stringResource(R.string.st_Whisper_DailyUp_AudienceDone))
+                }
+            }
+
+            when {
+                state.friendsLoading -> Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                }
+
+                state.friendsFailed && state.friends.isEmpty() -> Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Text(
                         text = stringResource(R.string.st_Whisper_DailyUp_FriendsFailed),
                         style = MaterialTheme.typography.bodyMedium,
@@ -314,46 +469,80 @@ private fun AudienceSection(
                         Text(stringResource(R.string.st_Whisper_DailyUp_Retry))
                     }
                 }
-            }
-            state.friends.isEmpty() -> {
-                Text(
+
+                state.friends.isEmpty() -> Text(
                     text = stringResource(R.string.st_Whisper_DailyUp_NoFriends),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 12.dp),
                 )
-            }
-            else -> {
-                state.friends.forEach { friend ->
-                    val included = friend.id !in state.excluded
+
+                else -> {
+                    GroupSearchField(
+                        value = query,
+                        onValueChange = { query = it },
+                        placeholder = stringResource(R.string.st_Whisper_DailyUp_AudienceSearchHint),
+                    )
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onToggle(friend.id) }
-                            .padding(vertical = 2.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(34.dp)
-                                .clip(RoundedCornerShape(17.dp))
-                                .background(MaterialTheme.colorScheme.primaryContainer),
-                            contentAlignment = Alignment.Center,
+                        TextButton(
+                            onClick = onSelectAll,
+                            enabled = state.excluded.isNotEmpty(),
                         ) {
-                            Text(
-                                text = friend.effectiveName.take(1).uppercase(),
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            )
+                            Text(stringResource(R.string.st_Whisper_DailyUp_AudienceSelectAll))
                         }
-                        Text(
-                            text = friend.effectiveName,
-                            style = MaterialTheme.typography.bodyLarge,
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(horizontal = 12.dp),
-                            maxLines = 1,
-                        )
-                        Checkbox(checked = included, onCheckedChange = { onToggle(friend.id) })
+                    }
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 420.dp),
+                    ) {
+                        items(filtered, key = { it.id }) { friend ->
+                            val included = friend.id !in state.excluded
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 52.dp)
+                                    .toggleable(
+                                        value = included,
+                                        role = Role.Checkbox,
+                                        onValueChange = { onToggle(friend.id) },
+                                    )
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                GroupAvatar(
+                                    name = friend.effectiveName,
+                                    groupId = friend.id,
+                                    size = 40.dp,
+                                )
+                                Text(
+                                    text = friend.effectiveName,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(horizontal = 12.dp),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Checkbox(checked = included, onCheckedChange = null)
+                            }
+                        }
+                        if (filtered.isEmpty()) {
+                            item {
+                                Text(
+                                    text = stringResource(R.string.st_Whisper_Groups_NoFriendsFound),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 24.dp),
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -362,40 +551,89 @@ private fun AudienceSection(
 }
 
 @Composable
-private fun ShareButton(
+private fun ComposeShareBar(
     state: WhisperDailyUpsComposeViewModel.ComposeUiState,
-    onClick: () -> Unit,
+    onShare: () -> Unit,
 ) {
-    val enabled = state.photo != null &&
-        !state.publishing &&
-        !state.published &&
-        state.remaining > 0 &&
-        state.audienceSize > 0
-    ToolzExpressiveButton(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = Modifier.fillMaxWidth().height(52.dp),
-    ) {
-        if (state.publishing) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(18.dp),
-                strokeWidth = 2.dp,
-                color = MaterialTheme.colorScheme.onPrimary,
-            )
-            Spacer(Modifier.size(10.dp))
-            Text(stringResource(R.string.st_Whisper_DailyUp_Posting))
+    val block = state.shareBlock
+    val reason: String? = when (block) {
+        ShareBlock.NoPhoto -> stringResource(R.string.st_Whisper_DailyUp_NeedPhoto)
+        ShareBlock.NoQuota -> stringResource(R.string.st_Whisper_DailyUp_NoUpsLeft)
+        ShareBlock.NoAudience -> if (
+            !state.friendsLoading &&
+            !state.friendsFailed &&
+            state.friends.isNotEmpty()
+        ) {
+            stringResource(R.string.st_Whisper_DailyUp_AudienceWarning)
         } else {
-            // Disabled buttons explain themselves: no photo → what to do next,
-            // exhausted quota → the limit. Same action, honest feedback.
-            Text(
-                text = when {
-                    state.remaining <= 0 -> stringResource(R.string.st_Whisper_DailyUp_ErrQuota)
-                    // Requires no new string: the photo slot's own invite copy.
-                    state.photo == null -> stringResource(R.string.st_Whisper_DailyUp_PickPhoto)
-                    else -> stringResource(R.string.st_Whisper_DailyUp_PostLabel)
-                },
-                fontWeight = FontWeight.SemiBold,
-            )
+            null
+        }
+        else -> null
+    }
+    val enabled = state.photo != null &&
+        state.remaining > 0 &&
+        state.audienceSize > 0 &&
+        !state.publishing &&
+        !state.published
+
+    Surface(color = MaterialTheme.colorScheme.surfaceContainerLow) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .imePadding(),
+        ) {
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Column(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                if (reason != null) {
+                    Text(
+                        text = reason,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (block == ShareBlock.NoAudience) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = stringResource(
+                            R.string.st_Whisper_DailyUp_QuotaLeft,
+                            state.remaining,
+                            WhisperDailyUpsConfig.DAILY_LIMIT,
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    ToolzExpressiveButton(
+                        onClick = onShare,
+                        enabled = enabled,
+                        modifier = Modifier
+                            .height(52.dp)
+                            .widthIn(min = 132.dp),
+                    ) {
+                        if (state.publishing) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                                color = LocalContentColor.current,
+                            )
+                            Spacer(Modifier.size(10.dp))
+                            Text(stringResource(R.string.st_Whisper_DailyUp_Posting))
+                        } else {
+                            Text(
+                                text = stringResource(R.string.st_Whisper_DailyUp_PostLabel),
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }

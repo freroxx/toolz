@@ -1760,8 +1760,16 @@ fun ToolzNavHost(
         composable(Screen.WhisperDailyUpsCompose.route) {
             com.frerox.toolz.ui.screens.whisper.WhisperDailyUpsComposeScreen(
                 onNavigateBack = { toolOnBack() },
-                onOpenHub = {
-                    navController.navigate(Screen.WhisperDailyUps.createRoute())
+                onPublished = {
+                    android.widget.Toast.makeText(
+                        context,
+                        context.getString(R.string.st_Whisper_DailyUp_Posted),
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                    navController.navigate(Screen.WhisperDailyUps.createRoute()) {
+                        popUpTo(Screen.WhisperDailyUpsCompose.route) { inclusive = true }
+                        launchSingleTop = true
+                    }
                 },
             )
         }
