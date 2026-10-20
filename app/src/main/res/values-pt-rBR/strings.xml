@@ -4047,4 +4047,180 @@
     <string name="st_NotepadScreen_nokeychk164">Verificar novamente</string>
     <!-- Painel de tamanho: motivo das opções desativadas -->
     <string name="st_NotepadScreen_attlock165">O conteúdo anexado sempre mantém o cartão em tamanho completo.</string>
+
+    <!-- Updater -->
+    <string name="st_Update_Title">Atualizações</string>
+    <string name="st_Update_Back">Voltar</string>
+    <string name="st_Update_About">Sobre as atualizações</string>
+
+    <string name="st_Update_StatusIdle">Pronto para verificar atualizações</string>
+    <string name="st_Update_StatusChecking">Verificando atualizações…</string>
+    <string name="st_Update_StatusAvailable">A versão %1$s está disponível</string>
+    <string name="st_Update_StatusDownloading">Baixando a versão %1$s…</string>
+    <string name="st_Update_StatusVerifying">Verificando a versão %1$s…</string>
+    <string name="st_Update_StatusReady">A versão %1$s está pronta para instalar</string>
+    <string name="st_Update_StatusInstalling">Instalando a versão %1$s…</string>
+    <string name="st_Update_StatusErrorDownload">A última atualização não foi concluída</string>
+    <string name="st_Update_StatusErrorCheck">Não foi possível verificar atualizações</string>
+    <string name="st_Update_StatusUpToDate">Você está na versão mais recente</string>
+    <string name="st_Update_StatusInstalled">Atualizado para a versão %1$s</string>
+
+    <string name="st_Update_VersionBuild">Versão %1$s · compilação %2$d</string>
+    <string name="st_Update_CriticalUpdate">Atualização crítica</string>
+    <string name="st_Update_Critical">Crítica</string>
+
+    <string name="st_Update_IdleTitle">Verificar atualizações</string>
+    <string name="st_Update_IdleBody">O Toolz %1$s está instalado. As novas versões são baixadas aqui e verificadas antes de o instalador abrir.</string>
+    <string name="st_Update_CheckNow">Verificar agora</string>
+    <string name="st_Update_VersionTitle">Versão %1$s</string>
+    <string name="st_Update_CheckedBeforeInstall">Verificado antes de instalar</string>
+    <string name="st_Update_ShowLess">Mostrar menos</string>
+    <string name="st_Update_ShowFullNotes">Ver notas completas</string>
+    <string name="st_Update_DownloadInstall">Baixar e instalar</string>
+    <string name="st_Update_CriticalCantSkip">Atualizações críticas mantêm o app funcionando e não podem ser ignoradas.</string>
+    <string name="st_Update_SkipVersion">Ignorar esta versão</string>
+
+    <string name="st_Update_SettingsCheck">Verificar atualizações</string>
+    <string name="st_Update_SettingsCheckBody">Veja se há uma versão nova</string>
+    <string name="st_Update_SettingsAutoBody">Baixa atualizações em segundo plano</string>
+    <string name="st_Update_OnboardingAvailable">A versão %1$s está pronta quando você quiser.</string>
+    <string name="st_Update_OnboardingUpdate">Atualizar e continuar</string>
+    <string name="st_Update_OnboardingContinue">Continuar</string>
+    <string name="st_Update_DefaultChangelog">Correções e melhorias.</string>
+
+    <string name="st_Update_DownloadingTitle">Baixando %1$s</string>
+    <string name="st_Update_Of">%1$s de %2$s</string>
+    <string name="st_Update_PerSecond">%1$s/s</string>
+    <string name="st_Update_TimeLeft">Faltam %1$s</string>
+    <string name="st_Update_EtaSeconds">%1$d s</string>
+    <string name="st_Update_EtaMinutes">%1$d min %2$02d s</string>
+    <string name="st_Update_EtaHours">%1$d h %2$02d min</string>
+    <string name="st_Update_CancelDownload">Cancelar download</string>
+
+    <string name="st_Update_ReadyTitle">A versão %1$s está pronta</string>
+    <string name="st_Update_Verified">Verificado</string>
+    <string name="st_Update_AllowInstallsTitle">Permitir instalações do Toolz</string>
+    <string name="st_Update_AllowInstallsBody">O Android precisa da sua permissão antes de instalar a atualização.</string>
+    <string name="st_Update_OpenSettings">Abrir configurações</string>
+    <string name="st_Update_InstallUpdate">Instalar atualização</string>
+    <string name="st_Update_SystemInstallerHint">O instalador do sistema vai pedir sua confirmação.</string>
+
+    <string name="st_Update_CheckingBody">Procurando uma versão mais recente…</string>
+    <string name="st_Update_VerifyingTitle">Verificando o download</string>
+    <string name="st_Update_VerifyingBody">Verificando a versão %1$s antes de o instalador abrir.</string>
+    <string name="st_Update_InstallingTitle">Aguardando o instalador</string>
+    <string name="st_Update_InstallingBody">Confirme a atualização na janela do sistema. O Toolz reabre quando terminar.</string>
+
+    <string name="st_Update_ErrorDownloadTitle">A atualização não foi concluída</string>
+    <string name="st_Update_TryAgain">Tentar novamente</string>
+    <string name="st_Update_ErrorOffline">Você está offline. Verifique sua conexão e tente novamente.</string>
+    <string name="st_Update_ErrorTimeout">O servidor de atualizações demorou demais para responder. Tente novamente.</string>
+    <string name="st_Update_ErrorBusy">O serviço de atualizações está ocupado agora. Tente novamente em alguns minutos.</string>
+    <string name="st_Update_ErrorServer">O servidor de atualizações retornou um erro. Tente novamente mais tarde.</string>
+    <string name="st_Update_ErrorNoBuild">Há uma versão mais recente, mas nenhuma das variantes funciona neste dispositivo.</string>
+    <string name="st_Update_ErrorChecksum">O arquivo baixado estava danificado ou incompleto e foi removido. Tente novamente.</string>
+    <string name="st_Update_ErrorInvalidFile">Esse arquivo não é uma atualização válida do Toolz e foi rejeitado.</string>
+    <string name="st_Update_ErrorStorage">Não há espaço suficiente para baixar a atualização. Libere espaço e tente novamente.</string>
+    <string name="st_Update_ErrorInstall">O instalador não conseguiu concluir a atualização.</string>
+    <string name="st_Update_ErrorUnknown">Algo deu errado com a atualização. Tente novamente.</string>
+    <string name="st_Update_ErrorNotApk">Esse arquivo não é um app Android válido.</string>
+    <string name="st_Update_ErrorWrongPackage">Esse arquivo pertence a outro app.</string>
+    <string name="st_Update_ErrorNotNewer">Esse arquivo tem a mesma versão ou é mais antigo que o instalado.</string>
+    <string name="st_Update_ErrorSignerUnavailable">O Toolz não conseguiu ler a assinatura do app, então a instalação foi interrompida.</string>
+    <string name="st_Update_ErrorSignerMismatch">Esse arquivo não foi assinado com a chave do Toolz e foi rejeitado.</string>
+    <string name="st_Update_DemoBlocked">Modo demo: esta versão é um arquivo local de teste, então nada foi instalado.</string>
+    <string name="st_Update_ErrorNoDownloadLink">Esta versão não tem link de download.</string>
+    <string name="st_Update_ErrorDetailsExpired">Os detalhes da atualização expiraram. Verifique atualizações novamente.</string>
+    <string name="st_Update_ErrorInstallerOpen">Não foi possível abrir o instalador do sistema.</string>
+    <string name="st_Update_ErrorNotVerified">Não foi possível confirmar que esta atualização é autêntica, então ela foi interrompida.</string>
+
+    <string name="st_Update_UpToDateTitle">Você está atualizado</string>
+    <string name="st_Update_UpToDateBody">O Toolz %1$s é a versão mais recente.</string>
+    <string name="st_Update_CheckAgain">Verificar novamente</string>
+    <string name="st_Update_InstalledTitle">Atualização instalada</string>
+    <string name="st_Update_InstalledVersionTitle">Atualizado para %1$s</string>
+    <string name="st_Update_InstalledBody">Você está usando a versão mais recente.</string>
+    <string name="st_Update_Done">Concluir</string>
+
+    <string name="st_Update_AutoTitle">Atualizações automáticas</string>
+    <string name="st_Update_AutoBody">Baixar e instalar sem perguntar. Atualizações críticas podem usar dados móveis.</string>
+    <string name="st_Update_BuildTitle">Versão para este dispositivo</string>
+    <string name="st_Update_BuildAuto">Automático · %1$s</string>
+    <string name="st_Update_BuildManual">Selecionada manualmente</string>
+    <string name="st_Update_LastChecked">Última verificação</string>
+    <string name="st_Update_NotYet">Ainda não</string>
+    <string name="st_Update_JustNow">Agora mesmo</string>
+    <plurals name="st_Update_MinutesAgo">
+        <item quantity="one">há %1$d minuto</item>
+        <item quantity="other">há %1$d minutos</item>
+    </plurals>
+    <plurals name="st_Update_HoursAgo">
+        <item quantity="one">há %1$d hora</item>
+        <item quantity="other">há %1$d horas</item>
+    </plurals>
+    <plurals name="st_Update_DaysAgo">
+        <item quantity="one">há %1$d dia</item>
+        <item quantity="other">há %1$d dias</item>
+    </plurals>
+    <string name="st_Update_Footer">Os downloads são verificados como versões genuínas do Toolz antes de o instalador abrir.</string>
+
+    <string name="st_Update_AbiIntro">A maioria deve manter Automático. Altere apenas se uma versão não instalar neste dispositivo.</string>
+    <string name="st_Update_AbiAutomatic">Automático</string>
+    <string name="st_Update_AbiAutomaticDesc">Usa o processador deste dispositivo (%1$s).</string>
+    <string name="st_Update_AbiArm64">ARM64</string>
+    <string name="st_Update_AbiArm64Desc">A maioria dos celulares desde 2017.</string>
+    <string name="st_Update_AbiArm32">ARM de 32 bits</string>
+    <string name="st_Update_AbiArm32Desc">Celulares 32 bits mais antigos.</string>
+    <string name="st_Update_AbiX86_64">x86 de 64 bits</string>
+    <string name="st_Update_AbiX86_64Desc">Emuladores e alguns tablets.</string>
+    <string name="st_Update_AbiX86">x86 de 32 bits</string>
+    <string name="st_Update_AbiX86Desc">Emuladores antigos.</string>
+
+    <string name="st_Update_HelpIntro">O Toolz consulta o GitHub e uma lista de versões verificada, depois baixa a versão que corresponde a este dispositivo. O arquivo é verificado novamente antes de o instalador abrir.</string>
+    <string name="st_Update_HelpSecurityTitle">Downloads verificados</string>
+    <string name="st_Update_HelpSecurityBody">O arquivo precisa corresponder à chave de assinatura do Toolz. Qualquer outro é rejeitado.</string>
+    <string name="st_Update_HelpWifiTitle">Feito para Wi-Fi</string>
+    <string name="st_Update_HelpWifiBody">Downloads automáticos aguardam o Wi-Fi. Atualizações críticas podem usar dados móveis.</string>
+    <string name="st_Update_HelpResumeTitle">Retomável</string>
+    <string name="st_Update_HelpResumeBody">Uma conexão interrompida continua de onde parou.</string>
+    <string name="st_Update_SeeAllReleases">Ver todas as versões</string>
+    <string name="st_Update_Close">Fechar</string>
+
+    <string name="st_Update_OverlayTitle">Atualização disponível</string>
+    <string name="st_Update_OverlayCriticalSubtitle">Toolz %1$s · Atualização crítica</string>
+    <string name="st_Update_OverlaySubtitle">O Toolz %1$s está pronto para baixar.</string>
+    <string name="st_Update_OverlayDownloading">Baixando… %1$d%%</string>
+    <string name="st_Update_OverlayReadyBody">O download foi verificado e está pronto. Conclua a instalação no atualizador.</string>
+    <string name="st_Update_OverlayChecked">%1$s · Verificado antes de instalar</string>
+    <string name="st_Update_OpenUpdater">Abrir atualizador</string>
+    <string name="st_Update_DownloadCritical">Baixar atualização crítica</string>
+    <string name="st_Update_DownloadUpdate">Baixar atualização</string>
+    <string name="st_Update_SeeDetails">Ver todos os detalhes</string>
+    <string name="st_Update_Later">Mais tarde</string>
+
+    <string name="st_Update_NotifAvailableTitle">O Toolz %1$s está disponível</string>
+    <string name="st_Update_NotifAvailableCriticalTitle">O Toolz %1$s está disponível · Crítica</string>
+    <string name="st_Update_NotifAvailableBody">Toque para ver as novidades e baixe no app.</string>
+    <string name="st_Update_ActionDownload">Baixar</string>
+    <string name="st_Update_ActionDetails">Detalhes</string>
+    <string name="st_Update_NotifDownloadingTitle">Baixando o Toolz %1$s</string>
+    <string name="st_Update_NotifProgress">%1$d%% · %2$s</string>
+    <string name="st_Update_ActionCancel">Cancelar</string>
+    <string name="st_Update_NotifReadyTitle">O Toolz %1$s está pronto para instalar</string>
+    <string name="st_Update_NotifReadyBody">Verificado. Toque para concluir a atualização.</string>
+    <string name="st_Update_NotifReadyBig">O Toolz %1$s foi baixado e verificado. Toque em Instalar e confirme no instalador do sistema.</string>
+    <string name="st_Update_ActionInstall">Instalar</string>
+    <string name="st_Update_NotifInstalledTitle">O Toolz foi atualizado para %1$s</string>
+    <string name="st_Update_NotifInstalledBody">Você está na versão mais recente.</string>
+    <string name="st_Update_NotifErrorTitle">A atualização não foi concluída</string>
+    <string name="st_Update_NotifErrorBody">%1$s Toque para abrir o atualizador.</string>
+
+    <string name="st_Update_DashboardAvailable">Atualização disponível</string>
+    <string name="st_Update_DashboardReady">O Toolz %1$s está pronto</string>
+    <string name="st_Update_DashboardTap">Toque para ver as novidades</string>
+
+    <string name="st_Update_DiscordTitle">Versões de acesso antecipado</string>
+    <string name="st_Update_DiscordBody">Entre no servidor do Discord para testar APKs antecipados e compartilhar feedback com frerox.</string>
+    <string name="st_Update_DiscordAction">Entrar no servidor do Discord</string>
+    <string name="st_Update_DiscordContentDesc">Abrir o convite do Discord do Toolz</string>
 </resources>

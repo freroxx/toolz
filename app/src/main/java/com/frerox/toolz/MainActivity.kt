@@ -41,6 +41,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Update
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -74,6 +75,7 @@ import androidx.navigation.navArgument
 import androidx.work.*
 import com.frerox.toolz.data.ai.AiSettingsManager
 import com.frerox.toolz.data.settings.SettingsRepository
+import com.frerox.toolz.data.update.pendingUpdate
 import com.frerox.toolz.data.repository.FlashlightRepository
 import com.frerox.toolz.service.FlashlightService
 import com.frerox.toolz.ui.navigation.Screen
@@ -436,7 +438,16 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
                                 )
                             }
 
-                            UpdateOverlay(settingsRepository, updateManager)
+                            UpdateOverlay(
+                                settingsRepository = settingsRepository,
+                                updateManager = updateManager,
+                                onOpenUpdater = {
+                                    try {
+                                        navController.navigate(com.frerox.toolz.ui.navigation.Screen.Update.route)
+                                    } catch (_: Exception) {
+                                    }
+                                },
+                            )
                         }
                     }
 
@@ -681,52 +692,56 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
 @Composable
 fun UpdateOverlay(
     settingsRepository: SettingsRepository,
-    updateManager: com.frerox.toolz.data.update.UpdateManager
+    updateManager: com.frerox.toolz.data.update.UpdateManager,
+    onOpenUpdater: () -> Unit,
 ) {
     val availableVersion by settingsRepository.updateAvailableVersion.collectAsState(initial = null)
     val changelog by settingsRepository.updateChangelog.collectAsState(initial = null)
     val managerState by updateManager.state.collectAsState()
     val scope = rememberCoroutineScope()
-
-    // Show the sheet when prefs hold an update and manager isn't terminal.
-    // Dismissing sets showSheet=false for this session; prefs clearing (Later/
-    // Skip via manager) keeps it gone across restarts.
     var showSheet by remember { mutableStateOf(false) }
+
+    // The persisted offer is the source of truth: Later/Skip clear it, so the
+    // sheet stays gone after a restart even though the manager keeps state.
     LaunchedEffect(availableVersion) {
-        if (availableVersion != null) showSheet = true
+        showSheet = availableVersion != null
     }
-    // Hide the promo sheet while actively downloading/installing — the
-    // Updater screen + notifications carry progress instead.
-    val busy = managerState is com.frerox.toolz.data.update.UpdateManagerState.Downloading ||
-        managerState is com.frerox.toolz.data.update.UpdateManagerState.Installing
-    if (showSheet && availableVersion != null && !busy) {
+
+    if (showSheet && availableVersion != null) {
         UpdateSheetContent(
             availableVersion = availableVersion ?: "",
             changelog = changelog ?: "",
             downloadState = managerState,
             onDismiss = { showSheet = false },
             onDownload = {
-                showSheet = false
-                scope.launch {
-                    val pending = updateManager.check(showNotification = false, force = true)
-                        ?: updateManager.currentPendingOrNull()
-                    if (pending != null) updateManager.download(pending, autoInstall = true)
+                val pending = updateManager.currentPendingOrNull()
+                    ?: updateManager.pendingFromStore()
+                if (pending != null) {
+                    updateManager.download(pending, autoInstall = true)
+                } else {
+                    scope.launch {
+                        updateManager.check(showNotification = false, force = true)
+                            ?.let { updateManager.download(it, autoInstall = true) }
+                    }
                 }
+            },
+            onOpenUpdater = {
+                showSheet = false
+                onOpenUpdater()
             },
             onLater = {
                 showSheet = false
-                scope.launch { settingsRepository.setAvailableUpdate(null, null, null) }
+                updateManager.dismissOffer()
             },
             onSkip = {
                 showSheet = false
                 updateManager.skipVersion(availableVersion ?: "")
-                scope.launch { settingsRepository.setAvailableUpdate(null, null, null) }
-            }
+            },
         )
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun UpdateSheetContent(
     availableVersion: String,
@@ -734,136 +749,251 @@ fun UpdateSheetContent(
     downloadState: com.frerox.toolz.data.update.UpdateManagerState,
     onDismiss: () -> Unit,
     onDownload: () -> Unit,
+    onOpenUpdater: () -> Unit,
     onLater: () -> Unit,
-    onSkip: () -> Unit
+    onSkip: () -> Unit,
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        shape = MaterialTheme.shapes.extraLarge,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
     ) {
         UpdateOverlayContent(
             availableVersion = availableVersion,
             changelog = changelog,
-            apkUrl = "",
-            onDismiss = onDismiss,
-            onStartDownload = { onDownload() },
-            onIgnore = onLater,
             downloadState = downloadState,
-            onSkip = onSkip
+            onDownload = onDownload,
+            onOpenUpdater = onOpenUpdater,
+            onIgnore = onLater,
+            onSkip = onSkip,
         )
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun UpdateOverlayContent(
     availableVersion: String,
     changelog: String,
-    apkUrl: String,
-    onDismiss: () -> Unit,
-    onStartDownload: (String) -> Unit,
+    onDownload: () -> Unit,
+    onOpenUpdater: () -> Unit,
     onIgnore: () -> Unit,
     downloadState: com.frerox.toolz.data.update.UpdateManagerState? = null,
-    onSkip: (() -> Unit)? = null
+    onSkip: (() -> Unit)? = null,
 ) {
     val vibrationManager = com.frerox.toolz.ui.theme.LocalVibrationManager.current
     val downloading = downloadState as? com.frerox.toolz.data.update.UpdateManagerState.Downloading
+    val ready = downloadState is com.frerox.toolz.data.update.UpdateManagerState.ReadyToInstall ||
+        downloadState is com.frerox.toolz.data.update.UpdateManagerState.Installing
+    val pending = downloadState?.pendingUpdate()
+    val available = (downloadState as? com.frerox.toolz.data.update.UpdateManagerState.Available)?.update
+    val critical = pending?.isCritical == true
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp)
-            .padding(bottom = 40.dp)
-            .verticalScroll(rememberScrollState()),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .padding(bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Box(
-            modifier = Modifier
-                .size(96.dp)
-                .clip(RoundedCornerShape(28.dp))
-                .background(MaterialTheme.colorScheme.primaryContainer),
-            contentAlignment = Alignment.Center
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            com.frerox.toolz.ui.components.CurrentToolzMark(
-                modifier = Modifier.size(96.dp).clip(RoundedCornerShape(28.dp)),
-            )
-        }
-        Spacer(Modifier.height(20.dp))
-        Text(
-            text = "NEW VERSION READY",
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.Black,
-            color = MaterialTheme.colorScheme.primary,
-            letterSpacing = 4.sp
-        )
-        Spacer(Modifier.height(6.dp))
-        Text(
-            text = "v$availableVersion",
-            style = MaterialTheme.typography.displaySmall,
-            fontWeight = FontWeight.Black,
-            textAlign = TextAlign.Center
-        )
-        Spacer(Modifier.height(16.dp))
-        Surface(
-            modifier = Modifier.fillMaxWidth().heightIn(max = 220.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-            shape = RoundedCornerShape(24.dp),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
-        ) {
-            MarkdownContent(
-                markdown = if (changelog.isBlank()) "No changelog provided for this release." else changelog,
-                modifier = Modifier.padding(20.dp).verticalScroll(rememberScrollState()),
-                baseFontSize = 14.sp,
-                textColor = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        Spacer(Modifier.height(20.dp))
-        if (downloading != null) {
-            val pct = downloading.progress.toInt()
-            LinearProgressIndicator(
-                progress = { (pct / 100f).coerceIn(0f, 1f) },
-                modifier = Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(8.dp)),
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "Downloading… $pct% • ${com.frerox.toolz.data.update.formatBytes(downloading.bytesDownloaded)}" +
-                    if (downloading.totalBytes > 0) " of ${com.frerox.toolz.data.update.formatBytes(downloading.totalBytes)}" else "",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.height(8.dp))
-        }
-        ToolzExpressiveButton(
-            onClick = {
-                vibrationManager?.vibrateClick()
-                if (downloading == null) onStartDownload(apkUrl)
-                else onDismiss()
-            },
-            modifier = Modifier.fillMaxWidth().height(64.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-        ) {
-            Icon(if (downloading == null) Icons.Rounded.Download else Icons.Rounded.Close, null, modifier = Modifier.size(22.dp))
-            Spacer(Modifier.width(12.dp))
-            Text(
-                if (downloading == null) "DOWNLOAD & AUTO-INSTALL" else "OPEN UPDATER",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Black,
-                letterSpacing = 1.sp
-            )
-        }
-        Spacer(Modifier.height(8.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(onClick = { vibrationManager?.vibrateClick(); onIgnore() }, modifier = Modifier.weight(1f).height(52.dp)) {
-                Text("LATER", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.outline)
+            Surface(
+                modifier = Modifier.size(52.dp),
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.primaryContainer,
+            ) {
+                com.frerox.toolz.ui.components.CurrentToolzMark(
+                    modifier = Modifier.size(52.dp).clip(RoundedCornerShape(16.dp)),
+                )
             }
-            if (onSkip != null) {
-                TextButton(onClick = { vibrationManager?.vibrateClick(); onSkip() }, modifier = Modifier.weight(1f).height(52.dp)) {
-                    Text("SKIP VERSION", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.outline)
+            Column {
+                Text(
+                    text = stringResource(R.string.st_Update_OverlayTitle),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = if (critical) {
+                        stringResource(
+                            R.string.st_Update_OverlayCriticalSubtitle,
+                            availableVersion,
+                        )
+                    } else {
+                        stringResource(R.string.st_Update_OverlaySubtitle, availableVersion)
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        if (downloading != null) {
+            val smoothProgress by animateFloatAsState(
+                targetValue = (downloading.progress / 100f).coerceIn(0f, 1f),
+                animationSpec = tween(450, easing = LinearOutSlowInEasing),
+                label = "overlay_progress",
+            )
+            val pct by animateIntAsState(
+                targetValue = downloading.progress.toInt().coerceIn(0, 100),
+                animationSpec = tween(450, easing = LinearOutSlowInEasing),
+                label = "overlay_percent",
+            )
+            Text(
+                text = stringResource(R.string.st_Update_OverlayDownloading, pct),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            LinearProgressIndicator(
+                progress = { smoothProgress },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(10.dp)
+                    .clip(RoundedCornerShape(8.dp)),
+            )
+            val sizeText = if (downloading.totalBytes > 0) {
+                stringResource(
+                    R.string.st_Update_Of,
+                    com.frerox.toolz.data.update.formatBytes(downloading.bytesDownloaded),
+                    com.frerox.toolz.data.update.formatBytes(downloading.totalBytes),
+                )
+            } else {
+                com.frerox.toolz.data.update.formatBytes(downloading.bytesDownloaded)
+            }
+            val speedText = if (downloading.speedBps > 0) {
+                stringResource(
+                    R.string.st_Update_PerSecond,
+                    com.frerox.toolz.data.update.formatBytes(downloading.speedBps),
+                )
+            } else {
+                null
+            }
+            Text(
+                text = listOfNotNull(sizeText, speedText).joinToString(" · "),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else if (ready) {
+            Text(
+                text = stringResource(R.string.st_Update_OverlayReadyBody),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else if (changelog.isNotBlank() && !critical) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 170.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                shape = RoundedCornerShape(14.dp),
+            ) {
+                Box(Modifier.verticalScroll(rememberScrollState())) {
+                    MarkdownContent(
+                        markdown = changelog,
+                        modifier = Modifier.padding(16.dp),
+                        baseFontSize = 13.sp,
+                        textColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }
-        Spacer(Modifier.navigationBarsPadding().height(8.dp))
+
+        if (pending?.sizeBytes != null) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(
+                    Icons.Rounded.Security,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp),
+                )
+                Text(
+                    text = "${com.frerox.toolz.data.update.formatBytes(pending.sizeBytes)} · " +
+                        stringResource(R.string.st_Update_CheckedBeforeInstall),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        if (downloading != null || ready) {
+            ToolzExpressiveButton(
+                onClick = {
+                    vibrationManager?.vibrateClick()
+                    onOpenUpdater()
+                },
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+                shape = RoundedCornerShape(16.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.st_Update_OpenUpdater),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        } else {
+            ToolzExpressiveButton(
+                onClick = {
+                    vibrationManager?.vibrateClick()
+                    onDownload()
+                },
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+                shape = RoundedCornerShape(16.dp),
+            ) {
+                Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = if (critical) {
+                        stringResource(R.string.st_Update_DownloadCritical)
+                    } else {
+                        stringResource(R.string.st_Update_DownloadUpdate)
+                    },
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
+
+        TextButton(onClick = onOpenUpdater, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(R.string.st_Update_SeeDetails))
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            TextButton(
+                onClick = {
+                    vibrationManager?.vibrateClick()
+                    onIgnore()
+                },
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(
+                    stringResource(R.string.st_Update_Later),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (onSkip != null && available != null && !critical) {
+                TextButton(
+                    onClick = {
+                        vibrationManager?.vibrateClick()
+                        onSkip()
+                    },
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(
+                        stringResource(R.string.st_Update_SkipVersion),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.navigationBarsPadding().height(4.dp))
     }
 }
 
@@ -873,11 +1003,11 @@ fun UpdateOverlayPreview() {
     ToolzTheme {
         UpdateOverlayContent(
             availableVersion = "1.1.8",
-            changelog = "### Highlights\n- Faster downloads\n- New installer",
-            apkUrl = "https://github.com",
-            onDismiss = {},
-            onStartDownload = {},
-            onIgnore = {}
+            changelog = "### Highlights\n- Faster downloads with resume\n- Clearer install flow",
+            onDownload = {},
+            onOpenUpdater = {},
+            onIgnore = {},
+            onSkip = {},
         )
     }
 }

@@ -1392,7 +1392,7 @@ fun SettingsScreen(
                     if (!offlineModeEnabled) {
                         StaggeredEntrance(index = 9) {
                             SettingsExpandableSection(
-                                title = "UPDATE",
+                                title = stringResource(R.string.st_Update_Title),
                                 icon = Icons.Rounded.SystemUpdate,
                                 isExpanded = expandedSection == "UPDATE" || searchQuery.isNotEmpty(),
                                 onExpandToggle = {
@@ -1401,8 +1401,8 @@ fun SettingsScreen(
                             ) {
                                 if (matches(searchQuery, "update", "auto", "patch", "background")) {
                                     SettingsToggleItem(
-                                        title = "Automatic Updates",
-                                        subtitle = "Download patches in background",
+                                        title = stringResource(R.string.st_Update_AutoTitle),
+                                        subtitle = stringResource(R.string.st_Update_SettingsAutoBody),
                                         icon = Icons.Rounded.AutoFixHigh,
                                         checked = autoUpdateEnabled,
                                         onCheckedChange = { viewModel.setAutoUpdateEnabled(it) }
@@ -1410,8 +1410,8 @@ fun SettingsScreen(
                                 }
                                 if (matches(searchQuery, "update", "check", "version", "new")) {
                                     SettingsItem(
-                                        title = "Check for Updates",
-                                        subtitle = "See if a new version is available",
+                                        title = stringResource(R.string.st_Update_SettingsCheck),
+                                        subtitle = stringResource(R.string.st_Update_SettingsCheckBody),
                                         icon = Icons.Rounded.Update,
                                         onClick = onNavigateToUpdate
                                     )

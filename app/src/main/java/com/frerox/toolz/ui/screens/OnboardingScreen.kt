@@ -703,7 +703,10 @@ fun UpdateStep(
                 }
                 val desc = when (updateState) {
                     null -> stringResource(R.string.st_OnboardingScreen_w3x4)
-                    is UpdateCheckResult.NewUpdate -> "Version ${updateState.version} is available whenever you're ready."
+                    is UpdateCheckResult.NewUpdate -> stringResource(
+                        R.string.st_Update_OnboardingAvailable,
+                        updateState.version,
+                    )
                     is UpdateCheckResult.UpToDate -> stringResource(R.string.st_OnboardingScreen_y5z6)
                     else -> stringResource(R.string.st_OnboardingScreen_a7b8)
                 }
@@ -735,7 +738,16 @@ fun UpdateStep(
                 shape = ExtraLargeExpressiveShape,
                 enabled = state != null
             ) {
-                Text(if (state is UpdateCheckResult.NewUpdate) "Update and continue" else "Continue", fontWeight = FontWeight.SemiBold)
+                Text(
+                    stringResource(
+                        if (state is UpdateCheckResult.NewUpdate) {
+                            R.string.st_Update_OnboardingUpdate
+                        } else {
+                            R.string.st_Update_OnboardingContinue
+                        },
+                    ),
+                    fontWeight = FontWeight.SemiBold,
+                )
             }
         }
     }

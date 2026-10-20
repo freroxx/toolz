@@ -2368,21 +2368,31 @@ fun UpdateBannerRich(
                     Column(Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(
-                                if (isCritical) "CRITICAL UPDATE" else stringResource(R.string.st_DashboardScreen_q3r4),
-                                style         = MaterialTheme.typography.labelSmall,
-                                fontWeight    = FontWeight.Black,
+                                text = stringResource(
+                                    if (isCritical) R.string.st_Update_CriticalUpdate
+                                    else R.string.st_Update_DashboardAvailable
+                                ),
+                                style         = MaterialTheme.typography.labelMedium,
+                                fontWeight    = FontWeight.SemiBold,
                                 color         = if (isCritical) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer,
-                                letterSpacing = 1.2.sp
                             )
                         }
-                        Text("Upgrade to v$version",
-                            style      = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.Bold,
-                            color      = (if (isCritical) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer).copy(alpha = 0.85f))
                         Text(
-                            if (downloadProgress != null) "Downloading… ${downloadProgress.toInt()}%" else "Tap for changelog • auto-install",
+                            text = stringResource(R.string.st_Update_DashboardReady, version),
+                            style      = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color      = (if (isCritical) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer).copy(alpha = 0.9f))
+                        Text(
+                            text = if (downloadProgress != null) {
+                                stringResource(
+                                    R.string.st_Update_OverlayDownloading,
+                                    downloadProgress.toInt(),
+                                )
+                            } else {
+                                stringResource(R.string.st_Update_DashboardTap)
+                            },
                             style = MaterialTheme.typography.bodySmall,
-                            color = (if (isCritical) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer).copy(alpha = 0.65f)
+                            color = (if (isCritical) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer).copy(alpha = 0.7f)
                         )
                     }
                 }

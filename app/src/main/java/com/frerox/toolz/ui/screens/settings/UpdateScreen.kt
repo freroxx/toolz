@@ -17,23 +17,35 @@
 
 package com.frerox.toolz.ui.screens.settings
 
-import android.net.Uri
+import android.content.Context
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.Spring
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.animateIntAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -43,32 +55,32 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.HelpOutline
 import androidx.compose.material.icons.rounded.InstallMobile
-import androidx.compose.material.icons.rounded.PriorityHigh
+import androidx.compose.material.icons.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.SystemUpdate
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButtonDefaults
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.RadioButton
@@ -88,27 +100,52 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalInspectionMode
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.LifecycleResumeEffect
+import com.frerox.toolz.R
+import com.frerox.toolz.data.developer.DevUiOverrider
+import com.frerox.toolz.data.update.Eta
 import com.frerox.toolz.data.update.PendingUpdate
+import com.frerox.toolz.data.update.RelativeAge
+import com.frerox.toolz.data.update.UpdateError
 import com.frerox.toolz.data.update.UpdateManagerState
+import com.frerox.toolz.data.update.etaOf
 import com.frerox.toolz.data.update.formatBytes
-import com.frerox.toolz.data.update.formatEta
-import com.frerox.toolz.data.update.formatSpeed
+import com.frerox.toolz.data.update.relativeAge
 import com.frerox.toolz.ui.components.MarkdownContent
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
-import com.frerox.toolz.ui.components.ToolzExpressiveIconButton
 import com.frerox.toolz.ui.components.ToolzLoadingIndicator
 import com.frerox.toolz.ui.components.ToolzWavyLinearProgressIndicator
-import com.frerox.toolz.ui.components.expressivePressScale
+import com.frerox.toolz.ui.theme.ToolzTheme
 import com.frerox.toolz.ui.theme.toolzBackground
+
+private const val RELEASES_URL = "https://github.com/freroxx/toolz/releases"
+
+// Updater surfaces use tighter corners than the app-wide defaults so the
+// screen reads as a compact utility rather than a stack of balloons.
+private val CardShape = RoundedCornerShape(20.dp)
+private val ButtonShape = RoundedCornerShape(16.dp)
+private val ChipShape = RoundedCornerShape(8.dp)
+private val SheetShape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+private val IconTileShape = RoundedCornerShape(16.dp)
+
+private val DiscordBlurpleDeep = Color(0xFF4752C4)
+private val DiscordGradient = listOf(Color(0xFF5865F2), Color(0xFF8A5CF6))
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -116,11 +153,19 @@ fun UpdateScreen(
     onBack: () -> Unit,
     currentVersionName: String,
     currentVersionCode: Long,
-    viewModel: UpdateViewModel = hiltViewModel()
+    viewModel: UpdateViewModel = hiltViewModel(),
 ) {
     val managerState by viewModel.managerState.collectAsState()
     val preferredAbi by viewModel.preferredAbi.collectAsState()
     val autoUpdate by viewModel.autoUpdateEnabled.collectAsState()
+    val lastChecked by viewModel.lastChecked.collectAsState()
+
+    // The user may leave to grant "install unknown apps"; pick it up on return.
+    LifecycleResumeEffect(Unit) {
+        viewModel.refreshInstallPermission()
+        onPauseOrDispose { }
+    }
+
     UpdateScreenContent(
         onBack = onBack,
         currentVersionName = currentVersionName,
@@ -128,16 +173,18 @@ fun UpdateScreen(
         managerState = managerState,
         preferredAbi = preferredAbi,
         autoUpdateEnabled = autoUpdate,
+        lastChecked = lastChecked,
         onCheck = { viewModel.checkForUpdates() },
         onDownload = { viewModel.startDownload(it) },
         onCancelDownload = { viewModel.cancelDownload() },
         onInstall = { viewModel.installReady() },
+        onRetry = { viewModel.retry() },
         onSkip = { viewModel.skipVersion(it) },
+        onDismissInstalled = { viewModel.dismissInstalled() },
         onSetPreferredAbi = { viewModel.setPreferredAbi(it) },
         onSetAutoUpdate = { viewModel.setAutoUpdateEnabled(it) },
         getDeviceAbi = { viewModel.getDeviceAbi() },
-        needsInstallPermission = { viewModel.needsInstallPermission() },
-        onOpenInstallSettings = { ctx -> viewModel.openInstallSettings(ctx) }
+        onOpenInstallSettings = { ctx -> viewModel.openInstallSettings(ctx) },
     )
 }
 
@@ -150,443 +197,1372 @@ fun UpdateScreenContent(
     managerState: UpdateManagerState,
     preferredAbi: String,
     autoUpdateEnabled: Boolean,
+    lastChecked: Long,
     onCheck: () -> Unit,
     onDownload: (PendingUpdate?) -> Unit,
     onCancelDownload: () -> Unit,
     onInstall: () -> Unit,
+    onRetry: () -> Unit,
     onSkip: (String) -> Unit,
+    onDismissInstalled: () -> Unit,
     onSetPreferredAbi: (String) -> Unit,
     onSetAutoUpdate: (Boolean) -> Unit,
     getDeviceAbi: () -> String,
-    needsInstallPermission: () -> Boolean,
-    onOpenInstallSettings: (android.content.Context) -> Unit
+    onOpenInstallSettings: (Context) -> Unit,
 ) {
-    val context = LocalContext.current
-    var showAbiSettings by remember { mutableStateOf(false) }
+    var showAbiSheet by remember { mutableStateOf(false) }
     var showHelpSheet by remember { mutableStateOf(false) }
 
     Scaffold(
+        modifier = Modifier.toolzBackground(),
+        containerColor = Color.Transparent,
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("Updater", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) },
+                title = {
+                    Text(
+                        text = stringResource(R.string.st_Update_Title),
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                },
                 navigationIcon = {
-                    ToolzExpressiveIconButton(
-                        onClick = onBack,
-                        modifier = Modifier.padding(8.dp),
-                        colors = IconButtonDefaults.filledTonalIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            Icons.AutoMirrored.Rounded.ArrowBack,
+                            contentDescription = stringResource(R.string.st_Update_Back),
                         )
-                    ) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back") }
+                    }
                 },
                 actions = {
-                    ToolzExpressiveIconButton(
-                        onClick = { showHelpSheet = true },
-                        modifier = Modifier.padding(end = 4.dp),
-                        colors = IconButtonDefaults.filledTonalIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                    IconButton(onClick = { showHelpSheet = true }) {
+                        Icon(
+                            Icons.Rounded.HelpOutline,
+                            contentDescription = stringResource(R.string.st_Update_About),
                         )
-                    ) { Icon(Icons.Rounded.ErrorOutline, contentDescription = "Help") }
-                    ToolzExpressiveIconButton(
-                        onClick = { showAbiSettings = true },
-                        modifier = Modifier.padding(end = 8.dp),
-                        colors = IconButtonDefaults.filledTonalIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                        )
-                    ) { Icon(Icons.Rounded.Settings, contentDescription = "ABI Settings") }
+                    }
                 },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
-                modifier = Modifier.statusBarsPadding()
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                    containerColor = Color.Transparent,
+                ),
             )
         },
-        containerColor = Color.Transparent
     ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .toolzBackground()
-                .padding(top = padding.calculateTopPadding())
+                .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .padding(horizontal = 20.dp)
+                .padding(top = 8.dp, bottom = 32.dp)
+                .navigationBarsPadding(),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            UpdateHeroCard(
+            VersionHero(
                 currentVersionName = currentVersionName,
                 currentVersionCode = currentVersionCode,
-                managerState = managerState
+                managerState = managerState,
             )
 
             AnimatedContent(
                 targetState = managerState,
+                // Keep progress ticks from replaying the transition; only a
+                // change of state type is a new card.
+                contentKey = { it::class },
                 transitionSpec = {
-                    (fadeIn(spring(stiffness = Spring.StiffnessLow)) +
-                        scaleIn(initialScale = 0.94f, animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow)))
-                        .togetherWith(fadeOut(tween(150)) + scaleOut(targetScale = 1.04f))
+                    (
+                        fadeIn(tween(240)) +
+                            slideInVertically(
+                                animationSpec = tween(240, easing = LinearOutSlowInEasing),
+                                initialOffsetY = { it / 14 },
+                            ) +
+                            scaleIn(initialScale = 0.98f, animationSpec = tween(240))
+                        ).togetherWith(
+                        fadeOut(tween(130)) +
+                            slideOutVertically(
+                                animationSpec = tween(130),
+                                targetOffsetY = { -it / 24 },
+                            )
+                    ).using(SizeTransform(clip = false))
                 },
                 label = "update_state",
-                modifier = Modifier.fillMaxWidth()
             ) { state ->
                 when (state) {
-                    is UpdateManagerState.Idle -> IdleCard(onCheck, autoUpdateEnabled, onSetAutoUpdate)
-                    is UpdateManagerState.Checking -> CheckingCard()
+                    is UpdateManagerState.Idle -> IdleCard(
+                        currentVersionName = currentVersionName,
+                        onCheck = onCheck,
+                    )
+
+                    is UpdateManagerState.Checking -> WorkingCard(
+                        title = stringResource(R.string.st_Update_StatusChecking),
+                        body = stringResource(R.string.st_Update_CheckingBody),
+                    )
+
                     is UpdateManagerState.Available -> AvailableCard(
                         update = state.update,
                         onDownload = { onDownload(state.update) },
-                        onSkip = { onSkip(state.update.version) }
+                        onSkip = { onSkip(state.update.version) },
                     )
+
                     is UpdateManagerState.Downloading -> DownloadingCard(
                         update = state.update,
-                        bytesDownloaded = state.bytesDownloaded,
-                        totalBytes = state.totalBytes,
+                        downloaded = state.bytesDownloaded,
+                        total = state.totalBytes,
                         speedBps = state.speedBps,
                         progress = state.progress,
-                        onCancel = onCancelDownload
+                        onCancel = onCancelDownload,
                     )
+
+                    is UpdateManagerState.Verifying -> WorkingCard(
+                        title = stringResource(R.string.st_Update_VerifyingTitle),
+                        body = stringResource(
+                            R.string.st_Update_VerifyingBody,
+                            state.update.version,
+                        ),
+                    )
+
                     is UpdateManagerState.ReadyToInstall -> ReadyCard(
                         update = state.update,
-                        apkSize = try { state.apkFile.length() } catch (_: Exception) { 0L },
-                        needsPermission = needsInstallPermission(),
+                        needsPermission = state.needsPermission,
                         onInstall = onInstall,
-                        onOpenSettings = { onOpenInstallSettings(context) }
+                        onOpenSettings = { ctx -> onOpenInstallSettings(ctx) },
                     )
-                    is UpdateManagerState.Installing -> InstallingCard(update = state.update)
-                    is UpdateManagerState.Error -> ErrorCard(message = state.message, onRetry = onCheck)
-                    is UpdateManagerState.UpToDate -> UpToDateCard(currentVersionName, onCheck)
-                    is UpdateManagerState.Installed -> InstalledCard(onCheck)
+
+                    is UpdateManagerState.Installing -> WorkingCard(
+                        title = stringResource(R.string.st_Update_InstallingTitle),
+                        body = stringResource(R.string.st_Update_InstallingBody),
+                    )
+
+                    is UpdateManagerState.Error -> ErrorCard(
+                        state = state,
+                        onRetry = onRetry,
+                    )
+
+                    is UpdateManagerState.UpToDate -> UpToDateCard(
+                        currentVersionName = currentVersionName,
+                        onCheck = onCheck,
+                    )
+
+                    is UpdateManagerState.Installed -> InstalledCard(
+                        version = state.version,
+                        onDone = onDismissInstalled,
+                    )
                 }
             }
 
-            // Secondary: device ABI row (always visible, compact).
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                shape = MaterialTheme.shapes.large
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Device build", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(
-                            if (preferredAbi == "AUTO") "Auto • ${getDeviceAbi()}" else preferredAbi,
-                            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                    TextButton(onClick = { showAbiSettings = true }) { Text("CHANGE") }
-                }
-            }
-            Spacer(Modifier.navigationBarsPadding().height(8.dp))
+            UpdateSettingsCard(
+                autoUpdateEnabled = autoUpdateEnabled,
+                preferredAbi = preferredAbi,
+                deviceAbiLabel = abiLabel(getDeviceAbi()),
+                lastChecked = lastChecked,
+                onSetAutoUpdate = onSetAutoUpdate,
+                onOpenAbiPicker = { showAbiSheet = true },
+            )
+
+            DiscordCard()
+
+            Text(
+                text = stringResource(R.string.st_Update_Footer),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            )
         }
+    }
+
+    if (showAbiSheet) {
+        AbiPickerSheet(
+            preferredAbi = preferredAbi,
+            deviceAbiLabel = abiLabel(getDeviceAbi()),
+            onSelect = {
+                onSetPreferredAbi(it)
+                showAbiSheet = false
+            },
+            onDismiss = { showAbiSheet = false },
+        )
     }
 
     if (showHelpSheet) {
-        UpdateHelpBottomSheet(
-            onDismiss = { showHelpSheet = false },
-            onNavigateToUrl = { url ->
-                context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url)))
-            }
-        )
+        HelpSheet(onDismiss = { showHelpSheet = false })
     }
+}
 
-    if (showAbiSettings) {
-        AlertDialog(
-            onDismissRequest = { showAbiSettings = false },
-            title = { Text("Preferred build", fontWeight = FontWeight.Black) },
-            text = {
-                Column {
-                    Text("Pick the APK variant. Auto follows your device CPU.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.height(8.dp))
-                    listOf("AUTO", "arm64-v8a", "armeabi-v7a", "x86_64", "x86").forEach { abi ->
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth().clickable { onSetPreferredAbi(abi); showAbiSettings = false }.padding(vertical = 8.dp)
-                        ) {
-                            RadioButton(selected = preferredAbi == abi, onClick = null)
-                            Spacer(Modifier.width(8.dp))
-                            Text(if (abi == "AUTO") "Auto (${getDeviceAbi()})" else abi, style = MaterialTheme.typography.bodyLarge)
-                        }
+// ── Current version + status ────────────────────────────────────────────────
+
+@Composable
+private fun VersionHero(
+    currentVersionName: String,
+    currentVersionCode: Long,
+    managerState: UpdateManagerState,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = CardShape,
+        color = MaterialTheme.colorScheme.primaryContainer,
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Surface(
+                    modifier = Modifier.size(52.dp),
+                    shape = IconTileShape,
+                    color = MaterialTheme.colorScheme.primary,
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Rounded.SystemUpdate,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(28.dp),
+                        )
                     }
                 }
-            },
-            confirmButton = { TextButton(onClick = { showAbiSettings = false }) { Text("CLOSE") } }
+                Column {
+                    Text(
+                        text = "Toolz",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = stringResource(
+                            R.string.st_Update_VersionBuild,
+                            currentVersionName,
+                            currentVersionCode,
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f),
+                    )
+                }
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                StatusDot(managerState)
+                AnimatedContent(
+                    targetState = statusLine(managerState),
+                    transitionSpec = {
+                        fadeIn(tween(190)) togetherWith fadeOut(tween(120))
+                    },
+                    modifier = Modifier.weight(1f),
+                    label = "update_status",
+                ) { line ->
+                    Text(
+                        text = line,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                }
+                AnimatedVisibility(
+                    visible = (managerState as? UpdateManagerState.Available)
+                        ?.update?.isCritical == true,
+                    enter = fadeIn(tween(180)) + expandHorizontally(tween(220)),
+                    exit = fadeOut(tween(120)) + shrinkHorizontally(tween(180)),
+                ) {
+                    Surface(
+                        shape = ChipShape,
+                        color = MaterialTheme.colorScheme.errorContainer,
+                    ) {
+                        Text(
+                            text = stringResource(R.string.st_Update_CriticalUpdate),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatusDot(state: UpdateManagerState) {
+    val working = state is UpdateManagerState.Checking ||
+        state is UpdateManagerState.Downloading ||
+        state is UpdateManagerState.Verifying ||
+        state is UpdateManagerState.Installing
+    val color = when (state) {
+        is UpdateManagerState.Error -> MaterialTheme.colorScheme.error
+        is UpdateManagerState.UpToDate,
+        is UpdateManagerState.Installed -> MaterialTheme.colorScheme.tertiary
+        is UpdateManagerState.Idle ->
+            MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.45f)
+        else -> MaterialTheme.colorScheme.primary
+    }
+    val inspection = LocalInspectionMode.current
+    val alpha = if (working && !inspection) {
+        val transition = rememberInfiniteTransition(label = "status_dot")
+        val pulse by transition.animateFloat(
+            initialValue = 0.3f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(850, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse,
+            ),
+            label = "status_dot_alpha",
+        )
+        pulse
+    } else {
+        1f
+    }
+    Box(
+        modifier = Modifier
+            .size(9.dp)
+            .clip(CircleShape)
+            .background(color.copy(alpha = alpha)),
+    )
+}
+
+/** Check failures are the only errors that mean "we couldn't look". */
+private fun UpdateManagerState.Error.isCheckFailure(): Boolean =
+    !retryDownload && when (error) {
+        is UpdateError.Offline,
+        is UpdateError.Timeout,
+        is UpdateError.RateLimited,
+        is UpdateError.Http,
+        is UpdateError.NoCompatibleBuild -> true
+        else -> false
+    }
+
+@Composable
+private fun statusLine(state: UpdateManagerState): String = when (state) {
+    is UpdateManagerState.Idle -> stringResource(R.string.st_Update_StatusIdle)
+    is UpdateManagerState.Checking -> stringResource(R.string.st_Update_StatusChecking)
+    is UpdateManagerState.Available -> stringResource(
+        R.string.st_Update_StatusAvailable,
+        state.update.version,
+    )
+    is UpdateManagerState.Downloading -> stringResource(
+        R.string.st_Update_StatusDownloading,
+        state.update.version,
+    )
+    is UpdateManagerState.Verifying -> stringResource(
+        R.string.st_Update_StatusVerifying,
+        state.update.version,
+    )
+    is UpdateManagerState.ReadyToInstall -> stringResource(
+        R.string.st_Update_StatusReady,
+        state.update.version,
+    )
+    is UpdateManagerState.Installing -> stringResource(
+        R.string.st_Update_StatusInstalling,
+        state.update.version,
+    )
+    is UpdateManagerState.Error -> stringResource(
+        if (state.isCheckFailure()) R.string.st_Update_StatusErrorCheck
+        else R.string.st_Update_StatusErrorDownload,
+    )
+    is UpdateManagerState.UpToDate -> stringResource(R.string.st_Update_StatusUpToDate)
+    is UpdateManagerState.Installed -> if (state.version.isBlank()) {
+        stringResource(R.string.st_Update_InstalledTitle)
+    } else {
+        stringResource(R.string.st_Update_StatusInstalled, state.version)
+    }
+}
+
+// ── State cards ─────────────────────────────────────────────────────────────
+
+@Composable
+private fun IdleCard(
+    currentVersionName: String,
+    onCheck: () -> Unit,
+) {
+    StateCard {
+        Text(
+            text = stringResource(R.string.st_Update_IdleTitle),
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = stringResource(R.string.st_Update_IdleBody, currentVersionName),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        PrimaryAction(
+            text = stringResource(R.string.st_Update_CheckNow),
+            icon = Icons.Rounded.Refresh,
+            onClick = onCheck,
         )
     }
 }
 
 @Composable
-private fun UpdateHeroCard(
-    currentVersionName: String,
-    currentVersionCode: Long,
-    managerState: UpdateManagerState
+private fun AvailableCard(
+    update: PendingUpdate,
+    onDownload: () -> Unit,
+    onSkip: () -> Unit,
 ) {
-    val pendingVersion = when (managerState) {
-        is UpdateManagerState.Available -> managerState.update.version
-        is UpdateManagerState.Downloading -> managerState.update.version
-        is UpdateManagerState.ReadyToInstall -> managerState.update.version
-        is UpdateManagerState.Installing -> managerState.update.version
-        else -> null
-    }
-    val isCritical = (managerState as? UpdateManagerState.Available)?.update?.isCritical == true
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.extraLarge,
-        color = MaterialTheme.colorScheme.primaryContainer,
-        tonalElevation = 6.dp
-    ) {
-        Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+    var expanded by remember(update.version) { mutableStateOf(false) }
+    StateCard {
+        Text(
+            text = stringResource(R.string.st_Update_VersionTitle, update.version),
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            update.sizeBytes?.let { MetaChip(formatBytes(it)) }
+            if (update.abi.isNotBlank()) MetaChip(abiLabel(update.abi))
+            if (update.isCritical) {
+                Surface(
+                    shape = ChipShape,
+                    color = MaterialTheme.colorScheme.errorContainer,
+                ) {
+                    Text(
+                        text = stringResource(R.string.st_Update_Critical),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                }
+            }
+        }
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Rounded.Security,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(18.dp),
+            )
+            Text(
+                text = stringResource(R.string.st_Update_CheckedBeforeInstall),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (update.hasReleaseNotes) {
             Surface(
-                modifier = Modifier.size(72.dp).expressivePressScale(remember { MutableInteractionSource() }),
-                shape = MaterialTheme.shapes.large,
-                color = MaterialTheme.colorScheme.primary
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .animateContentSize(),
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            ) {
+                Column(Modifier.padding(14.dp)) {
+                    Box(
+                        modifier = Modifier.heightIn(
+                            max = if (expanded) 2_000.dp else 176.dp
+                        )
+                    ) {
+                        MarkdownContent(
+                            markdown = update.changelog,
+                            baseFontSize = 14.sp,
+                            textColor = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                    if (update.changelog.length > 420) {
+                        TextButton(
+                            onClick = { expanded = !expanded },
+                            modifier = Modifier.align(Alignment.Start),
+                        ) {
+                            Text(
+                                stringResource(
+                                    if (expanded) R.string.st_Update_ShowLess
+                                    else R.string.st_Update_ShowFullNotes
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        PrimaryAction(
+            text = stringResource(R.string.st_Update_DownloadInstall),
+            icon = Icons.Rounded.Download,
+            onClick = onDownload,
+        )
+        if (update.isCritical) {
+            Text(
+                text = stringResource(R.string.st_Update_CriticalCantSkip),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center,
+            )
+        } else {
+            TextButton(
+                onClick = onSkip,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.st_Update_SkipVersion))
+            }
+        }
+    }
+}
+
+@Composable
+private fun DownloadingCard(
+    update: PendingUpdate,
+    downloaded: Long,
+    total: Long,
+    speedBps: Long,
+    progress: Float,
+    onCancel: () -> Unit,
+) {
+    val smoothProgress by animateFloatAsState(
+        targetValue = (progress / 100f).coerceIn(0f, 1f),
+        animationSpec = tween(450, easing = LinearOutSlowInEasing),
+        label = "download_progress",
+    )
+    val shownPercent by animateIntAsState(
+        targetValue = progress.toInt().coerceIn(0, 100),
+        animationSpec = tween(450, easing = LinearOutSlowInEasing),
+        label = "download_percent",
+    )
+    StateCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = stringResource(R.string.st_Update_DownloadingTitle, update.version),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = "$shownPercent%",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        ToolzWavyLinearProgressIndicator(
+            progress = { smoothProgress },
+            modifier = Modifier.fillMaxWidth().height(12.dp),
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = if (total > 0L) {
+                    stringResource(
+                        R.string.st_Update_Of,
+                        formatBytes(downloaded),
+                        formatBytes(total),
+                    )
+                } else {
+                    formatBytes(downloaded)
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.weight(1f))
+            val eta = if (total > downloaded) etaLabel(total - downloaded, speedBps) else null
+            Text(
+                text = listOfNotNull(
+                    speedBps.takeIf { it > 0L }?.let {
+                        stringResource(R.string.st_Update_PerSecond, formatBytes(it))
+                    },
+                    eta,
+                ).joinToString(" · "),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        TextButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(R.string.st_Update_CancelDownload))
+        }
+    }
+}
+
+@Composable
+private fun ReadyCard(
+    update: PendingUpdate,
+    needsPermission: Boolean,
+    onInstall: () -> Unit,
+    onOpenSettings: (Context) -> Unit,
+) {
+    val context = LocalContext.current
+    StateCard {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Rounded.CheckCircle,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(40.dp),
+            )
+            Column {
+                Text(
+                    text = stringResource(R.string.st_Update_ReadyTitle, update.version),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = listOfNotNull(
+                        update.sizeBytes?.let { formatBytes(it) },
+                        stringResource(R.string.st_Update_Verified),
+                    ).joinToString(" · "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        if (needsPermission) {
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.secondaryContainer,
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = stringResource(R.string.st_Update_AllowInstallsTitle),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = stringResource(R.string.st_Update_AllowInstallsBody),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    )
+                    TextButton(onClick = { onOpenSettings(context) }) {
+                        Text(stringResource(R.string.st_Update_OpenSettings))
+                    }
+                }
+            }
+        }
+        PrimaryAction(
+            text = stringResource(R.string.st_Update_InstallUpdate),
+            icon = Icons.Rounded.InstallMobile,
+            onClick = onInstall,
+            enabled = !needsPermission,
+        )
+        Text(
+            text = stringResource(R.string.st_Update_SystemInstallerHint),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.fillMaxWidth(),
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+@Composable
+private fun WorkingCard(
+    title: String,
+    body: String,
+) {
+    StateCard {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ToolzLoadingIndicator(modifier = Modifier.size(40.dp))
+            Column {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = body,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ErrorCard(
+    state: UpdateManagerState.Error,
+    onRetry: () -> Unit,
+) {
+    StateCard {
+        Icon(
+            Icons.Rounded.ErrorOutline,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.error,
+            modifier = Modifier.size(40.dp),
+        )
+        Text(
+            text = stringResource(
+                if (state.isCheckFailure()) R.string.st_Update_StatusErrorCheck
+                else R.string.st_Update_ErrorDownloadTitle
+            ),
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = stringResource(state.error.messageRes),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        PrimaryAction(
+            text = stringResource(R.string.st_Update_TryAgain),
+            icon = Icons.Rounded.Refresh,
+            onClick = onRetry,
+        )
+    }
+}
+
+@Composable
+private fun UpToDateCard(
+    currentVersionName: String,
+    onCheck: () -> Unit,
+) {
+    StateCard {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Rounded.CheckCircle,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(40.dp),
+            )
+            Column {
+                Text(
+                    text = stringResource(R.string.st_Update_UpToDateTitle),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = stringResource(
+                        R.string.st_Update_UpToDateBody,
+                        currentVersionName,
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        TextButton(onClick = onCheck, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(R.string.st_Update_CheckAgain))
+        }
+    }
+}
+
+@Composable
+private fun InstalledCard(
+    version: String,
+    onDone: () -> Unit,
+) {
+    StateCard {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Rounded.CheckCircle,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(40.dp),
+            )
+            Column {
+                Text(
+                    text = if (version.isBlank()) {
+                        stringResource(R.string.st_Update_InstalledTitle)
+                    } else {
+                        stringResource(R.string.st_Update_InstalledVersionTitle, version)
+                    },
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = stringResource(R.string.st_Update_InstalledBody),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        PrimaryAction(
+            text = stringResource(R.string.st_Update_Done),
+            icon = Icons.Rounded.CheckCircle,
+            onClick = onDone,
+        )
+    }
+}
+
+// ── Settings ────────────────────────────────────────────────────────────────
+
+@Composable
+private fun UpdateSettingsCard(
+    autoUpdateEnabled: Boolean,
+    preferredAbi: String,
+    deviceAbiLabel: String,
+    lastChecked: Long,
+    onSetAutoUpdate: (Boolean) -> Unit,
+    onOpenAbiPicker: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = CardShape,
+    ) {
+        Column(
+            modifier = Modifier.padding(vertical = 6.dp),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(R.string.st_Update_AutoTitle),
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Text(
+                        text = stringResource(R.string.st_Update_AutoBody),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Switch(checked = autoUpdateEnabled, onCheckedChange = onSetAutoUpdate)
+            }
+            CardDivider()
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onOpenAbiPicker)
+                    .padding(horizontal = 20.dp, vertical = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(R.string.st_Update_BuildTitle),
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Text(
+                        text = if (preferredAbi == "AUTO") {
+                            stringResource(R.string.st_Update_BuildAuto, deviceAbiLabel)
+                        } else {
+                            stringResource(R.string.st_Update_BuildManual)
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Icon(
+                    Icons.Rounded.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            CardDivider()
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(R.string.st_Update_LastChecked),
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = lastCheckedLabel(lastChecked),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CardDivider() {
+    HorizontalDivider(
+        modifier = Modifier.padding(horizontal = 20.dp),
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+    )
+}
+
+@Composable
+private fun lastCheckedLabel(timestamp: Long): String {
+    if (timestamp <= 0L) return stringResource(R.string.st_Update_NotYet)
+    return when (val age = relativeAge(System.currentTimeMillis() - timestamp)) {
+        is RelativeAge.JustNow -> stringResource(R.string.st_Update_JustNow)
+        is RelativeAge.Minutes -> {
+            val minutes = age.minutes.toInt()
+            pluralStringResource(R.plurals.st_Update_MinutesAgo, minutes, minutes)
+        }
+        is RelativeAge.Hours -> {
+            val hours = age.hours.toInt()
+            pluralStringResource(R.plurals.st_Update_HoursAgo, hours, hours)
+        }
+        is RelativeAge.Days -> {
+            val days = age.days.toInt()
+            pluralStringResource(R.plurals.st_Update_DaysAgo, days, days)
+        }
+    }
+}
+
+@Composable
+private fun etaLabel(remainingBytes: Long, bps: Long): String? {
+    val eta = etaOf(remainingBytes, bps) ?: return null
+    val text = when (eta) {
+        is Eta.Seconds -> stringResource(R.string.st_Update_EtaSeconds, eta.seconds)
+        is Eta.Minutes -> stringResource(
+            R.string.st_Update_EtaMinutes,
+            eta.minutes,
+            eta.seconds,
+        )
+        is Eta.Hours -> stringResource(
+            R.string.st_Update_EtaHours,
+            eta.hours,
+            eta.minutes,
+        )
+    }
+    return stringResource(R.string.st_Update_TimeLeft, text)
+}
+
+// ── Discord ─────────────────────────────────────────────────────────────────
+
+@Composable
+private fun DiscordCard() {
+    val uriHandler = LocalUriHandler.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(CardShape)
+            .background(Brush.linearGradient(DiscordGradient))
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Surface(
+                modifier = Modifier.size(44.dp),
+                shape = RoundedCornerShape(14.dp),
+                color = Color.White.copy(alpha = 0.18f),
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Rounded.SystemUpdate, null, modifier = Modifier.size(40.dp), tint = MaterialTheme.colorScheme.onPrimary)
+                    Icon(
+                        painter = painterResource(R.drawable.ic_discord),
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp),
+                    )
                 }
             }
             Column(Modifier.weight(1f)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Toolz v$currentVersionName", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                    if (isCritical) {
-                        Surface(color = MaterialTheme.colorScheme.error, shape = MaterialTheme.shapes.small) {
-                            Text("CRITICAL", Modifier.padding(horizontal = 8.dp, vertical = 3.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onError)
-                        }
-                    }
-                }
-                Text("BUILD $currentVersionCode", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f))
-                if (pendingVersion != null) {
-                    Text("→ v$pendingVersion available", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                } else {
-                    Text("You're on the update channel", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f))
-                }
+                Text(
+                    text = stringResource(R.string.st_Update_DiscordTitle),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White,
+                )
+                Text(
+                    text = stringResource(R.string.st_Update_DiscordBody),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.White.copy(alpha = 0.85f),
+                )
             }
         }
-    }
-}
-
-@Composable
-private fun IdleCard(onCheck: () -> Unit, autoUpdateEnabled: Boolean, onSetAutoUpdate: (Boolean) -> Unit) {
-    Card(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.extraLarge) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Check for updates", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-            Text("We compare your build against GitHub releases and the signed manifest, then pick the APK for your CPU.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            ToolzExpressiveButton(onClick = onCheck, modifier = Modifier.fillMaxWidth().height(60.dp)) {
-                Icon(Icons.Rounded.SystemUpdate, null); Spacer(Modifier.width(10.dp)); Text("CHECK FOR UPDATES", fontWeight = FontWeight.Black)
-            }
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                Column(Modifier.weight(1f)) {
-                    Text("Auto-update", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                    Text("Download + open installer automatically", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Switch(checked = autoUpdateEnabled, onCheckedChange = onSetAutoUpdate)
-            }
-        }
-    }
-}
-
-@Composable
-private fun CheckingCard() {
-    Card(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.extraLarge) {
-        Column(Modifier.padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            ToolzLoadingIndicator(modifier = Modifier.size(56.dp))
-            Spacer(Modifier.height(16.dp))
-            Text("Checking for updates…", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("GitHub releases → signed manifest", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
-        }
-    }
-}
-
-@Composable
-private fun AvailableCard(update: PendingUpdate, onDownload: () -> Unit, onSkip: () -> Unit) {
-    var expanded by remember { mutableStateOf(false) }
-    Card(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.extraLarge, border = if (update.isCritical) BorderStroke(2.dp, MaterialTheme.colorScheme.error) else null) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Surface(color = if (update.isCritical) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer, shape = MaterialTheme.shapes.small) {
-                    Text(if (update.isCritical) "CRITICAL UPDATE" else "NEW UPDATE", Modifier.padding(horizontal = 10.dp, vertical = 5.dp), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, color = if (update.isCritical) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer)
-                }
-                if (update.sizeBytes != null && update.sizeBytes > 0) {
-                    Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.small) {
-                        Text(formatBytes(update.sizeBytes), Modifier.padding(horizontal = 10.dp, vertical = 5.dp), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSecondaryContainer)
-                    }
-                }
-            }
-            Text("v${update.version}", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
-            Text("${update.abi} • ${update.source} • code ${update.versionCode}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Surface(color = MaterialTheme.colorScheme.surfaceContainerLowest, shape = MaterialTheme.shapes.large, border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))) {
-                Column(Modifier.padding(14.dp).heightIn(max = if (expanded) 320.dp else 140.dp).verticalScroll(rememberScrollState())) {
-                    MarkdownContent(markdown = update.changelog.ifBlank { "Bug fixes and performance improvements." }, baseFontSize = 14.sp, textColor = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-            TextButton(onClick = { expanded = !expanded }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
-                Text(if (expanded) "SHOW LESS" else "READ FULL CHANGELOG")
-            }
-            ToolzExpressiveButton(onClick = onDownload, modifier = Modifier.fillMaxWidth().height(62.dp)) {
-                Icon(Icons.Rounded.Download, null); Spacer(Modifier.width(10.dp)); Text("DOWNLOAD & AUTO-INSTALL", fontWeight = FontWeight.Black)
-            }
-            Text("Downloads in-app with progress, verifies the file, then opens the system installer — no browser detour.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
-            if (!update.isCritical) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = onSkip, modifier = Modifier.weight(1f)) { Text("SKIP THIS VERSION") }
-                }
-            } else {
-                Text("Critical releases can't be skipped.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
-            }
-        }
-    }
-}
-
-@Composable
-private fun DownloadingCard(update: PendingUpdate, bytesDownloaded: Long, totalBytes: Long, speedBps: Long, progress: Float, onCancel: () -> Unit) {
-    val animated by animateFloatAsState(targetValue = progress / 100f, animationSpec = spring(stiffness = Spring.StiffnessLow), label = "dl")
-    val remaining = if (totalBytes > 0) (totalBytes - bytesDownloaded).coerceAtLeast(0) else -1
-    Card(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.extraLarge) {
-        Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("DOWNLOADING v${update.version}", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
-            ToolzWavyLinearProgressIndicator(progress = { animated }, modifier = Modifier.fillMaxWidth().height(16.dp))
-            Text("${progress.toInt()}%", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
-            Text(
-                if (totalBytes > 0) "${formatBytes(bytesDownloaded)} of ${formatBytes(totalBytes)}" else formatBytes(bytesDownloaded),
-                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant
+        ToolzExpressiveButton(
+            onClick = {
+                runCatching { uriHandler.openUri(DevUiOverrider.TOOLZ_DISCORD_URL) }
+            },
+            modifier = Modifier.fillMaxWidth().height(50.dp),
+            shape = ButtonShape,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color.White,
+                contentColor = DiscordBlurpleDeep,
+            ),
+            contentPadding = PaddingValues(horizontal = 16.dp),
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_discord),
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
             )
+            Spacer(Modifier.width(10.dp))
             Text(
-                if (speedBps > 0) "${formatSpeed(speedBps)} • ETA ${formatEta(remaining, speedBps)}" else "Connecting…",
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                text = stringResource(R.string.st_Update_DiscordAction),
+                fontWeight = FontWeight.SemiBold,
             )
-            Spacer(Modifier.height(4.dp))
-            TextButton(onClick = onCancel) { Icon(Icons.Rounded.Close, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("CANCEL") }
         }
     }
 }
 
-@Composable
-private fun ReadyCard(update: PendingUpdate, apkSize: Long, needsPermission: Boolean, onInstall: () -> Unit, onOpenSettings: () -> Unit) {
-    Card(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.extraLarge, border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(Icons.Rounded.CheckCircle, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(52.dp))
-            Text("Ready to install", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-            Text("v${update.version} downloaded${if (apkSize > 0) " (${formatBytes(apkSize)})" else ""} and verified. One tap opens the system installer.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
-            if (needsPermission) {
-                Surface(color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f), shape = MaterialTheme.shapes.medium) {
-                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Permission needed", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
-                        Text("Allow \"Install unknown apps\" for Toolz, then come back and tap Install.", style = MaterialTheme.typography.bodySmall)
-                        ToolzExpressiveButton(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth().height(52.dp)) {
-                            Icon(Icons.AutoMirrored.Rounded.OpenInNew, null); Spacer(Modifier.width(8.dp)); Text("OPEN INSTALL SETTINGS", fontWeight = FontWeight.Black)
-                        }
-                    }
-                }
-            }
-            ToolzExpressiveButton(onClick = onInstall, modifier = Modifier.fillMaxWidth().height(62.dp)) {
-                Icon(Icons.Rounded.InstallMobile, null); Spacer(Modifier.width(10.dp)); Text("INSTALL NOW", fontWeight = FontWeight.Black)
-            }
-        }
-    }
-}
+// ── Build picker ────────────────────────────────────────────────────────────
+
+private data class AbiOption(
+    val value: String,
+    val title: String,
+    val description: String,
+)
 
 @Composable
-private fun InstallingCard(update: PendingUpdate) {
-    Card(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.extraLarge) {
-        Column(Modifier.padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            ToolzLoadingIndicator(modifier = Modifier.size(56.dp))
-            Spacer(Modifier.height(16.dp))
-            Text("Installing v${update.version}…", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-            Text("Confirm on the system installer screen. Toolz restarts when done.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
-        }
-    }
-}
-
-@Composable
-private fun ErrorCard(message: String, onRetry: () -> Unit) {
-    Card(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.extraLarge) {
-        Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Icon(Icons.Rounded.ErrorOutline, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(48.dp))
-            Text(message, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyMedium)
-            ToolzExpressiveButton(onClick = onRetry, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer)) {
-                Icon(Icons.Rounded.Refresh, null); Spacer(Modifier.width(8.dp)); Text("RETRY", fontWeight = FontWeight.Black)
-            }
-        }
-    }
-}
-
-@Composable
-private fun UpToDateCard(currentVersionName: String, onCheck: () -> Unit) {
-    Card(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.extraLarge) {
-        Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Icon(Icons.Rounded.CheckCircle, null, tint = Color(0xFF2E7D32), modifier = Modifier.size(52.dp))
-            Text("Up to date", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-            Text("Toolz v$currentVersionName is the latest. We'll check again in the background.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
-            TextButton(onClick = onCheck) { Text("CHECK AGAIN") }
-        }
-    }
-}
-
-@Composable
-private fun InstalledCard(onCheck: () -> Unit) {
-    Card(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.extraLarge) {
-        Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(Icons.Rounded.CheckCircle, null, tint = Color(0xFF2E7D32), modifier = Modifier.size(52.dp))
-            Spacer(Modifier.height(8.dp))
-            Text("Update installed", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-            Text("Enjoy the new release.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
+private fun abiLabel(abi: String): String = when (abi) {
+    "AUTO" -> stringResource(R.string.st_Update_AbiAutomatic)
+    "arm64-v8a" -> stringResource(R.string.st_Update_AbiArm64)
+    "armeabi-v7a" -> stringResource(R.string.st_Update_AbiArm32)
+    "x86_64" -> stringResource(R.string.st_Update_AbiX86_64)
+    "x86" -> stringResource(R.string.st_Update_AbiX86)
+    else -> abi
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun UpdateHelpBottomSheet(onDismiss: () -> Unit, onNavigateToUrl: (String) -> Unit) {
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), shape = MaterialTheme.shapes.extraLarge, containerColor = MaterialTheme.colorScheme.surfaceContainerHigh) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 48.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text("How updates work", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
-            Text("Checks run every 24h + on launch. Downloads stream in-app with resume and verification, then the system installer finishes the job. Critical updates can't be skipped.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            HelpSection("Verified builds", "GitHub release first, signed manifest as fallback. Tampered manifests are rejected.", Icons.Rounded.PriorityHigh)
-            HelpSection("Right APK, first try", "Auto-detects your CPU (arm64, arm32, x86) or use your override in settings.", Icons.Rounded.Settings)
-            HelpSection("Background friendly", "Auto-update downloads quietly and nudges you only when the installer is ready.", Icons.Rounded.Download)
-            ToolzExpressiveButton(onClick = { onNavigateToUrl("https://github.com/freroxx/toolz/releases") }, modifier = Modifier.fillMaxWidth().height(56.dp)) {
-                Icon(Icons.Rounded.Download, null); Spacer(Modifier.width(10.dp)); Text("VIEW ALL RELEASES", fontWeight = FontWeight.Black)
+private fun AbiPickerSheet(
+    preferredAbi: String,
+    deviceAbiLabel: String,
+    onSelect: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val options = listOf(
+        AbiOption(
+            value = "AUTO",
+            title = stringResource(R.string.st_Update_AbiAutomatic),
+            description = stringResource(R.string.st_Update_AbiAutomaticDesc, deviceAbiLabel),
+        ),
+        AbiOption(
+            value = "arm64-v8a",
+            title = stringResource(R.string.st_Update_AbiArm64),
+            description = stringResource(R.string.st_Update_AbiArm64Desc),
+        ),
+        AbiOption(
+            value = "armeabi-v7a",
+            title = stringResource(R.string.st_Update_AbiArm32),
+            description = stringResource(R.string.st_Update_AbiArm32Desc),
+        ),
+        AbiOption(
+            value = "x86_64",
+            title = stringResource(R.string.st_Update_AbiX86_64),
+            description = stringResource(R.string.st_Update_AbiX86_64Desc),
+        ),
+        AbiOption(
+            value = "x86",
+            title = stringResource(R.string.st_Update_AbiX86),
+            description = stringResource(R.string.st_Update_AbiX86Desc),
+        ),
+    )
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        shape = SheetShape,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 40.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.st_Update_BuildTitle),
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = stringResource(R.string.st_Update_AbiIntro),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+            options.forEach { option ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onSelect(option.value) }
+                        .padding(vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(
+                        selected = preferredAbi == option.value,
+                        onClick = { onSelect(option.value) },
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = option.title,
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        Text(
+                            text = option.description,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
-            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("CLOSE", fontWeight = FontWeight.Bold) }
+        }
+    }
+}
+
+// ── Help ────────────────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HelpSheet(onDismiss: () -> Unit) {
+    val uriHandler = LocalUriHandler.current
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        shape = SheetShape,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 40.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.st_Update_About),
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = stringResource(R.string.st_Update_HelpIntro),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            HelpSection(
+                icon = Icons.Rounded.Security,
+                title = stringResource(R.string.st_Update_HelpSecurityTitle),
+                description = stringResource(R.string.st_Update_HelpSecurityBody),
+            )
+            HelpSection(
+                icon = Icons.Rounded.Wifi,
+                title = stringResource(R.string.st_Update_HelpWifiTitle),
+                description = stringResource(R.string.st_Update_HelpWifiBody),
+            )
+            HelpSection(
+                icon = Icons.Rounded.Refresh,
+                title = stringResource(R.string.st_Update_HelpResumeTitle),
+                description = stringResource(R.string.st_Update_HelpResumeBody),
+            )
+            PrimaryAction(
+                text = stringResource(R.string.st_Update_SeeAllReleases),
+                icon = Icons.AutoMirrored.Rounded.OpenInNew,
+                onClick = { uriHandler.openUri(RELEASES_URL) },
+            )
+            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.st_Update_Close))
+            }
         }
     }
 }
 
 @Composable
-fun HelpSection(title: String, description: String, icon: ImageVector) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-        Surface(Modifier.size(44.dp), RoundedCornerShape(13.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)) {
-            Box(contentAlignment = Alignment.Center) { Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp)) }
+private fun HelpSection(
+    icon: ImageVector,
+    title: String,
+    description: String,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Surface(
+            modifier = Modifier.size(44.dp),
+            shape = RoundedCornerShape(14.dp),
+            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
         }
         Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black)
-            Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
+    }
+}
+
+// ── Shared building blocks ──────────────────────────────────────────────────
+
+@Composable
+private fun StateCard(content: @Composable ColumnScope.() -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = CardShape,
+    ) {
+        Column(
+            modifier = Modifier.padding(22.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+            content = content,
+        )
+    }
+}
+
+@Composable
+private fun PrimaryAction(
+    text: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+) {
+    ToolzExpressiveButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier.fillMaxWidth().height(56.dp),
+        shape = ButtonShape,
+    ) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(10.dp))
+        Text(text, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun MetaChip(text: String) {
+    Surface(
+        shape = ChipShape,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+        )
+    }
+}
+
+// ── Previews ────────────────────────────────────────────────────────────────
+
+private val previewUpdate = PendingUpdate(
+    version = "1.1.8",
+    versionCode = 19,
+    changelog = "### Highlights\n" +
+        "- Faster update downloads with resume support.\n" +
+        "- Clearer install flow with a verification step.\n" +
+        "- Bug fixes and polish.",
+    downloadUrl = "https://example.com/toolz.apk",
+    sizeBytes = 42_000_000L,
+    sha256 = null,
+    isCritical = false,
+    abi = "arm64-v8a",
+    source = "manifest",
+)
+
+@Preview(showBackground = true)
+@Composable
+private fun UpdateAvailablePreview() {
+    ToolzTheme {
+        UpdateScreenContent(
+            onBack = {},
+            currentVersionName = "1.1.7",
+            currentVersionCode = 18,
+            managerState = UpdateManagerState.Available(previewUpdate),
+            preferredAbi = "AUTO",
+            autoUpdateEnabled = true,
+            lastChecked = System.currentTimeMillis() - 3 * 60 * 60 * 1000L,
+            onCheck = {}, onDownload = {}, onCancelDownload = {}, onInstall = {},
+            onRetry = {}, onSkip = {}, onDismissInstalled = {},
+            onSetPreferredAbi = {}, onSetAutoUpdate = {},
+            getDeviceAbi = { "arm64-v8a" },
+            onOpenInstallSettings = {},
+        )
     }
 }
 
 @Preview(showBackground = true)
 @Composable
-fun UpdateScreenPreview() {
-    com.frerox.toolz.ui.theme.ToolzTheme {
+private fun UpdateReadyPreview() {
+    ToolzTheme {
         UpdateScreenContent(
-            onBack = {}, currentVersionName = "1.1.7", currentVersionCode = 18,
-            managerState = UpdateManagerState.Available(
-                PendingUpdate("1.1.8", 19, "### Highlights\n- Faster downloads\n- New installer", "https://example.com/a.apk", 42_000_000L, null, false, "arm64-v8a", "manifest")
+            onBack = {},
+            currentVersionName = "1.1.7",
+            currentVersionCode = 18,
+            managerState = UpdateManagerState.ReadyToInstall(
+                update = previewUpdate,
+                apkFile = java.io.File("/tmp/toolz.apk"),
+                needsPermission = false,
             ),
-            preferredAbi = "AUTO", autoUpdateEnabled = true,
-            onCheck = {}, onDownload = {}, onCancelDownload = {}, onInstall = {}, onSkip = {},
-            onSetPreferredAbi = {}, onSetAutoUpdate = {}, getDeviceAbi = { "arm64-v8a" },
-            needsInstallPermission = { false }, onOpenInstallSettings = {}
+            preferredAbi = "AUTO",
+            autoUpdateEnabled = false,
+            lastChecked = 0L,
+            onCheck = {}, onDownload = {}, onCancelDownload = {}, onInstall = {},
+            onRetry = {}, onSkip = {}, onDismissInstalled = {},
+            onSetPreferredAbi = {}, onSetAutoUpdate = {},
+            getDeviceAbi = { "arm64-v8a" },
+            onOpenInstallSettings = {},
         )
     }
 }
 
-private fun isNewerVersion(current: String, latest: String): Boolean {
-    val c = current.split(".").mapNotNull { it.toIntOrNull() }
-    val l = latest.split(".").mapNotNull { it.toIntOrNull() }
-    for (i in 0 until minOf(c.size, l.size)) {
-        if (l[i] > c[i]) return true
-        if (l[i] < c[i]) return false
+@Preview(showBackground = true)
+@Composable
+private fun UpdateDownloadingPreview() {
+    ToolzTheme {
+        UpdateScreenContent(
+            onBack = {},
+            currentVersionName = "1.1.7",
+            currentVersionCode = 18,
+            managerState = UpdateManagerState.Downloading(
+                update = previewUpdate,
+                bytesDownloaded = 18_000_000L,
+                totalBytes = 42_000_000L,
+                speedBps = 2_400_000L,
+                progress = 42.9f,
+            ),
+            preferredAbi = "AUTO",
+            autoUpdateEnabled = true,
+            lastChecked = 0L,
+            onCheck = {}, onDownload = {}, onCancelDownload = {}, onInstall = {},
+            onRetry = {}, onSkip = {}, onDismissInstalled = {},
+            onSetPreferredAbi = {}, onSetAutoUpdate = {},
+            getDeviceAbi = { "arm64-v8a" },
+            onOpenInstallSettings = {},
+        )
     }
-    return l.size > c.size
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun UpdateErrorPreview() {
+    ToolzTheme {
+        UpdateScreenContent(
+            onBack = {},
+            currentVersionName = "1.1.7",
+            currentVersionCode = 18,
+            managerState = UpdateManagerState.Error(
+                error = UpdateError.Offline,
+                retryDownload = true,
+            ),
+            preferredAbi = "AUTO",
+            autoUpdateEnabled = false,
+            lastChecked = System.currentTimeMillis() - 20 * 60 * 1000L,
+            onCheck = {}, onDownload = {}, onCancelDownload = {}, onInstall = {},
+            onRetry = {}, onSkip = {}, onDismissInstalled = {},
+            onSetPreferredAbi = {}, onSetAutoUpdate = {},
+            getDeviceAbi = { "arm64-v8a" },
+            onOpenInstallSettings = {},
+        )
+    }
 }
