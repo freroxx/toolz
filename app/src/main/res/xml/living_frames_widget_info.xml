@@ -14,4 +14,5 @@
     android:targetCellHeight="2"
     android:updatePeriodMillis="0"
     android:resizeMode="horizontal|vertical"
+    android:widgetFeatures="reconfigurable"
     android:widgetCategory="home_screen" />

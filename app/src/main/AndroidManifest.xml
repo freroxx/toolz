@@ -1824,15 +1824,33 @@
         </receiver>
 
         <!-- Living Frames — looping GIF / video / photo home-screen frames -->
+        <activity
+            android:name=".widget.livingframes.LivingFramesConfigActivity"
+            android:exported="true"
+            android:label="@string/widget_living_frames_label"
+            android:theme="@style/Theme.Toolz"
+            android:excludeFromRecents="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+
         <receiver android:name=".widget.livingframes.LivingFramesWidgetReceiver"
             android:exported="true"
-            android:label="@string/widget_living_frames_label">
+            android:label="@string/widget_living_frames_label"
+            android:configure="com.frerox.toolz.widget.livingframes.LivingFramesConfigActivity">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>
             <meta-data android:name="android.appwidget.provider"
                 android:resource="@xml/living_frames_widget_info" />
         </receiver>
+
+        <!-- Tap / slideshow / pin callbacks are PendingIntent-only. Keeping this
+             receiver unexported prevents other apps from broadcasting actions. -->
+        <receiver
+            android:name=".widget.livingframes.LivingFramesActionReceiver"
+            android:exported="false" />
 
         <receiver android:name=".widget.livingframes.LivingFramesBootReceiver"
             android:enabled="true"

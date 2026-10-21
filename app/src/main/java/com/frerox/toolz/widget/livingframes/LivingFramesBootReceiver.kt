@@ -20,6 +20,7 @@ package com.frerox.toolz.widget.livingframes
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import com.frerox.toolz.worker.LivingFramesRenderWorker
 import com.frerox.toolz.worker.LivingFramesWatchdogWorker
 import dagger.hilt.android.EntryPointAccessors
 import kotlinx.coroutines.CoroutineScope
@@ -37,28 +38,42 @@ class LivingFramesBootReceiver : BroadcastReceiver() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun onReceive(context: Context, intent: Intent?) {
-        when (intent?.action) {
+        val action = intent?.action
+        when (action) {
             Intent.ACTION_BOOT_COMPLETED,
             Intent.ACTION_MY_PACKAGE_REPLACED,
             "android.intent.action.QUICKBOOT_POWERON" -> Unit
             else -> return
         }
+        // An update replaces the code behind existing PendingIntents. Re-push
+        // every widget so taps, slideshow timers and the pin flow switch to
+        // the non-exported action receiver instead of waiting for a resize.
+        val republish = action == Intent.ACTION_MY_PACKAGE_REPLACED
         val result = goAsync()
         scope.launch {
             try {
-                val ids = LivingFramesWidgetHelper.allWidgetIds(context)
-                if (ids.isEmpty()) return@launch
+                // Schedule first so an Hilt/property failure below cannot leave
+                // the watchdog unemployed for the rest of the boot cycle.
+                LivingFramesWatchdogWorker.schedule(context)
+                val ids = LivingFramesWidgetHelper.allWidgetIdsOrNull(context)
+                if (ids == null) return@launch
                 val repo = EntryPointAccessors.fromApplication(
                     context.applicationContext, LivingFramesEntryPoint::class.java
                 ).livingFramesRepository()
                 repo.ensureLoaded()
-                ids.forEach { id ->
-                    val frame = repo.boundFrame(id)?.let { repo.get(it) }
-                    if (frame != null && frame.isSlideshow) {
-                        LivingFramesSlideshow.schedule(context, id, frame.slideshowIntervalMin)
+                if (ids.isNotEmpty() && republish && !repo.isLoadFailed()) {
+                    LivingFramesRenderWorker.enqueue(context, ids)
+                }
+                if (ids.isNotEmpty()) {
+                    ids.forEach { id ->
+                        val frame = repo.boundFrame(id)?.let { repo.get(it) }
+                        if (frame != null && frame.isSlideshow) {
+                            LivingFramesSlideshow.ensureScheduled(
+                                context, id, frame.slideshowIntervalMin
+                            )
+                        }
                     }
                 }
-                LivingFramesWatchdogWorker.schedule(context)
             } catch (_: Exception) {
             } finally {
                 runCatching { result.finish() }

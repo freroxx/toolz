@@ -23,6 +23,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.view.View
 import android.widget.RemoteViews
@@ -34,6 +35,7 @@ import com.frerox.toolz.data.livingframes.LivingFrameRenderer
 import com.frerox.toolz.data.livingframes.LivingFrameTapAction
 import com.frerox.toolz.data.livingframes.LivingFramesRepository
 import com.frerox.toolz.ui.navigation.Screen
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
@@ -55,38 +57,87 @@ object LivingFramesWidgetHelper {
 
     // -- widget geometry ------------------------------------------------------
 
-    fun allWidgetIds(context: Context): IntArray = try {
+    /**
+     * Kept for callers that only need a best-effort list. Use
+     * [allWidgetIdsOrNull] when an empty list must not be confused with a
+     * failed binder call (the watchdog used to prune every binding on error).
+     */
+    fun allWidgetIds(context: Context): IntArray = allWidgetIdsOrNull(context) ?: intArrayOf()
+
+    fun allWidgetIdsOrNull(context: Context): IntArray? = try {
         AppWidgetManager.getInstance(context)
             .getAppWidgetIds(ComponentName(context, LivingFramesWidgetReceiver::class.java))
-    } catch (_: Exception) { intArrayOf() }
+    } catch (_: Exception) {
+        null
+    }
 
-    /** Widget size in dp as the launcher reports it (portrait: min width × max height). */
-    fun widgetSizeDp(mgr: AppWidgetManager, appWidgetId: Int): Pair<Int, Int> {
-        val o = try { mgr.getAppWidgetOptions(appWidgetId) } catch (_: Exception) { null }
-        val w = o?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 0) ?: 0
-        val h = o?.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 0) ?: 0
+    /**
+     * Widget size in dp as the launcher reports it. Android's contract gives
+     * portrait dimensions through MIN_WIDTH/MAX_HEIGHT and landscape through
+     * MAX_WIDTH/MIN_HEIGHT; using only the portrait pair squashes landscape
+     * widgets.
+     */
+    fun widgetSizeDp(context: Context, mgr: AppWidgetManager, appWidgetId: Int): Pair<Int, Int> {
+        val o = try {
+            mgr.getAppWidgetOptions(appWidgetId)
+        } catch (_: Exception) {
+            null
+        }
+        val minW = o?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 0) ?: 0
+        val maxW = o?.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, 0) ?: 0
+        val minH = o?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0) ?: 0
+        val maxH = o?.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 0) ?: 0
+        val portrait =
+            context.resources.configuration.orientation != Configuration.ORIENTATION_LANDSCAPE
+        val w = if (portrait) {
+            minW.takeIf { it > 0 } ?: maxW
+        } else {
+            maxW.takeIf { it > 0 } ?: minW
+        }
+        val h = if (portrait) {
+            maxH.takeIf { it > 0 } ?: minH
+        } else {
+            minH.takeIf { it > 0 } ?: maxH
+        }
         return (if (w > 0) w else 150) to (if (h > 0) h else 150)
     }
 
-    fun widgetSizePx(context: Context, mgr: AppWidgetManager, appWidgetId: Int): Pair<Int, Int> {
+    fun widgetSizePx(
+        context: Context,
+        mgr: AppWidgetManager,
+        appWidgetId: Int
+    ): Pair<Int, Int> {
         val d = context.resources.displayMetrics.density
-        val (w, h) = widgetSizeDp(mgr, appWidgetId)
-        return (w * d).roundToInt().coerceIn(96, 1400) to (h * d).roundToInt().coerceIn(96, 1400)
+        val (w, h) = widgetSizeDp(context, mgr, appWidgetId)
+        return (w * d).roundToInt().coerceIn(96, 1600) to
+            (h * d).roundToInt().coerceIn(96, 1600)
     }
 
     /** Launcher grid cells, e.g. "4×2" (standard 70dp-cell rule). */
     fun cellLabel(context: Context, appWidgetId: Int): String {
-        val (w, h) = widgetSizeDp(AppWidgetManager.getInstance(context), appWidgetId)
+        val (w, h) = widgetSizeDp(
+            context,
+            AppWidgetManager.getInstance(context),
+            appWidgetId
+        )
         return "${((w + 30) / 70).coerceAtLeast(1)}×${((h + 30) / 70).coerceAtLeast(1)}"
     }
 
-    /** What the OS allows for one update is ~6 screens of pixels; we use 40% of it. */
+    /**
+     * RemoteViews' real binder budget is 6 × screen width × screen height
+     * bytes. The old code multiplied by 4 as well and used 40%, i.e. 160% of
+     * the actual ceiling, so large GIFs exhausted every retry. Keep 55% for
+     * serialization and ViewFlipper child overhead.
+     */
     fun bitmapBudget(context: Context): Long {
         val dm = context.resources.displayMetrics
-        return (6.0 * 4.0 * dm.widthPixels * dm.heightPixels * 0.4).toLong()
+        val cap = (6.0 * dm.widthPixels.toDouble() * dm.heightPixels.toDouble()).toLong()
+        return (cap * 0.55).toLong()
+            .coerceAtLeast(minOf(256L * 1024, cap))
+            .coerceAtMost(cap)
     }
 
-    // -- layouts ------------------------------------------------------------------
+    // -- layouts --------------------------------------------------------------
 
     private fun flipperLayout(fps: Int): Int = when (fps) {
         1 -> R.layout.living_frames_widget_f1
@@ -103,17 +154,26 @@ object LivingFramesWidgetHelper {
         else -> R.layout.living_frames_widget_f12
     }
 
-    // -- tap handling -------------------------------------------------------------------
+    // -- tap handling ---------------------------------------------------------
 
-    private fun tapIntent(context: Context, appWidgetId: Int, frame: LivingFrame): PendingIntent? {
+    private fun tapIntent(
+        context: Context,
+        appWidgetId: Int,
+        frame: LivingFrame
+    ): PendingIntent? {
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        val action = if (frame.tapAction == LivingFrameTapAction.NEXT_FRAME && !frame.isSlideshow)
-            LivingFrameTapAction.OPEN_PREVIEW else frame.tapAction
+        val action = if (
+            frame.tapAction == LivingFrameTapAction.NEXT_FRAME && !frame.isSlideshow
+        ) {
+            LivingFrameTapAction.OPEN_PREVIEW
+        } else {
+            frame.tapAction
+        }
         return when (action) {
             LivingFrameTapAction.NOTHING -> null
             LivingFrameTapAction.NEXT_FRAME -> PendingIntent.getBroadcast(
                 context, appWidgetId,
-                Intent(context, LivingFramesWidgetReceiver::class.java).apply {
+                Intent(context, LivingFramesActionReceiver::class.java).apply {
                     this.action = ACTION_NEXT
                     putExtra(EXTRA_WIDGET_ID, appWidgetId)
                 }, flags
@@ -128,18 +188,26 @@ object LivingFramesWidgetHelper {
         }
     }
 
-    private fun applyChrome(context: Context, views: RemoteViews, appWidgetId: Int, frame: LivingFrame) {
+    private fun applyChrome(
+        context: Context,
+        views: RemoteViews,
+        appWidgetId: Int,
+        frame: LivingFrame
+    ) {
         if (frame.showCaption) {
             views.setTextViewText(R.id.living_frame_caption, frame.name)
             views.setViewVisibility(R.id.living_frame_caption, View.VISIBLE)
         } else {
             views.setViewVisibility(R.id.living_frame_caption, View.GONE)
         }
-        views.setOnClickPendingIntent(R.id.living_frame_root, tapIntent(context, appWidgetId, frame))
+        views.setOnClickPendingIntent(
+            R.id.living_frame_root,
+            tapIntent(context, appWidgetId, frame)
+        )
         views.setContentDescription(R.id.living_frame_root, frame.name)
     }
 
-    // -- pushing ----------------------------------------------------------------------------
+    // -- pushing --------------------------------------------------------------
 
     fun pushPlaceholder(context: Context, appWidgetId: Int, text: String): Boolean = try {
         val v = RemoteViews(context.packageName, R.layout.living_frames_widget_static)
@@ -147,9 +215,12 @@ object LivingFramesWidgetHelper {
         v.setViewVisibility(R.id.living_frame_caption, View.GONE)
         v.setViewVisibility(R.id.living_frame_placeholder, View.VISIBLE)
         v.setTextViewText(R.id.living_frame_placeholder, text)
+        v.setContentDescription(R.id.living_frame_root, text)
         AppWidgetManager.getInstance(context).updateAppWidget(appWidgetId, v)
         true
-    } catch (_: Exception) { false }
+    } catch (_: Exception) {
+        false
+    }
 
     /**
      * Renders [frame] at this widget's exact size and pushes it. If the system
@@ -166,16 +237,25 @@ object LivingFramesWidgetHelper {
         val (w, h) = widgetSizePx(context, mgr, appWidgetId)
         val density = context.resources.displayMetrics.density
         val animated = frame.isAnimated
-        val sourceIndex = if (frame.isSlideshow) LivingFramesSlideshow.currentIndex(context, appWidgetId, frame) else 0
+        val sourceIndex = if (frame.isSlideshow) {
+            LivingFramesSlideshow.currentIndex(context, appWidgetId, frame)
+        } else {
+            0
+        }
         var budget = bitmapBudget(context)
         var error = "The launcher rejected the update."
 
         for (attempt in 0 until 4) {
             val plan = LivingFrameEngine.plan(
                 if (animated) frame.frameCount else 1, w, h,
-                LivingFrameRenderer.isOpaque(frame), frame.fps, budget
+                LivingFrameRenderer.isOpaque(frame), frame.fps, budget,
+                frame.loopMode
             )
-            val indices = if (animated) (0 until frame.frameCount step plan.step).toList() else listOf(sourceIndex)
+            val indices = if (animated) {
+                (0 until frame.frameCount step plan.step).toList()
+            } else {
+                listOf(sourceIndex)
+            }
             val need = maxOf(plan.outW, plan.outH)
             val bitmaps = ArrayList<Bitmap>(indices.size)
             try {
@@ -183,25 +263,43 @@ object LivingFramesWidgetHelper {
                     val src = repo.decodeAtLeast(frame.id, i, need) ?: continue
                     try {
                         bitmaps.add(
-                            LivingFrameRenderer.render(src, frame, plan.outW, plan.outH, density * plan.scale, plan.rgb565)
+                            LivingFrameRenderer.render(
+                                src, frame, plan.outW, plan.outH,
+                                density * plan.scale, plan.rgb565
+                            )
                         )
-                    } finally { runCatching { src.recycle() } }
+                    } finally {
+                        runCatching { src.recycle() }
+                    }
                 }
-                if (bitmaps.isEmpty()) {
-                    error = "Frames are missing. Re-import this widget."
-                    break
+                if (bitmaps.size < indices.size) {
+                    // A decode can fail because this attempt's bitmaps were
+                    // too large; retry smaller. A genuinely corrupt frame also
+                    // ends in a clear placeholder after the retries.
+                    error = "Some frames are missing. Re-import this widget."
+                    budget /= 2
+                    continue
                 }
                 val views = if (animated && bitmaps.size > 1) {
-                    val v = RemoteViews(context.packageName, flipperLayout(plan.effectiveFps))
+                    val v = RemoteViews(
+                        context.packageName,
+                        flipperLayout(plan.effectiveFps)
+                    )
                     v.removeAllViews(R.id.living_frame_flip)
                     LivingFrameEngine.playbackOrder(bitmaps.size, frame.loopMode).forEach { idx ->
-                        val child = RemoteViews(context.packageName, R.layout.living_frames_frame)
+                        val child = RemoteViews(
+                            context.packageName,
+                            R.layout.living_frames_frame
+                        )
                         child.setImageViewBitmap(R.id.living_frame_item, bitmaps[idx])
                         v.addView(R.id.living_frame_flip, child)
                     }
                     v
                 } else {
-                    val v = RemoteViews(context.packageName, R.layout.living_frames_widget_static)
+                    val v = RemoteViews(
+                        context.packageName,
+                        R.layout.living_frames_widget_static
+                    )
                     v.setImageViewBitmap(R.id.living_frame_static, bitmaps[0])
                     v.setViewVisibility(R.id.living_frame_static, View.VISIBLE)
                     v.setViewVisibility(R.id.living_frame_placeholder, View.GONE)
@@ -211,47 +309,128 @@ object LivingFramesWidgetHelper {
                 mgr.updateAppWidget(appWidgetId, views)
                 writeInfo(
                     context, appWidgetId,
-                    WidgetInfo(w, h, bitmaps.size, bitmaps.sumOf { it.allocationByteCount.toLong() },
-                        (plan.scale * 100).roundToInt(), plan.rgb565, plan.step, plan.effectiveFps,
-                        System.currentTimeMillis(), null)
+                    WidgetInfo(
+                        w, h, bitmaps.size,
+                        plan.bytes,
+                        (plan.scale * 100).roundToInt(), plan.rgb565, plan.step,
+                        plan.effectiveFps, System.currentTimeMillis(), null
+                    )
                 )
                 return@withContext true
-            } catch (e: Exception) {
-                error = (e.message ?: error).take(90)
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                val message = t.message
+                if (!message.isNullOrBlank()) error = message.take(90)
                 budget /= 2
             } finally {
                 bitmaps.forEach { runCatching { if (!it.isRecycled) it.recycle() } }
             }
         }
-        writeInfo(context, appWidgetId, WidgetInfo(w, h, 0, 0, 0, false, 1, frame.fps, System.currentTimeMillis(), error))
+        writeInfo(
+            context, appWidgetId,
+            WidgetInfo(
+                w, h, 0, 0, 0, false, 1, frame.fps,
+                System.currentTimeMillis(), error
+            )
+        )
+        pushPlaceholder(
+            context, appWidgetId,
+            "Couldn't render this Living Widget. Try resizing it or re-adding it."
+        )
         false
     }
 
     /** Binds (if needed) and pushes one widget. The single entry point for every refresh path. */
-    suspend fun refresh(context: Context, repo: LivingFramesRepository, appWidgetId: Int): Boolean {
+    suspend fun refresh(
+        context: Context,
+        repo: LivingFramesRepository,
+        appWidgetId: Int
+    ): Boolean {
         repo.ensureLoaded()
         var frameId = repo.boundFrame(appWidgetId)
+        if (frameId == LivingFramesRepository.DELETED_WIDGET_BINDING) {
+            LivingFramesSlideshow.cancel(context, appWidgetId)
+            pushPlaceholder(
+                context, appWidgetId,
+                "This widget was deleted. Long-press to remove it."
+            )
+            return false
+        }
         if (frameId == null) {
-            val pending = takePendingPinFrame(context)?.takeIf { repo.get(it) != null }
-            val pick = pending?.let { repo.get(it) } ?: repo.snapshot().firstOrNull()
+            val pendingPin = peekPendingPinFrame(context)
+            val pending = pendingPin?.let { repo.get(it) }
+            // Never attach "the newest set" to an arbitrary widget: that made
+            // pinning two sets non-deterministic. A single-set library is a
+            // safe migration fallback; otherwise the config activity binds it.
+            // When a pin is pending, never substitute a different set.
+            val pick = when {
+                pending != null -> pending
+                pendingPin != null -> null
+                else -> repo.snapshot().singleOrNull()
+            }
             if (pick == null) {
-                pushPlaceholder(context, appWidgetId, "Create a widget in Toolz first")
+                val text = when {
+                    repo.isLoadFailed() ->
+                        "Couldn't read the Living Widget library. Your files are safe."
+                    pendingPin != null -> {
+                        // The set was removed while the pin request was in
+                        // flight. Drop the stale request and ask for a new one.
+                        clearPendingPin(context)
+                        "That set was deleted. Choose another one in Toolz."
+                    }
+                    else -> "Choose a Living Widget set in Toolz"
+                }
+                pushPlaceholder(context, appWidgetId, text)
                 return false
             }
-            repo.bindWidget(appWidgetId, pick.id)
+            if (!repo.bindWidget(appWidgetId, pick.id)) {
+                pushPlaceholder(context, appWidgetId, "Couldn't attach this widget. Try re-adding it.")
+                return false
+            }
+            if (pendingPin != null) clearPendingPin(context)
             frameId = pick.id
         }
-        val frame = repo.get(frameId) ?: run {
-            pushPlaceholder(context, appWidgetId, "This widget was deleted. Long-press to remove it.")
+        val frame = repo.get(frameId)
+        if (frame == null) {
+            if (repo.isLoadFailed()) {
+                // A corrupt/unreadable JSON file must not destroy the
+                // association between this widget and its set. Keep the
+                // binding; the next successful load restores it.
+                pushPlaceholder(
+                    context, appWidgetId,
+                    "Couldn't read the Living Widget library. Your files are safe."
+                )
+                return false
+            }
+            // Keep a tombstone so the single-set migration fallback below
+            // cannot later attach this widget to a different set.
+            repo.markWidgetDeleted(appWidgetId)
+            LivingFramesSlideshow.cancel(context, appWidgetId)
+            pushPlaceholder(
+                context, appWidgetId,
+                "This widget was deleted. Long-press to remove it."
+            )
             return false
         }
         val ok = push(context, repo, appWidgetId, frame)
-        if (frame.isSlideshow) LivingFramesSlideshow.ensureScheduled(context, appWidgetId, frame.slideshowIntervalMin)
+        if (frame.isSlideshow) {
+            LivingFramesSlideshow.ensureScheduled(
+                context, appWidgetId, frame.slideshowIntervalMin
+            )
+        } else {
+            // Reconfiguration from a slideshow to an animation/photo must not
+            // leave a stale one-shot alarm behind.
+            LivingFramesSlideshow.cancel(context, appWidgetId)
+        }
         return ok
     }
 
     /** Slideshow tick or tap-next: move the cursor, push the photo, arm the next alarm. */
-    suspend fun advanceSlideshow(context: Context, repo: LivingFramesRepository, appWidgetId: Int): Boolean {
+    suspend fun advanceSlideshow(
+        context: Context,
+        repo: LivingFramesRepository,
+        appWidgetId: Int
+    ): Boolean {
         repo.ensureLoaded()
         val frame = repo.boundFrame(appWidgetId)?.let { repo.get(it) } ?: return false
         if (!frame.isSlideshow) return false
@@ -261,11 +440,15 @@ object LivingFramesWidgetHelper {
         return ok
     }
 
-    suspend fun refreshFrame(context: Context, repo: LivingFramesRepository, frameId: String) {
+    suspend fun refreshFrame(
+        context: Context,
+        repo: LivingFramesRepository,
+        frameId: String
+    ) {
         repo.boundWidgetIds(frameId).forEach { refresh(context, repo, it) }
     }
 
-    // -- per-widget render report (shown in the tool) ----------------------------------------------
+    // -- per-widget render report (shown in the tool) -------------------------
 
     data class WidgetInfo(
         val widthPx: Int,
@@ -289,60 +472,98 @@ object LivingFramesWidgetHelper {
         try {
             infoPrefs(context).edit().putString(
                 "i_$id",
-                listOf(i.widthPx, i.heightPx, i.frames, i.bytes, i.scalePct, if (i.rgb565) 1 else 0, i.step, i.fps, i.atMs)
-                    .joinToString("|") + "|" + (i.error ?: "")
+                listOf(
+                    i.widthPx, i.heightPx, i.frames, i.bytes, i.scalePct,
+                    if (i.rgb565) 1 else 0, i.step, i.fps, i.atMs
+                ).joinToString("|") + "|" + (i.error ?: "")
             ).apply()
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+        }
     }
 
     fun readInfo(context: Context, id: Int): WidgetInfo? = try {
         val p = infoPrefs(context).getString("i_$id", null)?.split("|", limit = 10)
-        if (p == null || p.size < 10) null else WidgetInfo(
-            p[0].toInt(), p[1].toInt(), p[2].toInt(), p[3].toLong(), p[4].toInt(), p[5] == "1",
-            p[6].toInt(), p[7].toInt(), p[8].toLong(), p[9].ifBlank { null }
-        )
-    } catch (_: Exception) { null }
+        if (p == null || p.size < 10) {
+            null
+        } else {
+            WidgetInfo(
+                p[0].toInt(), p[1].toInt(), p[2].toInt(), p[3].toLong(),
+                p[4].toInt(), p[5] == "1", p[6].toInt(), p[7].toInt(),
+                p[8].toLong(), p[9].ifBlank { null }
+            )
+        }
+    } catch (_: Exception) {
+        null
+    }
 
     fun clearInfo(context: Context, id: Int) {
         runCatching { infoPrefs(context).edit().remove("i_$id").apply() }
     }
 
-    // -- pin flow -----------------------------------------------------------------------------------------
+    // -- pin flow -------------------------------------------------------------
 
     private const val PIN_PREFS = "living_frames_pin"
+    private const val PIN_TTL_MS = 120_000L
 
     fun setPendingPinFrame(context: Context, frameId: String) {
         runCatching {
             context.getSharedPreferences(PIN_PREFS, Context.MODE_PRIVATE).edit()
-                .putString("id", frameId).putLong("at", System.currentTimeMillis()).apply()
+                .putString("id", frameId)
+                .putLong("at", System.currentTimeMillis())
+                .apply()
         }
     }
 
-    /** requestPinAppWidget carries no extras, so the tool records which set was pinned (2-minute window). */
-    fun takePendingPinFrame(context: Context): String? = try {
+    /** Non-destructive read; the callback may arrive after the launcher UI settles. */
+    fun peekPendingPinFrame(context: Context): String? = try {
         val p = context.getSharedPreferences(PIN_PREFS, Context.MODE_PRIVATE)
         val id = p.getString("id", null)
         val at = p.getLong("at", 0L)
-        if (id == null || System.currentTimeMillis() - at > 120_000L) null
-        else { p.edit().clear().apply(); id }
-    } catch (_: Exception) { null }
+        if (id == null || System.currentTimeMillis() - at > PIN_TTL_MS) null else id
+    } catch (_: Exception) {
+        null
+    }
 
-    fun requestPin(context: Context, frame: LivingFrame): Boolean = try {
-        val mgr = context.getSystemService(AppWidgetManager::class.java)
-        if (mgr == null || !mgr.isRequestPinAppWidgetSupported) {
-            false
-        } else {
-            val callback = PendingIntent.getBroadcast(
-                context, frame.id.hashCode(),
-                Intent(context, LivingFramesWidgetReceiver::class.java).apply {
-                    action = LivingFramesWidgetReceiver.ACTION_PINNED
-                    putExtra(LivingFramesWidgetReceiver.EXTRA_FRAME_ID, frame.id)
-                },
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-            mgr.requestPinAppWidget(ComponentName(context, LivingFramesWidgetReceiver::class.java), null, callback)
+    fun clearPendingPin(context: Context) {
+        runCatching {
+            context.getSharedPreferences(PIN_PREFS, Context.MODE_PRIVATE)
+                .edit().clear().apply()
         }
-    } catch (_: Exception) { false }
+    }
+
+    @Deprecated("Use peekPendingPinFrame + clearPendingPin")
+    fun takePendingPinFrame(context: Context): String? {
+        val id = peekPendingPinFrame(context)
+        if (id != null) clearPendingPin(context)
+        return id
+    }
+
+    fun requestPin(context: Context, frame: LivingFrame): Boolean {
+        val ok = try {
+            val mgr = context.getSystemService(AppWidgetManager::class.java)
+            if (mgr == null || !mgr.isRequestPinAppWidgetSupported) {
+                false
+            } else {
+                val callback = PendingIntent.getBroadcast(
+                    context, frame.id.hashCode(),
+                    Intent(context, LivingFramesActionReceiver::class.java).apply {
+                        action = LivingFramesWidgetReceiver.ACTION_PINNED
+                        putExtra(LivingFramesWidgetReceiver.EXTRA_FRAME_ID, frame.id)
+                    },
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+                mgr.requestPinAppWidget(
+                    ComponentName(context, LivingFramesWidgetReceiver::class.java),
+                    null,
+                    callback
+                )
+            }
+        } catch (_: Exception) {
+            false
+        }
+        if (!ok) clearPendingPin(context)
+        return ok
+    }
 
     /**
      * Master toggle for the 4 Glance app widgets (Music / Pomodoro / Toolbar /
@@ -350,8 +571,11 @@ object LivingFramesWidgetHelper {
      * callers keep compiling.
      */
     fun setAppWidgetsComponentEnabled(context: Context, enabled: Boolean) {
-        val state = if (enabled) PackageManager.COMPONENT_ENABLED_STATE_ENABLED
-        else PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+        val state = if (enabled) {
+            PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+        } else {
+            PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+        }
         listOf(
             "com.frerox.toolz.widget.glance.MusicWidgetReceiver",
             "com.frerox.toolz.widget.glance.PomodoroWidgetReceiver",
@@ -360,9 +584,12 @@ object LivingFramesWidgetHelper {
         ).forEach { cls ->
             try {
                 context.packageManager.setComponentEnabledSetting(
-                    ComponentName(context.packageName, cls), state, PackageManager.DONT_KILL_APP
+                    ComponentName(context.packageName, cls),
+                    state,
+                    PackageManager.DONT_KILL_APP
                 )
-            } catch (_: Exception) {}
+            } catch (_: Exception) {
+            }
         }
     }
 }

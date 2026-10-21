@@ -19,6 +19,7 @@ package com.frerox.toolz.data.livingframes
 
 import kotlin.math.ceil
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 /** Pure math: playback order, render budgeting, shuffle. No Android dependencies. */
 object LivingFrameEngine {
@@ -44,7 +45,8 @@ object LivingFrameEngine {
 
     /**
      * How a widget gets rendered so the RemoteViews fit the system's bitmap
-     * memory ceiling. [bytes] counts unique bitmaps only.
+     * memory ceiling. [bytes] counts every child bitmap in the RemoteViews,
+     * including the duplicates a boomerang playback order creates.
      */
     data class RenderPlan(
         val scale: Float,
@@ -59,12 +61,18 @@ object LivingFrameEngine {
         val reduced: Boolean get() = scale < 0.999f || step > 1 || rgb565
     }
 
-    private val SCALES = floatArrayOf(1f, 0.85f, 0.7f, 0.6f)
+    private val SCALES = floatArrayOf(
+        1f, 0.9f, 0.8f, 0.7f, 0.6f, 0.5f, 0.4f, 0.33f, 0.25f, 0.2f, 0.15f, 0.1f
+    )
+
+    /** Binder/serialization cost per child; without it tiny budgets are fictional. */
+    private const val FRAME_OVERHEAD_BYTES = 64L
 
     /**
-     * Preference order: full frames at full size, then cheaper pixel format,
-     * then lower resolution, and only then fewer frames (fps is rescaled so
-     * the loop keeps its real-time length).
+     * Preference order: keep every frame at full size, then use a cheaper
+     * pixel format, then lower resolution, and only then drop frames (fps is
+     * rescaled so the loop keeps its real-time length). The returned plan is
+     * guaranteed to fit [budgetBytes] whenever even a 2×2 frame can fit.
      */
     fun plan(
         frameCount: Int,
@@ -72,29 +80,79 @@ object LivingFrameEngine {
         heightPx: Int,
         opaque: Boolean,
         fps: Int,
-        budgetBytes: Long
+        budgetBytes: Long,
+        loopMode: LivingFrameLoopMode = LivingFrameLoopMode.LOOP
     ): RenderPlan {
         val n = frameCount.coerceAtLeast(1)
+        val budget = budgetBytes.coerceAtLeast(0L)
+        val width = widthPx.coerceAtLeast(2)
+        val height = heightPx.coerceAtLeast(2)
+        val steps = listOf(1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 30, 40)
+            .filter { it <= n }
+            .ifEmpty { listOf(1) }
         var fallback: RenderPlan? = null
-        for (step in 1..4) {
+        for (step in steps) {
             val kept = ceil(n / step.toFloat()).toInt().coerceAtLeast(1)
             for (scale in SCALES) {
-                val w = (widthPx * scale).roundToInt().coerceAtLeast(2)
-                val h = (heightPx * scale).roundToInt().coerceAtLeast(2)
+                val w = (width * scale).roundToInt().coerceAtLeast(2)
+                val h = (height * scale).roundToInt().coerceAtLeast(2)
                 val formats = if (opaque) listOf(false, true) else listOf(false)
                 for (is565 in formats) {
                     val bpp = if (is565) 2L else 4L
-                    val bytes = kept.toLong() * w * h * bpp
+                    val children = playbackOrder(kept, loopMode).size
+                    val bytes = children.toLong() *
+                        (w.toLong() * h * bpp + FRAME_OVERHEAD_BYTES)
                     val p = RenderPlan(
                         scale, step, is565, kept, w, h, bytes,
                         LivingFrameFps.snap(fps / step.toFloat())
                     )
                     fallback = p
-                    if (bytes <= budgetBytes) return p
+                    if (bytes <= budget) return p
                 }
             }
         }
-        return fallback!!
+        if (fallback != null && fallback.bytes <= budget) return fallback
+        // The smallest scale in the normal ladder can still be too large on
+        // tiny screens/tiny budgets. Keep one frame and solve for the largest
+        // 2..N pixel rectangle that fits, instead of returning a plan the
+        // caller cannot push.
+        return oneFramePlan(width, height, opaque, n, fps, budget)
+    }
+
+    private fun oneFramePlan(
+        width: Int,
+        height: Int,
+        opaque: Boolean,
+        step: Int,
+        fps: Int,
+        budget: Long
+    ): RenderPlan {
+        val bpp = if (opaque) 2L else 4L
+        val available = (budget - FRAME_OVERHEAD_BYTES).coerceAtLeast(0L)
+        if (available < bpp * 4L) {
+            return RenderPlan(
+                scale = 0.1f, step = step, rgb565 = opaque,
+                frames = 1, outW = 2, outH = 2,
+                bytes = (2L * 2L * bpp) + FRAME_OVERHEAD_BYTES,
+                effectiveFps = LivingFrameFps.snap(fps.toFloat() / step)
+            )
+        }
+        val scale = sqrt(
+            available.toDouble() / (bpp.toDouble() * width.toDouble() * height.toDouble())
+        )
+        var w = (width * scale).toInt().coerceIn(2, width)
+        var h = (height * scale).toInt().coerceIn(2, height)
+        // Coercing an extreme aspect ratio up to 2 px can overshoot again.
+        // Shrink the long side until the rectangle fits this budget.
+        while (w > 2 && w.toLong() * h * bpp + FRAME_OVERHEAD_BYTES > budget) w--
+        while (h > 2 && w.toLong() * h * bpp + FRAME_OVERHEAD_BYTES > budget) h--
+        val bytes = w.toLong() * h * bpp + FRAME_OVERHEAD_BYTES
+        return RenderPlan(
+            scale = (w.toFloat() / width).coerceIn(0.001f, 1f),
+            step = step, rgb565 = opaque,
+            frames = 1, outW = w, outH = h, bytes = bytes,
+            effectiveFps = LivingFrameFps.snap(fps.toFloat() / step)
+        )
     }
 
     /** Deterministic shuffle cycle: same widget + cycle always gives the same order. */

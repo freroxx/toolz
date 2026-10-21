@@ -86,9 +86,13 @@ object LivingFrameRenderer {
         return out
     }
 
-    /** Opaque output (no corners, no letterbox, full opacity) can use RGB_565. */
+    /**
+     * Only decoded video frames are guaranteed to have no alpha channel.
+     * Photos, slideshows and GIFs may carry transparent pixels, so they always
+     * get an ARGB output even when their corners/letterbox are fully filled.
+     */
     fun isOpaque(frame: LivingFrame): Boolean =
-        frame.type != LivingFrameType.GIF &&
+        frame.type == LivingFrameType.VIDEO &&
             frame.cornerRadiusDp == 0 &&
             frame.opacity >= 0.999f &&
             frame.fit == LivingFrameFit.FILL

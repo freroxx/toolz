@@ -18,6 +18,7 @@
 package com.frerox.toolz.worker
 
 import android.content.Context
+import android.util.Log
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
@@ -29,13 +30,16 @@ import com.frerox.toolz.widget.livingframes.LivingFramesSlideshow
 import com.frerox.toolz.widget.livingframes.LivingFramesWidgetHelper
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import kotlinx.coroutines.CancellationException
 import java.util.concurrent.TimeUnit
 
 /**
- * Hourly housekeeping: re-arms slideshow alarms that an OEM or a reboot
- * killed, drops bindings for widgets the launcher no longer has, and renders
- * any widget that has never been rendered. It never touches widgets that are
- * already fine, so it costs next to nothing.
+ * Hourly housekeeping: re-arms slideshow alarms that an OEM, force-stop or
+ * reboot killed, drops bindings for widgets the launcher no longer has, and
+ * renders any widget that has never been rendered.
+ *
+ * Enumeration failure is treated as "unknown", never as "no widgets"; the
+ * previous code turned a binder hiccup into deletion of every binding.
  */
 @HiltWorker
 class LivingFramesWatchdogWorker @AssistedInject constructor(
@@ -45,29 +49,65 @@ class LivingFramesWatchdogWorker @AssistedInject constructor(
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
-        try {
+        return try {
             repo.ensureLoaded()
             val ctx = applicationContext
-            val ids = LivingFramesWidgetHelper.allWidgetIds(ctx)
+            val ids = LivingFramesWidgetHelper.allWidgetIdsOrNull(ctx)
+                ?: return Result.retry()
+
+            if (repo.isLoadFailed()) {
+                // A failed metadata read is not a reason to overwrite every
+                // home-screen widget with an error card. Keep the last pushed
+                // RemoteViews and let the user retry the load from Toolz.
+                Log.w(TAG, "Skipping widget work while metadata is unreadable")
+                return Result.success()
+            }
+
             repo.pruneBindings(ids.toSet()).forEach {
                 LivingFramesSlideshow.cancel(ctx, it)
                 LivingFramesWidgetHelper.clearInfo(ctx, it)
             }
+
+            // Expired staging folders and orphaned imports should not count
+            // against the storage quota forever. Never clean while metadata
+            // is unreadable: every real set would look orphaned.
+            if (!repo.isLoadFailed()) {
+                runCatching { repo.cleanupOrphans() }
+            }
+
             ids.forEach { id ->
                 try {
                     val frame = repo.boundFrame(id)?.let { repo.get(it) }
-                    if (frame == null || LivingFramesWidgetHelper.readInfo(ctx, id) == null) {
-                        LivingFramesWidgetHelper.refresh(ctx, repo, id)
-                    } else if (frame.isSlideshow) {
-                        LivingFramesSlideshow.ensureScheduled(ctx, id, frame.slideshowIntervalMin)
+                    val info = LivingFramesWidgetHelper.readInfo(ctx, id)
+                    if (frame == null) {
+                        LivingFramesRenderWorker.enqueue(ctx, id)
+                    } else {
+                        if (frame.isSlideshow) {
+                            LivingFramesSlideshow.ensureScheduled(
+                                ctx, id, frame.slideshowIntervalMin
+                            )
+                        }
+                        if (info == null || info.error != null) {
+                            LivingFramesRenderWorker.enqueue(ctx, id)
+                        }
                     }
-                } catch (_: Exception) {}
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.w(TAG, "Watchdog skipped widget $id", e)
+                }
             }
-        } catch (_: Exception) {}
-        return Result.success()
+            Result.success()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "Watchdog failed", e)
+            Result.retry()
+        }
     }
 
     companion object {
+        private const val TAG = "LivingFramesWatchdog"
         private const val UNIQUE = "living_frames_watchdog"
 
         fun schedule(context: Context) {
@@ -75,9 +115,16 @@ class LivingFramesWatchdogWorker @AssistedInject constructor(
                 WorkManager.getInstance(context).enqueueUniquePeriodicWork(
                     UNIQUE,
                     ExistingPeriodicWorkPolicy.KEEP,
-                    PeriodicWorkRequestBuilder<LivingFramesWatchdogWorker>(1, TimeUnit.HOURS).build()
+                    PeriodicWorkRequestBuilder<LivingFramesWatchdogWorker>(
+                        1, TimeUnit.HOURS
+                    ).build()
                 )
-            } catch (_: Exception) {}
+            } catch (_: Exception) {
+            }
+        }
+
+        fun cancel(context: Context) {
+            runCatching { WorkManager.getInstance(context).cancelUniqueWork(UNIQUE) }
         }
     }
 }
