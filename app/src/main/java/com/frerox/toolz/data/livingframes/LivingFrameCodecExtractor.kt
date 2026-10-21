@@ -30,8 +30,11 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
 import android.os.SystemClock
+import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import javax.inject.Inject
@@ -39,29 +42,33 @@ import javax.inject.Singleton
 
 /**
  * Full-decode frame extraction (MediaExtractor + MediaCodec, no surface).
- * Decodes the stream and captures exact uniform samples inside a window, so
- * the loop plays at true speed — unlike seek-based retrievers that snap to
- * keyframes and silently duplicate frames.
+ * Decodes the stream and hands uniform samples to [extractTo] one at a time,
+ * so a 6-second clip never holds 40 full bitmaps in RAM.
  *
- * Fixes over the previous extractor: honours the container's rotation tag
- * (portrait phone clips used to come out sideways), honours the decoder's
- * crop rect, supports a start offset, and reports progress.
+ * Honours the container's rotation tag, the decoder's crop rect and a start
+ * offset, and reports progress.
  */
 @Singleton
 class LivingFrameCodecExtractor @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
-    suspend fun extract(
+    /**
+     * Captures [count] samples in the window. [onFrame] must not recycle the
+     * bitmap; the extractor recycles it after all callbacks for that frame.
+     * Returns the number of frames emitted.
+     */
+    suspend fun extractTo(
         uri: Uri,
         startMs: Long,
         lengthMs: Long,
         count: Int,
         targetSide: Int,
+        onFrame: suspend (Bitmap) -> Unit,
         onProgress: (Float) -> Unit = {}
-    ): List<Bitmap> = withContext(Dispatchers.IO) {
+    ): Int = withContext(Dispatchers.IO) {
         var extractor: MediaExtractor? = null
         var codec: MediaCodec? = null
-        val out = ArrayList<Bitmap>(count)
+        var emitted = 0
         try {
             extractor = MediaExtractor().also { it.setDataSource(context, uri, null) }
             var track = -1
@@ -69,18 +76,28 @@ class LivingFrameCodecExtractor @Inject constructor(
             for (i in 0 until extractor.trackCount) {
                 val f = extractor.getTrackFormat(i)
                 if ((f.getString(MediaFormat.KEY_MIME) ?: "").startsWith("video/")) {
-                    track = i; format = f; break
+                    track = i
+                    format = f
+                    break
                 }
             }
             require(track >= 0 && format != null) { "No video track" }
             extractor.selectTrack(track)
 
-            val rotation = if (format.containsKey(MediaFormat.KEY_ROTATION))
-                format.getInteger(MediaFormat.KEY_ROTATION) else 0
+            val rotation = if (format.containsKey(MediaFormat.KEY_ROTATION)) {
+                format.getInteger(MediaFormat.KEY_ROTATION)
+            } else {
+                0
+            }
             val startUs = startMs.coerceAtLeast(0L) * 1000L
             val lengthUs = lengthMs.coerceAtLeast(100L) * 1000L
-            val targets = LongArray(count) { i -> startUs + i * lengthUs / count }
             if (startUs > 0L) extractor.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+            // Some containers start presentation time at a non-zero offset.
+            // Anchor targets to the first real sample so they are all not
+            // satisfied by one early frame.
+            val firstPts = extractor.sampleTime.takeIf { it >= 0L } ?: 0L
+            val timeBase = if (firstPts > startUs) firstPts else startUs
+            val targets = LongArray(count) { i -> timeBase + i * lengthUs / count }
 
             val mime = format.getString(MediaFormat.KEY_MIME) ?: "video/avc"
             codec = MediaCodec.createDecoderByType(mime)
@@ -94,6 +111,7 @@ class LivingFrameCodecExtractor @Inject constructor(
             var next = 0
 
             while (next < count) {
+                currentCoroutineContext().ensureActive()
                 val now = SystemClock.elapsedRealtime()
                 if (now - startedAt > 45_000L) break // never decode forever
                 if (!inputEos) {
@@ -102,7 +120,9 @@ class LivingFrameCodecExtractor @Inject constructor(
                         val buf = codec.getInputBuffer(inIdx)
                         val n = if (buf != null) extractor.readSampleData(buf, 0) else -1
                         if (n < 0) {
-                            codec.queueInputBuffer(inIdx, 0, 0, 0L, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            codec.queueInputBuffer(
+                                inIdx, 0, 0, 0L, MediaCodec.BUFFER_FLAG_END_OF_STREAM
+                            )
                             inputEos = true
                         } else {
                             codec.queueInputBuffer(inIdx, 0, n, extractor.sampleTime, 0)
@@ -116,17 +136,30 @@ class LivingFrameCodecExtractor @Inject constructor(
                     try {
                         val eos = (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
                         if (info.size > 0) {
-                            // One decoded picture can satisfy several targets (slow clips).
+                            // One decoded picture can satisfy several targets
+                            // (slow clips or a low requested fps).
                             var covered = 0
-                            while (next + covered < count && info.presentationTimeUs >= targets[next + covered]) covered++
+                            while (next + covered < count &&
+                                info.presentationTimeUs >= targets[next + covered]
+                            ) {
+                                covered++
+                            }
                             if (covered > 0) {
                                 val bmp = yuvToBitmap(codec, outIdx, targetSide, rotation)
                                 if (bmp != null) {
-                                    repeat(covered) { k ->
-                                        out.add(if (k == 0) bmp else bmp.copy(bmp.config ?: Bitmap.Config.ARGB_8888, false) ?: bmp)
+                                    try {
+                                        // One decoded picture can fill several
+                                        // slots. Reuse it rather than allocating
+                                        // up to 40 copies of a 720p bitmap.
+                                        repeat(covered) {
+                                            onFrame(bmp)
+                                            emitted++
+                                        }
+                                        next += covered
+                                        onProgress(next / count.toFloat())
+                                    } finally {
+                                        if (!bmp.isRecycled) bmp.recycle()
                                     }
-                                    next += covered
-                                    onProgress(next / count.toFloat())
                                 }
                             }
                         }
@@ -139,8 +172,8 @@ class LivingFrameCodecExtractor @Inject constructor(
                 }
                 if (inputEos && SystemClock.elapsedRealtime() - lastOutputAt > 5_000L) break
             }
-            require(out.isNotEmpty()) { "Decoder produced no frames" }
-            out
+            require(emitted > 0) { "Decoder produced no frames" }
+            emitted
         } finally {
             runCatching { codec?.stop() }
             runCatching { codec?.release() }
@@ -148,7 +181,12 @@ class LivingFrameCodecExtractor @Inject constructor(
         }
     }
 
-    private fun yuvToBitmap(codec: MediaCodec, index: Int, targetSide: Int, rotation: Int): Bitmap? {
+    private fun yuvToBitmap(
+        codec: MediaCodec,
+        index: Int,
+        targetSide: Int,
+        rotation: Int
+    ): Bitmap? {
         return try {
             val image = codec.getOutputImage(index) ?: return null
             try {
@@ -171,12 +209,14 @@ class LivingFrameCodecExtractor @Inject constructor(
                     bytes, 0, bytes.size,
                     BitmapFactory.Options().apply { inSampleSize = sample }
                 ) ?: return null
-                // Exact fit to the storage tier.
                 val side = maxOf(bmp.width, bmp.height)
                 if (side > targetSide) {
                     val s = targetSide / side.toFloat()
                     val scaled = Bitmap.createScaledBitmap(
-                        bmp, (bmp.width * s).toInt().coerceAtLeast(1), (bmp.height * s).toInt().coerceAtLeast(1), true
+                        bmp,
+                        (bmp.width * s).toInt().coerceAtLeast(1),
+                        (bmp.height * s).toInt().coerceAtLeast(1),
+                        true
                     )
                     if (scaled !== bmp) bmp.recycle()
                     bmp = scaled
@@ -193,7 +233,12 @@ class LivingFrameCodecExtractor @Inject constructor(
             } finally {
                 runCatching { image.close() }
             }
-        } catch (_: Exception) { null }
+        } catch (e: OutOfMemoryError) {
+            Log.w(TAG, "Out of memory decoding a video frame", e)
+            null
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun yuv420ToNv21(image: Image, xOff: Int, yOff: Int, w: Int, h: Int): ByteArray? {
@@ -231,6 +276,15 @@ class LivingFrameCodecExtractor @Inject constructor(
                 }
             }
             nv21
-        } catch (_: Exception) { null }
+        } catch (e: OutOfMemoryError) {
+            Log.w(TAG, "Out of memory converting a video frame", e)
+            null
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    companion object {
+        private const val TAG = "LivingFrameCodec"
     }
 }

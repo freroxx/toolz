@@ -99,3 +99,39 @@ object LivingFrameFps {
         else -> "Fast"
     }
 }
+
+/**
+ * Defensive normalisation at the storage boundary. Metadata may have been
+ * written by an older release or edited by a backup tool, so never trust
+ * values that can cause huge bitmaps, invalid paths or endless loops.
+ */
+object LivingFrameValidation {
+    private val ID_PATTERN = Regex("[A-Za-z0-9_-]{1,64}")
+
+    fun isValidId(id: String): Boolean = ID_PATTERN.matches(id) && id != "." && id != ".."
+
+    fun normalize(frame: LivingFrame): LivingFrame? {
+        if (!isValidId(frame.id)) return null
+        val name = frame.name.trim().ifBlank { "Untitled" }.take(48)
+        val maxCount = when (frame.type) {
+            LivingFrameType.SLIDESHOW -> LivingFramesRepository.MAX_SLIDES
+            LivingFrameType.PHOTO -> 1
+            else -> LivingFramesRepository.MAX_FRAMES
+        }
+        val count = frame.frameCount.coerceIn(1, maxCount)
+        val width = frame.width.coerceIn(1, 8_192)
+        val height = frame.height.coerceIn(1, 8_192)
+        return frame.copy(
+            name = name,
+            frameCount = count,
+            width = width,
+            height = height,
+            fps = LivingFrameFps.snap(frame.fps),
+            opacity = frame.opacity.coerceIn(0.4f, 1f),
+            cornerRadiusDp = frame.cornerRadiusDp.coerceIn(0, 48),
+            slideshowIntervalMin = frame.slideshowIntervalMin.coerceIn(1, 1_440),
+            avgFrameBytes = frame.avgFrameBytes.coerceAtLeast(0L),
+            sourceLabel = frame.sourceLabel.take(160)
+        )
+    }
+}
