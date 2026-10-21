@@ -337,12 +337,25 @@ fun LivingWidgetsScreen(
                                     fontWeight = FontWeight.SemiBold
                                 )
                                 Text(
-                                    "Pick something to start. It's cut to your widget's exact size, and the launcher plays it. Nothing runs in the background.",
+                                    if (ui.loadFailed) {
+                                        "We couldn't read the saved library. Imported frames are still on disk; try loading again before adding more."
+                                    } else {
+                                        "Pick something to start. It's cut to your widget's exact size, and the launcher plays it. Nothing runs in the background."
+                                    },
                                     style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = if (ui.loadFailed) MaterialTheme.colorScheme.error
+                                    else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                            SourceGrid(onPick = ::pick)
+                            if (!ui.loadFailed) SourceGrid(onPick = ::pick)
+                            if (ui.loadFailed || (ui.storage?.usedBytes ?: 0L) > 0L) {
+                                StoragePanel(
+                                    storage = ui.storage,
+                                    loadFailed = ui.loadFailed,
+                                    onRetry = viewModel::retryLoad,
+                                    onCleanup = viewModel::cleanupStorage
+                                )
+                            }
                         }
                     }
                 }
@@ -380,6 +393,16 @@ fun LivingWidgetsScreen(
                                 placed = placed,
                                 onPin = { pin(selected) },
                                 onDelete = { confirmDelete = true }
+                            )
+                        }
+                    }
+                    item(key = "storage") {
+                        StaggeredEntrance(index = 3) {
+                            StoragePanel(
+                                storage = ui.storage,
+                                loadFailed = ui.loadFailed,
+                                onRetry = viewModel::retryLoad,
+                                onCleanup = viewModel::cleanupStorage
                             )
                         }
                     }

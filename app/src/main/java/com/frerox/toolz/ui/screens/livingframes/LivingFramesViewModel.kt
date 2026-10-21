@@ -32,8 +32,10 @@ import com.frerox.toolz.data.livingframes.LivingFrameImporter
 import com.frerox.toolz.data.livingframes.LivingFrameLoopMode
 import com.frerox.toolz.data.livingframes.LivingFrameTapAction
 import com.frerox.toolz.data.livingframes.LivingFramesRepository
+import com.frerox.toolz.data.livingframes.LivingFramesStorage
 import com.frerox.toolz.widget.livingframes.LivingFramesSlideshow
 import com.frerox.toolz.widget.livingframes.LivingFramesWidgetHelper
+import com.frerox.toolz.worker.LivingFramesRenderWorker
 import com.frerox.toolz.worker.LivingFramesWatchdogWorker
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -78,7 +80,9 @@ data class LivingFramesUiState(
     val selectedId: String? = null,
     val loaded: Boolean = false,
     val import: ImportState? = null,
-    val pendingVideo: PendingVideo? = null
+    val pendingVideo: PendingVideo? = null,
+    val storage: LivingFramesStorage? = null,
+    val loadFailed: Boolean = false
 ) {
     val selected: LivingFrame? get() = frames.firstOrNull { it.id == selectedId } ?: frames.firstOrNull()
 }
@@ -97,16 +101,20 @@ class LivingFramesViewModel @Inject constructor(
     val messages: SharedFlow<String> = _messages.asSharedFlow()
 
     private var importJob: Job? = null
+    private var retryJob: Job? = null
     private val refreshJobs = HashMap<String, Job>()
 
     init {
         viewModelScope.launch {
             repo.ensureLoaded()
+            _ui.update { it.copy(loadFailed = repo.isLoadFailed()) }
+            refreshStorage()
             repo.frames.collect { list ->
                 _ui.update {
                     it.copy(
                         frames = list,
                         loaded = true,
+                        loadFailed = repo.isLoadFailed(),
                         selectedId = it.selectedId?.takeIf { id -> list.any { f -> f.id == id } }
                             ?: list.firstOrNull()?.id
                     )
@@ -142,12 +150,68 @@ class LivingFramesViewModel @Inject constructor(
 
     fun select(id: String) = _ui.update { it.copy(selectedId = id) }
 
-    fun coverFile(id: String): File = repo.coverFile(id)
+    fun coverFile(id: String): File =
+        repo.coverFile(id).takeIf { it.isFile } ?: repo.frameFile(id, 0)
+
+    fun refreshStorage() {
+        viewModelScope.launch {
+            val stats = withContext(Dispatchers.IO) { repo.storage() }
+            _ui.update { it.copy(storage = stats) }
+        }
+    }
+
+    fun cleanupStorage() {
+        viewModelScope.launch {
+            val freed = withContext(Dispatchers.IO) { repo.cleanupOrphans() }
+            refreshStorage()
+            _messages.emit(
+                if (freed > 0) {
+                    "Cleaned up ${LivingFramesRepository.formatBytes(freed)} of unused files."
+                } else {
+                    "Nothing to clean up."
+                }
+            )
+        }
+    }
+
+    fun retryLoad() {
+        // A queued duplicate load could overwrite an import started after the
+        // first attempt succeeded.
+        if (retryJob?.isActive == true) return
+        retryJob = viewModelScope.launch {
+            repo.load()
+            _ui.update {
+                it.copy(
+                    frames = repo.snapshot(),
+                    loaded = true,
+                    loadFailed = repo.isLoadFailed(),
+                    selectedId = it.selectedId?.takeIf { id -> repo.get(id) != null }
+                        ?: repo.snapshot().firstOrNull()?.id
+                )
+            }
+            refreshStorage()
+            if (!repo.isLoadFailed()) {
+                // Recovery should restore widgets immediately rather than
+                // waiting for the next hourly watchdog pass.
+                LivingFramesWidgetHelper.allWidgetIdsOrNull(context)?.forEach { id ->
+                    LivingFramesRenderWorker.enqueue(context, id)
+                }
+            }
+        }
+    }
 
     // -- import -----------------------------------------------------------------------
 
     private fun runImport(label: String, block: suspend ((Float) -> Unit) -> LivingFrameImportResult) {
-        if (_ui.value.import != null) return
+        if (importJob?.isActive == true || _ui.value.import != null) return
+        if (!_ui.value.loaded) {
+            _messages.tryEmit("The library is still loading. Try again in a moment.")
+            return
+        }
+        if (repo.isLoadFailed()) {
+            _messages.tryEmit("The library couldn't be read. Use “Try loading again” before importing.")
+            return
+        }
         importJob = viewModelScope.launch {
             _ui.update { it.copy(import = ImportState(label, 0f)) }
             try {
@@ -158,10 +222,17 @@ class LivingFramesViewModel @Inject constructor(
                 _messages.emit(res.note ?: "“${res.frame.name}” is ready. Add it to your home screen.")
             } catch (e: CancellationException) {
                 throw e
-            } catch (e: Exception) {
-                _messages.emit(e.message ?: "Import failed")
+            } catch (e: Throwable) {
+                if (e is CancellationException) throw e
+                _messages.emit(
+                    when (e) {
+                        is OutOfMemoryError -> "Not enough memory to import that. Try a shorter video or a smaller photo."
+                        else -> e.message ?: "Import failed"
+                    }
+                )
             } finally {
                 _ui.update { it.copy(import = null) }
+                refreshStorage()
             }
         }
     }
@@ -257,22 +328,30 @@ class LivingFramesViewModel @Inject constructor(
 
     fun delete(id: String) {
         viewModelScope.launch {
+            val widgetIds = repo.boundWidgetIds(id)
+            if (!repo.delete(id)) {
+                _messages.emit("Couldn't delete this set. Free some storage and try again.")
+                return@launch
+            }
             refreshJobs.remove(id)?.cancel()
-            repo.boundWidgetIds(id).forEach { wid ->
+            widgetIds.forEach { wid ->
+                LivingFramesRenderWorker.cancel(context, wid)
                 LivingFramesWidgetHelper.pushPlaceholder(context, wid, "This widget was deleted. Long-press to remove it.")
                 LivingFramesSlideshow.cancel(context, wid)
                 LivingFramesWidgetHelper.clearInfo(context, wid)
             }
             synchronized(previewCache) { previewCache.keys.removeAll { it.startsWith("$id:") } }
-            repo.delete(id)
-            _messages.emit("Widget deleted")
+            refreshStorage()
+            _messages.emit("Widget set deleted")
         }
     }
 
     // -- in-app preview ------------------------------------------------------------------------------------
 
+    // Only one preview set is visible at a time. Keeping a second animation
+    // list can retain tens of megabytes of decoded bitmaps on a large device.
     private val previewCache = object : LinkedHashMap<String, List<ImageBitmap>>(4, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<ImageBitmap>>?) = size > 2
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<ImageBitmap>>?) = size > 1
     }
 
     /**

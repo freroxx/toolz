@@ -40,6 +40,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -58,6 +59,8 @@ import com.frerox.toolz.data.livingframes.LivingFrameFit
 import com.frerox.toolz.data.livingframes.LivingFrameFps
 import com.frerox.toolz.data.livingframes.LivingFrameLoopMode
 import com.frerox.toolz.data.livingframes.LivingFrameTapAction
+import com.frerox.toolz.data.livingframes.LivingFramesRepository
+import com.frerox.toolz.data.livingframes.LivingFramesStorage
 import com.frerox.toolz.ui.components.ExpressiveCard
 import com.frerox.toolz.ui.components.SquircleShape
 import com.frerox.toolz.ui.components.ToolzConnectedButtonGroup
@@ -297,6 +300,11 @@ internal fun WidgetPanel(
             ToolzExpressiveButton(onClick = onPin, modifier = Modifier.fillMaxWidth()) {
                 Text(if (placed.isEmpty()) "Add to home screen" else "Add another", fontWeight = FontWeight.SemiBold)
             }
+            Text(
+                "Each copy can show a different set; the launcher's configuration screen asks which one. Some launchers pause widget animations in battery saver, and a few don't animate ViewFlipper widgets at all.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
         ToolzOutlinedExpressiveButton(
             onClick = onDelete,
@@ -307,6 +315,85 @@ internal fun WidgetPanel(
             Spacer(Modifier.width(8.dp))
             Text("Delete “${frame.name}”", maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
+    }
+}
+
+@Composable
+internal fun StoragePanel(
+    storage: LivingFramesStorage?,
+    loadFailed: Boolean,
+    onRetry: () -> Unit,
+    onCleanup: () -> Unit
+) {
+    PanelCard {
+        SettingHeader(
+            "Storage",
+            storage?.let {
+                "${LivingFramesRepository.formatBytes(it.usedBytes)} / " +
+                    LivingFramesRepository.formatBytes(it.quotaBytes)
+            }
+        )
+        if (loadFailed) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(SquircleShape)
+                    .background(MaterialTheme.colorScheme.errorContainer)
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Rounded.Warning, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onErrorContainer)
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    "The library file couldn't be read. Imported files were kept.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            ToolzOutlinedExpressiveButton(onClick = onRetry, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Rounded.Refresh, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Try loading again")
+            }
+        }
+        val s = storage
+        if (s == null) {
+            Text(
+                "Checking storage…",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            LinearProgressIndicator(
+                progress = { s.fraction },
+                modifier = Modifier.fillMaxWidth()
+            )
+            Text(
+                "${s.setCount} set${if (s.setCount == 1) "" else "s"} · " +
+                    "${LivingFramesRepository.formatBytes(s.freeBytes)} free on this device",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (s.orphanBytes > 0L) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "${s.orphanDirs.size} unused folder${if (s.orphanDirs.size == 1) "" else "s"} " +
+                            "(${LivingFramesRepository.formatBytes(s.orphanBytes)})",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f)
+                    )
+                    ToolzOutlinedExpressiveButton(onClick = onCleanup) { Text("Clean up") }
+                }
+            }
+        }
+        Text(
+            "Frames are downscaled for the home screen (40-frame animation / 30-photo slideshow limit). " +
+                "Imports keep at least ${LivingFramesRepository.formatBytes(LivingFramesRepository.MIN_FREE_BYTES)} free.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
