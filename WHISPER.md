@@ -10,6 +10,10 @@ seen the codebase can reason about it.
 **How to read this document.** It describes the codebase as of the 1.1.7
 release (October 2026), including the six client-side hardening rounds that
 followed the initial release cut (§6, §9, §11.7, §12, §13 — October 2026).
+It also records, without softening, the October 2026 field report that 1:1
+messages could render the locked placeholder for every row, the three
+independent code paths that produced it, and the fix that landed for each
+(§3.9, §14).
 The working tree is the source of truth; this document is not
 machine-checked against code, so treat any specific constant or file name as a
 pointer to verify, not a guarantee. Sections about cryptography name exact
@@ -329,7 +333,10 @@ After the handshake, every frame advances a Double Ratchet:
   Retention is bounded (the 400-key consumed window above), so that window is
   also how far back a re-open can reach; beyond it the honest locked
   placeholder applies. The render path memoizes decrypted text in memory, so
-  ordinary scrolling does not depend on key retention.
+  ordinary scrolling does not depend on key retention. That memo covers
+  *received* frames only. A device's own sent frames are re-rendered from the
+  persistent self-read store described in §3.9, not from the ratchet: the
+  sender never keeps the receive keys that would open its own ciphertext.
 
 Unrecoverable gaps raise `WhisperRatchetLostMessage`, rendered as an honest
 locked placeholder: "this message could not be opened because part of the
@@ -450,6 +457,125 @@ re-renderability), and reinstall or data wipe locks past self frames with no
 server fallback, same parity as the 1:1 "reinstall loses old sealed frames"
 posture.
 
+### 3.9 The locked-message field report and its fix (October 2026)
+
+The October 2026 field report was that 1:1 history could render the locked
+placeholder — the localized `st_Whisper_Locked_Message` ("This message can no
+longer be decrypted on this device") — for every row, that the user's own
+messages flickered locked and then showed their text, and that switching
+accounts locked everything. Those were three independent failures collapsing
+into one user-visible line, and all three are now fixed in the working tree.
+The distinction still matters in the rest of this document: "locked" is only
+honest for genuinely unrecoverable history (§3.4), never for "not read yet".
+
+**Failure 1 — own sent v3 text had no persistent self-read path.** The Double
+Ratchet is send-only on the sender's side: the device keeps the chain that
+*produced* the frame, never the receive keys that would open it. Re-rendering
+a sent text row depended entirely on `WhisperRepository.sentV3PlaintextMemo`,
+an in-process 1,000-entry LRU written at send time and never persisted, while
+Room stays ciphertext-only (§6.2). After process death or LRU eviction a sent
+v3 row had no re-read path and rendered locked permanently.
+
+*Fix: the persistent self-read store (`WhisperSelfReadStore`).* At send time
+the plaintext is sealed with the hardware-backed Keystore AES key
+(`WhisperCrypto.wrapWithKeystoreAes`) and written to the Room table
+`whisper_self_read` (schema v66), which itself lives inside the
+SQLCipher-encrypted database — double-protected at rest, and never the
+peer-facing ciphertext. The sealed payload is `SR1|messageId|plaintext`, so a
+blob cannot be swapped onto another message; rows are keyed by
+`(ownerId, messageId)` with a SHA-256 `contentHash` of the wire
+ciphertext, which is how conversation previews (the `get_conversations` RPC
+carries no message id) resolve their own last message. Retention is bounded at
+1,500 copies per owner. The read paths preload the conversation's own rows in
+one indexed query (`getMessagesFlow`, `getMessages`) and consult the in-process
+memo first; realtime echoes and previews use a single targeted lookup.
+Deleting a message, clearing a history, or a tombstone also forgets its copy;
+sign-out keeps copies (the account must still render its history when it signs
+back in) and account deletion wipes them.
+
+**Failure 2 — the locked placeholder was also the first paint.** The Room flow
+emits ciphertext rows and decrypts on read, so an own row whose memo was
+written a beat after the emission landed painted the locked marker first;
+`ChatMessageMerger` then healed locked → plaintext on the next emission, which
+is exactly the reported flicker. The realtime echo of an own row took the
+normal decrypt path, which can never open the sender's own frame.
+
+*Fix: write before the network insert, resolve own rows first.* `sendMessage`
+now writes the memo and the sealed self-read copy **before** the network insert
+(and before the queued/offline path's Room insert), so neither the echo nor the
+first Room emission can beat it. `decryptRealtimeMessage` and the conversation
+preview paths resolve an own row from the memo/self-read copy before any
+ratchet work. The merger's locked → plaintext healing rule stays as a safety
+net for old rows, but new own sends no longer reach the locked state at all.
+
+**Failure 3 — stores were install-scoped, not account-scoped.** Room rows, the
+`whisper_sessions/` snapshots and the key trust store were keyed by peer, never
+by the signed-in account. Sign-out clears only in-memory caches (§7) and
+deliberately leaves those stores in place, so two accounts on one device
+shared one session snapshot per peer: whichever account advanced the session
+last owned the file, and the other account's cached rows then failed AEAD and
+rendered locked. The session store's recovery rule ("a corrupt file is treated
+as absent") could not help — the file was valid, it simply belonged to the
+other account.
+
+*Fix: account-scoped session state.* Session files now live at
+`whisper_sessions/<sha256(accountId)>/<sha256(peerId)>.json`; the in-memory
+maps and the per-peer mutex are keyed by `(accountId, peerId)`; and each loaded
+`Live` pins the account it came from, so a save that spans a sign-out can never
+land in the next account's file. Sign-out calls
+`WhisperSessionStore.clearMemory()`, which drops live ratchets, the last-written
+cache and establish-failure counters while leaving the per-account files on
+disk.
+
+Upgrading cannot lose existing sessions, and it cannot hand them to the wrong
+account either. Pre-scoping builds wrote `<sha256(peerId)>.json` directly under
+`whisper_sessions/` with no owner in the name, so adoption is **per peer and
+lazy**: the first time an account opens a conversation with peer P, the file
+for P is moved into that account's directory. Two accounts A and B on one
+device chatting with *each other* own different files (`<sha256(B)>` for A,
+`<sha256(A)>` for B), so both keep their own ratchet — the case a whole-
+directory sweep broke, because it dumped every file, including B's session with
+A, into whichever account happened to run first. A file for peer P found
+inside account P's own directory is also reclaimed: that location can never be
+legitimate (an account has no session whose peer is itself), so it can only be
+the counterpart account's session for P. Already-mis-swept installs repair
+themselves on the next open of the affected conversation.
+
+One honest limit: if two accounts on one install have both chatted with the
+same third peer P, the pre-scoping layout kept only one snapshot for P, so it
+can be attributed to only one of them. The account that claims it keeps its
+history; the other one has no session for P and re-handshakes on its next send.
+That ambiguity is inherent to the old file name (it records the peer, never the
+owner) — it is not introduced by the fix, and unlike the same-install pair it
+cannot be resolved from the layout alone.
+
+The other half of the same-install case is handshake acceptance. Two accounts
+on one install share the device identity key, so the usual "peer identity
+changed ⇒ reinstall ⇒ accept the fresh session" signal never fires between
+them, and the deterministic session-id tie-break (which makes two *racing*
+initiators converge, §13) would reject a legitimate new session roughly half
+the time. The losing side then keeps sending pure frames on a session the other
+side never adopted — permanently locked, with no handshake left to retry.
+Because only one account can be signed in at a time, two accounts on one
+install cannot race, so a handshake whose identity is this device's own
+identity is always accepted when its session id differs. Cross-device traffic
+keeps the tie-break unchanged.
+
+The key trust store stays install-wide on purpose: a peer's identity key is a
+property of the peer, not of the local account, so a TOFU pin recorded while
+signed in as A remains valid and useful for B on the same device. What *must*
+not cross accounts — the ratchet chains and the sent plaintext — is scoped.
+
+**Honest residuals.** (a) Rows sent before this build have no self-read copy;
+if their ratchet state is already gone they stay locked, and no update can
+recover them. (b) Sign-out clears the sent-plaintext memo and every live
+ratchet from RAM (§7), but the sealed copies remain on disk scoped to their
+owner, by design. (c) The chat still does not render a separate "decrypting"
+state, so a *received* row whose session has not hydrated yet can briefly show
+the locked marker before its first successful decrypt; the merger heals it and
+the pipeline now hydrates keys before emitting history, but the tri-state
+render remains a future polish item.
+
 ---
 
 ## 4. The life of a message (end-to-end walkthrough)
@@ -511,9 +637,15 @@ Alice's keyboard to Bob's screen.
    the human-readable content only ever appears once the app has opened,
    synced, and decrypted locally.
 8. **Render.** The Bubble UI displays the decrypted content — or a locked
-   placeholder if the history genuinely cannot catch up. Read receipts,
-   typing, and presence flow back over their own channels; reactions and
-   deletes travel as their own protocol objects.
+   placeholder if the history genuinely cannot catch up (§3.4). Own sent rows
+   are resolved from the persistent self-read copy before any ratchet work
+   (§3.9), so they no longer render locked after a restart or on an account
+   switch. A *received* row whose session has not hydrated yet can still show
+   the placeholder for one emission; `ChatMessageMerger` heals locked →
+   plaintext on the next emission and never the reverse, so "locked" on screen
+   is not proof of history loss. Read receipts, typing, and presence flow back
+   over their own channels; reactions and deletes travel as their own protocol
+   objects.
 
 ---
 
@@ -602,12 +734,23 @@ Local state is split across purpose-built stores, all read in full by the app
 | Store | Holds | Notably does NOT hold |
 |---|---|---|
 | Room (messages, local tombstones, outbox) | ciphertext-only messages (latest 500), delete-for-me tombstones, FIFO outbox (cap 100, 200-entry drop ledger) | plaintext before render; no key material |
-| `whisper_sessions/` | one wrapped session snapshot per peer | anything that cannot be Keystore-wrapped |
+| `whisper_sessions/` | one wrapped session snapshot per peer, under `<sha256(accountId)>/` | anything that cannot be Keystore-wrapped |
+| Self-read store (`whisper_self_read`, Room v66) | the user's OWN sent plaintext, sealed with the Keystore AES key as `SR1\|messageId\|plaintext`, keyed by `(ownerId, messageId)`, with a SHA-256 hash of the wire ciphertext for previews; capped at 1,500 rows per owner | peer-facing ciphertext; incoming messages; anything readable by another account |
 | Key trust store | pinned/verified fingerprints + rotation counters | private halves |
 | Mute/hidden-chats/delete-for-me/undo/preferences stores | UX state with expiries (24h eviction for delete-for-me, 30s undo window, hidden chat auto-return) | — |
 | Daily Ups seen store (`whisper_story_seen`) | opaque `storyId → expiresAtMs` pairs for device-local ring state, capped at 512, expired entries filtered on load and pruned on refresh/write | who viewed what; account id; media or keys |
 | Access-file backup (`WhisperAubupManager`) | credential-only payload (username, auth type, credential, display name) | session/ratchet state, key material — never |
 | Sealed image disk caches | encrypted containers keyed by URL hash, generation-guarded | plaintext pixels |
+
+A scoping note on that table, because the row titles hide it. Whisper state is
+split by *what it is*, not uniformly by account. Room message rows are filtered
+by `senderId`/`receiverId`; session files are namespaced by
+`sha256(accountId)`; the self-read store is keyed by `ownerId`; the key trust
+store stays *install-scoped* on purpose, because a peer's identity key is a
+property of the peer rather than of the local account (§3.9). The in-process
+`sentV3PlaintextMemo` remains a 1,000-entry LRU keyed by message ID and is
+cleared on sign-out; it is only a hot-path cache in front of the sealed
+self-read rows, not the durable copy.
 
 The Room outbox and delivery scheduler work together: FIFO delivery of
 ciphertext-only rows, duplicate-delivery detection (a server replay guard),
@@ -658,6 +801,20 @@ tokens; username availability checks; signed-out and full-wipe account
 deletion (re-auth for password accounts, edge deletion with a password
 header and a 5-minute confirmation timestamp, then local wipe of sessions,
 Room, trust store, outbox, avatar caches, and push registration).
+
+**Sign-out is not a wipe, and that difference matters.** Deleting an account
+runs `clearAllLocalData()` — everything above, including the ratchet session
+store, the self-read copies and the key trust store. A plain sign-out runs
+`clearSessionScopedCaches()`: it drops in-memory state only (profile / peer-key
+/ block caches, the decrypt memo, the sent-plaintext memo, live ratchet
+sessions, avatars, realtime channels) and deliberately leaves Room,
+`whisper_sessions/`, the self-read store, the key trust store and the outbox on
+disk, because they are classed as account data rather than session data. That
+is safe because the durable state that could poison another account is scoped:
+session files and live ratchets are namespaced by account id, and self-read
+copies are keyed by owner id, so a second account on the same device cannot
+read or overwrite the first account's chains (§3.9). The key trust store stays
+install-wide by design — peer identity keys are not account state.
 
 ---
 
@@ -1384,6 +1541,23 @@ Whisper's cryptography is pinned with a deliberately paranoid test stack:
   changed no cryptography and no SQL: quotas (600/day fan-out, 5/day/IP
   story, 5/day/IP signup), signed-log verification, epochs, and descriptor
   shapes are byte-identical to the release cut — the freeze was deliberate.
+- **Regression cover from the October 2026 locked-message defect (§3.9).** The
+  existing suite pins copy-commit ratchet behavior and the merger's
+  locked → plaintext rule. The fix added `WhisperSelfReadStoreTest`, which
+  exercises the durable self-read path through its sealing seam: a copy written
+  at send time is recalled by message id after a cold start, is unreadable by
+  another owner account, resolves conversation previews by wire-ciphertext
+  hash, rejects (and prunes) a sealed blob moved onto another message id, is
+  forgotten on delete, and is bounded by `MAX_PER_OWNER`. The account-scoping
+  side is covered by `WhisperSessionFilesTest`, which pins the on-disk layout
+  and the upgrade rules with real files: two accounts on one install each adopt
+  the legacy snapshot whose peer they are, a file mis-swept into the peer's own
+  directory is reclaimed by the counterpart account, an existing scoped file is
+  never overwritten, and nothing is adopted for a self-peer. The store itself
+  still needs an Android context and a Supabase client, so its wiring is
+  covered by the compile plus the Whisper suites; the file-attribution rules
+  that caused the account-switch regression are now tested directly instead of
+  passing by omission.
 
 ---
 
@@ -1434,6 +1608,26 @@ A few design constraints documented as *decisions*, not surprises:
    nothing in §2.1's "never visible" list depends on these signals being
    unconditional. It is a product calibration call, owned by the operator,
    not an architectural constraint.
+7. **Locked-message field report (October 2026) — fixed, with residuals.**
+   The report was that 1:1 history could render "This message can no longer be
+   decrypted on this device" for every row, that own messages flickered, and
+   that switching accounts locked everything. Three independent causes stacked
+   (§3.9) and all three were fixed in the same cycle: a persistent, per-owner,
+   Keystore-sealed self-read copy for the user's own sends (written before the
+   network insert, so no echo can race it); own-row resolution ahead of any
+   ratchet attempt on the history, realtime and conversation-preview paths; and
+   account-scoped session files and in-memory ratchets with a pinned scope on
+   every live session, lazy per-peer adoption of the pre-scoping files (a
+   whole-directory sweep is what handed one account the other's sessions), and
+   same-install handshake acceptance so the account-switch pair survives a
+   session restart, plus a sign-out that clears those in-memory chains and
+   the sent-plaintext memo. The key trust store intentionally remains
+   install-wide, because peer identity keys are not account state. Residuals
+   are stated honestly rather than hidden: rows sent before this build have no
+   self-read copy and cannot be recovered if their ratchet state is already
+   gone, and the chat still has no explicit "decrypting" state, so a received
+   row can briefly show the locked marker before its first successful decrypt
+   (the merger heals it).
 
 Deployment/operational runbooks (rollout, smoke tests, edge redeploys) live
 outside this document, on purpose: `supabase/POST_DEPLOY_SMOKE.md` and the
@@ -1451,7 +1645,8 @@ Paths relative to `app/src/main/java/com/frerox/toolz/`.
 `WhisperRepositoryStories.kt`, `WhisperRepositorySocial.kt`,
 `WhisperRepositoryProfile.kt` · `WhisperCrypto.kt` (hardware identity),
 `WhisperSelfLegCrypto.kt` (self-leg anchor), `session/` (`WhisperRatchet`,
-`WhisperSessionFactory`, `WhisperSessionStore`,
+`WhisperSessionFactory`, `WhisperSessionStore`, `WhisperSessionFiles`
+(account-scoped on-disk layout + legacy adoption),
 `WhisperSessionSecretProtector`, `WhisperV3Codec` in `data/whisper/session/`),
 `WhisperEnvelope.kt` (wire codecs), `WireProtocol.kt` (pure decisions),
 `WhisperPrekeyManager.kt`, `WhisperKeyTrustStore.kt`,
@@ -1463,7 +1658,9 @@ Paths relative to `app/src/main/java/com/frerox/toolz/`.
 `WhisperStoryLocalEntity.kt`, `WhisperDailyUpPhotoPreprocessor.kt`,
 `WhisperOutgoingQueue.kt` (Room outbox + delivery), `WhisperDeliveryScheduler.kt`,
 `WhisperMessageDao.kt`/`WhisperMessageEntity.kt`/
-`WhisperLocalTombstoneEntity.kt`, `WhisperEncryptedImageHost.kt`,
+`WhisperLocalTombstoneEntity.kt`,
+`WhisperSelfReadStore.kt` (device-sealed self-read copies for own sends +
+`WhisperSelfReadSealer` seam), `WhisperEncryptedImageHost.kt`,
 `WhisperImageCipherTransport.kt` (WZ1 container), `WhisperImagePreprocess.kt`,
 `WhisperAvatarCodec.kt`, `WhisperAvatarLoader.kt`,
 `WhisperImageDiskCache.kt`, `WhisperDeletedMessagesStore.kt`,
@@ -1523,6 +1720,7 @@ baseline), `functions/` (see §8.2), `whisper-sql-info.md`,
 | **Realtime publication** | The set of tables whose changes stream to subscribed clients |
 | **Remote wake ping** | A push notification carrying no content — only IDs + event kinds (encrypted on FCM-fallback hops) |
 | **ratchet lost / placeholder** | The honest UI state for a message that cannot open because part of the session history is unrecoverable |
+| **Self-read store** | `whisper_self_read` (Room v66) + `WhisperSelfReadStore` — the durable, Keystore-sealed copy of this device's own sent plaintext, keyed by `(ownerId, messageId)` and bound to the message id; the in-process `sentV3PlaintextMemo` is only its hot-path cache (§3.9) |
 | **Static envelope** | §3.2's v2 sealed body; called "static" because it uses pinned long-term identities |
 | **TOFU** | Trust-on-first-use — pin the first key seen; subsequent changes are fail-closed |
 | **Web Push (RFC 8291/8292)** | Standard browser-push encryption/auth; used on the FCM-fallback hop |

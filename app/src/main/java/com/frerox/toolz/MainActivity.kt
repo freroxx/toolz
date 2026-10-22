@@ -74,6 +74,9 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.work.*
 import com.frerox.toolz.data.ai.AiSettingsManager
+import com.frerox.toolz.data.developer.CapturedCrash
+import com.frerox.toolz.data.developer.FastReportExporter
+import com.frerox.toolz.data.developer.FastReportStore
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.data.update.pendingUpdate
 import com.frerox.toolz.data.repository.FlashlightRepository
@@ -291,6 +294,32 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
             val hapticIntensity by settingsRepository.hapticIntensity.collectAsState(initial = 0.5f)
             val showTopAppBarDescriptions by settingsRepository.showTopAppBarDescriptions.collectAsState(initial = true)
 
+            // Post-crash recovery: FastReportStore writes a snapshot from the
+            // uncaught handler; on the next launch we offer to turn it into a
+            // Markdown report. The snapshot is only cleared after the user
+            // acts, so process death cannot silently lose the diagnostics.
+            val crashContext = LocalContext.current
+            val fastReportScope = rememberCoroutineScope()
+            var pendingCrash by remember { mutableStateOf<CapturedCrash?>(null) }
+            // Retained separately so the exit animation still has content once
+            // pendingCrash is cleared.
+            var shownCrash by remember { mutableStateOf<CapturedCrash?>(null) }
+            var fastReportBusy by remember { mutableStateOf(false) }
+            var fastReportError by remember { mutableStateOf<String?>(null) }
+            LaunchedEffect(Unit) {
+                val stored = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    val parsed = FastReportStore.readPendingCrash(crashContext)
+                    if (parsed == null && FastReportStore.hasPendingCrash(crashContext)) {
+                        // A corrupt or half-written snapshot must not haunt
+                        // every launch; drop it once, then carry on normally.
+                        FastReportStore.clearPendingCrash(crashContext)
+                    }
+                    parsed
+                }
+                pendingCrash = stored
+                shownCrash = stored
+            }
+
             val isDark = when (themeMode) {
                 "LIGHT" -> false
                 "DARK" -> true
@@ -484,6 +513,63 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
                         isReady = offlineOverlayReady,
                         performanceMode = performanceMode
                     )
+
+                    // Crash recovery is hosted at the app root so it appears
+                    // no matter which screen the user landed on, and above the
+                    // news popup, loading and offline overlays.
+                    AnimatedVisibility(
+                        visible = pendingCrash != null,
+                        enter = fadeIn(tween(200)) + scaleIn(
+                            initialScale = 0.92f,
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                stiffness = Spring.StiffnessMediumLow
+                            )
+                        ),
+                        exit = fadeOut(tween(150)) + scaleOut(
+                            targetScale = 0.96f,
+                            animationSpec = tween(150)
+                        )
+                    ) {
+                        val crash = shownCrash ?: return@AnimatedVisibility
+                        com.frerox.toolz.ui.screens.diagnostics.FastReportCrashPopup(
+                            crash = crash,
+                            busy = fastReportBusy,
+                            errorText = fastReportError,
+                            onFastReport = {
+                                if (!fastReportBusy) {
+                                    fastReportBusy = true
+                                    fastReportError = null
+                                    fastReportScope.launch {
+                                        val result = kotlinx.coroutines.withContext(
+                                            kotlinx.coroutines.Dispatchers.IO
+                                        ) {
+                                            val latest = FastReportStore.readPendingCrash(crashContext)
+                                                ?: crash
+                                            FastReportExporter.exportAndShare(crashContext, latest)
+                                        }
+                                        fastReportBusy = false
+                                        if (result.shared) {
+                                            FastReportStore.clearPendingCrash(crashContext)
+                                            pendingCrash = null
+                                            fastReportError = null
+                                        } else {
+                                            fastReportError = crashContext.getString(
+                                                R.string.st_FastReport_failed
+                                            )
+                                        }
+                                    }
+                                }
+                            },
+                            onDismiss = {
+                                if (!fastReportBusy) {
+                                    FastReportStore.clearPendingCrash(crashContext)
+                                    pendingCrash = null
+                                    fastReportError = null
+                                }
+                            }
+                        )
+                    }
                 }
                 }
             }

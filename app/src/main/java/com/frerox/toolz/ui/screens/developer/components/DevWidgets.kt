@@ -26,7 +26,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.rememberSliderState
@@ -501,6 +503,40 @@ fun DevSlider(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+}
+
+/** Compact removable chip used by the Overview tab's active-sandbox list. */
+@Composable
+fun ActiveToolChip(
+    title: String,
+    onRemove: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(50),
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)),
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 12.dp, end = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Medium,
+            )
+            IconButton(onClick = onRemove) {
+                Icon(
+                    imageVector = Icons.Rounded.Close,
+                    contentDescription = "Turn off $title sandbox",
+                    modifier = Modifier.size(16.dp),
+                )
+            }
         }
     }
 }

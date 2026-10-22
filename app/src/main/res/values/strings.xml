@@ -4618,4 +4618,28 @@
     <string name="st_FocusLock_BtnExit_CD">Exit blocked app to Home</string>
     <string name="st_FocusLock_ToastCantOpen">Couldn\'t open Toolz automatically — tap EXIT TO HOME, then open Toolz manually.</string>
 
+    <!-- Fast report -->
+    <string name="st_FastReport_crash_label">CRASH RECOVERED</string>
+    <string name="st_FastReport_crash_title">Toolz hit a snag</string>
+    <string name="st_FastReport_crash_body">The app closed unexpectedly last time. A short, private report can help find and fix what went wrong.</string>
+    <string name="st_FastReport_crash_time">Crashed at %1$s</string>
+    <string name="st_FastReport_privacy_note">The report includes recent warnings and errors, the crash details, and basic device information. It never includes your messages, files, photos, passwords, or account details.</string>
+    <string name="st_FastReport_discord_note">Join the Toolz Discord and drop the generated file in the bug-reports channel.</string>
+    <string name="st_FastReport_action">Fast report</string>
+    <string name="st_FastReport_preparing">Preparing…</string>
+    <string name="st_FastReport_failed">Could not create the report. Please try again.</string>
+    <string name="st_FastReport_dismiss">I don\'t mind</string>
+    <string name="st_FastReport_info_desc">What is a fast report?</string>
+    <string name="st_FastReport_close_desc">Close</string>
+    <string name="st_FastReport_join_discord">Join Discord</string>
+    <string name="st_FastReport_sent_note">Nothing is sent until you choose where to share it.</string>
+    <string name="st_FastReport_info_title">What is a fast report?</string>
+    <string name="st_FastReport_info_intro">It creates one small Markdown (.md) file that explains what went wrong. You can send it to the Toolz team so they can fix the issue faster.</string>
+    <string name="st_FastReport_info_point_file">The file lists recent warnings and errors, the crash details, and basic information like your app version, phone model, and Android version.</string>
+    <string name="st_FastReport_info_point_private">It never includes your messages, files, photos, passwords, or account details.</string>
+    <string name="st_FastReport_info_point_choice">Nothing is uploaded automatically. Toolz only opens your phone\'s share sheet, and you choose where the file goes.</string>
+    <string name="st_FastReport_info_point_discord">Join the Toolz Discord and drop the file in the bug-reports channel so it can be reviewed.</string>
+    <string name="st_FastReport_info_got_it">Got it</string>
+    <string name="st_FastReport_info_open_discord">Open Discord</string>
+
 </resources>

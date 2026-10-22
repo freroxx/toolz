@@ -5,6 +5,8 @@
 
 package com.frerox.toolz.di
 
+import com.frerox.toolz.data.whisper.KeystoreSelfReadSealer
+import com.frerox.toolz.data.whisper.WhisperSelfReadSealer
 import com.frerox.toolz.data.whisper.session.KeystoreSessionSecretProtector
 import com.frerox.toolz.data.whisper.session.WhisperSessionSecretProtector
 import dagger.Module
@@ -46,4 +48,12 @@ object AppModule {
     fun provideWhisperSessionSecretProtector(
         impl: KeystoreSessionSecretProtector,
     ): WhisperSessionSecretProtector = impl
+
+    // Sent-history self-read copies seal through the same seam pattern: production
+    // uses the hardware-backed Keystore AES key, JVM tests substitute a fake.
+    @Provides
+    @Singleton
+    fun provideWhisperSelfReadSealer(
+        impl: KeystoreSelfReadSealer,
+    ): WhisperSelfReadSealer = impl
 }

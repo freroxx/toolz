@@ -134,6 +134,14 @@ internal fun buildDeveloperCommands(
     )
     add(
         DevCommand(
+            title = "Share fast report",
+            subtitle = "Markdown file with warnings, errors and a full device snapshot",
+            icon = Icons.Rounded.Description,
+            run = viewModel::shareFastReport,
+        ),
+    )
+    add(
+        DevCommand(
             title = "Copy warnings and errors",
             subtitle = "Only warning, error and fatal log lines",
             icon = Icons.Rounded.ContentCopy,

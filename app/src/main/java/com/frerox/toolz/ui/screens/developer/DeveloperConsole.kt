@@ -215,6 +215,7 @@ internal fun DeveloperConsole(
                     onOpenNotificationSettings = viewModel::openNotificationSettings,
                     onCopyReport = viewModel::copyBugReport,
                     onShareReport = viewModel::shareBugReport,
+                    onShareFastReport = viewModel::shareFastReport,
                 )
 
                 DeveloperTab.SYSTEM -> DeveloperSystemTab(

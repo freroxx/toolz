@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -18,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.DeleteSweep
+import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.NotificationsOff
 import androidx.compose.material.icons.rounded.Share
@@ -30,6 +32,10 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.frerox.toolz.data.developer.CrashLabEvent
@@ -46,6 +52,8 @@ import com.frerox.toolz.ui.screens.developer.components.DevPill
 import com.frerox.toolz.ui.screens.developer.components.DevSectionTitle
 import com.frerox.toolz.ui.screens.developer.components.DevToggleRow
 import com.frerox.toolz.ui.screens.developer.components.LogcatViewer
+import com.frerox.toolz.ui.screens.diagnostics.FastReportInfoButton
+import com.frerox.toolz.ui.screens.diagnostics.FastReportInfoDialog
 
 @Composable
 fun DeveloperDiagnosticsTab(
@@ -76,7 +84,10 @@ fun DeveloperDiagnosticsTab(
     onOpenNotificationSettings: () -> Unit,
     onCopyReport: () -> Unit,
     onShareReport: () -> Unit,
+    onShareFastReport: () -> Unit,
 ) {
+    var fastReportInfoOpen by remember { mutableStateOf(false) }
+
     LazyColumn(
         modifier = Modifier.fillMaxWidth(),
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 24.dp),
@@ -98,7 +109,31 @@ fun DeveloperDiagnosticsTab(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Button(onClick = onCopyReport, modifier = Modifier.weight(1f)) {
+                    Button(
+                        onClick = onShareFastReport,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Description,
+                            contentDescription = null,
+                            modifier = Modifier
+                                .padding(end = 6.dp)
+                                .size(17.dp),
+                        )
+                        Text("Fast report", maxLines = 1)
+                    }
+                    FastReportInfoButton(
+                        onClick = { fastReportInfoOpen = true },
+                        size = 48.dp,
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedButton(onClick = onCopyReport, modifier = Modifier.weight(1f)) {
                         Icon(
                             imageVector = Icons.Rounded.ContentCopy,
                             contentDescription = null,
@@ -120,7 +155,9 @@ fun DeveloperDiagnosticsTab(
                     }
                 }
                 Text(
-                    text = "Includes active sandbox names and crash-lab history. Log lines are never added automatically.",
+                    text = "Fast report writes a Markdown (.md) file with recent warnings and errors plus a " +
+                        "full device snapshot, ready to drop in the Toolz Discord. Copy and Share below send " +
+                        "the short report only.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -258,5 +295,9 @@ fun DeveloperDiagnosticsTab(
                 )
             }
         }
+    }
+
+    if (fastReportInfoOpen) {
+        FastReportInfoDialog(onDismiss = { fastReportInfoOpen = false })
     }
 }

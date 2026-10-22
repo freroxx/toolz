@@ -185,6 +185,129 @@ class EventRepository @Inject constructor(
     suspend fun insertEvent(event: EventEntry) = eventDao.insertEvent(event)
     
     suspend fun insertEventsBulk(events: List<EventEntry>) = eventDao.insertEventsTx(events)
+
+    /** Result summary for deduplicated sync/import operations. */
+    data class DeduplicationResult(
+        val insertedCount: Int,
+        val updatedCount: Int,
+        val skippedCount: Int,
+    ) {
+        val totalProcessed: Int get() = insertedCount + updatedCount + skippedCount
+    }
+
+    /**
+     * Inserts incoming events with robust deduplication.
+     * Prevents duplication across multiple sync runs and within the incoming batch.
+     */
+    suspend fun insertEventsDeduplicated(incoming: List<EventEntry>): DeduplicationResult {
+        if (incoming.isEmpty()) return DeduplicationResult(0, 0, 0)
+
+        val existingEvents = eventDao.getAllEventsSync()
+
+        fun dedupeKey(title: String, ts: Long): String {
+            val normTitle = title.trim().lowercase()
+            val minuteBucket = ts / 60_000L
+            return "$normTitle@$minuteBucket"
+        }
+
+        val existingMap = mutableMapOf<String, EventEntry>()
+        for (e in existingEvents) {
+            existingMap[dedupeKey(e.title, e.timestamp)] = e
+        }
+
+        val toInsert = mutableListOf<EventEntry>()
+        val toUpdate = mutableListOf<EventEntry>()
+        var skipped = 0
+
+        // 1. Deduplicate within incoming batch first
+        val distinctIncoming = mutableListOf<EventEntry>()
+        val seenInBatch = mutableSetOf<String>()
+        for (event in incoming) {
+            val key = dedupeKey(event.title, event.timestamp)
+            if (seenInBatch.add(key)) {
+                distinctIncoming.add(event)
+            } else {
+                skipped++
+            }
+        }
+
+        // 2. Match against existing DB records
+        for (event in distinctIncoming) {
+            val key = dedupeKey(event.title, event.timestamp)
+            val matched = existingMap[key]
+            if (matched != null) {
+                // Check if attributes changed (description, color, recurrence, etc.)
+                val isIdentical = matched.title == event.title &&
+                        matched.description == event.description &&
+                        matched.eventType == event.eventType &&
+                        matched.subjectColor == event.subjectColor &&
+                        matched.durationMinutes == event.durationMinutes &&
+                        matched.recurringRule == event.recurringRule
+                if (!isIdentical) {
+                    toUpdate.add(event.copy(id = matched.id))
+                } else {
+                    skipped++
+                }
+            } else {
+                toInsert.add(event.copy(id = 0))
+                existingMap[key] = event
+            }
+        }
+
+        if (toInsert.isNotEmpty()) {
+            eventDao.insertEventsTx(toInsert)
+        }
+        for (update in toUpdate) {
+            eventDao.updateEvent(update)
+        }
+
+        return DeduplicationResult(
+            insertedCount = toInsert.size,
+            updatedCount = toUpdate.size,
+            skippedCount = skipped
+        )
+    }
+
+    /**
+     * Purges existing duplicate events from the database (e.g. created by earlier syncs).
+     * Keeps the earliest created event for each (title, minute-bucket) pair and deletes copies.
+     * Returns the count of deleted duplicate events.
+     */
+    suspend fun removeDuplicateEvents(): Int {
+        val allEvents = eventDao.getAllEventsSync()
+        if (allEvents.size <= 1) return 0
+
+        fun dedupeKey(e: EventEntry): String {
+            val normTitle = e.title.trim().lowercase()
+            val minuteBucket = e.timestamp / 60_000L
+            return "$normTitle@$minuteBucket"
+        }
+
+        val seen = mutableSetOf<String>()
+        val duplicateIds = mutableListOf<Int>()
+
+        for (e in allEvents) {
+            val key = dedupeKey(e)
+            if (!seen.add(key)) {
+                duplicateIds.add(e.id)
+            }
+        }
+
+        if (duplicateIds.isNotEmpty()) {
+            eventDao.deleteEvents(duplicateIds)
+        }
+        return duplicateIds.size
+    }
+
+    suspend fun deleteEvents(eventIds: List<Int>) {
+        if (eventIds.isNotEmpty()) {
+            eventDao.deleteEvents(eventIds)
+        }
+    }
+
+    suspend fun clearAllEvents() {
+        eventDao.deleteAll()
+    }
     
     suspend fun updateEvent(event: EventEntry) = eventDao.updateEvent(event)
 

@@ -79,6 +79,9 @@ class ToolzApplication : Application(), Configuration.Provider {
 
     override fun onCreate() {
         super.onCreate()
+        // Always-on crash capture: independent of Developer Mode, installed
+        // before any other startup work so even early failures are recorded.
+        com.frerox.toolz.data.developer.FastReportStore.installCrashHandler(this)
         // The new standard for SQLCipher 4.6.1+ is a direct native load
         System.loadLibrary("sqlcipher")
         // Reliable foreground tracking (replaces single-Activity focus flag).

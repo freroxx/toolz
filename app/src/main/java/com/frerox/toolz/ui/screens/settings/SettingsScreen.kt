@@ -370,8 +370,15 @@ fun SettingsScreen(
                 ) {
                     Spacer(Modifier.height(8.dp))
 
+                    // Search gates mirror each section's row keywords so a
+                    // query never leaves behind an empty section header.
                     // 1. Section: MY ACCOUNT
-                    StaggeredEntrance(index = 0) {
+                    if (
+                        matches(
+                            searchQuery,
+                            "profile", "name", "explorer", "identity",
+                        )
+                    ) StaggeredEntrance(index = 0) {
                         SettingsExpandableSection(
                             title = stringResource(R.string.st_SettingsScreen_c9d0),
                             icon = Icons.Rounded.AccountCircle,
@@ -406,7 +413,15 @@ fun SettingsScreen(
                     // 2. Visuals & theme now lives in App Skin below — one home for every visual.
 
                     // 2. Section: APP SKIN (all visuals live here now)
-                    StaggeredEntrance(index = 1) {
+                    if (
+                        matches(
+                            searchQuery,
+                            "skin", "app skin", "icon", "icons", "catalog", "appearance", "theme pack",
+                            "preset", "look", "visual", "visuals", "theme", "dark", "light", "mode", "dynamic",
+                            "color", "material", "wallpaper", "palette", "accent", "gradient", "background",
+                            "performance", "animations", "blur", "top bar", "description",
+                        )
+                    ) StaggeredEntrance(index = 1) {
                         SettingsExpandableSection(
                             title = stringResource(R.string.st_AppSkin_section_title),
                             icon = Icons.Rounded.Palette,
@@ -473,7 +488,15 @@ fun SettingsScreen(
                     }
 
                     // 3. Section: INTELLIGENCE & AI
-                    StaggeredEntrance(index = 2) {
+                    if (
+                        matches(
+                            searchQuery,
+                            "offline", "local", "internet", "network", "privacy", "auto", "automatic",
+                            "connection", "ai", "search", "conversational", "smart", "chat", "clipboard",
+                            "monitoring", "summarize", "pdf", "tools", "extract", "notepad", "notes", "style",
+                            "now playing", "lyrics", "meaning",
+                        )
+                    ) StaggeredEntrance(index = 2) {
                         SettingsExpandableSection(
                             title = stringResource(R.string.st_SettingsScreen_k3l5),
                             icon = Icons.Rounded.AutoAwesome,
@@ -563,7 +586,16 @@ fun SettingsScreen(
                     }
 
                     // 4. Section: INTERACTION & HUD — Home layout, pill, feedback & popups
-                    StaggeredEntrance(index = 3) {
+                    if (
+                        matches(
+                            searchQuery,
+                            "home", "layout", "view", "dashboard", "style", "grid", "list", "recent",
+                            "quick notes", "sections", "visibility", "pill", "smart", "overlay", "todo",
+                            "focus", "fill", "hud", "tools", "rows", "interaction", "stats", "battery",
+                            "storage", "info", "vibration", "haptic", "intensity", "feedback", "tuner",
+                            "offline", "online", "popup", "transition", "banner",
+                        )
+                    ) StaggeredEntrance(index = 3) {
                         SettingsExpandableSection(
                             title = stringResource(R.string.st_SettingsScreen_g5h7),
                             icon = Icons.Rounded.SmartButton,
@@ -738,7 +770,15 @@ fun SettingsScreen(
                     }
 
                     // 5. Section: MEDIA & AUDIO
-                    StaggeredEntrance(index = 4) {
+                    if (
+                        matches(
+                            searchQuery,
+                            "shake", "skip", "audio", "sensitivity", "gesture", "lyrics", "screen", "sleep",
+                            "awake", "visibility", "focus", "pause", "smart", "ducking", "allow", "duck",
+                            "volume", "lower", "karaoke", "mic", "sing", "ringtone", "sound", "custom",
+                            "timer", "pomodoro",
+                        )
+                    ) StaggeredEntrance(index = 4) {
                         SettingsExpandableSection(
                             title = stringResource(R.string.st_SettingsScreen_m7n9),
                             icon = Icons.Rounded.MusicNote,
@@ -879,7 +919,12 @@ fun SettingsScreen(
                     }
 
                     // 6. Section: HEALTH & ACTIVITY
-                    StaggeredEntrance(index = 5) {
+                    if (
+                        matches(
+                            searchQuery,
+                            "step", "goal", "health", "tracker", "walking",
+                        )
+                    ) StaggeredEntrance(index = 5) {
                         SettingsExpandableSection(
                             title = stringResource(R.string.st_SettingsScreen_w3x5),
                             icon = Icons.AutoMirrored.Rounded.DirectionsRun,
@@ -917,7 +962,15 @@ fun SettingsScreen(
                     }
 
                     // 7. Section: WIDGETS SETTINGS
-                    StaggeredEntrance(index = 6) {
+                    if (
+                        matches(
+                            searchQuery,
+                            "widget", "home screen", "music", "pomodoro", "enable", "disable", "app widgets",
+                            "screen time", "toolbar", "appearance", "transparency", "accent", "color",
+                            "custom", "art", "cover", "album", "queue", "up next", "list", "haptic",
+                            "vibration", "feedback", "touch", "shortcut", "slot", "quick action", "search bar",
+                        )
+                    ) StaggeredEntrance(index = 6) {
                         SettingsExpandableSection(
                             title = stringResource(R.string.st_Settings_Section_Widgets),
                             icon = Icons.Rounded.Widgets,
@@ -1047,7 +1100,22 @@ fun SettingsScreen(
                     }
 
                     // 8. Section: NOTIFICATIONS — Master, background & per-tool alerts
-                    StaggeredEntrance(index = 7) {
+                    if (
+                        matches(
+                            searchQuery,
+                            "notification", "master", "switch", "alerts", "all", "enable", "background",
+                            "ongoing", "persistent", "running", "purgeshot active", "caffeinate active",
+                            "toolz is running", "whisper", "chat", "message", "friend", "push", "vault",
+                            "history", "save", "retention", "days", "keep", "cleanup", "step", "goal", "alert",
+                            "counter", "activity", "timer", "task", "countdown", "alarm", "pomodoro", "focus",
+                            "session", "break", "voice", "recorder", "recording", "audio", "mic", "music",
+                            "playback", "media", "player", "conversion", "file", "progress", "converter",
+                            "reminder", "deadline", "todo", "event", "calendar", "update", "app", "version",
+                            "upgrade", "backup", "restore", "export", "flashlight", "light", "torch",
+                            "caffeinate", "awake", "screen", "coffee", "purgeshot", "screenshot", "delete",
+                            "scheduled", "auto",
+                        )
+                    ) StaggeredEntrance(index = 7) {
                         SettingsExpandableSection(
                             title = stringResource(R.string.st_SettingsScreen_e1f3),
                             icon = Icons.Rounded.Notifications,
@@ -1258,7 +1326,14 @@ fun SettingsScreen(
                     }
 
                     // 8. Section: SYSTEM & DATA
-                    StaggeredEntrance(index = 7) {
+                    if (
+                        matches(
+                            searchQuery,
+                            "backup", "restore", "data", "save", "export", "import", "shortcut", "pin",
+                            "home screen", "tool shortcut", "launcher", "converter", "output", "path",
+                            "folder", "storage", "device", "info", "cache", "reset", "specs", "market",
+                        )
+                    ) StaggeredEntrance(index = 7) {
                         SettingsExpandableSection(
                             title = stringResource(R.string.st_Settings_Section_System),
                             icon = Icons.Rounded.SettingsInputComponent,
@@ -1337,7 +1412,12 @@ fun SettingsScreen(
                     }
 
                     // 9. Section: LANGUAGES
-                    StaggeredEntrance(index = 8) {
+                    if (
+                        matches(
+                            searchQuery,
+                            "English", "en", "Português (Brasil)", "pt-BR", "Español", "es", "Français", "fr",
+                        )
+                    ) StaggeredEntrance(index = 8) {
                         SettingsExpandableSection(
                             title = "LANGUAGES",
                             icon = Icons.Rounded.Language,
@@ -1399,7 +1479,13 @@ fun SettingsScreen(
                     }
 
                     // 10. Section: UPDATE
-                    if (!offlineModeEnabled) {
+                    if (
+                        !offlineModeEnabled &&
+                        matches(
+                            searchQuery,
+                            "update", "auto", "patch", "background", "check", "version", "new",
+                        )
+                    ) {
                         StaggeredEntrance(index = 9) {
                             SettingsExpandableSection(
                                 title = stringResource(R.string.st_Update_Title),
@@ -1431,7 +1517,13 @@ fun SettingsScreen(
                     }
 
                     // 10b. Section: TOOLZ NEWS
-                    StaggeredEntrance(index = 10) {
+                    if (
+                        matches(
+                            searchQuery,
+                            "news", "announcement", "changelog", "notification", "critical", "info", "check",
+                            "sync", "refresh",
+                        )
+                    ) StaggeredEntrance(index = 10) {
                         SettingsExpandableSection(
                             title = stringResource(R.string.st_News_settings_section),
                             icon = Icons.Rounded.Newspaper,
@@ -1504,7 +1596,12 @@ fun SettingsScreen(
                     }
 
                     // 11. Section: DEVELOPER MODE (visible toggle + warning popup + own screen)
-                    StaggeredEntrance(index = 11) {
+                    if (
+                        matches(
+                            searchQuery,
+                            "developer", "dev", "debug", "fixture", "test", "sandbox", "console", "logcat",
+                        )
+                    ) StaggeredEntrance(index = 11) {
                         SettingsExpandableSection(
                             title = "DEVELOPER",
                             icon = Icons.Rounded.BugReport,
@@ -1557,7 +1654,7 @@ fun SettingsScreen(
                     }
 
                     // 12. Section: ABOUT
-                    StaggeredEntrance(index = 12) {
+                    if (matches(searchQuery)) StaggeredEntrance(index = 12) {
                         AboutSection(
                             onCheckUpdate = onNavigateToUpdate,
                             onNewsClick = onNavigateToNews,

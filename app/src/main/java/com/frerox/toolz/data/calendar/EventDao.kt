@@ -40,6 +40,9 @@ interface EventDao {
     @Query("DELETE FROM events WHERE id = :eventId")
     suspend fun deleteEvent(eventId: Int)
 
+    @Query("DELETE FROM events WHERE id IN (:eventIds)")
+    suspend fun deleteEvents(eventIds: List<Int>)
+
     // CAL-P3: non-destructive clear used by backup REPLACE-after-merge (additive).
     @Query("DELETE FROM events")
     suspend fun deleteAll()

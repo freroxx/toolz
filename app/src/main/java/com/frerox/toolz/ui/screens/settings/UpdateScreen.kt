@@ -39,6 +39,7 @@ import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -52,7 +53,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -62,13 +62,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.HelpOutline
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.ErrorOutline
-import androidx.compose.material.icons.rounded.HelpOutline
 import androidx.compose.material.icons.rounded.InstallMobile
-import androidx.compose.material.icons.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.SystemUpdate
@@ -95,15 +95,20 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
@@ -113,6 +118,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -210,8 +216,9 @@ fun UpdateScreenContent(
     getDeviceAbi: () -> String,
     onOpenInstallSettings: (Context) -> Unit,
 ) {
-    var showAbiSheet by remember { mutableStateOf(false) }
-    var showHelpSheet by remember { mutableStateOf(false) }
+    var showAbiSheet by rememberSaveable { mutableStateOf(false) }
+    var showHelpSheet by rememberSaveable { mutableStateOf(false) }
+    val scrollState = rememberScrollState()
 
     Scaffold(
         modifier = Modifier.toolzBackground(),
@@ -235,7 +242,7 @@ fun UpdateScreenContent(
                 actions = {
                     IconButton(onClick = { showHelpSheet = true }) {
                         Icon(
-                            Icons.Rounded.HelpOutline,
+                            Icons.AutoMirrored.Rounded.HelpOutline,
                             contentDescription = stringResource(R.string.st_Update_About),
                         )
                     }
@@ -250,10 +257,10 @@ fun UpdateScreenContent(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .verticalScroll(rememberScrollState())
+                .scrollEdgeFade(scrollState)
+                .verticalScroll(scrollState)
                 .padding(horizontal = 20.dp)
-                .padding(top = 8.dp, bottom = 32.dp)
-                .navigationBarsPadding(),
+                .padding(top = 8.dp, bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             VersionHero(
@@ -598,7 +605,8 @@ private fun AvailableCard(
     onDownload: () -> Unit,
     onSkip: () -> Unit,
 ) {
-    var expanded by remember(update.version) { mutableStateOf(false) }
+    var expanded by rememberSaveable(update.version) { mutableStateOf(false) }
+    val hasLongNotes = update.changelog.length > 420
     StateCard {
         Text(
             text = stringResource(R.string.st_Update_VersionTitle, update.version),
@@ -660,8 +668,28 @@ private fun AvailableCard(
                             baseFontSize = 14.sp,
                             textColor = MaterialTheme.colorScheme.onSurface,
                         )
+                        androidx.compose.animation.AnimatedVisibility(
+                            visible = hasLongNotes && !expanded,
+                            enter = fadeIn(tween(180)),
+                            exit = fadeOut(tween(120)),
+                            modifier = Modifier.align(Alignment.BottomCenter),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(56.dp)
+                                    .background(
+                                        Brush.verticalGradient(
+                                            colors = listOf(
+                                                Color.Transparent,
+                                                MaterialTheme.colorScheme.surfaceContainerHigh,
+                                            ),
+                                        )
+                                    )
+                            )
+                        }
                     }
-                    if (update.changelog.length > 420) {
+                    if (hasLongNotes) {
                         TextButton(
                             onClick = { expanded = !expanded },
                             modifier = Modifier.align(Alignment.Start),
@@ -1053,7 +1081,7 @@ private fun UpdateSettingsCard(
                     )
                 }
                 Icon(
-                    Icons.Rounded.KeyboardArrowRight,
+                    Icons.AutoMirrored.Rounded.KeyboardArrowRight,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1155,7 +1183,7 @@ private fun DiscordCard() {
                         painter = painterResource(R.drawable.ic_discord),
                         contentDescription = null,
                         tint = Color.White,
-                        modifier = Modifier.size(24.dp),
+                        modifier = Modifier.size(26.dp),
                     )
                 }
             }
@@ -1188,7 +1216,7 @@ private fun DiscordCard() {
             Icon(
                 painter = painterResource(R.drawable.ic_discord),
                 contentDescription = null,
-                modifier = Modifier.size(18.dp),
+                modifier = Modifier.size(20.dp),
             )
             Spacer(Modifier.width(10.dp))
             Text(
@@ -1404,6 +1432,54 @@ private fun HelpSection(
 }
 
 // ── Shared building blocks ──────────────────────────────────────────────────
+
+/**
+ * Softens the top and bottom of a scroll viewport only while there is content
+ * hidden in that direction. The mask fades to the live app background instead
+ * of painting a solid scrim over it.
+ */
+@Composable
+private fun Modifier.scrollEdgeFade(
+    scrollState: ScrollState,
+    topFade: Dp = 20.dp,
+    bottomFade: Dp = 28.dp,
+): Modifier {
+    val topAlpha by animateFloatAsState(
+        targetValue = if (scrollState.canScrollBackward) 1f else 0f,
+        animationSpec = tween(220, easing = FastOutSlowInEasing),
+        label = "scroll_fade_top",
+    )
+    val bottomAlpha by animateFloatAsState(
+        targetValue = if (scrollState.canScrollForward) 1f else 0f,
+        animationSpec = tween(220, easing = FastOutSlowInEasing),
+        label = "scroll_fade_bottom",
+    )
+    val density = LocalDensity.current
+    val topPx = with(density) { topFade.toPx() }
+    val bottomPx = with(density) { bottomFade.toPx() }
+
+    return this
+        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+        .drawWithContent {
+            drawContent()
+            if ((topAlpha <= 0f && bottomAlpha <= 0f) || size.height <= 0f) {
+                return@drawWithContent
+            }
+            val topStop = (topPx / size.height).coerceIn(0f, 0.5f)
+            val bottomStop = (1f - bottomPx / size.height).coerceIn(0.5f, 1f)
+            drawRect(
+                brush = Brush.verticalGradient(
+                    colorStops = arrayOf(
+                        0f to Color.White.copy(alpha = 1f - topAlpha),
+                        topStop to Color.White,
+                        bottomStop to Color.White,
+                        1f to Color.White.copy(alpha = 1f - bottomAlpha),
+                    ),
+                ),
+                blendMode = BlendMode.DstIn,
+            )
+        }
+}
 
 @Composable
 private fun StateCard(content: @Composable ColumnScope.() -> Unit) {

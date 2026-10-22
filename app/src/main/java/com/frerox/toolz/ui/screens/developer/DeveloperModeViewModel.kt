@@ -23,18 +23,16 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
-import android.os.Debug
 import android.os.Handler
 import android.os.Looper
 import android.os.Process
-import android.os.SystemClock
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.frerox.toolz.BuildConfig
 import com.frerox.toolz.data.AppDatabase
 import com.frerox.toolz.data.developer.CrashLabEvent
 import com.frerox.toolz.data.developer.DevAppInfo
+import com.frerox.toolz.data.developer.DevAppInfoCollector
 import com.frerox.toolz.data.developer.DevLogHub
 import com.frerox.toolz.data.developer.DevMessage
 import com.frerox.toolz.data.developer.DevPrefsState
@@ -45,6 +43,8 @@ import com.frerox.toolz.data.developer.DevTableCount
 import com.frerox.toolz.data.developer.DevTableState
 import com.frerox.toolz.data.developer.DevToolId
 import com.frerox.toolz.data.developer.DevUiOverrider
+import com.frerox.toolz.data.developer.FastReportExporter
+import com.frerox.toolz.data.developer.FastReportStore
 import com.frerox.toolz.data.developer.LogcatLevel
 import com.frerox.toolz.data.developer.LogcatScope
 import com.frerox.toolz.data.developer.LogcatSeverity
@@ -174,39 +174,7 @@ class DeveloperModeViewModel @Inject constructor(
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), collectAppInfo())
 
-    private fun collectAppInfo(): DevAppInfo {
-        val runtime = Runtime.getRuntime()
-        val used = (runtime.totalMemory() - runtime.freeMemory()).coerceAtLeast(0L)
-        val max = runtime.maxMemory().coerceAtLeast(1L)
-        val manufacturer = Build.MANUFACTURER
-            .replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.US) else it.toString() }
-            .trim()
-        val model = Build.MODEL.trim()
-        val device = when {
-            manufacturer.isBlank() -> model
-            model.isBlank() -> manufacturer
-            model.startsWith(manufacturer, ignoreCase = true) -> model
-            else -> "$manufacturer $model"
-        }
-        return DevAppInfo(
-            versionName = BuildConfig.VERSION_NAME,
-            versionCode = BuildConfig.VERSION_CODE.toLong(),
-            packageName = context.packageName,
-            pid = Process.myPid(),
-            processUptimeMs = (SystemClock.elapsedRealtime() - Process.getStartElapsedRealtime()).coerceAtLeast(0L),
-            heapUsedBytes = used,
-            heapMaxBytes = max,
-            nativeHeapBytes = Debug.getNativeHeapAllocatedSize().coerceAtLeast(0L),
-            threads = Thread.activeCount(),
-            heapUsedFraction = (used.toFloat() / max.toFloat()).coerceIn(0f, 1f),
-            deviceLabel = device.ifBlank { "Unknown device" },
-            androidLabel = "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",
-            abi = Build.SUPPORTED_ABIS.firstOrNull().orEmpty(),
-            buildType = BuildConfig.BUILD_TYPE,
-            densityDpi = context.resources.displayMetrics.densityDpi,
-            debuggable = BuildConfig.DEBUG,
-        )
-    }
+    private fun collectAppInfo(): DevAppInfo = DevAppInfoCollector.collect(context)
 
     // ---- Logcat ------------------------------------------------------------
 
@@ -225,6 +193,20 @@ class DeveloperModeViewModel @Inject constructor(
     private val _shizukuState = MutableStateFlow(DevShizukuState())
     val shizukuState: StateFlow<DevShizukuState> = _shizukuState.asStateFlow()
 
+    // ---- Notification test matrix -----------------------------------------
+    //
+    // Declared before the init blocks on purpose: every initializer in this
+    // class runs in source order, so a state holder used from `init` must be
+    // declared above it. `refreshNotificationsEnabled()` must never be called
+    // from `init` — it is triggered by the console when Diagnostics opens and
+    // on every ON_RESUME.
+
+    private val _notificationsEnabled = MutableStateFlow(areNotificationsEnabledNow())
+    val notificationsEnabled: StateFlow<Boolean> = _notificationsEnabled.asStateFlow()
+
+    private val _postedNotificationIds = MutableStateFlow<Set<Int>>(emptySet())
+    val postedNotificationIds: StateFlow<Set<Int>> = _postedNotificationIds.asStateFlow()
+
     @Volatile private var logClearCutoffMs: Long? = null
     @Volatile private var logGeneration = 0L
     private var logcatVisible = false
@@ -234,7 +216,6 @@ class DeveloperModeViewModel @Inject constructor(
 
     init {
         checkShizukuStatus()
-        refreshNotificationsEnabled()
         refreshLogcat()
     }
 
@@ -531,6 +512,36 @@ class DeveloperModeViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Full fast report: requested crash snapshot (when one is waiting), the
+     * live warning/error stream and a fresh device snapshot in one .md file.
+     */
+    fun shareFastReport() = viewModelScope.launch {
+        postMessage("Preparing fast report…")
+        val result = devCatching {
+            val crash = withContext(Dispatchers.IO) { FastReportStore.readPendingCrash(context) }
+            val logs = filterLogcatLines(_logLines.value, severity = LogcatSeverity.WARNINGS)
+            withContext(Dispatchers.IO) {
+                FastReportExporter.exportAndShare(
+                    context = context,
+                    crash = crash,
+                    activeSandboxes = currentActiveTools(),
+                    extraWarnErrorLogs = logs,
+                )
+            }
+        }
+        result.onSuccess { export ->
+            if (export.shared) {
+                postMessage("Fast report ready · choose where to share it")
+            } else {
+                postMessage("Could not open the share sheet")
+            }
+        }.onFailure { error ->
+            DevLogHub.w(DevLogHub.TAG, "Fast report export failed", error)
+            postMessage("Could not create the fast report")
+        }
+    }
+
     fun copyText(label: String, text: String) {
         try {
             val manager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -543,12 +554,6 @@ class DeveloperModeViewModel @Inject constructor(
     }
 
     // ---- Notification test matrix -----------------------------------------
-
-    private val _notificationsEnabled = MutableStateFlow(areNotificationsEnabledNow())
-    val notificationsEnabled: StateFlow<Boolean> = _notificationsEnabled.asStateFlow()
-
-    private val _postedNotificationIds = MutableStateFlow<Set<Int>>(emptySet())
-    val postedNotificationIds: StateFlow<Set<Int>> = _postedNotificationIds.asStateFlow()
 
     fun refreshNotificationsEnabled() {
         _notificationsEnabled.value = areNotificationsEnabledNow()
@@ -571,12 +576,17 @@ class DeveloperModeViewModel @Inject constructor(
         _postedNotificationIds.value = active
     }
 
-    private fun areNotificationsEnabledNow(): Boolean {
+    private fun areNotificationsEnabledNow(): Boolean = devCatching {
         val permissionGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
             PackageManager.PERMISSION_GRANTED
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-        return permissionGranted && (manager?.areNotificationsEnabled() ?: true)
+        permissionGranted && (manager?.areNotificationsEnabled() ?: true)
+    }.getOrElse { error ->
+        // Some OEM builds throw from the notification service; never let a
+        // diagnostic readout take down the console.
+        DevLogHub.w(DevLogHub.TAG, "Could not read the notification state", error)
+        true
     }
 
     fun sendTestNotification(test: DevNotificationTest) {

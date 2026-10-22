@@ -96,6 +96,10 @@ class WhisperRepository @Inject constructor(
     internal val outgoingQueue: WhisperOutgoingQueue,
     internal val deliveryScheduler: WhisperDeliveryScheduler,
     private val messageDao: WhisperMessageDao,
+    // Sent-history self-read: device-sealed copies of the user's OWN outgoing
+    // plaintext. Without it, sent v3 ratchet frames render locked forever after a
+    // process restart (see WhisperSelfReadStore's class doc).
+    private val selfReadStore: WhisperSelfReadStore,
     // Daily Ups descriptors are opaque at rest but still account-scoped state: a
     // sign-out or account deletion must never leave them available to the next user.
     // Phase-3 Daily Ups parity slice: widened private→internal (same precedent as
@@ -976,6 +980,16 @@ class WhisperRepository @Inject constructor(
             val wire = frame.x3dh
             if (wire != null) {
                 val existing = sessionStore.load(partnerId)
+                // SAME-INSTALL RULE (two accounts, one device): both accounts share this
+                // device's crypto identity, so the `peer identity changed` reinstall
+                // signal can never fire between them and the deterministic session-id
+                // tie-break would randomly reject a legitimate fresh session. The
+                // losing side then keeps sending pure frames on a session the other
+                // side never adopted — a permanent, silent locked conversation (the
+                // October 2026 account-switch report). Accounts on one install are
+                // sequential (only one is signed in at a time), so the racing-initiator
+                // ping-pong the tie-break protects against cannot happen here: accept.
+                val sameInstallIdentity = crypto.isCurrentPublicKey(wire.ikPubB64)
                 when {
                     // Idempotent redelivery of a handshake we already bootstrapped:
                     // re-running X3DH here would reset the advanced ratchet chains.
@@ -983,7 +997,8 @@ class WhisperRepository @Inject constructor(
                         ProtocolDiagnostics.increment("v3.handshakeReplay")
                     // Racing initiator lost the deterministic tie-break (or a stale
                     // post-reinstall header): one locked frame, then convergence.
-                    existing != null && !existing.canAcceptHandshake(wire.ikPubB64, frame.sessionId) -> {
+                    existing != null && !sameInstallIdentity &&
+                        !existing.canAcceptHandshake(wire.ikPubB64, frame.sessionId) -> {
                         ProtocolDiagnostics.increment("v3.handshakeRejected")
                         tryInsurance()?.let { return@withLock maybeHealFromPlaintext(it, msgSenderId, partnerId, System.currentTimeMillis()) }
                         return@withLock null
@@ -1095,8 +1110,20 @@ class WhisperRepository @Inject constructor(
     }
 
 
-    /** Decrypts a cached ciphertext message for display, falling back to a neutral marker. */
-    private suspend fun WhisperMessage.decryptContent(peerKey: String?, extraFresh: String? = null): WhisperMessage {
+    /**
+     * Decrypts a cached ciphertext message for display, falling back to a neutral
+     * marker.
+     *
+     * [selfRead] is the bulk preload of device-sealed self copies for this
+     * conversation (own rows only). The read paths preload it once per emission so
+     * this per-row function never issues one query per message; null means "no
+     * preload" and enables a single targeted lookup instead.
+     */
+    private suspend fun WhisperMessage.decryptContent(
+        peerKey: String?,
+        extraFresh: String? = null,
+        selfRead: Map<String, String>? = null,
+    ): WhisperMessage {
         // FIX-1 (field bug "v3 never attempted between existing pairs"): this CACHED
         // HISTORY path no longer records protocol floors. Rendering months-old v5
         // envelopes used to pin the partner at floor=2 for the whole process, which
@@ -1106,6 +1133,32 @@ class WhisperRepository @Inject constructor(
         if (isDeletedForEveryone) return this
         if (contentIv == null && !WhisperEnvelope.isEnvelope(content)) return this
         val partnerId = if (senderId == myId) receiverId else senderId
+        // SELF-READ: the sender's ratchet cannot re-open frames it sealed, and while
+        // Room stores ciphertext only, an own row would otherwise render locked after
+        // every process restart. The in-process memo is the hot path; the sealed
+        // self-read row is the durable one (survives restarts and account switches).
+        // This applies to envelope rows too: an identity rotation would otherwise
+        // orphan the user's own history. Own rows with no copy (sent by another
+        // device, or before this build) still fall through to the normal path.
+        if (senderId == myId) {
+            val memoHit = synchronized(sentV3PlaintextMemo) { sentV3PlaintextMemo[id] }
+            val ownPlaintext = memoHit
+                ?: selfRead?.get(id)
+                ?: if (selfRead == null) {
+                    runCatchingCE { selfReadStore.recall(myId, id) }.getOrNull()
+                } else {
+                    // Non-null map == the caller already bulk-queried every own row.
+                    null
+                }
+            if (ownPlaintext != null) {
+                if (memoHit == null) {
+                    synchronized(sentV3PlaintextMemo) { sentV3PlaintextMemo[id] = ownPlaintext }
+                }
+                ProtocolDiagnostics.increment("v3.selfMemoHit")
+                return copy(content = ownPlaintext)
+            }
+            ProtocolDiagnostics.increment("v3.selfMemoMiss")
+        }
         val decrypted = runCatchingCE {
             decryptUnified(
                 rawContent = content,
@@ -1132,6 +1185,23 @@ class WhisperRepository @Inject constructor(
      */
     private val decryptMemo = object : LinkedHashMap<String, String>(256, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>): Boolean = size > 512
+    }
+
+    /**
+     * In-process plaintext cache for sent v3 (Double Ratchet) messages.
+     *
+     * The Double Ratchet protocol is one-directional: the sender's ratchet state can
+     * only encrypt; it cannot re-open frames it produced. Room stores ciphertext only
+     * (never plaintext on disk). Without this memo, sent v3 rows show "locked" after
+     * any Room re-emission (including the initial one after app start if the row was
+     * seeded from a realtime push before the memo was populated).
+     *
+     * Keyed by stable server message ID (UUID). Bounded to 1 000 entries; MRU eviction
+     * keeps the most recently sent messages hot. Cleared on sign-out alongside every
+     * other in-memory key material.
+     */
+    internal val sentV3PlaintextMemo = object : LinkedHashMap<String, String>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>): Boolean = size > 1_000
     }
 
     private fun decryptMemoized(
@@ -1366,6 +1436,30 @@ class WhisperRepository @Inject constructor(
     private fun conversationKey(userA: String, userB: String): String =
         if (userA < userB) "${userA}_${userB}" else "${userB}_${userA}"
 
+    /**
+     * Bulk preload of the sealed self-read copies for a conversation's own rows.
+     * Ids already present in the in-process memo are skipped, so a Room re-emission
+     * only queries for rows that genuinely have no copy (e.g. history sent from
+     * another device) instead of re-unwrapping the whole thread on every insert.
+     */
+    private suspend fun selfReadCopies(
+        ownerId: String,
+        messageIds: List<String>,
+    ): Map<String, String> {
+        if (ownerId.isBlank() || messageIds.isEmpty()) return emptyMap()
+        val missing = messageIds.filter { id ->
+            synchronized(sentV3PlaintextMemo) { sentV3PlaintextMemo[id] } == null
+        }
+        if (missing.isEmpty()) return emptyMap()
+        return runCatchingCE { selfReadStore.recallAll(ownerId, missing) }.getOrDefault(emptyMap())
+    }
+
+    /** Drops the memo + sealed self copy for a message the user deleted. */
+    private suspend fun forgetSelfRead(messageId: String) {
+        synchronized(sentV3PlaintextMemo) { sentV3PlaintextMemo.remove(messageId) }
+        runCatchingCE { selfReadStore.forget(messageId) }
+    }
+
     fun getMessagesFlow(otherUserId: String): Flow<List<WhisperMessage>> {
         val currentId = myId
         if (currentId.isBlank()) return flowOf(emptyList())
@@ -1380,12 +1474,22 @@ class WhisperRepository @Inject constructor(
         ) { entities, inMemoryKey, blocked ->
             withContext(Dispatchers.Default) {
                 val peerKey = keyTrustStore.knownKey(otherUserId) ?: inMemoryKey
+                // One bulk query: own rows resolve from their sealed self copy, which is
+                // what keeps sent (especially v3) history readable across restarts.
+                val selfRead = selfReadCopies(
+                    currentId,
+                    entities.filter { it.senderId == currentId }.map { it.id },
+                )
                 entities
                     // Never resurrect delete-for-me tombstones from the Room cache.
                     .filterNot { deletedStore.isMessageDeleted(it.id) }
                     // Hidden/blocked partners keep only the user's own outgoing rows.
                     .filter { it.senderId == currentId || otherUserId !in blocked }
-                    .map { it.toModel().decryptContent(peerKey) }
+                    // Pass inMemoryKey as extraFresh so that, in the window between app
+                    // start and the first getMessages() sync (which calls adoptFreshKeyIfFresh),
+                    // envelope rows can still decrypt against a freshly fetched server key
+                    // that hasn't been committed to the trust store yet.
+                    .map { it.toModel().decryptContent(peerKey, extraFresh = inMemoryKey, selfRead = selfRead) }
             }
         }.flowOn(Dispatchers.Default)
     }
@@ -1433,8 +1537,15 @@ class WhisperRepository @Inject constructor(
         // Decrypt with the trusted key only (never a changed fresh server key), falling
         // back to a neutral marker instead of leaking raw ciphertext.
         // Entrance lag fix: batch decrypt off Main (P-256 ECDH per row is heavy).
+        // Own rows resolve from their device-sealed self copy first: the sender's own
+        // ratchet can never re-open the frame it sealed, so without this every sent v3
+        // row would come back from the server as locked.
+        val ownIds = visibleRaw.filter { it.senderId == currentId }.map { it.id }
+        val selfRead = selfReadCopies(currentId, ownIds)
         val decryptedMessages = withContext(Dispatchers.Default) {
-            visibleRaw.map { msg -> msg.decryptContent(peerKeyFor(otherUserId), partnerProfile?.publicKey) }
+            visibleRaw.map { msg ->
+                msg.decryptContent(peerKeyFor(otherUserId), partnerProfile?.publicKey, selfRead = selfRead)
+            }
         }
 
         // Fetch reactions for all messages
@@ -1633,6 +1744,12 @@ class WhisperRepository @Inject constructor(
                 replyToId = replyToId
             )
         }
+        // SELF-READ: persist BEFORE the network insert. The server echo (realtime) and the
+        // first Room emission can both arrive before the insert response, and either one
+        // would otherwise paint a one-frame "locked" placeholder (the reported flicker).
+        // The memo covers this process; the sealed row covers every later process.
+        synchronized(sentV3PlaintextMemo) { sentV3PlaintextMemo[clientId] = content }
+        selfReadStore.remember(currentId, clientId, content, insert.content)
         // V2-FIX (reviewwhisper.md) L-13: CE-safe runCatching around suspend retry loop.
         val insertedMsg = runCatchingCE {
             retryWithBackoff(times = 4, initialDelayMs = 500, maxDelayMs = 4_000) {
@@ -1666,6 +1783,8 @@ class WhisperRepository @Inject constructor(
             // Cache pending ciphertext (never plaintext) so Room never holds cleartext;
             // getMessagesFlow decrypts it on read via peerKeyFor.
             messageDao.insertMessage(pendingMsg.toEntity())
+            // Self-read material was already written above, so the queued row renders
+            // plaintext immediately and survives process death until the flush lands.
             // Return plaintext for immediate UI; only ciphertext is persisted.
             return@runCatching pendingMsg.copy(content = content, contentIv = null)
         }
@@ -1673,6 +1792,7 @@ class WhisperRepository @Inject constructor(
         val clearMsg = insertedMsg.copy(content = content)
         // Cache the successfully sent message as ciphertext only (never the plaintext).
         // getMessagesFlow decrypts it on read using the recipient's accepted public key.
+        // The self-read copy + memo were written before the insert (see above).
         messageDao.insertMessage(insertedMsg.toEntity())
 
         // Invalidate conversation cache so the chats list refreshes
@@ -2075,6 +2195,7 @@ class WhisperRepository @Inject constructor(
         if (messageId.startsWith("queued_") || outgoingQueue.entries().any { it.clientId == messageId }) {
             outgoingQueue.remove(messageId)
             messageDao.deleteMessage(messageId)
+            forgetSelfRead(messageId)
             invalidateConversationsCache()
             return@runCatching
         }
@@ -2129,6 +2250,7 @@ class WhisperRepository @Inject constructor(
         // 3. Erase from local cache only when the server accepted the tombstone.
         if (updated.isNotEmpty()) {
             messageDao.deleteMessage(messageId)
+            forgetSelfRead(messageId)
             invalidateConversationsCache()
             // 4. Only now delete remote attachment — if tombstone RLS rejects (0 rows),
             // the blob must remain so a retry can still succeed.
@@ -2149,6 +2271,7 @@ class WhisperRepository @Inject constructor(
         runCatchingCE { syncDeletedTombstonesRemote(listOf(messageId)) }
         // 2. Erase from local Room cache
         messageDao.deleteMessage(messageId)
+        forgetSelfRead(messageId)
         // 3. Invalidate conversation cache
         invalidateConversationsCache()
     }
@@ -2197,6 +2320,21 @@ class WhisperRepository @Inject constructor(
         }
         if (msg.isDeletedForEveryone) return msg.content
         if (msg.contentIv == null && !WhisperEnvelope.isEnvelope(msg.content)) return msg.content
+        // SELF-READ: the server echoes our own row back to this device. The sender's
+        // ratchet cannot re-open it, so attempting the normal path here painted the
+        // locked placeholder for a frame (and permanently in push/restore lanes)
+        // before the Room emission healed it. Resolve from the memo/self copy first.
+        if (msg.senderId == myId) {
+            val memoHit = synchronized(sentV3PlaintextMemo) { sentV3PlaintextMemo[msg.id] }
+            val own = memoHit
+                ?: runCatchingCE { selfReadStore.recall(myId, msg.id) }.getOrNull()
+            if (own != null) {
+                if (memoHit == null) {
+                    synchronized(sentV3PlaintextMemo) { sentV3PlaintextMemo[msg.id] = own }
+                }
+                return own
+            }
+        }
         // V3-FIX: date the row once — scopes the legacy fallback to pre-cutoff messages.
         val createdAtEpochMs = WhisperMessageEntity.parseSortEpoch(msg.createdAt)
         // V5.1: never give up on the first (possibly stale) pin — retry against a
@@ -2338,7 +2476,10 @@ class WhisperRepository @Inject constructor(
 
                         // Hard server-side row deletion: mirror it in the cache immediately.
                         if (action is PostgresAction.Delete) {
-                            launch { messageDao.deleteMessage(msg.id) }
+                            launch {
+                                messageDao.deleteMessage(msg.id)
+                                forgetSelfRead(msg.id)
+                            }
                             // V2-FIX (reviewwhisper.md) R-M4: log failed deliveries instead of dropping silently.
                             if (shouldEmitMessage(msg.id)) {
                                 if (trySend(WhisperChatEvent.DeleteEvent(msg.id)).isFailure) {
@@ -2359,7 +2500,10 @@ class WhisperRepository @Inject constructor(
                         // through a realtime Update, so skipped rows are simply not re-inserted.
                         launch {
                             when {
-                                msg.isDeletedForEveryone -> messageDao.deleteMessage(msg.id)
+                                msg.isDeletedForEveryone -> {
+                                    messageDao.deleteMessage(msg.id)
+                                    forgetSelfRead(msg.id)
+                                }
                                 deletedStore.isMessageDeleted(msg.id) -> Unit
                                 else -> messageDao.insertMessage(msg.toEntity())
                             }
@@ -2475,6 +2619,7 @@ class WhisperRepository @Inject constructor(
                         if (msg.isDeletedForEveryone) {
                             if (seenState.remove(msg.id) != null) {
                                 messageDao.deleteMessage(msg.id)
+                                forgetSelfRead(msg.id)
                                 trySend(WhisperChatEvent.DeleteEvent(msg.id))
                             }
                             continue
@@ -2734,6 +2879,7 @@ class WhisperRepository @Inject constructor(
             deletedStore.markMessagesDeletedSuspend(toDeleteIds)
             runCatchingCE { syncDeletedTombstonesRemote(toDeleteIds) }
             toDeleteIds.forEach { messageDao.deleteMessage(it) }
+            runCatchingCE { selfReadStore.forgetMany(toDeleteIds) }
         }
         invalidateConversationsCache()
         allToDelete
@@ -2889,7 +3035,7 @@ class WhisperRepository @Inject constructor(
                 val profile = profilesById[row.partnerId] ?: continue
                 val decryptedContent = if (WhisperTombstone.isTombstone(row.lastContent)) {
                     WhisperTombstone.DISPLAY_TEXT
-                } else if (row.lastContentIv != null && profile.publicKey != null) {
+                } else if (row.lastContentIv != null) {
                     // TOFU-consistent with getMessages: prefer the ACCEPTED trusted key so a
                     // changed (possibly malicious) server key can never silently decrypt the
                     // preview; fall back to the fresh key only on true first contact.
@@ -2898,12 +3044,22 @@ class WhisperRepository @Inject constructor(
                     // V3-FIX: lastCreatedAt scopes the legacy fallback to pre-cutoff rows.
                     // V6-R2: previewKey removed — decryptUnified resolves keys internally;
                     // the variable was dead and its TOFU comment misleading.
-                    val createdAtEpochMs = WhisperMessageEntity.parseSortEpoch(row.lastCreatedAt)
-                    decryptUnified(row.lastContent, row.lastContentIv, row.partnerId, row.partnerId, myId, createdAtEpochMs)
-                        ?: decryptUnified(row.lastContent, row.lastContentIv, row.partnerId, myId, row.partnerId, createdAtEpochMs)
-                        ?: WhisperTombstone.LOCKED_PLACEHOLDER
-                } else if (row.lastContentIv != null) {
-                    WhisperTombstone.LOCKED_PLACEHOLDER
+                    //
+                    // OWN-PREVIEW: the RPC row carries no message id, so an own sent v3
+                    // frame is resolved by ciphertext hash from the sealed self-read copy.
+                    // Without this the user's own latest message previewed as locked.
+                    val ownPreview = if (row.lastContentIv == IV_V3) {
+                        runCatchingCE { selfReadStore.recallByCiphertext(myId, row.lastContent) }.getOrNull()
+                    } else {
+                        null
+                    }
+                    ownPreview ?: if (profile.publicKey != null) {
+                        val createdAtEpochMs = WhisperMessageEntity.parseSortEpoch(row.lastCreatedAt)
+                        decryptUnified(row.lastContent, row.lastContentIv, row.partnerId, row.partnerId, myId, createdAtEpochMs)
+                            ?: decryptUnified(row.lastContent, row.lastContentIv, row.partnerId, myId, row.partnerId, createdAtEpochMs)
+                    } else {
+                        null
+                    } ?: WhisperTombstone.LOCKED_PLACEHOLDER
                 } else WhisperTombstone.LEGACY_ENCRYPTED
 
                 // V2-FIX (reviewwhisper.md) L-24: renamed — "fake" implied mock/test data.
@@ -2961,18 +3117,26 @@ class WhisperRepository @Inject constructor(
                 // TOFU-consistent preview decryption (see RPC path above).
                 val decryptedContent = if (lastMsg.isDeletedForEveryone) {
                     WhisperTombstone.DISPLAY_TEXT
-                } else if (lastMsg.contentIv != null && (peerKeyFor(partnerId) ?: profile.publicKey) != null) {
+                } else if (lastMsg.contentIv != null) {
                     // V2-FIX (reviewwhisper.md) L-22: route the fallback preview decryption
                     // through decryptMemoized like the RPC path — every hub rebuild used to
                     // pay a full ECDH derive per conversation for the same cached ciphertext.
                     // Actual direction first, then the reversed fallback for legacy rows.
                     // V3-FIX: createdAt scopes the legacy fallback to pre-cutoff rows.
-                    val previewEpochMs = WhisperMessageEntity.parseSortEpoch(lastMsg.createdAt)
-                    decryptUnified(lastMsg.content, lastMsg.contentIv, partnerId, lastMsg.senderId, lastMsg.receiverId, previewEpochMs)
-                        ?: decryptUnified(lastMsg.content, lastMsg.contentIv, partnerId, lastMsg.receiverId, lastMsg.senderId, previewEpochMs)
-                        ?: WhisperTombstone.LOCKED_PLACEHOLDER
-                } else if (lastMsg.contentIv != null) {
-                    WhisperTombstone.LOCKED_PLACEHOLDER
+                    // OWN-PREVIEW: own rows have a sealed self copy (the sender's ratchet
+                    // cannot re-open them); resolve it before the key paths.
+                    val ownPreview = if (lastMsg.senderId == myId) {
+                        runCatchingCE { selfReadStore.recall(myId, lastMsg.id) }.getOrNull()
+                    } else {
+                        null
+                    }
+                    ownPreview ?: if ((peerKeyFor(partnerId) ?: profile.publicKey) != null) {
+                        val previewEpochMs = WhisperMessageEntity.parseSortEpoch(lastMsg.createdAt)
+                        decryptUnified(lastMsg.content, lastMsg.contentIv, partnerId, lastMsg.senderId, lastMsg.receiverId, previewEpochMs)
+                            ?: decryptUnified(lastMsg.content, lastMsg.contentIv, partnerId, lastMsg.receiverId, lastMsg.senderId, previewEpochMs)
+                    } else {
+                        null
+                    } ?: WhisperTombstone.LOCKED_PLACEHOLDER
                 } else WhisperTombstone.LEGACY_ENCRYPTED
 
                 val unread = visibleMsgs.count { it.receiverId == myId && !it.isRead }
@@ -3455,6 +3619,12 @@ class WhisperRepository @Inject constructor(
         recentlyEmittedMessageIds.clear()
         receiveKeyNotified.clear()
         synchronized(decryptMemo) { decryptMemo.clear() }
+        // SELF-READ: drop this account's in-process sent plaintext and every live
+        // ratchet. Disk state is kept (own history + session files are per account and
+        // must still hydrate when this account signs back in) — only the memory that
+        // must never cross accounts is dropped.
+        synchronized(sentV3PlaintextMemo) { sentV3PlaintextMemo.clear() }
+        sessionStore.clearMemory()
         clearFriendNamesCache()
         avatarLoader.clear() // V6-R7: account switch must not serve old avatars
         // H-2: channels are torn down asynchronously on the app scope — sign-out must
@@ -3475,6 +3645,7 @@ class WhisperRepository @Inject constructor(
         imageDiskCache.clearAll()
         messageDao.clearAll()
         storyLocalDao.clearAll()
+        selfReadStore.clearAll()
         deletedStore.clearAll()
         // V6 (planwhisper.md §3.1): ratchet sessions die with the account — a later
         // sign-in must never inherit another identity's chains.

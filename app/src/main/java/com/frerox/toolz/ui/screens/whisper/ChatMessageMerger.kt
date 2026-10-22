@@ -7,6 +7,7 @@ package com.frerox.toolz.ui.screens.whisper
 
 import com.frerox.toolz.data.whisper.WhisperImageAttachment
 import com.frerox.toolz.data.whisper.WhisperMessage
+import com.frerox.toolz.data.whisper.WhisperTombstone
 import java.time.Instant
 
 /**
@@ -48,6 +49,14 @@ object ChatMessageMerger {
                     content = when {
                         prior.isDeletedForEveryone -> prior.content
                         newMsg.isDeletedForEveryone -> newMsg.content
+                        // Healing: if the previously-cached content is a locked marker but
+                        // the Room re-emission (freshly decrypted from DB) is real plaintext,
+                        // prefer the new plaintext. This lets a successful DB-path decrypt
+                        // heal a row that was initially locked by a realtime push that arrived
+                        // before the peer key was loaded. The converse is intentionally
+                        // blocked: a locked newMsg must NEVER overwrite known good prior content.
+                        WhisperTombstone.isLockedMarker(prior.content) &&
+                            !WhisperTombstone.isLockedMarker(newMsg.content) -> newMsg.content
                         else -> prior.content
                     },
                     reactions = if (

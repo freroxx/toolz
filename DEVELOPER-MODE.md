@@ -73,7 +73,9 @@ dismisses the sheet once.
   tail, severity filters, text search, copy-all, copy warnings/errors and a true
   clear. Clearing empties the local hub and applies a cutoff so stale system lines
   do not immediately reappear. Tailing runs only while Diagnostics is visible and
-  the screen is resumed; switching tabs or backgrounding the app stops it.
+  the screen is resumed; switching tabs or backgrounding the app stops it. The
+  logcat child process has a watchdog, and oversized records keep their parent
+  line so stack traces remain readable.
 - **Crash lab**: crash-on-next-launch plus NPE, IllegalState, ANR and OOM tests.
   History is written before the failure and survives the crash. If the history
   write fails, the test aborts with an error snackbar and the app keeps running.
@@ -118,7 +120,8 @@ dismisses the sheet once.
   is the fail-closed guard for network-backed sends such as Whisper.
 - Tool screens render fixture-shaped content without banners or watermarks. The
   dashboard star and long-press dialog identify an active sandbox and can turn it
-  off. `routeToDevTool()` is the only route-to-sandbox map.
+  off. The quick-fix dialog stays open and surfaces a write failure instead of
+  silently closing. `routeToDevTool()` is the only route-to-sandbox map.
 
 ## Version changes and reset
 
@@ -153,7 +156,7 @@ the master is off, `On · console unlocked` when no sandbox is active, or
 | Tabs | `DeveloperOverviewTab.kt`, `DeveloperSandboxesTab.kt`, `DeveloperDiagnosticsTab.kt`, `DeveloperSystemTab.kt` |
 | Pure catalogs | `DevModels.kt`, `DevFormatters.kt`, `DevLogcat.kt`, `DevPresets.kt`, `DevRoutes.kt`, `DevToolFilters.kt`, `SpoofToolSpecs.kt` |
 | State/actions | `DeveloperModeViewModel.kt` |
-| Components | `DevWidgets.kt`, `SpoofTileGrid.kt`, `SpoofConfiguratorSheet.kt`, `LogcatViewer.kt`, `RuntimeStatsCard.kt`, `CommandPalette.kt`, `CrashHistoryCard.kt`, `RouteLauncherSheet.kt`, `SpoofQuickFix.kt`, `DevRouteMap.kt`, `SpoofSandboxState.kt` |
+| Components | `DevWidgets.kt`, `SpoofSandboxRows.kt`, `SpoofConfiguratorSheet.kt`, `LogcatViewer.kt`, `RuntimeStatsCard.kt`, `CommandPalette.kt`, `CrashHistoryCard.kt`, `RouteLauncherSheet.kt`, `SpoofQuickFix.kt`, `DevRouteMap.kt`, `SpoofSandboxState.kt` |
 | Data layer | `data/developer/DevToolId.kt`, `SpoofParams.kt`, `SpoofGrid.kt`, `SpoofGate.kt`, `SpoofSandboxException.kt`, `DevLogHub.kt`, `DevUiOverrider.kt`, `ShakeDetector.kt`, plus the `Fake*Sandbox` fixtures |
 | Persistence | `data/settings/SettingsRepository.kt`, `SettingsViewModel.kt` |
 | Entry points | `MainActivity.kt`, `SettingsScreen.kt` |
@@ -181,10 +184,11 @@ Manual checks:
 5. Configurator: sliders commit on release, text survives echoes, pending text is
    flushed on dismissal, and the tool route opens once.
 6. Logcat: tail pause/resume, app/system scope, severity and text filters, clear,
-   copy, Shizuku fallback.
+   copy, Shizuku fallback, and a tail that stops on tab change/background.
 7. Crash lab: the history event exists before the crash; crash-on-next-launch
    fires once.
 8. Notifications: send all six, cancel only the band, restore permission state.
 9. System: cache clear reports freed bytes, Room/prefs refresh, report redaction,
    destructive confirmations.
-10. Dashboard star and long-press quick fix work for every mapped route.
+10. Dashboard star and long-press quick fix work for every mapped route,
+    including the failure path that keeps the dialog open with an error.

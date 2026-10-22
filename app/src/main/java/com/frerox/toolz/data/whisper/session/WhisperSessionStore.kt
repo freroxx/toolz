@@ -10,6 +10,8 @@ import android.util.Log
 import com.frerox.toolz.data.whisper.ProtocolDiagnostics
 import com.frerox.toolz.data.whisper.WhisperSessionFactory
 import dagger.hilt.android.qualifiers.ApplicationContext
+import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.auth.auth
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.serialization.Serializable
@@ -26,8 +28,11 @@ import javax.inject.Singleton
  * THE lesson this store encodes (see planwhisper.md §7): anything RAM-only becomes
  * a field bug later — process death between an X3DH handshake and the next message
  * used to mean a permanently unreadable conversation. Every session therefore lives
- * in `filesDir/whisper_sessions/<sha256(peerId)>.json` AND in a shared in-memory
- * map of LIVE [WhisperRatchet] instances; disk is only a cold-start restore path.
+ * in `filesDir/whisper_sessions/<sha256(accountId)>/<sha256(peerId)>.json` AND in a
+ * shared in-memory map of LIVE [WhisperRatchet] instances; disk is only a cold-start
+ * restore path. Pre-scoping single-level files are adopted per peer on first use
+ * (see [adoptLegacySession]) — never in one sweep, which used to hand every
+ * account's sessions to whichever account happened to run first.
  *
  * SECURITY POSTURE — never plaintext key material at rest:
  *  - The X3DH shared secret is stored Keystore-AES wrapped ([StoredSession.x3dhKeyWrapped]).
@@ -44,11 +49,21 @@ import javax.inject.Singleton
 class WhisperSessionStore @Inject constructor(
     @ApplicationContext private val appContext: Context,
     private val protector: WhisperSessionSecretProtector,
+    // ACCOUNT-SCOPING (field defect, October 2026): the crypto identity is
+    // install-wide, but a peer's client keys its ratchet state by our USER id.
+    // Two accounts on the same install that talk to the same peer therefore
+    // need two independent sessions here as well, or they share one ratchet and
+    // every message on one side becomes undecryptable. Scoping reads the
+    // signed-in id at call time; a loaded Live remembers the scope it came from
+    // so a late save can never land in the next account's file.
+    private val supabase: SupabaseClient,
 ) {
     companion object {
         private const val TAG = "WhisperSessionStore"
         private const val DIR_NAME = "whisper_sessions"
-        private const val FILE_EXT = ".json"
+
+        /** Sentinel scope while signed out — no chat can run, but keeps keys distinct. */
+        private const val ANON_SCOPE = "\u0000signed-out"
 
         /**
          * Residual-downgrade block threshold: after this many consecutive X3DH
@@ -61,8 +76,14 @@ class WhisperSessionStore @Inject constructor(
     }
 
     private val json = Json { ignoreUnknownKeys = true }
-    private val dir: File get() = File(appContext.filesDir, DIR_NAME)
+    private val baseDir: File get() = File(appContext.filesDir, DIR_NAME)
     private val failureLogged = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /** Signed-in account id; scopes all in-memory and on-disk session state. */
+    private fun accountScope(): String =
+        supabase.auth.currentUserOrNull()?.id?.takeIf { it.isNotBlank() } ?: ANON_SCOPE
+
+    private fun scoped(peerId: String): String = "${accountScope()}\u0000$peerId"
 
     /** Serializable, secret-free-framing record persisted to disk. */
     @Serializable
@@ -118,6 +139,12 @@ class WhisperSessionStore @Inject constructor(
         val ratchet: WhisperRatchet?,
         /** FIX-2 — see [StoredSession.sessionProven]. Volatile: set from decrypt lanes. */
         @Volatile var sessionProven: Boolean = false,
+        /**
+         * Account scope this session was loaded/created under. Pinned on first save
+         * so an operation that spans a sign-out still writes to the correct
+         * account's file instead of the next account's.
+         */
+        @Volatile var accountScope: String = "",
     ) {
         /** Set whenever ratchet/header state mutated; cleared by [WhisperSessionStore.save]. */
         @Volatile var dirty: Boolean = true
@@ -144,12 +171,13 @@ class WhisperSessionStore @Inject constructor(
     private val failedEstablishCounts = ConcurrentHashMap<String, Int>()
 
     /** Consecutive establish failures for [peerId] (0 when never failed). */
-    fun failedEstablishCount(peerId: String): Int = failedEstablishCounts[peerId] ?: 0
+    fun failedEstablishCount(peerId: String): Int = failedEstablishCounts[scoped(peerId)] ?: 0
 
     /** Records one establish failure; returns the new consecutive count. */
     fun recordEstablishFailure(peerId: String): Int {
-        val n = (failedEstablishCounts[peerId] ?: 0) + 1
-        failedEstablishCounts[peerId] = n
+        val key = scoped(peerId)
+        val n = (failedEstablishCounts[key] ?: 0) + 1
+        failedEstablishCounts[key] = n
         ProtocolDiagnostics.increment("v3.establishFailCount")
         if (n >= MAX_FAILED_ESTABLISH_BEFORE_DOWNGRADE_BLOCK) {
             android.util.Log.w(TAG, "Handshake repeatedly failed (${n}x) — insecure fallback will block, retry later")
@@ -160,7 +188,7 @@ class WhisperSessionStore @Inject constructor(
 
     /** Resets the failure count after a successful establish (or proven session). */
     fun recordEstablishSuccess(peerId: String) {
-        if (failedEstablishCounts.remove(peerId) != null) {
+        if (failedEstablishCounts.remove(scoped(peerId)) != null) {
             ProtocolDiagnostics.increment("v3.establishRecovered")
         }
     }
@@ -168,15 +196,18 @@ class WhisperSessionStore @Inject constructor(
     // One writer at a time per peer; encrypt/decrypt callers ALSO hold this mutex so
     // concurrent flow collectors can never advance one ratchet from two threads.
     private val locks = ConcurrentHashMap<String, Mutex>()
-    fun mutexFor(peerId: String): Mutex = locks.computeIfAbsent(peerId) { Mutex() }
+    fun mutexFor(peerId: String): Mutex = locks.computeIfAbsent(scoped(peerId)) { Mutex() }
 
     // ------------------------------------------------------------------ API
 
     /** Memory-first lookup with cold-start hydration from disk. Null = no usable session. */
     suspend fun load(peerId: String): Live? {
-        memory[peerId]?.let { return it }
+        val scope = accountScope()
+        val key = "$scope\u0000$peerId"
+        memory[key]?.let { return it }
         return kotlinx.coroutines.withContext(Dispatchers.IO) {
-            val file = fileFor(peerId)
+            adoptLegacySession(peerId, scope)
+            val file = fileFor(peerId, scope)
             if (!file.exists()) return@withContext null
             val stored = runCatching {
                 json.decodeFromString(StoredSession.serializer(), file.readText())
@@ -192,18 +223,26 @@ class WhisperSessionStore @Inject constructor(
                 file.delete()
                 return@withContext null
             }
-            lastWrittenJson[peerId] = file.readText()
-            memory[peerId] = live
+            live.accountScope = scope
+            lastWrittenJson[key] = file.readText()
+            memory[key] = live
             live
         }
     }
 
-    fun peek(peerId: String): Live? = memory[peerId]
+    fun peek(peerId: String): Live? = memory[scoped(peerId)]
 
     /** Persists [live] under [peerId] (memory + atomic disk write). Skips no-op writes. */
     suspend fun save(peerId: String, live: Live) {
-        memory[peerId] = live
+        // The scope is pinned on the Live instance so an operation that started
+        // under one account can never write into the next account's file.
+        val scope = live.accountScope.ifBlank {
+            accountScope().also { live.accountScope = it }
+        }
+        val key = "$scope\u0000$peerId"
+        memory[key] = live
         kotlinx.coroutines.withContext(Dispatchers.IO) {
+            adoptLegacySession(peerId, scope)
             val stored = serialize(live) ?: run {
                 Log.w(TAG, "refusing to persist session for ${peerId.take(6)}… — wrap failed")
                 return@withContext
@@ -211,15 +250,33 @@ class WhisperSessionStore @Inject constructor(
             val text = json.encodeToString(StoredSession.serializer(), stored)
             // Identical serialized state → skip the disk write entirely; chat scrolls
             // re-decrypt whole history and would otherwise rewrite the file per row.
-            val unchanged = lastWrittenJson.put(peerId, text) == text
-            if (!unchanged) writeFileAtomic(fileFor(peerId), text)
+            val unchanged = lastWrittenJson.put(key, text) == text
+            if (!unchanged) writeFileAtomic(fileFor(peerId, scope), text)
             live.dirty = false
         }
     }
 
-    suspend fun delete(peerId: String) {        memory.remove(peerId)
-        lastWrittenJson.remove(peerId)
-        kotlinx.coroutines.withContext(Dispatchers.IO) { fileFor(peerId).delete() }
+    suspend fun delete(peerId: String) {
+        val scope = accountScope()
+        val key = "$scope\u0000$peerId"
+        memory.remove(key)
+        lastWrittenJson.remove(key)
+        kotlinx.coroutines.withContext(Dispatchers.IO) {
+            adoptLegacySession(peerId, scope)
+            fileFor(peerId, scope).delete()
+        }
+    }
+
+    /**
+     * Drops every in-memory session without touching disk. Called on sign-out:
+     * the next account must not inherit the previous account's live ratchets,
+     * but its own history must still hydrate from disk when it signs back in.
+     * [locks] are intentionally kept so concurrent callers still share a mutex.
+     */
+    fun clearMemory() {
+        memory.clear()
+        lastWrittenJson.clear()
+        failedEstablishCounts.clear()
     }
 
     /** Sign-out / account-deletion wipe (planwhisper.md §3.1). */
@@ -228,8 +285,7 @@ class WhisperSessionStore @Inject constructor(
         lastWrittenJson.clear()
         failedEstablishCounts.clear()
         kotlinx.coroutines.withContext(Dispatchers.IO) {
-            dir.listFiles()?.forEach { it.delete() }
-            dir.delete()
+            baseDir.deleteRecursively()
         }
     }
 
@@ -241,14 +297,42 @@ class WhisperSessionStore @Inject constructor(
     private fun hydrate(stored: StoredSession): Live? =
         hydrateSession(stored, protector, json)
 
-    private fun fileFor(peerId: String): File =
-        File(dir, sha256Hex(peerId) + FILE_EXT)
+    /**
+     * Per-account file: `whisper_sessions/<sha256(account)>/<sha256(peer)>.json`.
+     *
+     * Builds before account scoping stored `<sha256(peer)>.json` directly under
+     * `whisper_sessions/`. [adoptLegacySession] claims those per peer, on demand.
+     */
+    private fun fileFor(peerId: String, scope: String): File =
+        WhisperSessionFiles.fileFor(baseDir, peerId, scope)
+
+    /**
+     * Upgrade-only, per-peer adoption of session files written before account
+     * scoping. Deliberately NOT a directory sweep: the old files name only the
+     * peer, so sweeping all of them into whichever account was active first
+     * handed one account another account's sessions — which is exactly how a
+     * same-device account switch turned whole conversations locked. Adopting a
+     * file only when the active account actually opens that peer keeps each
+     * account's own sessions (for two accounts A and B on one install, A claims
+     * `<sha256(B)>` and B claims `<sha256(A)>` — different files, no conflict).
+     *
+     * Also reclaims files mis-swept by the earlier eager migration: a snapshot
+     * for peer P sitting inside account P's own directory cannot be legitimate
+     * (an account has no session whose peer is itself), so it is the other
+     * account's session for P and is moved where it can be used.
+     */
+    private fun adoptLegacySession(peerId: String, scope: String) {
+        if (WhisperSessionFiles.adopt(baseDir, peerId, scope) != null) {
+            ProtocolDiagnostics.log("session: adopted a pre-scoping file into the active account")
+        }
+    }
 
     /** Atomic temp+rename write (same pattern as WhisperImageDiskCache). */
     private fun writeFileAtomic(target: File, text: String) {
         runCatching {
-            dir.mkdirs()
-            val tmp = File.createTempFile("wsess_", ".tmp", dir)
+            val parent = target.parentFile ?: return@runCatching
+            parent.mkdirs()
+            val tmp = File.createTempFile("wsess_", ".tmp", parent)
             try {
                 tmp.writeText(text)
                 if (!tmp.renameTo(target)) {
@@ -267,8 +351,61 @@ class WhisperSessionStore @Inject constructor(
         }
         ProtocolDiagnostics.increment("session.storeFault")
     }
+}
 
-    private fun sha256Hex(s: String): String =
+/**
+ * On-disk layout for session snapshots. Pure `java.io.File` maths — no Android
+ * imports — so the upgrade/adoption rules are unit-testable on the JVM.
+ *
+ * Live layout: `whisper_sessions/<sha256(ownerAccountId)>/<sha256(peerUserId)>.json`.
+ */
+internal object WhisperSessionFiles {
+    private const val FILE_EXT = ".json"
+
+    fun fileFor(baseDir: File, peerId: String, scope: String): File =
+        File(File(baseDir, sha256Hex(scope)), sha256Hex(peerId) + FILE_EXT)
+
+    /**
+     * A leftover snapshot that may be adopted for ([scope], [peerId]), or null.
+     *
+     *  1. Pre-scoping layout: `<sha256(peer)>.json` directly under the root.
+     *  2. Mis-swept layout: `<sha256(peer)>/<sha256(peer)>.json` — a snapshot
+     *     for peer P inside account P's own directory. That location is never
+     *     legitimate (an account holds no session whose peer is itself), so it
+     *     can only be a counterpart account's session for P.
+     *
+     * Never adopts for a self-peer.
+     */
+    fun legacySource(baseDir: File, peerId: String, scope: String): File? {
+        if (peerId == scope) return null
+        val hash = sha256Hex(peerId)
+        val singleLevel = File(baseDir, hash + FILE_EXT)
+        if (singleLevel.isFile) return singleLevel
+        val misSwept = File(File(baseDir, hash), hash + FILE_EXT)
+        return misSwept.takeIf { it.isFile }
+    }
+
+    /**
+     * Moves a leftover described by [legacySource] into [scope]'s directory.
+     * Returns the target when a file was adopted, null when there was nothing
+     * to do (already scoped, or no leftover).
+     */
+    fun adopt(baseDir: File, peerId: String, scope: String): File? {
+        val target = fileFor(baseDir, peerId, scope)
+        if (target.isFile) return null
+        val source = legacySource(baseDir, peerId, scope) ?: return null
+        return runCatching {
+            target.parentFile?.mkdirs()
+            val moved = source.renameTo(target) || run {
+                source.copyTo(target, overwrite = true)
+                source.delete()
+                target.isFile
+            }
+            target.takeIf { moved }
+        }.getOrNull()
+    }
+
+    fun sha256Hex(s: String): String =
         MessageDigest.getInstance("SHA-256").digest(s.toByteArray())
             .joinToString("") { "%02x".format(it) }
 }
