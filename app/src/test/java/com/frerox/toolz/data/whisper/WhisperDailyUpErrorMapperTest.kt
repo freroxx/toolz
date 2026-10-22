@@ -7,6 +7,7 @@ package com.frerox.toolz.data.whisper
 
 import com.frerox.toolz.R
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -150,6 +151,6 @@ class WhisperDailyUpErrorMapperTest {
         assertEquals(18, WhisperDailyUpsConfig.MIN_VERSION_CODE)
         assertEquals(24L * 60 * 60, WhisperDailyUpsConfig.UPLOAD_TTL_SECONDS)
         assertEquals(32_768, WhisperDailyUpsConfig.DESCRIPTOR_MAX_CHARS)
-        assertTrue(WhisperDailyUpsConfig.ENABLED) // v1.1.7 ships the surface ON
+        assertFalse(WhisperDailyUpsConfig.ENABLED) // Hidden from UI in this update
     }
 }

@@ -99,7 +99,13 @@ private suspend fun <T> groupIo(block: suspend () -> T): T =
     kotlinx.coroutines.withTimeout(WhisperGroupsConfig.OP_TIMEOUT_MS) { block() }
 
 /** Friend id → display name, cached briefly (all chat loads share it). */
+@Volatile
 private var friendNamesCache: Pair<Long, Map<String, String>>? = null
+
+/** Invalidates the shared friend names cache on logout or account switch. */
+fun clearFriendNamesCache() {
+    friendNamesCache = null
+}
 
 suspend fun WhisperRepository.friendNameMap(): Map<String, String> {
     val now = System.currentTimeMillis()

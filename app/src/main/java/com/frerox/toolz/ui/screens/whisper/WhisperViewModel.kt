@@ -237,6 +237,7 @@ class WhisperViewModel @Inject constructor(
                     // correct guard against cross-account mute leakage between logins.
                     runCatching { mutePrefs.clearAll() }
                     runCatching { keyRotationStore.clear() }
+                    runCatching { pushTokenStore.clear() }
                     droppedNotifiedClientIds.clear()
                     _uiState.update { WhisperUiState() }
                 }
@@ -723,6 +724,11 @@ class WhisperViewModel @Inject constructor(
             return
         }
         viewModelScope.launch {
+            // Delete server push target before the account is deleted
+            val currentUserId = authManager.currentUserId
+            if (!currentUserId.isNullOrBlank()) {
+                runCatching { pushTokenStore.clear(currentUserId) }
+            }
             authManager.deleteAccount(password)
                 .onSuccess {
                     // Permanently wipe every local trace of the account after the server
@@ -859,6 +865,11 @@ class WhisperViewModel @Inject constructor(
         // sign-out belongs to the next session (it restarts on re-auth).
         droppedCollectorJob?.cancel()
         viewModelScope.launch {
+            // Delete server push target BEFORE session is destroyed (RLS requires auth.uid())
+            val currentUserId = authManager.currentUserId
+            if (!currentUserId.isNullOrBlank()) {
+                runCatching { pushTokenStore.clear(currentUserId) }
+            }
             authManager.signOut()
                 .onFailure { err -> android.util.Log.w("WhisperVM", "signOut failed: ${err.message}", err) }
             // Regardless of the network outcome, wipe every session-scoped cache and

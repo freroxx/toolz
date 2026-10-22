@@ -64,6 +64,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
 import com.frerox.toolz.R
+import com.frerox.toolz.data.developer.DevToolId
 import com.frerox.toolz.di.ApplicationScope
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -1486,7 +1487,7 @@ class WhisperRepository @Inject constructor(
     ): Result<WhisperMessage> = runCatching {
         // DEV-SPOOF gate: sandboxed Whisper never reaches the server.
         try {
-            if (settingsRepository.isSandboxNow("spoof_whisper")) {
+            if (settingsRepository.isSandboxNow(DevToolId.WHISPER.prefKey)) {
                 android.util.Log.w("DevSpoof", "Blocked Whisper sendMessage — sandbox active (local only)")
                 throw com.frerox.toolz.data.developer.SpoofSandboxException(com.frerox.toolz.data.developer.DevToolId.WHISPER)
             }
@@ -1690,7 +1691,7 @@ class WhisperRepository @Inject constructor(
     ): Result<WhisperMessage> = runCatching {
         // DEV-SPOOF gate: sandboxed Whisper never uploads ciphertext.
         try {
-            if (settingsRepository.isSandboxNow("spoof_whisper")) {
+            if (settingsRepository.isSandboxNow(DevToolId.WHISPER.prefKey)) {
                 android.util.Log.w("DevSpoof", "Blocked Whisper sendEncryptedImage — sandbox active (local only)")
                 throw com.frerox.toolz.data.developer.SpoofSandboxException(com.frerox.toolz.data.developer.DevToolId.WHISPER)
             }
@@ -3047,7 +3048,7 @@ class WhisperRepository @Inject constructor(
     suspend fun sendTypingStatus(targetUserId: String, isTyping: Boolean) {
         // DEV-SPOOF gate: no typing signals leave the device in sandbox.
         try {
-            if (settingsRepository.isSandboxNow("spoof_whisper")) return
+            if (settingsRepository.isSandboxNow(DevToolId.WHISPER.prefKey)) return
         } catch (_: Exception) { }
         // V4-FIX (field report): typing died when the plaintext R-M1 emissions were
         // removed. Restored with an ENCRYPTED payload — the boolean is sealed with the
@@ -3454,6 +3455,7 @@ class WhisperRepository @Inject constructor(
         recentlyEmittedMessageIds.clear()
         receiveKeyNotified.clear()
         synchronized(decryptMemo) { decryptMemo.clear() }
+        clearFriendNamesCache()
         avatarLoader.clear() // V6-R7: account switch must not serve old avatars
         // H-2: channels are torn down asynchronously on the app scope — sign-out must
         // not block on network I/O, but the stale channels must not survive either.

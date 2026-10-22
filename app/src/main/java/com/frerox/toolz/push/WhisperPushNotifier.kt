@@ -140,6 +140,21 @@ class WhisperPushNotifier @Inject constructor(
         else groupDao.group(groupId)?.name?.takeIf { it.isNotBlank() } ?: "Group"
 
     private suspend fun render(data: Map<String, String>) {
+        val me = supabase.auth.currentUserOrNull()?.id
+        if (me.isNullOrBlank()) {
+            if (com.frerox.toolz.BuildConfig.DEBUG) {
+                Log.d(TAG, "Dropping wake-ping: no user currently signed in")
+            }
+            return
+        }
+        val receiverId = data["receiverId"].orEmpty()
+        if (receiverId.isNotEmpty() && receiverId != me) {
+            if (com.frerox.toolz.BuildConfig.DEBUG) {
+                Log.d(TAG, "Dropping wake-ping: receiverId does not match current user")
+            }
+            return
+        }
+
         val senderId = data["senderId"].orEmpty()
         val messageId = data["messageId"].orEmpty()
 
@@ -318,7 +333,7 @@ class WhisperPushNotifier @Inject constructor(
             return
         }
 
-        if (!data["whisper_new_message"].toBoolean() || senderId.isEmpty()) return
+        if (!data["whisper_new_message"].toBoolean() || senderId.isEmpty() || senderId == me) return
 
         // Generic, content-free notification — identical body to the in-app realtime
         // path so lock-screen behavior never leaks text (VISIBILITY_PRIVATE).

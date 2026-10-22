@@ -36,6 +36,16 @@ class WhisperPushRegistrar @Inject constructor(
 
     fun ensureRegistered() {
         runCatching {
+            val availableDistributors = UnifiedPush.getDistributors(context)
+            val currentDistributor = UnifiedPush.getAckDistributor(context)
+                ?: UnifiedPush.getSavedDistributor(context)
+
+            if (!currentDistributor.isNullOrBlank() && availableDistributors.contains(currentDistributor)) {
+                // Previously configured distributor is still installed: preserve it.
+                register()
+                return
+            }
+
             when (val resolved = UnifiedPush.resolveDefaultDistributor(context)) {
                 is ResolvedDistributor.Found -> {
                     // User's default distributor (or a single unambiguous one) —
@@ -47,9 +57,8 @@ class WhisperPushRegistrar @Inject constructor(
                 is ResolvedDistributor.ToSelect -> {
                     // Several distributors installed, none is a default yet.
                     // Auto-pick: explicit externals first, else our embedded one.
-                    val distributors = UnifiedPush.getDistributors(context)
-                    val chosen = distributors.firstOrNull { it != context.packageName }
-                        ?: distributors.firstOrNull()
+                    val chosen = availableDistributors.firstOrNull { it != context.packageName }
+                        ?: availableDistributors.firstOrNull()
                         ?: return
                     UnifiedPush.saveDistributor(context, chosen)
                     register()

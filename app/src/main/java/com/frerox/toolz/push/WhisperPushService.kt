@@ -164,10 +164,10 @@ class WhisperPushTargetStore @Inject constructor(
         if (uploaded) clearPending()
     }
 
-    /** Registration was revoked (unregistered by the distributor / user action). */
-    suspend fun clear() {
+    /** Registration was revoked (unregistered by the distributor / user action / logout). */
+    suspend fun clear(explicitUserId: String? = null) {
         clearPending()
-        val userId = supabase.auth.currentUserOrNull()?.id ?: return
+        val userId = explicitUserId ?: supabase.auth.currentUserOrNull()?.id ?: return
         runCatching {
             supabase.postgrest.from(TARGETS_TABLE).delete { filter { eq("user_id", userId) } }
         }
