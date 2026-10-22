@@ -81,6 +81,7 @@ fun CalendarSettingsSheet(
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+    var showClearAllDialog by remember { mutableStateOf(false) }
 
     // Permission launcher for phone calendar
     var hasCalendarPermission by remember {
@@ -262,6 +263,54 @@ fun CalendarSettingsSheet(
                 verticalArrangement = Arrangement.spacedBy(20.dp),
                 contentPadding = PaddingValues(bottom = 32.dp)
             ) {
+                // ─────────────────────────────────────────────────────────────
+                // OVERVIEW & SYNC DASHBOARD
+                // ─────────────────────────────────────────────────────────────
+                item {
+                    Card(
+                        shape = MediumExpressiveShape,
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(
+                                    text = "${uiState.events.size} Events Stored",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = if (uiState.lastSyncMs > 0) {
+                                        "Last synced: " + SimpleDateFormat("MMM d, HH:mm", Locale.getDefault()).format(Date(uiState.lastSyncMs))
+                                    } else {
+                                        "Never synced"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            ToolzExpressiveButton(
+                                onClick = { viewModel.syncAllNow() },
+                                enabled = !uiState.isSyncing
+                            ) {
+                                Icon(Icons.Rounded.Sync, null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Sync All")
+                            }
+                        }
+                    }
+                }
+
                 // ─────────────────────────────────────────────────────────────
                 // SECTION: Calendars (Create & Manage)
                 // ─────────────────────────────────────────────────────────────
@@ -646,6 +695,92 @@ fun CalendarSettingsSheet(
                 }
 
                 // ─────────────────────────────────────────────────────────────
+                // SECTION: Data Management & Clean Up
+                // ─────────────────────────────────────────────────────────────
+                item {
+                    SettingsSection(
+                        title = "Data Management",
+                        icon = Icons.Rounded.DeleteSweep,
+                        subtitle = "Clean up duplicates or wipe stored calendar events"
+                    ) {
+                        Card(
+                            shape = SmallExpressiveShape,
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainer
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(14.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "Remove Duplicates",
+                                            fontWeight = FontWeight.SemiBold,
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                        Text(
+                                            text = "Find and remove redundant event copies created by repeated syncs",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Spacer(Modifier.width(10.dp))
+                                    ToolzOutlinedExpressiveButton(
+                                        onClick = { viewModel.removeDuplicates() },
+                                        enabled = !uiState.isSyncing
+                                    ) {
+                                        Icon(Icons.Rounded.CleaningServices, null, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("Deduplicate")
+                                    }
+                                }
+
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "Clear All Events",
+                                            fontWeight = FontWeight.SemiBold,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.error
+                                        )
+                                        Text(
+                                            text = "Permanently delete all events from local calendar storage",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Spacer(Modifier.width(10.dp))
+                                    ToolzExpressiveButton(
+                                        onClick = { showClearAllDialog = true },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.errorContainer,
+                                            contentColor = MaterialTheme.colorScheme.onErrorContainer
+                                        )
+                                    ) {
+                                        Icon(Icons.Rounded.DeleteForever, null, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("Clear All")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ─────────────────────────────────────────────────────────────
                 // SECTION: Display Preferences
                 // ─────────────────────────────────────────────────────────────
                 item {
@@ -722,6 +857,52 @@ fun CalendarSettingsSheet(
                 }
             }
         }
+    }
+
+    if (showClearAllDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearAllDialog = false },
+            icon = {
+                Icon(
+                    Icons.Rounded.DeleteForever,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(28.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = "Clear All Events?",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text = "This will permanently delete all ${uiState.events.size} calendar events from local storage. This action cannot be undone.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.clearAllEvents()
+                        showClearAllDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    )
+                ) {
+                    Text("Delete Everything", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearAllDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }
 

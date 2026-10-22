@@ -61,6 +61,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -121,6 +122,8 @@ import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.DeleteForever
+import androidx.compose.material.icons.rounded.Deselect
 import androidx.compose.material.icons.rounded.DoneAll
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.EditNote
@@ -135,10 +138,12 @@ import androidx.compose.material.icons.rounded.PriorityHigh
 import androidx.compose.material.icons.rounded.RadioButtonUnchecked
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.School
+import androidx.compose.material.icons.rounded.SelectAll
 import androidx.compose.material.icons.rounded.Today
 import androidx.compose.material.icons.rounded.Update
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.ViewAgenda
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -175,6 +180,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TimePicker
 import androidx.compose.material3.ToggleFloatingActionButton
 import androidx.compose.material3.ToggleFloatingActionButtonDefaults.animateIcon
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -349,6 +355,14 @@ fun CalendarScreen(viewModel: CalendarViewModel = hiltViewModel()) {
     var aiPrompt       by remember { mutableStateOf("") }
     var editingEvent   by remember { mutableStateOf<EventEntry?>(null) }
     var longPressedDate by remember { mutableStateOf<Long?>(null) }
+    var isSelectionMode by rememberSaveable { mutableStateOf(false) }
+    var selectedEventIds by rememberSaveable { mutableStateOf(setOf<Int>()) }
+    var showBatchDeleteConfirmation by remember { mutableStateOf(false) }
+
+    BackHandler(enabled = isSelectionMode) {
+        isSelectionMode = false
+        selectedEventIds = emptySet()
+    }
 
     val snackbarHostState = remember { SnackbarHostState() }
     val context           = LocalContext.current
@@ -416,41 +430,68 @@ fun CalendarScreen(viewModel: CalendarViewModel = hiltViewModel()) {
             snackbarHost     = { SnackbarHost(snackbarHostState) },
             containerColor   = Color.Transparent,
             topBar = {
-                CalendarTopBar(
-                    selectedDate       = uiState.selectedDate,
-                    isAcademicMode     = uiState.isAcademicMode,
-                    isMonthView        = isMonthView,
-                    isTodaySelected    = isTodaySelected,
-                    onPrevious         = {
-                        vibrationManager?.vibrateTick()
-                        viewModel.previousMonth()
-                    },
-                    onNext             = {
-                        vibrationManager?.vibrateTick()
-                        viewModel.nextMonth()
-                    },
-                    onToday            = {
-                        vibrationManager?.vibrateClick()
-                        viewModel.goToToday()
-                    },
-                    onMonthPickerClick = { showMonthPicker = true },
-                    onToggleView       = {
-                        vibrationManager?.vibrateTick()
-                        isMonthView = !isMonthView
-                    },
-                    onSettingsClick    = {
-                        vibrationManager?.vibrateTick()
-                        showSettingsSheet = true
-                    },
-                    scrollBehavior     = scrollBehavior
-                )
+                if (isSelectionMode) {
+                    CalendarSelectionTopBar(
+                        selectedCount = selectedEventIds.size,
+                        totalCount = uiState.events.size,
+                        onSelectAll = {
+                            vibrationManager?.vibrateTick()
+                            val allIds = uiState.events.map { it.id }.toSet()
+                            selectedEventIds = if (selectedEventIds.size == allIds.size) emptySet() else allIds
+                        },
+                        onDeleteSelected = {
+                            vibrationManager?.vibrateClick()
+                            showBatchDeleteConfirmation = true
+                        },
+                        onCloseSelection = {
+                            vibrationManager?.vibrateTick()
+                            isSelectionMode = false
+                            selectedEventIds = emptySet()
+                        }
+                    )
+                } else {
+                    CalendarTopBar(
+                        selectedDate       = uiState.selectedDate,
+                        isAcademicMode     = uiState.isAcademicMode,
+                        isMonthView        = isMonthView,
+                        isTodaySelected    = isTodaySelected,
+                        onPrevious         = {
+                            vibrationManager?.vibrateTick()
+                            viewModel.previousMonth()
+                        },
+                        onNext             = {
+                            vibrationManager?.vibrateTick()
+                            viewModel.nextMonth()
+                        },
+                        onToday            = {
+                            vibrationManager?.vibrateClick()
+                            viewModel.goToToday()
+                        },
+                        onMonthPickerClick = { showMonthPicker = true },
+                        onToggleView       = {
+                            vibrationManager?.vibrateTick()
+                            isMonthView = !isMonthView
+                        },
+                        onSelectModeClick  = {
+                            vibrationManager?.vibrateTick()
+                            isSelectionMode = true
+                        },
+                        onSettingsClick    = {
+                            vibrationManager?.vibrateTick()
+                            showSettingsSheet = true
+                        },
+                        scrollBehavior     = scrollBehavior
+                    )
+                }
             },
             floatingActionButton = {
-                CalendarFabMenu(
-                    offlineMode   = uiState.offlineModeEnabled,
-                    onAiClick     = { showAiSheet = true },
-                    onAddClick    = { showAddDialog = true }
-                )
+                if (!isSelectionMode) {
+                    CalendarFabMenu(
+                        offlineMode   = uiState.offlineModeEnabled,
+                        onAiClick     = { showAiSheet = true },
+                        onAddClick    = { showAddDialog = true }
+                    )
+                }
             }
         ) { paddingValues ->
             Box(
@@ -473,34 +514,60 @@ fun CalendarScreen(viewModel: CalendarViewModel = hiltViewModel()) {
                 ) { monthView ->
                     if (monthView) {
                         MonthViewSection(
-                            uiState        = uiState,
-                            onDateSelected = viewModel::onDateSelected,
-                            onLongPress    = {
+                            uiState          = uiState,
+                            isSelectionMode  = isSelectionMode,
+                            selectedEventIds = selectedEventIds,
+                            onEventSelect    = { ev ->
+                                vibrationManager?.vibrateTick()
+                                selectedEventIds = if (ev.id in selectedEventIds) selectedEventIds - ev.id else selectedEventIds + ev.id
+                            },
+                            onEventLongClick = { ev ->
+                                vibrationManager?.vibrateTick()
+                                if (!isSelectionMode) {
+                                    isSelectionMode = true
+                                    selectedEventIds = setOf(ev.id)
+                                }
+                            },
+                            onDateSelected   = viewModel::onDateSelected,
+                            onLongPress      = {
                                 vibrationManager?.vibrateTick()
                                 longPressedDate = it
                             },
-                            onSwipeLeft    = {
+                            onSwipeLeft      = {
                                 vibrationManager?.vibrateTick()
                                 viewModel.nextMonth()
                             },
-                            onSwipeRight   = {
+                            onSwipeRight     = {
                                 vibrationManager?.vibrateTick()
                                 viewModel.previousMonth()
                             },
-                            onEventToggle  = viewModel::toggleEventCompletion,
-                            onEventEdit    = { editingEvent = it },
-                            onEventDelete  = ::requestDelete,
-                            onTaskToggle   = viewModel::toggleTaskCompletion
+                            onEventToggle    = viewModel::toggleEventCompletion,
+                            onEventEdit      = { editingEvent = it },
+                            onEventDelete    = ::requestDelete,
+                            onTaskToggle     = viewModel::toggleTaskCompletion
                         )
                     } else {
                         AgendaView(
-                            events        = uiState.events,
-                            tasks         = uiState.tasks,
-                            onEventToggle = viewModel::toggleEventCompletion,
-                            onDelete      = ::requestDelete,
-                            onEdit        = { editingEvent = it },
-                            onTaskToggle  = viewModel::toggleTaskCompletion,
-                            offlineMode   = uiState.offlineModeEnabled
+                            events           = uiState.events,
+                            tasks            = uiState.tasks,
+                            isSelectionMode  = isSelectionMode,
+                            selectedEventIds = selectedEventIds,
+                            onEventSelect    = { ev ->
+                                vibrationManager?.vibrateTick()
+                                selectedEventIds = if (ev.id in selectedEventIds) selectedEventIds - ev.id else selectedEventIds + ev.id
+                            },
+                            onEventLongClick = { ev ->
+                                vibrationManager?.vibrateTick()
+                                if (!isSelectionMode) {
+                                    isSelectionMode = true
+                                    selectedEventIds = setOf(ev.id)
+                                }
+                            },
+                            onEventToggle    = viewModel::toggleEventCompletion,
+                            onDelete         = ::requestDelete,
+                            onEdit           = { editingEvent = it },
+                            onTaskToggle     = viewModel::toggleTaskCompletion,
+                            offlineMode      = uiState.offlineModeEnabled
                         )
                     }
                 }
@@ -638,6 +705,59 @@ fun CalendarScreen(viewModel: CalendarViewModel = hiltViewModel()) {
             )
         }
 
+        // Batch delete confirmation dialog
+        if (showBatchDeleteConfirmation) {
+            AlertDialog(
+                onDismissRequest = { showBatchDeleteConfirmation = false },
+                icon = {
+                    Icon(
+                        Icons.Rounded.DeleteForever,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(28.dp)
+                    )
+                },
+                title = {
+                    Text(
+                        text = "Delete ${selectedEventIds.size} events?",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                },
+                text = {
+                    Text(
+                        text = "Are you sure you want to permanently delete the ${selectedEventIds.size} selected events? This cannot be undone.",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            val count = selectedEventIds.size
+                            viewModel.deleteSelectedEvents(selectedEventIds)
+                            isSelectionMode = false
+                            selectedEventIds = emptySet()
+                            showBatchDeleteConfirmation = false
+                            scope.launch {
+                                snackbarHostState.showSnackbar("Deleted $count events")
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error,
+                            contentColor = MaterialTheme.colorScheme.onError
+                        )
+                    ) {
+                        Text("Delete", fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showBatchDeleteConfirmation = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
         // CAL-P2-05: surface Retry for parse failures, then clear the error.
         uiState.errorMessage?.let { msg ->
             val canRetry = uiState.rawAiFailureResponse != null
@@ -677,6 +797,7 @@ private fun CalendarTopBar(
     onToday: () -> Unit,
     onMonthPickerClick: () -> Unit,
     onToggleView: () -> Unit,
+    onSelectModeClick: () -> Unit = {},
     onSettingsClick: () -> Unit,
     scrollBehavior: androidx.compose.material3.TopAppBarScrollBehavior? = null,
 ) {
@@ -796,6 +917,21 @@ private fun CalendarTopBar(
                         }
                     }
                 }
+                // Select Mode button
+                Surface(
+                    onClick = onSelectModeClick,
+                    shape   = SmallExpressiveShape,
+                    color   = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                        Icon(
+                            Icons.Rounded.Checklist,
+                            contentDescription = "Select Mode",
+                            modifier = Modifier.size(17.dp)
+                        )
+                    }
+                }
                 // Settings button
                 Surface(
                     onClick = onSettingsClick,
@@ -817,6 +953,52 @@ private fun CalendarTopBar(
         colors = TopAppBarDefaults.topAppBarColors(
             containerColor         = Color.Transparent,
             scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.96f)
+        )
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CalendarSelectionTopBar(
+    selectedCount: Int,
+    totalCount: Int,
+    onSelectAll: () -> Unit,
+    onDeleteSelected: () -> Unit,
+    onCloseSelection: () -> Unit,
+) {
+    TopAppBar(
+        title = {
+            Text(
+                text = if (selectedCount == 0) "Select events" else "$selectedCount selected",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+        },
+        navigationIcon = {
+            IconButton(onClick = onCloseSelection) {
+                Icon(Icons.Rounded.Close, contentDescription = "Close selection")
+            }
+        },
+        actions = {
+            IconButton(onClick = onSelectAll) {
+                Icon(
+                    imageVector = if (selectedCount == totalCount && totalCount > 0) Icons.Rounded.Deselect else Icons.Rounded.SelectAll,
+                    contentDescription = "Select or deselect all"
+                )
+            }
+            IconButton(
+                onClick = onDeleteSelected,
+                enabled = selectedCount > 0
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Delete,
+                    contentDescription = "Delete selected",
+                    tint = if (selectedCount > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                )
+            }
+        },
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
         )
     )
 }
@@ -1016,6 +1198,10 @@ fun LoadingOverlay() {
 @Composable
 fun MonthViewSection(
     uiState: CalendarUiState,
+    isSelectionMode: Boolean = false,
+    selectedEventIds: Set<Int> = emptySet(),
+    onEventSelect: (EventEntry) -> Unit = {},
+    onEventLongClick: (EventEntry) -> Unit = {},
     onDateSelected: (Long) -> Unit,
     onLongPress: (Long) -> Unit,
     onSwipeLeft: () -> Unit,
@@ -1788,6 +1974,10 @@ private fun CompactTaskItem(
 fun AgendaView(
     events: List<EventEntry>,
     tasks: List<TaskEntry>,
+    isSelectionMode: Boolean = false,
+    selectedEventIds: Set<Int> = emptySet(),
+    onEventSelect: (EventEntry) -> Unit = {},
+    onEventLongClick: (EventEntry) -> Unit = {},
     onEventToggle: (EventEntry) -> Unit,
     onDelete: (EventEntry) -> Unit,
     onEdit: (EventEntry) -> Unit,
@@ -1870,10 +2060,16 @@ fun AgendaView(
                 ) {
                     when (item) {
                         is CalendarItem.Event -> AgendaEventCard(
-                            event    = item.event,
-                            onToggle = { onEventToggle(item.event) },
-                            onDelete = { onDelete(item.event) },
-                            onEdit   = { onEdit(item.event) }
+                            event       = item.event,
+                            selected    = item.event.id in selectedEventIds,
+                            selectionMode = isSelectionMode,
+                            onToggle    = { onEventToggle(item.event) },
+                            onDelete    = { onDelete(item.event) },
+                            onEdit      = {
+                                if (isSelectionMode) onEventSelect(item.event)
+                                else onEdit(item.event)
+                            },
+                            onLongClick = { onEventLongClick(item.event) },
                         )
                         is CalendarItem.Task  -> AgendaTaskCard(item.task, onToggle = onTaskToggle)
                     }
@@ -1984,6 +2180,9 @@ fun AgendaEventCard(
     onToggle: () -> Unit,
     onDelete: () -> Unit,
     onEdit: () -> Unit,
+    selected: Boolean = false,
+    selectionMode: Boolean = false,
+    onLongClick: () -> Unit = {},
 ) {
     val vibrationManager = LocalVibrationManager.current
     val accentColor = remember(event.subjectColor) { eventColor(event.subjectColor) }
@@ -1998,11 +2197,17 @@ fun AgendaEventCard(
 
     Surface(
         // CAL-P2-04: agenda tap EDITS (accidental toggles had no undo); toggle via checkbox/menu.
-        onClick  = onEdit,
-        color    = MaterialTheme.colorScheme.surfaceContainerLow,
+        // Selection mode reroutes taps to selection and exposes a long-press entry point.
+        color    = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+        else MaterialTheme.colorScheme.surfaceContainerLow,
         shape    = SquircleShape,
+        border   = if (selected) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)) else null,
         modifier = Modifier
             .fillMaxWidth()
+            .combinedClickable(
+                onClick = onEdit,
+                onLongClick = onLongClick,
+            )
             .semantics { contentDescription = "${event.title} $timeText" }
     ) {
         Row(modifier = Modifier.height(IntrinsicSize.Min)) {
@@ -2087,58 +2292,71 @@ fun AgendaEventCard(
                     }
                 }
                 // CAL-P2-04: explicit checkbox toggles (tap on card edits).
-                Checkbox(
-                    checked = event.isCompleted,
-                    onCheckedChange = {
-                        vibrationManager?.vibrateTick()
-                        onToggle()
-                    },
-                    modifier = Modifier.semantics {
-                        contentDescription = if (event.isCompleted) "Mark ${event.title} as not done" else "Mark ${event.title} as done"
-                        role = Role.Checkbox
-                    }
-                )
-                Box {
-                    IconButton(onClick = { showMenu = true }, Modifier.size(36.dp)) {
-                        Icon(
-                            Icons.Rounded.MoreVert, null,
-                            modifier = Modifier.size(17.dp),
-                            tint     = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.35f)
-                        )
-                    }
-                    DropdownMenu(
-                        expanded         = showMenu,
-                        onDismissRequest = { showMenu = false },
-                        shape            = SmallExpressiveShape
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text(if (event.isCompleted) stringResource(R.string.st_CalendarScreen_o5p6) else stringResource(R.string.st_CalendarScreen_q7r8)) },
-                            onClick = {
-                                vibrationManager?.vibrateTick()
-                                onToggle(); showMenu = false
-                            },
-                            leadingIcon = {
-                                Icon(
-                                    if (event.isCompleted) Icons.Rounded.RadioButtonUnchecked
-                                    else Icons.Rounded.CheckCircle,
-                                    null
-                                )
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.st_CalendarScreen_9f0a)) },
-                            onClick = { onEdit(); showMenu = false },
-                            leadingIcon = { Icon(Icons.Rounded.Edit, null) }
-                        )
-                        HorizontalDivider()
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.st_CalendarScreen_a1b2), color = MaterialTheme.colorScheme.error) },
-                            onClick = {
-                                vibrationManager?.vibrateTick()
-                                onDelete(); showMenu = false
-                            },
-                            leadingIcon = { Icon(Icons.Rounded.Delete, null, tint = MaterialTheme.colorScheme.error) }
-                        )
+                // Selection mode replaces it with a plain selection indicator.
+                if (selectionMode) {
+                    Icon(
+                        imageVector = if (selected) Icons.Rounded.CheckCircle else Icons.Rounded.RadioButtonUnchecked,
+                        contentDescription = if (selected) "Deselect ${event.title}" else "Select ${event.title}",
+                        tint = if (selected) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.size(24.dp),
+                    )
+                } else {
+                    Checkbox(
+                        checked = event.isCompleted,
+                        onCheckedChange = {
+                            vibrationManager?.vibrateTick()
+                            onToggle()
+                        },
+                        modifier = Modifier.semantics {
+                            contentDescription = if (event.isCompleted) "Mark ${event.title} as not done" else "Mark ${event.title} as done"
+                            role = Role.Checkbox
+                        }
+                    )
+                }
+                if (!selectionMode) {
+                    Box {
+                        IconButton(onClick = { showMenu = true }, Modifier.size(36.dp)) {
+                            Icon(
+                                Icons.Rounded.MoreVert, null,
+                                modifier = Modifier.size(17.dp),
+                                tint     = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.35f)
+                            )
+                        }
+                        DropdownMenu(
+                            expanded         = showMenu,
+                            onDismissRequest = { showMenu = false },
+                            shape            = SmallExpressiveShape
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text(if (event.isCompleted) stringResource(R.string.st_CalendarScreen_o5p6) else stringResource(R.string.st_CalendarScreen_q7r8)) },
+                                onClick = {
+                                    vibrationManager?.vibrateTick()
+                                    onToggle(); showMenu = false
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        if (event.isCompleted) Icons.Rounded.RadioButtonUnchecked
+                                        else Icons.Rounded.CheckCircle,
+                                        null
+                                    )
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.st_CalendarScreen_9f0a)) },
+                                onClick = { onEdit(); showMenu = false },
+                                leadingIcon = { Icon(Icons.Rounded.Edit, null) }
+                            )
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.st_CalendarScreen_a1b2), color = MaterialTheme.colorScheme.error) },
+                                onClick = {
+                                    vibrationManager?.vibrateTick()
+                                    onDelete(); showMenu = false
+                                },
+                                leadingIcon = { Icon(Icons.Rounded.Delete, null, tint = MaterialTheme.colorScheme.error) }
+                            )
+                        }
                     }
                 }
             }

@@ -103,9 +103,9 @@ class CalendarAutoSyncWorker @AssistedInject constructor(
                 val lastSync = 0L // always fetch all for simplicity; delta sync is a future improvement
                 val phoneEvents = phoneImporter.importFromCalendars(phoneCalIds, lastSync)
                 if (phoneEvents.isNotEmpty()) {
-                    repository.insertEventsBulk(phoneEvents)
-                    imported += phoneEvents.size
-                    Log.d(TAG, "Phone sync: imported ${phoneEvents.size} events")
+                    val res = repository.insertEventsDeduplicated(phoneEvents)
+                    imported += res.insertedCount + res.updatedCount
+                    Log.d(TAG, "Phone sync: ${res.insertedCount} inserted, ${res.updatedCount} updated, ${res.skippedCount} skipped")
                 }
             }
 
@@ -115,9 +115,9 @@ class CalendarAutoSyncWorker @AssistedInject constructor(
                 calDavClient.fetchEvents(account).fold(
                     onSuccess = { events ->
                         if (events.isNotEmpty()) {
-                            repository.insertEventsBulk(events)
-                            imported += events.size
-                            Log.d(TAG, "CalDAV sync [${account.url}]: ${events.size} events")
+                            val res = repository.insertEventsDeduplicated(events)
+                            imported += res.insertedCount + res.updatedCount
+                            Log.d(TAG, "CalDAV sync [${account.url}]: ${res.insertedCount} inserted, ${res.updatedCount} updated, ${res.skippedCount} skipped")
                         }
                     },
                     onFailure = { e ->

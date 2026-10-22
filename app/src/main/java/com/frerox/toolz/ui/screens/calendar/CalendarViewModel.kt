@@ -1148,12 +1148,12 @@ Please output ONLY the corrected raw JSON array now. No markdown, no prose.
             runCatching {
                 val imported = phoneImporter.importFromCalendars(selected)
                 if (imported.isNotEmpty()) {
-                    repository.insertEventsBulk(imported)
+                    val result = repository.insertEventsDeduplicated(imported)
                     calendarSyncSettings.updateLastSyncMs()
                     _uiState.update {
                         it.copy(
                             isSyncing = false,
-                            settingsMessage = "Imported ${imported.size} events from phone"
+                            settingsMessage = "Phone sync: ${result.insertedCount} added, ${result.updatedCount} updated (${result.skippedCount} duplicates skipped)"
                         )
                     }
                 } else {
@@ -1185,11 +1185,11 @@ Please output ONLY the corrected raw JSON array now. No markdown, no prose.
 
                 val events = IcsParser.parse(content)
                 if (events.isNotEmpty()) {
-                    repository.insertEventsBulk(events)
+                    val result = repository.insertEventsDeduplicated(events)
                     _uiState.update {
                         it.copy(
                             isSyncing = false,
-                            settingsMessage = "Imported ${events.size} events from ICS"
+                            settingsMessage = "ICS import: ${result.insertedCount} added, ${result.updatedCount} updated (${result.skippedCount} duplicates skipped)"
                         )
                     }
                 } else {
@@ -1282,14 +1282,16 @@ Please output ONLY the corrected raw JSON array now. No markdown, no prose.
             _uiState.update { it.copy(isSyncing = true) }
             calDavClient.fetchEvents(account).fold(
                 onSuccess = { events ->
-                    if (events.isNotEmpty()) {
-                        repository.insertEventsBulk(events)
+                    val result = if (events.isNotEmpty()) {
+                        repository.insertEventsDeduplicated(events)
+                    } else {
+                        EventRepository.DeduplicationResult(0, 0, 0)
                     }
                     calendarSyncSettings.updateLastSyncMs()
                     _uiState.update {
                         it.copy(
                             isSyncing = false,
-                            settingsMessage = "Synced ${events.size} events from ${account.displayName.ifBlank { account.url }}"
+                            settingsMessage = "CalDAV [${account.displayName.ifBlank { account.url }}]: ${result.insertedCount} added, ${result.updatedCount} updated (${result.skippedCount} duplicates skipped)"
                         )
                     }
                 },
@@ -1308,20 +1310,26 @@ Please output ONLY the corrected raw JSON array now. No markdown, no prose.
     fun syncAllNow() {
         viewModelScope.launch {
             _uiState.update { it.copy(isSyncing = true) }
-            var count = 0
+            var totalAdded = 0
+            var totalUpdated = 0
+            var totalSkipped = 0
             val phoneIds = _uiState.value.selectedPhoneCalendarIds
             if (phoneIds.isNotEmpty()) {
                 val pEvents = phoneImporter.importFromCalendars(phoneIds)
                 if (pEvents.isNotEmpty()) {
-                    repository.insertEventsBulk(pEvents)
-                    count += pEvents.size
+                    val res = repository.insertEventsDeduplicated(pEvents)
+                    totalAdded += res.insertedCount
+                    totalUpdated += res.updatedCount
+                    totalSkipped += res.skippedCount
                 }
             }
             for (acc in _uiState.value.calDavAccounts) {
                 calDavClient.fetchEvents(acc).onSuccess { evs ->
                     if (evs.isNotEmpty()) {
-                        repository.insertEventsBulk(evs)
-                        count += evs.size
+                        val res = repository.insertEventsDeduplicated(evs)
+                        totalAdded += res.insertedCount
+                        totalUpdated += res.updatedCount
+                        totalSkipped += res.skippedCount
                     }
                 }
             }
@@ -1329,8 +1337,58 @@ Please output ONLY the corrected raw JSON array now. No markdown, no prose.
             _uiState.update {
                 it.copy(
                     isSyncing = false,
-                    settingsMessage = "Sync complete. Merged $count events."
+                    settingsMessage = "Sync complete: $totalAdded added, $totalUpdated updated ($totalSkipped duplicates skipped)"
                 )
+            }
+        }
+    }
+
+    fun deleteSelectedEvents(ids: Set<Int>) {
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            try {
+                repository.deleteEvents(ids.toList())
+                _uiState.update { it.copy(settingsMessage = "Deleted ${ids.size} events") }
+            } catch (e: Exception) {
+                Log.e(TAG, "deleteSelectedEvents failed", e)
+                _uiState.update { it.copy(errorMessage = "Failed to delete selected events") }
+            }
+        }
+    }
+
+    fun removeDuplicates() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSyncing = true) }
+            runCatching {
+                val removed = repository.removeDuplicateEvents()
+                _uiState.update {
+                    it.copy(
+                        isSyncing = false,
+                        settingsMessage = if (removed > 0) "Removed $removed duplicate events" else "No duplicate events found"
+                    )
+                }
+            }.onFailure { e ->
+                _uiState.update {
+                    it.copy(
+                        isSyncing = false,
+                        settingsMessage = "Failed to remove duplicates: ${e.message}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun clearAllEvents() {
+        viewModelScope.launch {
+            runCatching {
+                repository.clearAllEvents()
+                _uiState.update {
+                    it.copy(settingsMessage = "All calendar events cleared")
+                }
+            }.onFailure { e ->
+                _uiState.update {
+                    it.copy(settingsMessage = "Failed to clear events: ${e.message}")
+                }
             }
         }
     }
