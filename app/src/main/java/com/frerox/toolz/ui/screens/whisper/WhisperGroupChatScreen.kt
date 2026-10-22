@@ -73,7 +73,10 @@ fun WhisperGroupChatScreen(
     onNavigateToInfo: (String) -> Unit,
     viewModel: WhisperGroupChatViewModel = hiltViewModel(),
 ) {
-    if (!groupsEnabled()) return
+    if (!groupsEnabled()) {
+        LaunchedEffect(Unit) { onNavigateBack() }
+        return
+    }
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val myId = viewModel.myUserId
     // E2EE group content never appears in screenshots or recent-app previews

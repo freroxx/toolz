@@ -370,6 +370,7 @@ class WhisperNotificationManager @Inject constructor(
      */
     fun showGroupInviteNotification(groupId: String, groupName: String, inviterName: String) {
         if (!whisperNotificationsEnabled) return
+        if (!groupsEnabled()) return
         if (groupId.isBlank()) return
         val notifId = groupNotifId("invite:$groupId:$inviterName")
         val intent = Intent(context, MainActivity::class.java).apply {
@@ -406,6 +407,7 @@ class WhisperNotificationManager @Inject constructor(
      * Same stable id as [showGroupInviteNotification]; silent when absent.
      */
     fun cancelGroupInviteNotification(groupId: String, inviterName: String) {
+        if (!groupsEnabled()) return
         if (groupId.isBlank()) return
         runCatching { notifManager.cancel(groupNotifId("invite:$groupId:$inviterName")) }
     }
@@ -465,6 +467,7 @@ class WhisperNotificationManager @Inject constructor(
         dedupeKey: String,
     ) {
         if (!whisperNotificationsEnabled) return
+        if (!groupsEnabled()) return
         if (groupId.isBlank() || !shouldNotifyForMessage(dedupeKey)) return
         if (mutePrefs.isMuted("group:$groupId")) return
         if (isInForeground && currentChatId == "group:$groupId") return

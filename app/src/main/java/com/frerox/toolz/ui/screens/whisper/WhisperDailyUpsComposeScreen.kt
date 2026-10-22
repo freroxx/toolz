@@ -106,7 +106,10 @@ fun WhisperDailyUpsComposeScreen(
     onPublished: () -> Unit = onNavigateBack,
     viewModel: WhisperDailyUpsComposeViewModel = hiltViewModel(),
 ) {
-    if (!WhisperDailyUpsConfig.ENABLED) return
+    if (!WhisperDailyUpsConfig.ENABLED) {
+        LaunchedEffect(Unit) { onNavigateBack() }
+        return
+    }
     SecureWindow()
 
     val state by viewModel.state.collectAsStateWithLifecycle()

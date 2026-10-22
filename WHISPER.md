@@ -56,15 +56,17 @@ Feature surface at 1.1.7:
   timers), replies, reactions, read receipts, typing and presence, in-chat
   search, clear-chat with undo, per-chat muting, blocking. Every message is
   end-to-end encrypted on top of a Signal-style session protocol.
-- **Groups** — up to 12 members with owner/admin/member roles. Group history
+- **Groups** *(Hidden from UI in this update)* — up to 12 members with owner/admin/member roles. Group history
   is an admin-**signed event log** that every client verifies independently;
   membership changes, polls, mentions, invites, and permission changes are all
   events in that log. Messages fan out pairwise: every member's copy is sealed
-  through *their own* 1:1-quality session with the sender.
-- **Daily Ups** — 24-hour photo stories posted to all friends at once, capped
+  through *their own* 1:1-quality session with the sender. (Note: Groups are
+  currently not accessible in the UI; all backend and files remain preserved).
+- **Daily Ups** *(Hidden from UI in this update)* — 24-hour photo stories posted to all friends at once, capped
   at 5 per UTC day per poster, with optional view receipts and a six-emoji
   reaction vocabulary. Photos are stripped of GPS/EXIF metadata before they
-  ever leave the device.
+  ever leave the device. (Note: Daily Ups are currently not accessible in the
+  UI; all backend and files remain preserved).
 - **Cross-cutting** — offline-first (history reads from a local encrypted
   store; sends queue and drain), push notifications whose payloads never carry
   message content, screenshot protection with a server-gated bypass for
@@ -813,6 +815,9 @@ and the UnifiedPush service entry point.
 
 ## 11. Groups
 
+> [!NOTE]
+> **Update Status:** Whisper Groups are currently hidden from the UI and not accessible in this update (`WhisperGroupsConfig.ENABLED = false`). All backend infrastructure, database tables, edge functions, crypto fan-out routines, and UI screen files are preserved intact for a future release.
+
 Groups are the most intricate subsystem: a cryptographically authenticated
 membership log, pairwise message fan-out, and a permission model, all inside
 the existing 1:1 trust machinery. Up to 12 members, three roles
@@ -1083,6 +1088,9 @@ every group screen without touching the server plane:
 ---
 
 ## 12. Daily Ups
+
+> [!NOTE]
+> **Update Status:** Daily Ups are currently hidden from the UI and not accessible in this update (`WhisperDailyUpsConfig.ENABLED = false`). All backend infrastructure, database tables, edge functions, photo pipelines, and UI screen files are preserved intact for a future release.
 
 Daily Ups are 24-hour **photo stories** posted to all friends at once — never
 addressed to one person, capped at 5 per poster per UTC day, and bound to the

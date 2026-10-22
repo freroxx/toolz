@@ -159,6 +159,9 @@ class WhisperPushNotifier @Inject constructor(
         // story; the NOTIFICATION carries only the poster's name (payload keys
         // mirror the server contract; see WhisperNotificationManager).
         if (data["whisper_story_new"].toBoolean()) {
+            // Daily Ups are hidden in this release; swallow the wake ping
+            // instead of posting a notification for an unreachable surface.
+            if (!com.frerox.toolz.data.whisper.WhisperDailyUpsConfig.ENABLED) return
             val storyId = data["storyId"].orEmpty()
             val posterId = data["posterId"].orEmpty()
             if (storyId.isNotEmpty() && posterId.isNotEmpty()) {
@@ -174,6 +177,15 @@ class WhisperPushNotifier @Inject constructor(
         }
 
         // Phase-2 groups: invite / message / event wake pings (data-only, no content).
+        // Groups are hidden in this release; any group ping is dropped rather
+        // than opening a notification whose destination is unreachable.
+        if (!com.frerox.toolz.data.whisper.groupsEnabled()) {
+            if (data["whisper_group_invite"].toBoolean() ||
+                data["whisper_group_message"].toBoolean() ||
+                data["whisper_group_event"].toBoolean()) {
+                return
+            }
+        }
         if (data["whisper_group_invite"].toBoolean()) {
             val groupId = data["groupId"].orEmpty()
             val groupName = data["groupName"].takeIf { !it.isNullOrBlank() } ?: localGroupName(groupId)

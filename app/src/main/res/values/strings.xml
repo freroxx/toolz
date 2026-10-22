@@ -4143,6 +4143,13 @@
     <string name="st_Whisper_DailyUp_RailLabelOne">%1$s, %2$d up, %3$s</string>
     <string name="st_Whisper_DailyUp_SeenState">seen</string>
     <string name="st_Whisper_DailyUp_UnseenState">unseen</string>
+    <string name="st_Whisper_NotifBanner_Title">Enable notifications</string>
+    <string name="st_Whisper_NotifBanner_Desc">Get notified when friends message you — even when Toolz is in background.</string>
+    <string name="st_Whisper_NotifBanner_Enable">Enable</string>
+    <string name="st_Whisper_NotifBanner_NotNow">Not now</string>
+    <string name="st_Whisper_NotifBanner_GrantedTitle">Notifications on</string>
+    <string name="st_Whisper_NotifBanner_GrantedDesc">You\'ll get alerts for new messages</string>
+    <string name="st_Whisper_NotifBanner_Active">Active</string>
     <string name="st_AppSkin_section_title">APP SKIN</string>
     <string name="st_AppSkin_screen_title">App Skin</string>
     <string name="st_AppSkin_screen_subtitle">Icons, colors &amp; community skins</string>

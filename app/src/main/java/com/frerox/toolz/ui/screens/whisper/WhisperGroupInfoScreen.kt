@@ -79,7 +79,10 @@ fun WhisperGroupInfoScreen(
     onNavigateToPermissions: (String) -> Unit,
     viewModel: WhisperGroupInfoViewModel = hiltViewModel(),
 ) {
-    if (!groupsEnabled()) return
+    if (!groupsEnabled()) {
+        LaunchedEffect(Unit) { onNavigateBack() }
+        return
+    }
     // Member list + names are E2EE-derived too: screenshots/recents stay
     // blocked here (plain guard; no screenshot override lane on this screen).
     SecureWindow()

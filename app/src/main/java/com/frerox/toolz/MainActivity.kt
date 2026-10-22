@@ -1073,12 +1073,21 @@ fun ToolzNavHost(
         }
 
         // 2c. Handle Whisper Group Deep Links (Phase-2 groups).
+        // Groups are hidden in this release. The group surfaces stay in the
+        // codebase, but no deep link or push tap may reach them: both actions
+        // fall back to the Whisper hub, which no longer renders the section.
         if (latestIntent.action == "com.frerox.toolz.OPEN_WHISPER_GROUP_INVITES") {
             navController.navigate(Screen.Whisper.route)
             return@LaunchedEffect
         }
         if (latestIntent.action == "com.frerox.toolz.OPEN_WHISPER_GROUP") {
             val groupId = latestIntent.getStringExtra("groupId")?.trim()
+            if (!com.frerox.toolz.data.whisper.groupsEnabled()) {
+                navController.navigate(Screen.Whisper.route) {
+                    launchSingleTop = true
+                }
+                return@LaunchedEffect
+            }
             if (!groupId.isNullOrBlank() && groupId.length in 5..128 && groupId.matches(Regex("[a-zA-Z0-9_-]+"))) {
                 navController.navigate(Screen.WhisperGroupChat.createRoute(groupId))
                 return@LaunchedEffect
@@ -1086,9 +1095,16 @@ fun ToolzNavHost(
                 android.util.Log.w("MainActivity", "Invalid OPEN_WHISPER_GROUP groupId: $groupId")
             }
         }
-        // 2d. Daily Ups deep link (no extras to validate; the screen is flag-gated).
+        // 2d. Daily Ups deep link. Hidden in this release: the routes stay
+        // registered, but the link lands on the hub instead of a blank screen.
         if (latestIntent.action == "com.frerox.toolz.OPEN_WHISPER_DAILY_UPS") {
-            navController.navigate(Screen.WhisperDailyUps.createRoute())
+            if (com.frerox.toolz.data.whisper.WhisperDailyUpsConfig.ENABLED) {
+                navController.navigate(Screen.WhisperDailyUps.createRoute())
+            } else {
+                navController.navigate(Screen.Whisper.route) {
+                    launchSingleTop = true
+                }
+            }
             return@LaunchedEffect
         }
 
@@ -1825,14 +1841,23 @@ fun ToolzNavHost(
                     onNavigateToProfile = { userId ->
                         navController.navigate(Screen.WhisperUserProfile.createRoute(userId))
                     },
+                    // Hidden in this release: the callbacks stay wired so the
+                    // screens can be re-enabled from the compile flag alone,
+                    // but they can never be reached from the visible UI.
                     onNavigateToGroup = { groupId ->
-                        navController.navigate(Screen.WhisperGroupChat.createRoute(groupId))
+                        if (com.frerox.toolz.data.whisper.groupsEnabled()) {
+                            navController.navigate(Screen.WhisperGroupChat.createRoute(groupId))
+                        }
                     },
                     onNavigateToDailyUps = { ownerId ->
-                        navController.navigate(Screen.WhisperDailyUps.createRoute(ownerId))
+                        if (com.frerox.toolz.data.whisper.WhisperDailyUpsConfig.ENABLED) {
+                            navController.navigate(Screen.WhisperDailyUps.createRoute(ownerId))
+                        }
                     },
                     onNavigateToDailyUpsCompose = {
-                        navController.navigate(Screen.WhisperDailyUpsCompose.route)
+                        if (com.frerox.toolz.data.whisper.WhisperDailyUpsConfig.ENABLED) {
+                            navController.navigate(Screen.WhisperDailyUpsCompose.route)
+                        }
                     },
                     onLoggedOut = {
                         navController.navigate(Screen.WhisperAuth.route) {

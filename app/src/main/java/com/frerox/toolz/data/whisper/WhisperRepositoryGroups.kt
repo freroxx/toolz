@@ -55,13 +55,16 @@ import io.github.jan.supabase.realtime.postgresChangeFlow
 import io.github.jan.supabase.realtime.realtime
 import io.github.jan.supabase.postgrest.query.Order
 
-/** Compile-time gate: true in v1.1.7 dev builds (1.1.7 is unshipped — only dev
- * devices carry it). Server-side, every group write still requires
- * client_version_code >= 18, and the ship-day floor flip blocks <1.1.7
- * clients from all of Whisper — so the flag can stay true for good. */
+/** Compile-time gate for the Groups surface.
+ *
+ * Groups are intentionally hidden from the UI in this release: the feature is
+ * not ready to ship, so every group entry point (Chats section, group routes,
+ * deep links and push taps) is closed while the data layer, SQL, edge
+ * functions and all screen files stay in place for a later release.
+ * Server-side, every group write still requires client_version_code >= 18. */
 object WhisperGroupsConfig {
     /** Master switch — every group entry point must check this first. */
-    const val ENABLED = true
+    const val ENABLED = false
 
     /** Max members per group, mirrored by SQL (member-cap trigger) and UI. */
     const val MAX_MEMBERS = 12

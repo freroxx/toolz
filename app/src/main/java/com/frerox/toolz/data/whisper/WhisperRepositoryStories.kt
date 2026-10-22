@@ -58,10 +58,15 @@ import java.util.UUID
 // that opens them, and it never persists a plaintext descriptor or key.
 // ────────────────────────────────────────────────────────────────────────────
 
-/** Compile-time switchboard for the Daily Ups surface. Only [ENABLED] ships true. */
+/** Compile-time switchboard for the Daily Ups surface.
+ *
+ * Daily Ups are intentionally hidden from the UI in this release: the feature
+ * is not ready to ship, so the hub, composer, stories bar, routes and deep
+ * links are all closed while the data layer, SQL, edge functions and every
+ * screen file stay in place for a later release. */
 object WhisperDailyUpsConfig {
     /** Master kill switch for the whole feature surface. */
-    const val ENABLED = true
+    const val ENABLED = false
 
     /** Server re-writes expiry anyway; clients mirror 24h for labels. */
     const val TTL_MS = 24 * 60 * 60 * 1000L

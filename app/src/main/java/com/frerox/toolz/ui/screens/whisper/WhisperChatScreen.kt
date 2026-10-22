@@ -182,10 +182,8 @@ fun WhisperChatScreen(
                                 viewModel.setScreenshotBypass(enabling)
                                 toastState.show(
                                     context.getString(
-                                        // S-6 FIX: these two branches were swapped — enabling
-                                        // announced "disabled" and vice versa.
-                                        if (enabling) R.string.st_Whisper_Bypass_ProtectionOn
-                                        else R.string.st_Whisper_Bypass_ProtectionOff
+                                        if (enabling) R.string.st_Whisper_Bypass_ProtectionOff
+                                        else R.string.st_Whisper_Bypass_ProtectionOn
                                     ),
                                     WhisperToastType.SUCCESS
                                 )
@@ -234,9 +232,9 @@ fun WhisperChatScreen(
     val isAtBottom by remember(density) {
         derivedStateOf {
             // In reverseLayout, firstVisibleItemIndex is the index from the BOTTOM.
-            // Index 0 is the newest message. The scroll offset must also be near zero:
-            // a partially scrolled-away bottom row shouldn't count as "at bottom".
-            listState.firstVisibleItemIndex <= 1 && listState.firstVisibleItemScrollOffset < with(density) { 8.dp.toPx() }
+            // Index 0 is the newest message.
+            listState.firstVisibleItemIndex == 0 ||
+                (listState.firstVisibleItemIndex == 1 && listState.firstVisibleItemScrollOffset < with(density) { 8.dp.toPx() })
         }
     }
 
@@ -528,7 +526,7 @@ fun WhisperChatScreen(
                             Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Rounded.Shield, null, tint = MaterialTheme.colorScheme.onErrorContainer)
                                 Text(
-                                    stringResource(R.string.st_Whisper_Chat_KeyChanged, uiState.otherUser?.effectiveName ?: "Partner"),
+                                    stringResource(R.string.st_Whisper_Chat_KeyChanged, uiState.otherUser?.effectiveName ?: stringResource(R.string.st_Whisper_SomeoneDefault)),
                                     modifier = Modifier.weight(1f),
                                     color = MaterialTheme.colorScheme.onErrorContainer,
                                     style = MaterialTheme.typography.bodySmall

@@ -89,7 +89,10 @@ fun WhisperGroupPermissionsScreen(
     onNavigateBack: () -> Unit,
     viewModel: WhisperGroupPermissionsViewModel = hiltViewModel(),
 ) {
-    if (!groupsEnabled()) return
+    if (!groupsEnabled()) {
+        LaunchedEffect(Unit) { onNavigateBack() }
+        return
+    }
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val listState = rememberLazyListState()

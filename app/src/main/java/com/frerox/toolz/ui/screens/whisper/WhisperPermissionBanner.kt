@@ -23,9 +23,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.frerox.toolz.R
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.components.ToolzOutlinedExpressiveButton
 import com.frerox.toolz.ui.components.rememberToolzHapticFeedback
@@ -82,13 +84,13 @@ fun WhisperPermissionBanner(
                 }
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
-                        "Enable notifications",
+                        stringResource(R.string.st_Whisper_NotifBanner_Title),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Black,
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                     Text(
-                        "Get notified when friends message you — even when Toolz is in background.",
+                        stringResource(R.string.st_Whisper_NotifBanner_Desc),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.82f),
                         lineHeight = 16.sp
@@ -100,14 +102,14 @@ fun WhisperPermissionBanner(
                             shape = RoundedCornerShape(12.dp),
                             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
                         ) {
-                            Text("Enable", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text(stringResource(R.string.st_Whisper_NotifBanner_Enable), fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         }
                         ToolzOutlinedExpressiveButton(
                             onClick = { haptic.tick(); onDismiss() },
                             shape = RoundedCornerShape(12.dp),
                             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
                         ) {
-                            Text("Not now", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                            Text(stringResource(R.string.st_Whisper_NotifBanner_NotNow), fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                         }
                     }
                 }
@@ -141,13 +143,13 @@ fun WhisperPermissionBannerGranted(
                 }
             }
             Column(modifier = Modifier.weight(1f)) {
-                Text("Notifications on", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                Text("You'll get alerts for new messages", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f))
+                Text(stringResource(R.string.st_Whisper_NotifBanner_GrantedTitle), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.st_Whisper_NotifBanner_GrantedDesc), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f))
             }
             Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)) {
                 Row(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     Icon(Icons.Rounded.NotificationsActive, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
-                    Text("Active", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    Text(stringResource(R.string.st_Whisper_NotifBanner_Active), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                 }
             }
         }

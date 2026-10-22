@@ -143,7 +143,10 @@ fun WhisperDailyUpsScreen(
     ownerArg: String? = null,
     viewModel: WhisperDailyUpsViewModel = hiltViewModel(),
 ) {
-    if (!WhisperDailyUpsConfig.ENABLED) return
+    if (!WhisperDailyUpsConfig.ENABLED) {
+        LaunchedEffect(Unit) { onNavigateBack() }
+        return
+    }
     SecureWindow()
 
     val state by viewModel.uiState.collectAsStateWithLifecycle()

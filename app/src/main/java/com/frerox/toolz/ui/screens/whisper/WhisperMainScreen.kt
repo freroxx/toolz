@@ -1146,7 +1146,7 @@ private fun ConversationCard(
                         if (conversation.isMuted) {
                             Icon(
                                 Icons.Rounded.NotificationsOff,
-                                contentDescription = "Muted",
+                                contentDescription = stringResource(R.string.st_Whisper_Mute),
                                 tint = MaterialTheme.colorScheme.outline,
                                 modifier = Modifier.size(13.dp)
                             )
