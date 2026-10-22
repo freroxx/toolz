@@ -144,7 +144,7 @@ class PhoneCalendarImporter @Inject constructor(
                     val dtend: Long? = if (endIdx >= 0 && !cursor.isNull(endIdx)) cursor.getLong(endIdx) else null
                     val durStr: String? = if (durIdx >= 0 && !cursor.isNull(durIdx)) cursor.getString(durIdx) else null
 
-                    val endMs = dtend ?: durStr?.let { IcsParser.run { dtstart + (parseDurationPublic(it) ?: 3600_000L) } }
+                    val endMs = dtend ?: durStr?.let { dtstart + (parseDurationPublic(it) ?: 3600_000L) }
                     val durationMin = if (endMs != null) ((endMs - dtstart) / 60_000).toInt().coerceIn(1, 1440) else 60
 
                     val rawColor = if (colorIdx >= 0 && !cursor.isNull(colorIdx)) cursor.getInt(colorIdx)

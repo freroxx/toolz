@@ -147,14 +147,17 @@ object IcsParser {
             rruleToRecurrence.entries.find { rule.uppercase().startsWith(it.key) }?.value
         } ?: Recurrence.NONE
 
-        // Map event type heuristically from CATEGORIES or summary keywords
-        val categories = props["CATEGORIES"]?.uppercase() ?: ""
+        // Map event type heuristically from CATEGORIES or preserve custom category
+        val rawCat = props["CATEGORIES"]?.trim() ?: ""
+        val categories = rawCat.uppercase()
         val eventType = when {
             categories.contains("EXAM") || categories.contains("TEST") -> "EXAM"
+            categories.contains("EVALUATION") -> "EVALUATION"
             categories.contains("BIRTHDAY") -> "BIRTHDAY"
             categories.contains("MEETING") || categories.contains("CONFERENCE") -> "MEETING"
             categories.contains("HOLIDAY") -> "HOLIDAY"
             categories.contains("DEADLINE") -> "DEADLINE"
+            rawCat.isNotBlank() -> rawCat.split(',').first().trim()
             else -> "GENERAL"
         }
 
@@ -303,7 +306,7 @@ object IcsParser {
             if (end == start) { // single char larger than limit, just append it
                 end = start + Character.charCount(line.codePointAt(start))
             }
-            if (!first || prefix.isEmpty()) append(prefix)
+            append(prefix)
             append(line.substring(start, end))
             if (end < line.length) append("\r\n")
             start = end

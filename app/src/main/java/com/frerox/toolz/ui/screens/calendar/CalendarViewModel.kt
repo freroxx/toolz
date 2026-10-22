@@ -17,10 +17,14 @@
 
 package com.frerox.toolz.ui.screens.calendar
 
+import android.content.Context
 import android.graphics.Bitmap
+import android.net.Uri
 import android.util.Log
+import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.work.WorkManager
 import com.frerox.toolz.data.ai.AiConfig
 import com.frerox.toolz.data.ai.AiSettingsManager
 import com.frerox.toolz.data.ai.ChatRepository
@@ -28,14 +32,17 @@ import com.frerox.toolz.data.calendar.*
 import com.frerox.toolz.data.todo.TaskEntry
 import com.frerox.toolz.util.CalendarAlarmScheduler
 import com.frerox.toolz.util.TaskAlarmScheduler
+import com.frerox.toolz.worker.CalendarAutoSyncWorker
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import com.frerox.toolz.data.developer.FakeTasksSandbox
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 import javax.inject.Inject
@@ -84,6 +91,18 @@ data class CalendarUiState(
      * alongside the bad raw JSON for better self-correction context.
      */
     val lastUserPrompt: String           = "",
+    // Calendar Settings & Sync
+    val autoSyncEnabled: Boolean         = false,
+    val autoSyncIntervalHours: Int       = 6,
+    val firstDayOfWeek: Int              = Calendar.MONDAY,
+    val showWeekNumbers: Boolean         = false,
+    val calDavAccounts: List<CalDavSyncClient.CalDavAccount> = emptyList(),
+    val phoneCalendars: List<PhoneCalendarImporter.PhoneCalendar> = emptyList(),
+    val selectedPhoneCalendarIds: Set<Long> = emptySet(),
+    val userCalendars: List<UserCalendar> = CalendarSyncSettingsRepository.DEFAULT_CALENDARS,
+    val lastSyncMs: Long                 = 0L,
+    val isSyncing: Boolean               = false,
+    val settingsMessage: String?         = null,
 )
 
 // ─────────────────────────────────────────────────────────────
@@ -101,6 +120,10 @@ class CalendarViewModel @Inject constructor(
     private val settingsRepository: com.frerox.toolz.data.settings.SettingsRepository,
     private val moshi: Moshi,
     private val gate: com.frerox.toolz.data.developer.SpoofGate,
+    private val phoneImporter: PhoneCalendarImporter,
+    private val calDavClient: CalDavSyncClient,
+    private val calendarSyncSettings: CalendarSyncSettingsRepository,
+    @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
     // DEV-SPOOF: the calendar half of Tasks runs on the RAM fixture — event
@@ -185,6 +208,33 @@ class CalendarViewModel @Inject constructor(
         started      = SharingStarted.WhileSubscribed(5_000),
         initialValue = CalendarUiState(),
     )
+
+    init {
+        viewModelScope.launch {
+            calendarSyncSettings.autoSyncEnabled.collect { v -> _uiState.update { it.copy(autoSyncEnabled = v) } }
+        }
+        viewModelScope.launch {
+            calendarSyncSettings.autoSyncIntervalHours.collect { v -> _uiState.update { it.copy(autoSyncIntervalHours = v) } }
+        }
+        viewModelScope.launch {
+            calendarSyncSettings.firstDayOfWeek.collect { v -> _uiState.update { it.copy(firstDayOfWeek = v) } }
+        }
+        viewModelScope.launch {
+            calendarSyncSettings.showWeekNumbers.collect { v -> _uiState.update { it.copy(showWeekNumbers = v) } }
+        }
+        viewModelScope.launch {
+            calendarSyncSettings.calDavAccounts.collect { v -> _uiState.update { it.copy(calDavAccounts = v) } }
+        }
+        viewModelScope.launch {
+            calendarSyncSettings.selectedPhoneCalendarIds.collect { v -> _uiState.update { it.copy(selectedPhoneCalendarIds = v) } }
+        }
+        viewModelScope.launch {
+            calendarSyncSettings.userCalendars.collect { v -> _uiState.update { it.copy(userCalendars = v) } }
+        }
+        viewModelScope.launch {
+            calendarSyncSettings.lastSyncMs.collect { v -> _uiState.update { it.copy(lastSyncMs = v) } }
+        }
+    }
 
     // ─────────────────────────────────────────────────────────
     //  Date navigation
@@ -1058,5 +1108,280 @@ Please output ONLY the corrected raw JSON array now. No markdown, no prose.
         val hours = abs / 60
         val mins  = abs % 60
         return "UTC%s%02d:%02d".format(sign, hours, mins)
+    }
+
+    // ─────────────────────────────────────────────────────────
+    //  Calendar Settings & Sync Handlers
+    // ─────────────────────────────────────────────────────────
+
+    fun clearSettingsMessage() {
+        _uiState.update { it.copy(settingsMessage = null) }
+    }
+
+    fun loadPhoneCalendars() {
+        viewModelScope.launch {
+            val calendars = phoneImporter.getPhoneCalendars()
+            _uiState.update { it.copy(phoneCalendars = calendars) }
+        }
+    }
+
+    fun togglePhoneCalendar(calendarId: Long) {
+        viewModelScope.launch {
+            val current = _uiState.value.selectedPhoneCalendarIds.toMutableSet()
+            if (current.contains(calendarId)) {
+                current.remove(calendarId)
+            } else {
+                current.add(calendarId)
+            }
+            calendarSyncSettings.setSelectedPhoneCalendarIds(current)
+        }
+    }
+
+    fun importSelectedPhoneCalendars() {
+        val selected = _uiState.value.selectedPhoneCalendarIds
+        if (selected.isEmpty()) {
+            _uiState.update { it.copy(settingsMessage = "No phone calendars selected to import") }
+            return
+        }
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSyncing = true) }
+            runCatching {
+                val imported = phoneImporter.importFromCalendars(selected)
+                if (imported.isNotEmpty()) {
+                    repository.insertEventsBulk(imported)
+                    calendarSyncSettings.updateLastSyncMs()
+                    _uiState.update {
+                        it.copy(
+                            isSyncing = false,
+                            settingsMessage = "Imported ${imported.size} events from phone"
+                        )
+                    }
+                } else {
+                    _uiState.update {
+                        it.copy(
+                            isSyncing = false,
+                            settingsMessage = "No events found in selected phone calendars"
+                        )
+                    }
+                }
+            }.onFailure { e ->
+                _uiState.update {
+                    it.copy(
+                        isSyncing = false,
+                        settingsMessage = "Import failed: ${e.message}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun importIcsFromUri(uri: Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _uiState.update { it.copy(isSyncing = true) }
+            runCatching {
+                val content = context.contentResolver.openInputStream(uri)?.use { stream ->
+                    stream.bufferedReader().use { it.readText() }
+                } ?: throw IllegalArgumentException("Could not open file")
+
+                val events = IcsParser.parse(content)
+                if (events.isNotEmpty()) {
+                    repository.insertEventsBulk(events)
+                    _uiState.update {
+                        it.copy(
+                            isSyncing = false,
+                            settingsMessage = "Imported ${events.size} events from ICS"
+                        )
+                    }
+                } else {
+                    _uiState.update {
+                        it.copy(
+                            isSyncing = false,
+                            settingsMessage = "No valid events found in ICS file"
+                        )
+                    }
+                }
+            }.onFailure { e ->
+                _uiState.update {
+                    it.copy(
+                        isSyncing = false,
+                        settingsMessage = "ICS import failed: ${e.message}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun exportCalendarAsIcs(calendarCategory: String? = null, onReady: (Uri) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val allEvents = repository.getAllEventsSync()
+                val eventsToExport = if (calendarCategory.isNullOrBlank() || calendarCategory == "All") {
+                    allEvents
+                } else {
+                    allEvents.filter { it.eventType.equals(calendarCategory, ignoreCase = true) }
+                }
+                val calName = calendarCategory?.takeIf { it != "All" } ?: "Toolz Calendar"
+                val icsText = IcsParser.serialize(eventsToExport, calName)
+
+                val exportDir = File(context.cacheDir, "exports").apply { mkdirs() }
+                val exportFile = File(exportDir, "toolz_calendar_${System.currentTimeMillis()}.ics")
+                exportFile.writeText(icsText, Charsets.UTF_8)
+
+                val uri = FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    exportFile
+                )
+                withContext(Dispatchers.Main) {
+                    onReady(uri)
+                    _uiState.update { it.copy(settingsMessage = "Exported ${eventsToExport.size} events to ICS") }
+                }
+            }.onFailure { e ->
+                withContext(Dispatchers.Main) {
+                    _uiState.update { it.copy(settingsMessage = "Export failed: ${e.message}") }
+                }
+            }
+        }
+    }
+
+    fun addCalDavAccount(url: String, user: String, pass: String, name: String) {
+        viewModelScope.launch {
+            val account = CalDavSyncClient.CalDavAccount(
+                url = url.trim(),
+                username = user.trim(),
+                password = pass.trim(),
+                displayName = name.trim().ifBlank { url.trim() }
+            )
+            calendarSyncSettings.addCalDavAccount(account)
+            _uiState.update { it.copy(settingsMessage = "CalDAV account saved") }
+        }
+    }
+
+    fun removeCalDavAccount(accountId: String) {
+        viewModelScope.launch {
+            calendarSyncSettings.removeCalDavAccount(accountId)
+            _uiState.update { it.copy(settingsMessage = "CalDAV account removed") }
+        }
+    }
+
+    fun testCalDav(account: CalDavSyncClient.CalDavAccount, onResult: (String) -> Unit) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSyncing = true) }
+            val res = calDavClient.testConnection(account)
+            _uiState.update { it.copy(isSyncing = false) }
+            val msg = when (res) {
+                is CalDavSyncClient.SyncResult.Success -> res.message
+                is CalDavSyncClient.SyncResult.Failure -> "Failed: ${res.error}"
+            }
+            onResult(msg)
+        }
+    }
+
+    fun syncCalDavAccount(account: CalDavSyncClient.CalDavAccount) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSyncing = true) }
+            calDavClient.fetchEvents(account).fold(
+                onSuccess = { events ->
+                    if (events.isNotEmpty()) {
+                        repository.insertEventsBulk(events)
+                    }
+                    calendarSyncSettings.updateLastSyncMs()
+                    _uiState.update {
+                        it.copy(
+                            isSyncing = false,
+                            settingsMessage = "Synced ${events.size} events from ${account.displayName.ifBlank { account.url }}"
+                        )
+                    }
+                },
+                onFailure = { e ->
+                    _uiState.update {
+                        it.copy(
+                            isSyncing = false,
+                            settingsMessage = "CalDAV sync failed: ${e.message}"
+                        )
+                    }
+                }
+            )
+        }
+    }
+
+    fun syncAllNow() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSyncing = true) }
+            var count = 0
+            val phoneIds = _uiState.value.selectedPhoneCalendarIds
+            if (phoneIds.isNotEmpty()) {
+                val pEvents = phoneImporter.importFromCalendars(phoneIds)
+                if (pEvents.isNotEmpty()) {
+                    repository.insertEventsBulk(pEvents)
+                    count += pEvents.size
+                }
+            }
+            for (acc in _uiState.value.calDavAccounts) {
+                calDavClient.fetchEvents(acc).onSuccess { evs ->
+                    if (evs.isNotEmpty()) {
+                        repository.insertEventsBulk(evs)
+                        count += evs.size
+                    }
+                }
+            }
+            calendarSyncSettings.updateLastSyncMs()
+            _uiState.update {
+                it.copy(
+                    isSyncing = false,
+                    settingsMessage = "Sync complete. Merged $count events."
+                )
+            }
+        }
+    }
+
+    fun setAutoSyncEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            calendarSyncSettings.setAutoSyncEnabled(enabled)
+            val interval = _uiState.value.autoSyncIntervalHours
+            val wm = WorkManager.getInstance(context)
+            if (enabled) {
+                CalendarAutoSyncWorker.schedule(wm, interval)
+            } else {
+                CalendarAutoSyncWorker.cancel(wm)
+            }
+        }
+    }
+
+    fun setAutoSyncInterval(hours: Int) {
+        viewModelScope.launch {
+            calendarSyncSettings.setAutoSyncIntervalHours(hours)
+            if (_uiState.value.autoSyncEnabled) {
+                val wm = WorkManager.getInstance(context)
+                CalendarAutoSyncWorker.schedule(wm, hours)
+            }
+        }
+    }
+
+    fun setFirstDayOfWeek(day: Int) {
+        viewModelScope.launch {
+            calendarSyncSettings.setFirstDayOfWeek(day)
+        }
+    }
+
+    fun setShowWeekNumbers(show: Boolean) {
+        viewModelScope.launch {
+            calendarSyncSettings.setShowWeekNumbers(show)
+        }
+    }
+
+    fun addUserCalendar(name: String, color: String) {
+        viewModelScope.launch {
+            val cal = UserCalendar(name = name.trim(), color = color)
+            calendarSyncSettings.addUserCalendar(cal)
+            _uiState.update { it.copy(settingsMessage = "Calendar '$name' created") }
+        }
+    }
+
+    fun removeUserCalendar(calendarId: String) {
+        viewModelScope.launch {
+            calendarSyncSettings.removeUserCalendar(calendarId)
+            _uiState.update { it.copy(settingsMessage = "Calendar removed") }
+        }
     }
 }

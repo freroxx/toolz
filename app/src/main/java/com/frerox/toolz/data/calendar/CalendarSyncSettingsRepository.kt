@@ -26,6 +26,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import org.json.JSONArray
 import org.json.JSONObject
@@ -141,24 +142,14 @@ class CalendarSyncSettingsRepository @Inject constructor(
 
     // ── One-shot reads (for workers) ─────────────────────────────────────────
 
-    suspend fun getCalDavAccountsSnapshot(): List<CalDavSyncClient.CalDavAccount> {
-        var result = emptyList<CalDavSyncClient.CalDavAccount>()
-        ds.data.collect { prefs ->
-            result = parseAccounts(prefs[KEY_CALDAV_ACCOUNTS])
-            return@collect
-        }
-        return result
-    }
+    suspend fun getCalDavAccountsSnapshot(): List<CalDavSyncClient.CalDavAccount> =
+        ds.data.map { parseAccounts(it[KEY_CALDAV_ACCOUNTS]) }.first()
 
-    suspend fun getSelectedPhoneCalendarIdsSnapshot(): Set<Long> {
-        var result = emptySet<Long>()
-        ds.data.collect { prefs ->
-            result = prefs[KEY_PHONE_CAL_IDS]?.split(",")
+    suspend fun getSelectedPhoneCalendarIdsSnapshot(): Set<Long> =
+        ds.data.map { prefs ->
+            prefs[KEY_PHONE_CAL_IDS]?.split(",")
                 ?.mapNotNull { it.trim().toLongOrNull() }?.toSet() ?: emptySet()
-            return@collect
-        }
-        return result
-    }
+        }.first()
 
     suspend fun addUserCalendar(calendar: UserCalendar) {
         ds.edit { prefs ->

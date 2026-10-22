@@ -137,6 +137,7 @@ import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.School
 import androidx.compose.material.icons.rounded.Today
 import androidx.compose.material.icons.rounded.Update
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.ViewAgenda
 import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.Button
@@ -344,6 +345,7 @@ fun CalendarScreen(viewModel: CalendarViewModel = hiltViewModel()) {
     var showAiSheet    by remember { mutableStateOf(false) }
     var showAddDialog  by remember { mutableStateOf(false) }
     var showMonthPicker by remember { mutableStateOf(false) }
+    var showSettingsSheet by remember { mutableStateOf(false) }
     var aiPrompt       by remember { mutableStateOf("") }
     var editingEvent   by remember { mutableStateOf<EventEntry?>(null) }
     var longPressedDate by remember { mutableStateOf<Long?>(null) }
@@ -435,6 +437,10 @@ fun CalendarScreen(viewModel: CalendarViewModel = hiltViewModel()) {
                     onToggleView       = {
                         vibrationManager?.vibrateTick()
                         isMonthView = !isMonthView
+                    },
+                    onSettingsClick    = {
+                        vibrationManager?.vibrateTick()
+                        showSettingsSheet = true
                     },
                     scrollBehavior     = scrollBehavior
                 )
@@ -624,6 +630,14 @@ fun CalendarScreen(viewModel: CalendarViewModel = hiltViewModel()) {
             }
         }
 
+        // Calendar Settings sheet
+        if (showSettingsSheet) {
+            CalendarSettingsSheet(
+                onDismiss = { showSettingsSheet = false },
+                viewModel = viewModel,
+            )
+        }
+
         // CAL-P2-05: surface Retry for parse failures, then clear the error.
         uiState.errorMessage?.let { msg ->
             val canRetry = uiState.rawAiFailureResponse != null
@@ -663,6 +677,7 @@ private fun CalendarTopBar(
     onToday: () -> Unit,
     onMonthPickerClick: () -> Unit,
     onToggleView: () -> Unit,
+    onSettingsClick: () -> Unit,
     scrollBehavior: androidx.compose.material3.TopAppBarScrollBehavior? = null,
 ) {
     val monthYear = remember(selectedDate) {
@@ -779,6 +794,21 @@ private fun CalendarTopBar(
                                 modifier = Modifier.size(17.dp)
                             )
                         }
+                    }
+                }
+                // Settings button
+                Surface(
+                    onClick = onSettingsClick,
+                    shape   = SmallExpressiveShape,
+                    color   = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                        Icon(
+                            Icons.Rounded.Settings,
+                            contentDescription = "Calendar Settings",
+                            modifier = Modifier.size(17.dp)
+                        )
                     }
                 }
             }

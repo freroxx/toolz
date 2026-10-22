@@ -334,50 +334,7 @@ private fun DurationSlider(
     }
 }
 
-/**
- * P-P1-02: ringtone picker — ACTION_OPEN_DOCUMENT + persistable read grant.
- * Validates via openFileDescriptor in the VM before save; service falls back
- * to the default alarm sound when the grant is revoked.
- */
-@Composable
-private fun RingtonePickerRow(
-    currentUri: String?,
-    activeColor: Color,
-    onRingtoneChanged: (String) -> Unit,
-) {
-    val context = LocalContext.current
-    val launcher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        if (uri != null) {
-            try {
-                context.contentResolver.takePersistableUriPermission(
-                    uri,
-                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
-                )
-            } catch (_: Exception) {}
-            onRingtoneChanged(uri.toString())
-        }
-    }
-    PreferenceRow(
-        title = "Alarm sound",
-        subtitle = if (currentUri.isNullOrBlank()) "System default" else "Custom sound",
-        icon = Icons.Rounded.MusicNote,
-        activeColor = activeColor,
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (!currentUri.isNullOrBlank()) {
-                TextButton(onClick = { onRingtoneChanged("") }) { Text("Default") }
-            }
-            ToolzOutlinedExpressiveButton(
-                onClick = { launcher.launch(arrayOf("audio/*")) },
-                shape = SmallExpressiveShape,
-            ) {
-                Text("Pick sound")
-            }
-        }
-    }
-}
+
 
 @Composable
 private fun PreferenceRow(
