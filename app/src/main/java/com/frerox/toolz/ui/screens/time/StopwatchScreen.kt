@@ -23,6 +23,7 @@ import com.frerox.toolz.R
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -31,13 +32,16 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -59,8 +63,9 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Speed
-import androidx.compose.material.icons.rounded.Timer
+import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.Timeline
+import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -85,6 +90,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalConfiguration
@@ -258,17 +266,16 @@ private fun StopwatchContent(
     contentPadding: PaddingValues,
 ) {
     val performanceMode = LocalPerformanceMode.current
-    // Single scroll container (S-P1-02): no outer verticalScroll fighting the laps
-    // LazyColumn. Dial + stats are fixed; the laps list takes remaining space.
+    // Single scroll container: Dial + stats are fixed; the laps timeline takes all remaining space.
     Column(
         modifier = Modifier
             .fillMaxSize()
             .toolzBackground()
             .padding(top = contentPadding.calculateTopPadding())
-            .then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 16.dp, bottom = 28.dp))
+            .then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 12.dp, bottom = 24.dp))
             .padding(horizontal = 20.dp)
-            .padding(bottom = 116.dp),
-        verticalArrangement = Arrangement.spacedBy(18.dp),
+            .padding(bottom = 100.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         StaggeredEntrance(index = 0) {
             StopwatchDial(
@@ -279,6 +286,7 @@ private fun StopwatchContent(
                 lastLapAt = state.lastLapAt,
                 lapFlashAt = lapFlashAt,
                 accent = accent,
+                hasLaps = state.laps.isNotEmpty(),
             )
         }
         StaggeredEntrance(index = 1) {
@@ -292,7 +300,9 @@ private fun StopwatchContent(
             laps = state.laps,
             showMilliseconds = state.showMilliseconds,
             accent = accent,
-            modifier = Modifier.weight(1f, fill = false),
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f, fill = true),
         )
     }
 }
@@ -306,6 +316,7 @@ private fun StopwatchDial(
     lastLapAt: Long,
     lapFlashAt: Long,
     accent: Color,
+    hasLaps: Boolean = false,
 ) {
     val lapPulse by animateFloatAsState(
         targetValue = if (lapFlashAt == lastLapAt && lapFlashAt > 0L) 1f else 0f,
@@ -313,34 +324,70 @@ private fun StopwatchDial(
         label = "lapPulse",
     )
     val sweepProgress = ((elapsedTime % 60_000L).toFloat() / 60_000f).coerceIn(0f, 1f)
-    // Hours widen the string — step down one type size so H:MM:SS still fits.
-    // Toggling ms must NOT resize the whole (fraction is inline at ~0.5x).
     val hasHours = elapsedTime >= 3_600_000L
-    val timeStyle = if (hasHours) {
-        MaterialTheme.typography.displaySmall.copy(
-            fontWeight = FontWeight.Black,
+
+    val targetDialSize = if (hasLaps) 205.dp else 256.dp
+    val dialSize by animateDpAsState(
+        targetValue = targetDialSize,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "stopwatchDialSize",
+    )
+
+    val timeStyle = if (hasLaps) {
+        if (hasHours) {
+            MaterialTheme.typography.titleLarge.copy(
+                fontWeight = FontWeight.Black,
+                fontFeatureSettings = "tnum",
+            )
+        } else {
+            MaterialTheme.typography.headlineLarge.copy(
+                fontWeight = FontWeight.Black,
+                fontFeatureSettings = "tnum",
+            )
+        }
+    } else {
+        if (hasHours) {
+            MaterialTheme.typography.displaySmall.copy(
+                fontWeight = FontWeight.Black,
+                fontFeatureSettings = "tnum",
+            )
+        } else {
+            MaterialTheme.typography.displayMedium.copy(
+                fontWeight = FontWeight.Black,
+                fontFeatureSettings = "tnum",
+            )
+        }
+    }
+
+    val fractionStyle = if (hasLaps) {
+        MaterialTheme.typography.bodyLarge.copy(
+            fontWeight = FontWeight.Bold,
             fontFeatureSettings = "tnum",
         )
     } else {
-        MaterialTheme.typography.displayMedium.copy(
-            fontWeight = FontWeight.Black,
+        MaterialTheme.typography.titleLarge.copy(
+            fontWeight = FontWeight.Bold,
             fontFeatureSettings = "tnum",
         )
     }
 
     BoxWithConstraints(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        val dialSize = maxWidth.coerceAtMost(330.dp)
-        Box(modifier = Modifier.size(dialSize), contentAlignment = Alignment.Center) {
+        val constrainedSize = dialSize.coerceAtMost(maxWidth)
+        Box(modifier = Modifier.size(constrainedSize), contentAlignment = Alignment.Center) {
+            val surfacePadding = if (hasLaps) 14.dp else 20.dp
+            val innerPadding = if (hasLaps) 10.dp else 20.dp
             Surface(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(22.dp),
+                    .padding(surfacePadding),
                 shape = CircleShape,
                 color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.72f),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
             ) {
                 Column(
-                    modifier = Modifier.fillMaxSize().padding(24.dp),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
@@ -350,24 +397,23 @@ private fun StopwatchDial(
                         isRunning = isRunning,
                         accent = accent,
                         style = timeStyle,
-                        fractionStyle = MaterialTheme.typography.titleLarge.copy(
-                            fontWeight = FontWeight.Bold,
-                            fontFeatureSettings = "tnum",
-                        ),
+                        fractionStyle = fractionStyle,
                         ceilSeconds = false,
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    Spacer(Modifier.height(8.dp))
                     AnimatedVisibility(
                         visible = showStatusPill,
                         enter = fadeIn() + scaleIn(),
                         exit = fadeOut() + scaleOut(),
                     ) {
-                        ExpressiveStatePill(
-                            text = if (isRunning) stringResource(R.string.st_StopwatchScreen_y5z6) else if (elapsedTime > 0L) stringResource(R.string.st_StopwatchScreen_a7b8) else stringResource(R.string.st_StopwatchScreen_c9d0),
-                            icon = if (isRunning) Icons.Rounded.Timer else Icons.Rounded.Timeline,
-                            color = accent,
-                        )
+                        Column {
+                            Spacer(Modifier.height(if (hasLaps) 4.dp else 8.dp))
+                            ExpressiveStatePill(
+                                text = if (isRunning) stringResource(R.string.st_StopwatchScreen_y5z6) else if (elapsedTime > 0L) stringResource(R.string.st_StopwatchScreen_a7b8) else stringResource(R.string.st_StopwatchScreen_c9d0),
+                                icon = if (isRunning) Icons.Rounded.Timer else Icons.Rounded.Timeline,
+                                color = accent,
+                            )
+                        }
                     }
                 }
             }
@@ -390,23 +436,21 @@ private fun StopwatchStatsRow(
     showMilliseconds: Boolean,
     accent: Color,
 ) {
-    // Hoisted once per laps change (S-P1-02) — never recomputed per tick/item.
     val lapEntries = remember(laps) { laps.toLapEntries() }
     val bestDuration = remember(lapEntries) { lapEntries.minOfOrNull { it.duration } }
     val locale = safeStopwatchLocale()
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         StopwatchMetricCard(
             modifier = Modifier.weight(1f),
-            icon = { Icon(Icons.Rounded.Flag, contentDescription = null) },
+            icon = { Icon(Icons.Rounded.Flag, contentDescription = null, modifier = Modifier.size(20.dp)) },
             label = stringResource(R.string.st_StopwatchScreen_e1f2),
             value = laps.size.toString(),
             accent = accent,
         )
         StopwatchMetricCard(
             modifier = Modifier.weight(1f),
-            icon = { Icon(Icons.Rounded.Speed, contentDescription = null) },
+            icon = { Icon(Icons.Rounded.Speed, contentDescription = null, modifier = Modifier.size(20.dp)) },
             label = stringResource(R.string.st_StopwatchScreen_g3h4),
-            // S-P2-01: honor the ms setting here too (was hardcoded false).
             value = bestDuration?.let { formatStopwatchTime(it, showMilliseconds, locale) } ?: "--:--",
             accent = MaterialTheme.colorScheme.secondary,
         )
@@ -428,15 +472,38 @@ private fun StopwatchMetricCard(
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.78f),
         elevation = 0.dp,
     ) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Surface(shape = SmallExpressiveShape, color = accent.copy(alpha = 0.14f), contentColor = accent) {
-                // 48dp touch-target guidance (S-P2-04).
-                Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Surface(
+                shape = SmallExpressiveShape,
+                color = accent.copy(alpha = 0.14f),
+                contentColor = accent,
+            ) {
+                Box(modifier = Modifier.size(38.dp), contentAlignment = Alignment.Center) {
                     icon()
                 }
             }
-            Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = value,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Black,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
@@ -451,7 +518,9 @@ private fun StopwatchLapsPanel(
     val lapEntries = remember(laps) { laps.toLapEntries() }
     val bestDuration = remember(lapEntries) { lapEntries.minOfOrNull { it.duration } }
     val worstDuration = remember(lapEntries) { lapEntries.maxOfOrNull { it.duration } }
+    val maxDuration = remember(lapEntries) { lapEntries.maxOfOrNull { it.duration } ?: 1L }
     val locale = safeStopwatchLocale()
+
     ExpressiveCard(
         onClick = {},
         modifier = modifier.fillMaxWidth(),
@@ -459,56 +528,112 @@ private fun StopwatchLapsPanel(
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.72f),
         elevation = 0.dp,
     ) {
-        Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(stringResource(R.string.st_StopwatchScreen_i5j6), modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                Text(lapEntries.size.toString(), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = accent)
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+        ) {
+            // Header
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 10.dp),
+            ) {
+                Icon(
+                    Icons.Rounded.Timeline,
+                    contentDescription = null,
+                    tint = accent,
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    stringResource(R.string.st_StopwatchScreen_i5j6),
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Black,
+                )
+                if (lapEntries.isNotEmpty()) {
+                    Surface(
+                        shape = CircleShape,
+                        color = accent.copy(alpha = 0.14f),
+                        contentColor = accent,
+                    ) {
+                        Text(
+                            text = lapEntries.size.toString(),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Black,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        )
+                    }
+                }
             }
+
             if (lapEntries.isEmpty()) {
-                Box(modifier = Modifier.fillMaxWidth().height(124.dp), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Rounded.Flag, contentDescription = null, modifier = Modifier.size(42.dp), tint = accent.copy(alpha = 0.45f))
-                        Spacer(Modifier.height(10.dp))
-                        Text(stringResource(R.string.st_StopwatchScreen_k7l8), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f),
+                            modifier = Modifier.size(48.dp),
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Rounded.Flag,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(24.dp),
+                                    tint = accent.copy(alpha = 0.6f),
+                                )
+                            }
+                        }
+                        Text(
+                            stringResource(R.string.st_StopwatchScreen_k7l8),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
             } else {
-                // Virtualized for 200 laps without jank (S-P1-02); fills remaining space.
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(1f, fill = false),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                        .weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    contentPadding = PaddingValues(vertical = 4.dp),
                 ) {
                     itemsIndexed(
-                        lapEntries,
-                        // Stable across inserts/resets (S-P1-02): totals are unique
-                        // monotonic timestamps, unlike positional numbers.
+                        items = lapEntries,
                         key = { _, item -> "${item.total}_${item.number}" },
                     ) { index, lap ->
-                        // Entrance animation only for small lists — never re-animate
-                        // 200 rows on every insert (S-P1-02).
-                        if (lapEntries.size <= 20) {
-                            StaggeredEntrance(index = index % 5) {
-                                StopwatchLapCard(
-                                    lap = lap,
-                                    isBest = lap.duration == bestDuration,
-                                    isSlowest = lap.duration == worstDuration,
-                                    accent = accent,
-                                    showMilliseconds = showMilliseconds,
-                                    locale = locale,
-                                )
-                            }
-                        } else {
-                            StopwatchLapCard(
-                                lap = lap,
-                                isBest = lap.duration == bestDuration,
-                                isSlowest = lap.duration == worstDuration,
-                                accent = accent,
-                                showMilliseconds = showMilliseconds,
-                                locale = locale,
-                            )
-                        }
+                        val isBest = lap.duration == bestDuration && lapEntries.size > 1
+                        val isSlowest = lap.duration == worstDuration && lapEntries.size > 1 && bestDuration != worstDuration
+                        val diffToBest = if (bestDuration != null && !isBest && lapEntries.size > 1) {
+                            lap.duration - bestDuration
+                        } else null
+
+                        StopwatchTimelineLapItem(
+                            lap = lap,
+                            isBest = isBest,
+                            isSlowest = isSlowest,
+                            diffToBest = diffToBest,
+                            maxDuration = maxDuration,
+                            isFirstItem = index == 0,
+                            isLastItem = index == lapEntries.lastIndex,
+                            hasMultipleItems = lapEntries.size > 1,
+                            accent = accent,
+                            showMilliseconds = showMilliseconds,
+                            locale = locale,
+                            modifier = Modifier.animateItem(),
+                        )
                     }
                 }
             }
@@ -517,51 +642,191 @@ private fun StopwatchLapsPanel(
 }
 
 @Composable
-private fun StopwatchLapCard(
+private fun StopwatchTimelineLapItem(
     lap: LapEntry,
     isBest: Boolean,
     isSlowest: Boolean,
+    diffToBest: Long?,
+    maxDuration: Long,
+    isFirstItem: Boolean,
+    isLastItem: Boolean,
+    hasMultipleItems: Boolean,
     accent: Color,
     showMilliseconds: Boolean,
     locale: Locale,
+    modifier: Modifier = Modifier,
 ) {
-    val markerColor = when {
-        isBest -> MaterialTheme.colorScheme.primary
-        isSlowest -> MaterialTheme.colorScheme.tertiary
-        else -> accent
+    val nodeContainerColor = when {
+        isBest -> MaterialTheme.colorScheme.primaryContainer
+        isSlowest -> MaterialTheme.colorScheme.tertiaryContainer
+        isFirstItem -> accent.copy(alpha = 0.18f)
+        else -> MaterialTheme.colorScheme.surfaceContainerHighest
     }
-    ExpressiveCard(
-        onClick = {},
-        modifier = Modifier.fillMaxWidth(),
-        shape = MediumExpressiveShape,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.72f),
-        border = BorderStroke(1.dp, markerColor.copy(alpha = 0.16f)),
-        elevation = 0.dp,
+    val nodeContentColor = when {
+        isBest -> MaterialTheme.colorScheme.onPrimaryContainer
+        isSlowest -> MaterialTheme.colorScheme.onTertiaryContainer
+        isFirstItem -> accent
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val cardBackgroundColor = when {
+        isBest -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.14f)
+        isSlowest -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.12f)
+        else -> MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.72f)
+    }
+    val cardBorder = when {
+        isBest -> BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.28f))
+        isSlowest -> BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.24f))
+        else -> BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+    }
+    val railColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(IntrinsicSize.Min),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Surface(shape = SmallExpressiveShape, color = markerColor.copy(alpha = 0.14f), contentColor = markerColor) {
-                Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-                    Text(lap.number.toString(), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+        // Timeline node with connector rail
+        Box(
+            modifier = Modifier
+                .width(34.dp)
+                .fillMaxHeight()
+                .drawBehind {
+                    if (hasMultipleItems) {
+                        val startY = if (isFirstItem) size.height / 2 else 0f
+                        val endY = if (isLastItem) size.height / 2 else size.height
+                        drawLine(
+                            color = railColor,
+                            start = Offset(size.width / 2, startY),
+                            end = Offset(size.width / 2, endY),
+                            strokeWidth = 2.dp.toPx(),
+                            cap = StrokeCap.Round,
+                        )
+                    }
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            Surface(
+                shape = CircleShape,
+                color = nodeContainerColor,
+                contentColor = nodeContentColor,
+                modifier = Modifier.size(28.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    if (isBest) {
+                        Icon(
+                            Icons.Rounded.Star,
+                            contentDescription = stringResource(R.string.st_StopwatchScreen_g3h4),
+                            modifier = Modifier.size(15.dp),
+                        )
+                    } else {
+                        Text(
+                            text = lap.number.toString(),
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontFeatureSettings = "tnum",
+                            ),
+                            fontWeight = FontWeight.Black,
+                        )
+                    }
                 }
             }
-            Spacer(Modifier.width(14.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(stringResource(R.string.st_StopwatchScreen_m9n0), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(
-                    formatStopwatchTime(lap.duration, showMilliseconds, locale),
-                    style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Monospace),
-                    fontWeight = FontWeight.Black,
-                    maxLines = 1,
-                )
-            }
-            Column(horizontalAlignment = Alignment.End) {
-                Text(if (isBest) stringResource(R.string.st_StopwatchScreen_g3h4) else if (isSlowest) stringResource(R.string.st_StopwatchScreen_o1p2) else stringResource(R.string.st_StopwatchScreen_q3r4), style = MaterialTheme.typography.labelSmall, color = markerColor, fontWeight = FontWeight.Black)
-                Text(
-                    formatStopwatchTime(lap.total, showMilliseconds, locale),
-                    style = MaterialTheme.typography.labelLarge.copy(fontFamily = FontFamily.Monospace),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontWeight = FontWeight.Bold,
-                )
+        }
+
+        Spacer(Modifier.width(8.dp))
+
+        // Lap data card
+        Surface(
+            modifier = Modifier.weight(1f),
+            shape = MediumExpressiveShape,
+            color = cardBackgroundColor,
+            border = cardBorder,
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // Split time and diff
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(
+                            text = formatStopwatchTime(lap.duration, showMilliseconds, locale),
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontFamily = FontFamily.Monospace,
+                                fontFeatureSettings = "tnum",
+                            ),
+                            fontWeight = FontWeight.Black,
+                            color = if (isBest) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                        )
+                        if (isBest) {
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                                contentColor = MaterialTheme.colorScheme.primary,
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.st_StopwatchScreen_g3h4).uppercase(locale),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Black,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+                                )
+                            }
+                        } else if (diffToBest != null) {
+                            Text(
+                                text = "+${formatDiff(diffToBest, showMilliseconds, locale)}",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontFamily = FontFamily.Monospace,
+                                    fontFeatureSettings = "tnum",
+                                ),
+                                fontWeight = FontWeight.Bold,
+                                color = if (isSlowest) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                            )
+                        }
+                    }
+
+                    // Total elapsed time
+                    Text(
+                        text = formatStopwatchTime(lap.total, showMilliseconds, locale),
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontFeatureSettings = "tnum",
+                        ),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+
+                // Relative duration bar across laps
+                if (hasMultipleItems && maxDuration > 0L) {
+                    val ratio = (lap.duration.toFloat() / maxDuration.toFloat()).coerceIn(0.04f, 1f)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(3.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.45f))
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(ratio)
+                                .fillMaxHeight()
+                                .clip(CircleShape)
+                                .background(
+                                    when {
+                                        isBest -> MaterialTheme.colorScheme.primary
+                                        isSlowest -> MaterialTheme.colorScheme.tertiary.copy(alpha = 0.85f)
+                                        else -> accent.copy(alpha = 0.45f)
+                                    }
+                                )
+                        )
+                    }
+                }
             }
         }
     }
@@ -679,5 +944,27 @@ private fun formatStopwatchTime(timeMillis: Long, showMilliseconds: Boolean, loc
         showMilliseconds -> String.format(locale, "%02d:%02d.%02d", minutes, seconds, centis)
         hours > 0 -> String.format(locale, "%d:%02d:%02d", hours, minutes, seconds)
         else -> String.format(locale, "%02d:%02d", minutes, seconds)
+    }
+}
+
+/** Formats split difference relative to best lap time (e.g. "+0.42s" or "+1:02.14"). */
+private fun formatDiff(diffMillis: Long, showMilliseconds: Boolean, locale: Locale): String {
+    val safe = diffMillis.coerceAtLeast(0L)
+    val totalSeconds = safe / 1000
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    val centis = (safe % 1000) / 10
+    return if (minutes > 0) {
+        if (showMilliseconds) {
+            String.format(locale, "%d:%02d.%02d", minutes, seconds, centis)
+        } else {
+            String.format(locale, "%d:%02ds", minutes, seconds)
+        }
+    } else {
+        if (showMilliseconds) {
+            String.format(locale, "%d.%02ds", seconds, centis)
+        } else {
+            String.format(locale, "%ds", seconds)
+        }
     }
 }
