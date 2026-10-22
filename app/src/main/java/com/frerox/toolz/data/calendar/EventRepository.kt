@@ -184,6 +184,8 @@ class EventRepository @Inject constructor(
 
     suspend fun insertEvent(event: EventEntry) = eventDao.insertEvent(event)
     
+    suspend fun insertEventsBulk(events: List<EventEntry>) = eventDao.insertEventsTx(events)
+    
     suspend fun updateEvent(event: EventEntry) = eventDao.updateEvent(event)
 
     suspend fun deleteEvent(eventId: Int) = eventDao.deleteEvent(eventId)

@@ -24,8 +24,8 @@ import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * DEV-SPOOF: RAM-only Toolz news backlog. Powers the news screen (history,
- * search, priorities), the dashboard popup and the unread counter in demo
- * mode — no feed fetch, no Room, no real notifications.
+ * search, priorities), the dashboard popup and the unread counter while the
+ * sandbox is active — no feed fetch, no Room, no real notifications.
  */
 object FakeNewsSandbox {
 
@@ -48,7 +48,7 @@ object FakeNewsSandbox {
         seen.value = emptySet()
     }
 
-    /** DEV-SPOOF: seeds a believable editorial backlog on every demo arm. */
+    /** DEV-SPOOF: seeds a believable editorial backlog whenever the sandbox activates. */
     fun arm() {
         seen.value = emptySet()
         val now = System.currentTimeMillis()
@@ -74,47 +74,47 @@ object FakeNewsSandbox {
 
         items.value = listOf(
             item(
-                "demo-tip-demo-mode",
-                "Toolz Demo Mode is here",
-                "Every tool can now run on fake local data — perfect for showcasing. No watermarks, no real data touched. Long-press any starred dashboard card to exit a demo.",
+                "fixture-tip-developer-mode",
+                "Developer Mode is here",
+                "Every tool can now run on local fixture data — useful for showcasing. No watermarks, no real data touched. Long-press any starred dashboard card to turn its sandbox off.",
                 "update", pinned = true, ageMs = 2 * hour,
                 actionLabel = "Open developer options", actionUrl = "toolz://developer",
             ),
             item(
-                "demo-tip-whisper-local",
+                "fixture-tip-whisper-local",
                 "Whisper runs fully local",
                 "The private chat sandbox now needs no accounts, no network and no push relay. Everything is simulated on-device.",
                 "update", ageMs = 1 * day,
                 actionLabel = "Try Whisper",
             ),
             item(
-                "demo-fix-cleaner-fixture",
-                "Cleaner got a demo overhaul",
-                "The file cleaner demo now ships with fake scan results, RAM trash and undo — the demo deletes nothing real.",
+                "fixture-fix-cleaner-sandbox",
+                "Cleaner got a sandbox overhaul",
+                "The file cleaner sandbox now ships with fixture scan results, RAM trash and undo — it never deletes real files.",
                 "release", ageMs = 2 * day,
             ),
             item(
-                "demo-event-stickers",
+                "fixture-event-stickers",
                 "Skin of the week: Frosted Neon",
                 "The community chip contest winner ships with the winter theme pack. Preview it from Settings → App skin.",
                 "community", ageMs = 3 * day,
             ),
             item(
-                "demo-maint-sync",
+                "fixture-maint-sync",
                 "Maintenance window tonight",
-                "Demo notice: 02:00–03:00 local, cloud mirrors are refreshed from the editorial feed.",
+                "Scheduled: 02:00–03:00 local, cloud mirrors are refreshed from the editorial feed.",
                 "info", ageMs = 4 * day,
             ),
             item(
-                "demo-outage-2026-01",
+                "fixture-outage-2026-01",
                 "(Resolved) Brief mirror outage",
                 "A regional mirror flaked on Oct 3; all regions confirmed healthy. Kept for transparency.",
                 "info", ageMs = 14 * day,
             ),
             item(
-                "demo-tip-qr",
+                "fixture-tip-qr",
                 "Scanner payloads rotate",
-                "The scanner demo now shows a different payload every open, so quick showcases tell a richer story.",
+                "The scanner sandbox now shows a different payload every open, so quick showcases tell a richer story.",
                 "release", ageMs = 16 * day,
             ),
         )

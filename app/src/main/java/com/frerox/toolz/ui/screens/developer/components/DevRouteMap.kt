@@ -1,19 +1,16 @@
 /*
  * Copyright (C) 2026 Toolz Contributors
  *
- * Route → demo-tool mapping + (formerly) the watermark overlay. WATERMARKS ARE
- * GONE: demo mode is silent by design — the fake data IS the giveaway, and a
- * banner on every screen defeats the purpose of a realistic showcase. The
- * routeToDevTool map below stays: the dashboard star logic and console reuse
- * it as the single source of truth.
+ * Single source of truth for the route → sandboxed-tool map. The console's
+ * screen launcher, the dashboard star, and the long-press dialog all use it.
+ * On-screen sandbox watermarks were removed: fixture data is intentionally silent.
  */
 
 package com.frerox.toolz.ui.screens.developer.components
 
-import androidx.compose.runtime.Composable
 import com.frerox.toolz.data.developer.DevToolId
 
-/** Maps a nav route (without args) to its spoofable tool, or null. */
+/** Maps a nav route (with optional args) to its sandboxed tool, or null. */
 fun routeToDevTool(route: String?): DevToolId? {
     val base = route?.substringBefore("?")?.substringBefore("/") ?: return null
     return when (base) {
@@ -42,38 +39,4 @@ fun routeToDevTool(route: String?): DevToolId? {
         "flashlight", "screen_light", "caffeinate", "purge_shot" -> DevToolId.SYSTEM
         else -> null
     }
-}
-
-/**
- * Kept for call-site compatibility (mounted around the NavHost and per-screen
- * hosts) but renders CONTENT ONLY — no banner, no overlay, nothing appears on
- * tool screens while demo mode is armed.
- */
-@Composable
-fun SpoofWatermarkOverlay(
-    currentRoute: String?,
-    onOpenControls: (() -> Unit)? = null,
-    content: @Composable () -> Unit,
-) {
-    content()
-}
-
-/** NavController overload: observes the back stack itself. */
-@Composable
-fun SpoofWatermarkOverlay(
-    navController: androidx.navigation.NavHostController,
-    onOpenControls: () -> Unit,
-    content: @Composable () -> Unit,
-) {
-    content()
-}
-
-/** Per-screen host variant — content only, no banner. */
-@Composable
-fun SandboxWatermarkHost(
-    tool: DevToolId,
-    onOpenControls: (() -> Unit)? = null,
-    content: @Composable () -> Unit,
-) {
-    content()
 }

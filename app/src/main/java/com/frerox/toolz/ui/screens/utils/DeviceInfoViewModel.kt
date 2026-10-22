@@ -189,15 +189,15 @@ class DeviceInfoViewModel @Inject constructor(
     }
 
     private fun emitSpoof() {
-        // DEV-SPOOF fixture: flagship-that-is-almost-full. RAM-only, zero network.
+        // Fixture: flagship that is almost full. RAM-only, zero network.
         val p = gate.params.value
         val base = try { _uiState.value.localDevice } catch (_: Exception) { null }
         val fake = base?.copy(
-            brand = "Google (SPOOF)",
+            brand = "Google (fixture)",
             model = p.deviceModel,
-            device = "spoof_panther",
-            hardware = "spoof_qcom",
-            soc = "Snapdragon 8 Gen 4 (SPOOF)",
+            device = "fixture_panther",
+            hardware = "fixture_qcom",
+            soc = "Snapdragon 8 Gen 4 (fixture)",
             totalRam = 16L * 1024 * 1024 * 1024,
             availRam = 214L * 1024 * 1024,
             totalInternal = 512L * 1024 * 1024 * 1024,

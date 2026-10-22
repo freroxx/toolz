@@ -331,6 +331,12 @@ class ToolService : Service() {
         }
 
         serviceScope.launch {
+            try {
+                isGlobalNotificationsEnabled = settingsRepository.notificationsEnabled.first()
+                isTimerNotificationsEnabled = settingsRepository.timerNotifications.first()
+                isPomodoroNotificationsEnabled = settingsRepository.pomodoroNotifications.first()
+                isBackgroundNotificationsEnabled = settingsRepository.backgroundNotificationsEnabled.first()
+            } catch (_: Exception) {}
             combine(
                 settingsRepository.notificationsEnabled,
                 settingsRepository.timerNotifications,
@@ -343,6 +349,9 @@ class ToolService : Service() {
                 isTimerNotificationsEnabled = flags[1]
                 isPomodoroNotificationsEnabled = flags[2]
                 isBackgroundNotificationsEnabled = flags[3]
+                if (!isTimerNotificationsEnabled && _isTimerRinging.value) {
+                    stopTimerAlarmOnly()
+                }
                 refreshNotifications()
             }
         }
@@ -949,7 +958,9 @@ class ToolService : Service() {
             manager.cancel(NotificationHelper.ID_TIMER)
         } catch (_: Exception) {}
         // Sound via additive timer player with fallback; visual always posted.
-        startTimerAlarm(timerRingtoneUri, isTimerGradualVolume)
+        if (isGlobalNotificationsEnabled && isTimerNotificationsEnabled) {
+            startTimerAlarm(timerRingtoneUri, isTimerGradualVolume)
+        }
         showTimerFinishedNotification()
         _isTimerRinging.value = true
         acquireTimerWakeLock(RING_TIMEOUT_MS)
@@ -1874,10 +1885,12 @@ class ToolService : Service() {
             pomodoroPlayerMutex.withLock {
                 try { stopSharedAlarmLocked() } catch (_: Exception) {}
                 requestPomodoroAudioFocus()
-                val finalUriString = if (isCustomRingtoneEnabled && !customRingtoneUri.isNullOrBlank()) {
+                val finalUriString = if (!uriString.isNullOrBlank()) {
+                    uriString
+                } else if (isCustomRingtoneEnabled && !customRingtoneUri.isNullOrBlank()) {
                     customRingtoneUri
                 } else {
-                    uriString
+                    null
                 }
                 val candidates = listOfNotNull(
                     finalUriString?.takeIf { it.isNotBlank() }?.let { runCatching { android.net.Uri.parse(it) }.getOrNull() },

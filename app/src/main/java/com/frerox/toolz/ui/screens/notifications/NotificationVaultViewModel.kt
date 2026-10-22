@@ -71,7 +71,7 @@ class NotificationVaultViewModel @Inject constructor(
             gateActive.collect { demo ->
                 if (demo) {
                     com.frerox.toolz.data.developer.FakeNotificationSandbox.arm()
-                    android.util.Log.w("DevSpoof", "Notification vault sandbox armed — RAM backlog only")
+                    android.util.Log.w("DevSpoof", "Notification vault sandbox on — RAM backlog only")
                 } else {
                     com.frerox.toolz.data.developer.FakeNotificationSandbox.reset()
                 }

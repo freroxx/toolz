@@ -1,119 +1,56 @@
 /*
  * Copyright (C) 2026 Toolz Contributors
  *
- * In-app UI overrides for the dev console. Everything here is reversible
- * and app-local:
- * - RTL: flips the current Activity's decor view (no locale change).
- * - Font scale: updates the Activity resources configuration + recreates.
- * - System developer options / notification settings: deep-link intents,
- *   because true layout-bounds / animation-scale toggles require
- *   WRITE_SECURE_SETTINGS and cannot be flipped by a normal app.
+ * External links and the share sheet used by Developer Mode. Everything
+ * here is initiated by an explicit user tap; no text leaves the device
+ * automatically and no diagnostic is uploaded.
  */
 
 package com.frerox.toolz.data.developer
 
-import android.app.Activity
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 import android.provider.Settings
-import android.util.DisplayMetrics
-import androidx.core.view.WindowCompat
+import androidx.core.net.toUri
 
 object DevUiOverrider {
 
-    fun setRtl(activity: Activity, rtl: Boolean) {
-        try {
-            val decor = activity.window?.decorView ?: return
-            decor.layoutDirection =
-                if (rtl) android.view.View.LAYOUT_DIRECTION_RTL
-                else android.view.View.LAYOUT_DIRECTION_LTR
-        } catch (_: Exception) { }
-    }
-
-    fun isRtl(activity: Activity): Boolean {
-        return try {
-            activity.window?.decorView?.layoutDirection == android.view.View.LAYOUT_DIRECTION_RTL
-        } catch (_: Exception) { false }
-    }
-
-    fun setFontScale(activity: Activity, scale: Float) {
-        try {
-            @Suppress("DEPRECATION")
-            val res = activity.resources
-            @Suppress("DEPRECATION")
-            val config = res.configuration
-            config.fontScale = scale
-            @Suppress("DEPRECATION")
-            res.updateConfiguration(config, res.displayMetrics)
-            activity.recreate()
-        } catch (_: Exception) { }
-    }
-
-    fun currentFontScale(context: Context): Float {
-        return try { context.resources.configuration.fontScale } catch (_: Exception) { 1f }
-    }
-
-    fun openSystemDeveloperOptions(context: Context) {
-        try {
-            val intent = Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            context.startActivity(intent)
-        } catch (_: Exception) { }
-    }
-
-    fun openAppNotificationSettings(context: Context) {
-        try {
-            val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
-                    putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-            } else {
-                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                    data = android.net.Uri.parse("package:${context.packageName}")
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-            }
-            context.startActivity(intent)
-        } catch (_: Exception) { }
-    }
-
-    fun densityDpi(context: Context): Int {
-        return try {
-            context.resources.displayMetrics.densityDpi
-        } catch (_: Exception) { DisplayMetrics.DENSITY_MEDIUM }
-    }
-
-    /** Same invite link the Settings screen's DISCORD button uses. */
+    /** Same invite link the Settings screen's Discord button uses. */
     const val TOOLZ_DISCORD_URL = "https://discord.gg/aAswRUerwh"
 
-    fun openToolzDiscord(context: Context) {
-        try {
-            val intent = Intent(Intent.ACTION_VIEW, TOOLZ_DISCORD_URL.toUriSafe() ?: return)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            context.startActivity(intent)
-        } catch (_: Exception) { }
-    }
+    fun openSystemDeveloperOptions(context: Context): Boolean = runCatching {
+        context.startActivity(
+            Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+    }.isSuccess
+
+    fun openAppNotificationSettings(context: Context): Boolean = runCatching {
+        val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+        }
+        context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }.isSuccess
+
+    fun openToolzDiscord(context: Context): Boolean = runCatching {
+        context.startActivity(
+            Intent(Intent.ACTION_VIEW, TOOLZ_DISCORD_URL.toUri())
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+    }.isSuccess
 
     /**
-     * System share sheet — the ONLY channel a dev report leaves the device.
-     * The user picks the destination; nothing is uploaded automatically.
+     * System share sheet — the only channel a diagnostic report leaves the
+     * device. The user chooses the destination.
      */
-    fun shareText(context: Context, chooserTitle: String, text: String) {
-        try {
-            val intent = Intent(android.content.Intent.ACTION_SEND).apply {
-                type = "text/plain"
-                putExtra(Intent.EXTRA_TEXT, text)
-            }
-            context.startActivity(
-                Intent.createChooser(intent, chooserTitle).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-            )
-        } catch (_: Exception) { }
-    }
-
-    private fun String.toUriSafe(): android.net.Uri? = try {
-        android.net.Uri.parse(this)
-    } catch (_: Exception) { null }
+    fun shareText(context: Context, chooserTitle: String, text: String): Boolean = runCatching {
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, text)
+        }
+        context.startActivity(
+            Intent.createChooser(send, chooserTitle)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+    }.isSuccess
 }

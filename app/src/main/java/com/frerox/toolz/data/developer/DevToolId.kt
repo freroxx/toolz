@@ -10,12 +10,12 @@
 package com.frerox.toolz.data.developer
 
 /**
- * Every spoofable tool. The [networkPolicy] declares what the sandbox must
- * block while the spoof is active. BLOCK_ALL means: never construct/call the
- * real network client, never hit Supabase / download API / update feed.
+ * Every sandboxable tool. The [networkPolicy] declares what the sandbox must
+ * block while active. BLOCK_ALL means: never construct/call the real network
+ * client, never hit Supabase / download API / update feed.
  *
- * Controlled-spoof contract: spoof data is RAM-only fixtures. Nothing is
- * written to AppDatabase real tables, nothing leaves the device.
+ * Sandbox contract: fixture data is RAM-only. Nothing is written to real
+ * AppDatabase tables, and nothing leaves the device.
  */
 enum class DevToolId(
     val prefKey: String,
@@ -26,126 +26,126 @@ enum class DevToolId(
     BATTERY(
         "spoof_battery",
         "Battery",
-        "Fake level, charging, temp, health. Blocks remote spec fetch.",
+        "Sandboxed level, charging, temperature and health. Remote spec fetch is skipped.",
         SpoofNetworkPolicy.BLOCK_REMOTE_SPECS,
     ),
     DEVICE(
         "spoof_device",
         "Device info",
-        "Fake model, RAM, storage-almost-full. Blocks spec API.",
+        "Sandboxed model, RAM and almost-full storage. The spec API is skipped.",
         SpoofNetworkPolicy.BLOCK_REMOTE_SPECS,
     ),
     NETWORK(
         "spoof_network",
         "Network suite",
-        "Fake 0.2 Mbps / 2500ms / FakeFiber SSID. Ignores real signal.",
+        "Fixture SSID, ping and download speed. Real radios stay untouched.",
         SpoofNetworkPolicy.SENSORS_OFF,
     ),
     STEPS(
         "spoof_steps",
         "Steps",
-        "Fake 99,999 steps + 7-day history. Ignores Health Services.",
+        "Fixture step count with 7-day history. Health Services stays untouched.",
         SpoofNetworkPolicy.SENSORS_OFF,
     ),
     SENSORS(
         "spoof_sensors",
         "Sensors (compass/level/speed/alt/light/sound)",
-        "Frozen gauge extremes. Unregisters real listeners.",
+        "Frozen gauge extremes. Real sensor listeners stay idle.",
         SpoofNetworkPolicy.SENSORS_OFF,
     ),
     MUSIC(
         "spoof_music",
         "Now playing",
-        "Fake track + synced lyrics. No media scan, no lyrics fetch.",
+        "Fixture track and lyrics. No media scan and no lyrics fetch.",
         SpoofNetworkPolicy.BLOCK_ALL,
     ),
     DOWNLOADER(
         "spoof_downloader",
         "Downloader",
-        "Fake 2GB item stuck at 99% + fake 429. No HTTP, no WorkManager job.",
+        "Fixture history and a local extract. No HTTP and no WorkManager job.",
         SpoofNetworkPolicy.BLOCK_ALL,
     ),
     CLEANER(
         "spoof_cleaner",
         "Cleaner",
-        "Fake 45GB junk breakdown. Delete disabled in sandbox.",
+        "Fixture junk scan. Cleaned items go to RAM trash only.",
         SpoofNetworkPolicy.JOBS_PAUSED,
     ),
     NOTIFICATIONS(
         "spoof_notifications",
         "Notification vault",
-        "50 in-memory fake notifications. Real Room table untouched.",
+        "11 fixture notifications. The real Room table stays untouched.",
         SpoofNetworkPolicy.LOCAL_ONLY,
     ),
     CLIPBOARD(
         "spoof_clipboard",
         "Clipboard",
-        "30 in-memory clips incl. OTP/links. Real clipboard DB untouched.",
+        "30 fixture clips with OTP and links. The real clipboard stays untouched.",
         SpoofNetworkPolicy.LOCAL_ONLY,
     ),
     TASKS(
         "spoof_tasks",
         "Todo / Calendar / Notepad",
-        "100 overdue todos in memory. No reminder alarms scheduled.",
+        "Fixture todo board and calendar. No reminder alarms are scheduled.",
         SpoofNetworkPolicy.LOCAL_ONLY,
     ),
     QR(
         "spoof_qr",
         "QR / Scanner",
-        "Fake WIFI payload + fake OCR. Camera/MLKit idle.",
+        "Fixture Wi-Fi payload and OCR. Camera and ML Kit stay idle.",
         SpoofNetworkPolicy.SENSORS_OFF,
     ),
     TIMERS(
         "spoof_timers",
         "Timer / Stopwatch / Pomodoro",
-        "3-second timer, 999 laps preset. No real alarms.",
+        "Fixture timer and stopwatch. No real alarms.",
         SpoofNetworkPolicy.JOBS_PAUSED,
     ),
     UPDATE_NEWS(
         "spoof_update_news",
         "Update + News",
-        "Fake v9.9.9 + critical news. Skips update/news network sync.",
+        "Fixture version and critical news. Update and news sync are skipped.",
         SpoofNetworkPolicy.BLOCK_ALL,
     ),
     WHISPER(
         "spoof_whisper",
         "Whisper chat",
-        "OFFLINE SANDBOX: local contacts + thread. Supabase never touched.",
+        "Local contacts + scripted thread. Supabase never touched.",
         SpoofNetworkPolicy.BLOCK_ALL,
     ),
     SEARCH(
         "spoof_search",
         "Search / Browser",
-        "Canned results, ad-blocked=999. DoH + engine fetch disabled.",
+        "Canned results. Network engines and DoH disabled.",
         SpoofNetworkPolicy.BLOCK_ALL,
     ),
     FILES(
         "spoof_files",
         "PDF / Converter / Encrypter",
-        "Fake 500-page PDF + 99% conversion. Worker never runs.",
+        "Fixture documents and progress. File workers never start.",
         SpoofNetworkPolicy.JOBS_PAUSED,
     ),
     SYSTEM(
         "spoof_system",
         "Flashlight / Caffeinate / PurgeShot",
-        "Fake SOS strobe + INFINITE caffeinate. No real wakelock, no file deletes.",
+        "Fixture torch and caffeinate. No real wakelock or file deletion.",
         SpoofNetworkPolicy.JOBS_PAUSED,
     ),
 }
 
-enum class SpoofNetworkPolicy {
+enum class SpoofNetworkPolicy(val label: String) {
     /** No network, no sensors, no jobs, no DB writes. Pure RAM fixtures. */
-    BLOCK_ALL,
+    BLOCK_ALL("Offline"),
 
     /** Real DB/sensors stay, but remote spec/API fetch is skipped. */
-    BLOCK_REMOTE_SPECS,
+    BLOCK_REMOTE_SPECS("No remote specs"),
 
     /** Ignore OS sensor callbacks while active. */
-    SENSORS_OFF,
+    SENSORS_OFF("Sensors idle"),
 
     /** Pause WorkManager / AlarmManager side effects. */
-    JOBS_PAUSED,
+    JOBS_PAUSED("Jobs paused"),
 
     /** In-memory fake list; real Room tables are never written. */
-    LOCAL_ONLY,
+    LOCAL_ONLY("Local only"),
 }

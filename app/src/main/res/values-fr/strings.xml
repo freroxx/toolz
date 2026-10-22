@@ -4551,4 +4551,17 @@ La plupart des optimisations nécessitent Shizuku pour un accès shell privilég
     <string name="st_Whisper_UpdateRequired_Message">Whisper a besoin de Toolz %1$s ou plus récent pour fonctionner. Mettez à jour pour continuer à discuter.</string>
     <string name="st_Whisper_UpdateRequired_Title">Mise à jour requise</string>
     <string name="st_Whisper_UpdateRequired_UpdateNow">Mettre à jour maintenant</string>
+
+    <!-- FocusLock overlay -->
+    <string name="st_FocusLock_Title">PROTOCOLE DE CONCENTRATION</string>
+    <string name="st_FocusLock_MessageDefault">Le temps est écoulé pour cette app.</string>
+    <string name="st_FocusLock_MessageLimit">Le temps est écoulé pour %1$s.</string>
+    <string name="st_FocusLock_MessageSession">Session de concentration en cours. %1$s est bloquée.</string>
+    <string name="st_FocusLock_Subtitle">Vous avez atteint votre limite quotidienne. Restez concentré sur l\'essentiel.</string>
+    <string name="st_FocusLock_BtnReturn">RETOURNER À FOCUS FLOW</string>
+    <string name="st_FocusLock_BtnReturn_CD">Retourner à Focus Flow</string>
+    <string name="st_FocusLock_BtnExit">RETOUR À L\'ACCUEIL</string>
+    <string name="st_FocusLock_BtnExit_CD">Quitter l\'app bloquée vers l\'accueil</string>
+    <string name="st_FocusLock_ToastCantOpen">Impossible d\'ouvrir Toolz automatiquement — appuyez sur RETOUR À L\'ACCUEIL, puis ouvrez Toolz manuellement.</string>
+
 </resources>

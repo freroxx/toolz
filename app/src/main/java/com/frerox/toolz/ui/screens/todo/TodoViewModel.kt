@@ -184,7 +184,7 @@ class TodoViewModel @Inject constructor(
             gateActive.collect { demo ->
                 if (demo) {
                     com.frerox.toolz.data.developer.FakeTasksSandbox.arm()
-                    android.util.Log.w("DevSpoof", "Tasks sandbox armed — RAM board only")
+                    android.util.Log.w("DevSpoof", "Tasks sandbox on — RAM board only")
                 } else {
                     com.frerox.toolz.data.developer.FakeTasksSandbox.reset()
                     fixtureSessionTickJob?.cancel()

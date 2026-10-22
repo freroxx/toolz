@@ -48,16 +48,16 @@ class UpdateViewModel @Inject constructor(
     private val gate: SpoofGate,
 ) : ViewModel() {
 
-    // DEV-SPOOF: the whole update lifecycle is simulated in RAM while demo is
-    // armed — no GitHub fetch, no APK download, no install-session touch.
+    // DEV-SPOOF: the whole update lifecycle is simulated in RAM while the
+    // sandbox is active — no GitHub fetch, APK download or install-session touch.
     private val updateTool = DevToolId.UPDATE_NEWS
 
-    private val demoState = MutableStateFlow<UpdateManagerState?>(null)
+    private val sandboxState = MutableStateFlow<UpdateManagerState?>(null)
 
     val managerState: StateFlow<UpdateManagerState> = combine(
-        updateManager.state, demoState, gate.active(updateTool),
-    ) { real, demo, demoOn ->
-        if (demoOn && demo != null) demo else real
+        updateManager.state, sandboxState, gate.active(updateTool),
+    ) { real, fixture, sandboxed ->
+        if (sandboxed && fixture != null) fixture else real
     }.stateIn(viewModelScope, SharingStarted.Eagerly, UpdateManagerState.Idle)
 
     val pending: StateFlow<PendingUpdate?> = managerState
@@ -84,9 +84,9 @@ class UpdateViewModel @Inject constructor(
     fun checkForUpdates(force: Boolean = true) {
         if (gate.sandboxed(updateTool)) {
             viewModelScope.launch {
-                demoState.value = UpdateManagerState.Checking
+                sandboxState.value = UpdateManagerState.Checking
                 delay(700)
-                demoState.value = UpdateManagerState.Available(fakeUpdate())
+                sandboxState.value = UpdateManagerState.Available(fakeUpdate())
             }
             return
         }
@@ -97,14 +97,14 @@ class UpdateViewModel @Inject constructor(
 
     fun startDownload(update: PendingUpdate? = null) {
         if (gate.sandboxed(updateTool)) {
-            val demo = fakeUpdate()
+            val fixture = fakeUpdate()
             viewModelScope.launch {
-                val total = demo.sizeBytes ?: 46_600_000L
+                val total = fixture.sizeBytes ?: 46_600_000L
                 var downloaded = 0L
                 while (downloaded < total) {
                     downloaded = (downloaded + total / 18).coerceAtMost(total)
-                    demoState.value = UpdateManagerState.Downloading(
-                        update = demo,
+                    sandboxState.value = UpdateManagerState.Downloading(
+                        update = fixture,
                         bytesDownloaded = downloaded,
                         totalBytes = total,
                         speedBps = 4_600_000L,
@@ -112,9 +112,9 @@ class UpdateViewModel @Inject constructor(
                     )
                     delay(140)
                 }
-                demoState.value = UpdateManagerState.ReadyToInstall(
-                    update = demo,
-                    apkFile = File("/dev/demo.apk"),
+                sandboxState.value = UpdateManagerState.ReadyToInstall(
+                    update = fixture,
+                    apkFile = File("/dev/fixture.apk"),
                     needsPermission = false,
                 )
             }
@@ -125,7 +125,7 @@ class UpdateViewModel @Inject constructor(
 
     fun cancelDownload() {
         if (gate.sandboxed(updateTool)) {
-            demoState.value = UpdateManagerState.Available(fakeUpdate())
+            sandboxState.value = UpdateManagerState.Available(fakeUpdate())
             return
         }
         updateManager.cancelDownload()
@@ -133,9 +133,9 @@ class UpdateViewModel @Inject constructor(
 
     fun installReady() {
         if (gate.sandboxed(updateTool)) {
-            demoState.value = UpdateManagerState.Error(
+            sandboxState.value = UpdateManagerState.Error(
                 UpdateError.Verification(
-                    overrideMessageRes = R.string.st_Update_DemoBlocked,
+                    overrideMessageRes = R.string.st_Update_DeveloperModeBlocked,
                 ),
                 retryDownload = false,
             )
@@ -174,7 +174,7 @@ class UpdateViewModel @Inject constructor(
 
     fun skipVersion(version: String) {
         if (gate.sandboxed(updateTool)) {
-            demoState.value = null
+            sandboxState.value = null
             return
         }
         updateManager.skipVersion(version)
@@ -182,7 +182,7 @@ class UpdateViewModel @Inject constructor(
 
     fun dismissInstalled() {
         if (gate.sandboxed(updateTool)) {
-            demoState.value = null
+            sandboxState.value = null
             return
         }
         updateManager.dismissInstalled()
@@ -200,17 +200,17 @@ class UpdateViewModel @Inject constructor(
 
     /** DEV-SPOOF: fixture release the fake lifecycle stages around. */
     private fun fakeUpdate(): PendingUpdate = PendingUpdate(
-        version = "9.9.9-demo",
+        version = "9.9.9-fixture",
         versionCode = 999999,
-        changelog = "## Demo release notes\n" +
+        changelog = "## Fixture release notes\n" +
             "- Showcase build — no APK is downloaded.\n" +
-            "- Toolz demo banner removal.\n" +
+            "- Developer Mode console refresh.\n" +
             "- Cleaner, vault and news sandboxes.",
-        downloadUrl = "https://fake.local/toolz/demo.apk",
+        downloadUrl = "https://fake.local/toolz/fixture.apk",
         sizeBytes = 46_600_000L,
         sha256 = null,
         isCritical = false,
-        abi = "universal (demo)",
-        source = "demo-fixture",
+        abi = "universal (fixture)",
+        source = "fixture",
     )
 }

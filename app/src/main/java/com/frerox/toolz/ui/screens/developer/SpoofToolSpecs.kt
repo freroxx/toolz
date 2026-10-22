@@ -11,8 +11,8 @@
 package com.frerox.toolz.ui.screens.developer
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.DirectionsWalk
 import androidx.compose.material.icons.rounded.BatteryFull
-import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.Campaign
 import androidx.compose.material.icons.rounded.Checklist
 import androidx.compose.material.icons.rounded.CleaningServices
@@ -29,10 +29,10 @@ import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.Wifi
-import androidx.compose.material.icons.rounded.DirectionsWalk
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.frerox.toolz.data.developer.DevToolId
 import com.frerox.toolz.data.developer.SpoofParams
+import java.util.Locale
 
 /** A single editable fixture field of a tool's configurator. */
 sealed class SpoofFieldSpec {
@@ -66,44 +66,41 @@ sealed class SpoofFieldSpec {
 val DevToolId.fieldSpecs: List<SpoofFieldSpec>
     get() = when (this) {
         DevToolId.BATTERY -> listOf(
-            SpoofFieldSpec.FixtureSlider("Battery level", 0f, 100f, { it.batteryLevel.toFloat() }, { p, v -> p.copy(batteryLevel = v.toInt()) }, { "${it.toInt()}%" }),
-            SpoofFieldSpec.FixtureSlider("Battery temp", -10f, 65f, { it.batteryTempC }, { p, v -> p.copy(batteryTempC = v) }, { "${it}°C" }),
+            SpoofFieldSpec.FixtureSlider("Battery level", SpoofParams.BATTERY_LEVEL_MIN.toFloat(), SpoofParams.BATTERY_LEVEL_MAX.toFloat(), { it.batteryLevel.toFloat() }, { p, v -> p.copy(batteryLevel = v.toInt()) }, { "${it.toInt()}%" }),
+            SpoofFieldSpec.FixtureSlider("Battery temp", SpoofParams.BATTERY_TEMP_MIN, SpoofParams.BATTERY_TEMP_MAX, { it.batteryTempC }, { p, v -> p.copy(batteryTempC = v) }, { String.format(Locale.US, "%.1f°C", it) }),
             SpoofFieldSpec.FixtureSwitch("Charging", { it.batteryCharging }, { p, v -> p.copy(batteryCharging = v) }),
         )
         DevToolId.STEPS -> listOf(
-            SpoofFieldSpec.FixtureSlider("Steps today", 0f, 200000f, { it.stepsToday.toFloat() }, { p, v -> p.copy(stepsToday = v.toInt()) }, { "${it.toInt()} steps" }),
+            SpoofFieldSpec.FixtureSlider("Steps today", SpoofParams.STEPS_MIN.toFloat(), SpoofParams.STEPS_MAX.toFloat(), { it.stepsToday.toFloat() }, { p, v -> p.copy(stepsToday = v.toInt()) }, { String.format(Locale.US, "%,d steps", it.toInt()) }),
         )
         DevToolId.NETWORK -> listOf(
-            SpoofFieldSpec.FixtureSlider("Ping", 0f, 10000f, { it.networkPingMs.toFloat() }, { p, v -> p.copy(networkPingMs = v.toInt()) }, { "${it.toInt()}ms" }),
-            SpoofFieldSpec.FixtureSlider("Download", 0f, 2000f, { it.networkDownMbps }, { p, v -> p.copy(networkDownMbps = v) }, { "%.1f Mbps".format(it) }),
-            SpoofFieldSpec.FixtureText("Fake SSID", { it.networkSsid }, { p, v -> p.copy(networkSsid = v) }),
+            SpoofFieldSpec.FixtureSlider("Ping", SpoofParams.PING_MIN.toFloat(), SpoofParams.PING_MAX.toFloat(), { it.networkPingMs.toFloat() }, { p, v -> p.copy(networkPingMs = v.toInt()) }, { "${it.toInt()}ms" }),
+            SpoofFieldSpec.FixtureSlider("Download", SpoofParams.DOWNLOAD_MBPS_MIN, SpoofParams.DOWNLOAD_MBPS_MAX, { it.networkDownMbps }, { p, v -> p.copy(networkDownMbps = v) }, { "%.1f Mbps".format(Locale.US, it) }),
+            SpoofFieldSpec.FixtureText("SSID", { it.networkSsid }, { p, v -> p.copy(networkSsid = v) }),
         )
         DevToolId.SENSORS -> listOf(
-            SpoofFieldSpec.FixtureSlider("Compass", 0f, 359f, { it.compassDeg.toFloat() }, { p, v -> p.copy(compassDeg = v.toInt()) }, { "${it.toInt()}°" }),
-            SpoofFieldSpec.FixtureSlider("Sound", 0f, 160f, { it.soundDb.toFloat() }, { p, v -> p.copy(soundDb = v.toInt()) }, { "${it.toInt()}dB" }),
-            SpoofFieldSpec.FixtureSlider("Light", 0f, 200000f, { it.lightLux.toFloat() }, { p, v -> p.copy(lightLux = v.toInt()) }, { "${it.toInt()} lux" }),
-            SpoofFieldSpec.FixtureSlider("Speed", 0f, 2000f, { it.speedKmh.toFloat() }, { p, v -> p.copy(speedKmh = v.toInt()) }, { "${it.toInt()} km/h" }),
-            SpoofFieldSpec.FixtureSlider("Altitude", -500f, 12000f, { it.altitudeM.toFloat() }, { p, v -> p.copy(altitudeM = v.toInt()) }, { "${it.toInt()} m" }),
+            SpoofFieldSpec.FixtureSlider("Compass", SpoofParams.COMPASS_MIN.toFloat(), SpoofParams.COMPASS_MAX.toFloat(), { it.compassDeg.toFloat() }, { p, v -> p.copy(compassDeg = v.toInt()) }, { "${it.toInt()}°" }),
+            SpoofFieldSpec.FixtureSlider("Sound", SpoofParams.SOUND_MIN.toFloat(), SpoofParams.SOUND_MAX.toFloat(), { it.soundDb.toFloat() }, { p, v -> p.copy(soundDb = v.toInt()) }, { "${it.toInt()}dB" }),
+            SpoofFieldSpec.FixtureSlider("Light", SpoofParams.LIGHT_MIN.toFloat(), SpoofParams.LIGHT_MAX.toFloat(), { it.lightLux.toFloat() }, { p, v -> p.copy(lightLux = v.toInt()) }, { "${it.toInt()} lux" }),
+            SpoofFieldSpec.FixtureSlider("Speed", SpoofParams.SPEED_MIN.toFloat(), SpoofParams.SPEED_MAX.toFloat(), { it.speedKmh.toFloat() }, { p, v -> p.copy(speedKmh = v.toInt()) }, { "${it.toInt()} km/h" }),
+            SpoofFieldSpec.FixtureSlider("Altitude", SpoofParams.ALTITUDE_MIN.toFloat(), SpoofParams.ALTITUDE_MAX.toFloat(), { it.altitudeM.toFloat() }, { p, v -> p.copy(altitudeM = v.toInt()) }, { "${it.toInt()} m" }),
         )
         DevToolId.DEVICE -> listOf(
-            SpoofFieldSpec.FixtureText("Fake model", { it.deviceModel }, { p, v -> p.copy(deviceModel = v) }),
-            SpoofFieldSpec.FixtureSlider("Storage full", 0f, 100f, { it.storageFullPct.toFloat() }, { p, v -> p.copy(storageFullPct = v.toInt()) }, { "${it.toInt()}%" }),
+            SpoofFieldSpec.FixtureText("Device model", { it.deviceModel }, { p, v -> p.copy(deviceModel = v) }),
+            SpoofFieldSpec.FixtureSlider("Storage full", SpoofParams.STORAGE_MIN.toFloat(), SpoofParams.STORAGE_MAX.toFloat(), { it.storageFullPct.toFloat() }, { p, v -> p.copy(storageFullPct = v.toInt()) }, { "${it.toInt()}%" }),
         )
         DevToolId.MUSIC -> listOf(
             SpoofFieldSpec.FixtureText("Track", { it.musicTrack }, { p, v -> p.copy(musicTrack = v) }, 128),
             SpoofFieldSpec.FixtureText("Artist", { it.musicArtist }, { p, v -> p.copy(musicArtist = v) }, 128),
         )
-        DevToolId.DOWNLOADER -> listOf(
-            SpoofFieldSpec.FixtureSlider("Progress", 0f, 100f, { it.downloadProgress.toFloat() }, { p, v -> p.copy(downloadProgress = v.toInt()) }, { "${it.toInt()}%" }),
-        )
         DevToolId.CLEANER -> listOf(
-            SpoofFieldSpec.FixtureSlider("Junk full", 0f, 100f, { it.storageFullPct.toFloat() }, { p, v -> p.copy(storageFullPct = v.toInt()) }, { "${it.toInt()}% full" }),
+            SpoofFieldSpec.FixtureSlider("Storage full", SpoofParams.STORAGE_MIN.toFloat(), SpoofParams.STORAGE_MAX.toFloat(), { it.storageFullPct.toFloat() }, { p, v -> p.copy(storageFullPct = v.toInt()) }, { "${it.toInt()}% full" }),
         )
         DevToolId.TIMERS -> listOf(
-            SpoofFieldSpec.FixtureSlider("Fake timer", 1f, 3600f, { it.timerSecs.toFloat() }, { p, v -> p.copy(timerSecs = v.toInt()) }, { "${it.toInt()}s" }),
+            SpoofFieldSpec.FixtureSlider("Timer", SpoofParams.TIMER_MIN.toFloat(), SpoofParams.TIMER_MAX.toFloat(), { it.timerSecs.toFloat() }, { p, v -> p.copy(timerSecs = v.toInt()) }, { formatTimerDuration(it.toInt()) }),
         )
         DevToolId.QR -> listOf(
-            SpoofFieldSpec.FixtureText("Fake payload", { it.qrPayload }, { p, v -> p.copy(qrPayload = v) }, 512),
+            SpoofFieldSpec.FixtureText("QR payload", { it.qrPayload }, { p, v -> p.copy(qrPayload = v) }, 512),
         )
         else -> emptyList()
     }
@@ -114,7 +111,7 @@ val DevToolId.icon: ImageVector
         DevToolId.BATTERY -> Icons.Rounded.BatteryFull
         DevToolId.DEVICE -> Icons.Rounded.PhoneAndroid
         DevToolId.NETWORK -> Icons.Rounded.Wifi
-        DevToolId.STEPS -> Icons.Rounded.DirectionsWalk
+        DevToolId.STEPS -> Icons.AutoMirrored.Rounded.DirectionsWalk
         DevToolId.SENSORS -> Icons.Rounded.Speed
         DevToolId.MUSIC -> Icons.Rounded.MusicNote
         DevToolId.DOWNLOADER -> Icons.Rounded.Download
@@ -132,28 +129,45 @@ val DevToolId.icon: ImageVector
     }
 
 /** Short offline summary of the fixture this tool's sandbox shows. */
-fun spoofFixtureSummary(tool: DevToolId, p: SpoofParams): String = when (tool) {
-    DevToolId.BATTERY -> "${p.batteryLevel}% • ${p.batteryTempC}°C${if (p.batteryCharging) " • charging" else ""}"
-    DevToolId.DEVICE -> "${p.deviceModel} • ${p.storageFullPct}% full"
-    DevToolId.NETWORK -> "${p.networkSsid} • ${p.networkPingMs}ms • %.1f Mbps".format(p.networkDownMbps)
-    DevToolId.STEPS -> "${p.stepsToday} steps"
-    DevToolId.SENSORS -> "${p.compassDeg}° • ${p.soundDb}dB • ${p.speedKmh}km/h • ${p.altitudeM}m"
-    DevToolId.MUSIC -> "${p.musicTrack} — ${p.musicArtist}"
-    DevToolId.DOWNLOADER -> "${p.downloadProgress}% (stuck) + fake 429"
-    DevToolId.CLEANER -> "${p.storageFullPct}% junk • delete disabled"
-    DevToolId.NOTIFICATIONS -> "50 in-memory fake notifications"
-    DevToolId.CLIPBOARD -> "30 in-memory clips incl. OTP"
-    DevToolId.TASKS -> "100 overdue todos in memory"
-    DevToolId.QR -> p.qrPayload.take(32)
-    DevToolId.TIMERS -> "${p.timerSecs}s timer • 999 laps preset"
-    DevToolId.UPDATE_NEWS -> "fake v9.9.9 + critical news"
-    DevToolId.WHISPER -> "offline thread • no Supabase"
-    DevToolId.SEARCH -> "canned results • ads blocked 999"
-    DevToolId.FILES -> "fake 500-page PDF • no worker"
-    DevToolId.SYSTEM -> "fake SOS strobe • wakelock blocked"
+private fun Float.oneDecimal(): String = String.format(Locale.US, "%.1f", this)
+
+private fun formatTimerDuration(seconds: Int): String {
+    val safe = seconds.coerceAtLeast(0)
+    val hours = safe / 3_600
+    val minutes = (safe % 3_600) / 60
+    val remainder = safe % 60
+    return buildList {
+        if (hours > 0) add("${hours}h")
+        if (minutes > 0) add("${minutes}m")
+        if (remainder > 0 || isEmpty()) add("${remainder}s")
+    }.joinToString(" ")
 }
 
-/** Grouping used by the Spoofs tab so 18 tiles read as sections. */
+private fun String.fixturePreview(maxLength: Int = 36): String =
+    if (length <= maxLength) this else take(maxLength - 1).trimEnd() + "…"
+
+fun spoofFixtureSummary(tool: DevToolId, p: SpoofParams): String = when (tool) {
+    DevToolId.BATTERY -> "${p.batteryLevel}% • ${p.batteryTempC.oneDecimal()}°C${if (p.batteryCharging) " • charging" else ""}"
+    DevToolId.DEVICE -> "${p.deviceModel.ifBlank { "Unknown model" }} • ${p.storageFullPct}% full"
+    DevToolId.NETWORK -> "${p.networkSsid.ifBlank { "Hidden network" }} • ${p.networkPingMs}ms • ${p.networkDownMbps.oneDecimal()} Mbps"
+    DevToolId.STEPS -> "${String.format(Locale.US, "%,d", p.stepsToday)} steps"
+    DevToolId.SENSORS -> "${p.compassDeg}° • ${p.soundDb}dB • ${p.speedKmh}km/h • ${p.altitudeM}m"
+    DevToolId.MUSIC -> "${p.musicTrack.ifBlank { "Untitled" }} — ${p.musicArtist.ifBlank { "Unknown artist" }}"
+    DevToolId.DOWNLOADER -> "Fixture extract • 3-row history"
+    DevToolId.CLEANER -> "${p.storageFullPct}% storage full • local scan fixture"
+    DevToolId.NOTIFICATIONS -> "11 fixture notifications • 6 apps"
+    DevToolId.CLIPBOARD -> "30 fixture clips • OTP + links"
+    DevToolId.TASKS -> "6-item fixture board + calendar"
+    DevToolId.QR -> p.qrPayload.ifBlank { "Empty payload" }.fixturePreview()
+    DevToolId.TIMERS -> "${formatTimerDuration(p.timerSecs)} timer • stopwatch + pomodoro"
+    DevToolId.UPDATE_NEWS -> "Fixture v9.9.9 + critical news"
+    DevToolId.WHISPER -> "Local contacts • scripted thread"
+    DevToolId.SEARCH -> "Canned results • engines offline"
+    DevToolId.FILES -> "Fixture PDF/conversion • workers idle"
+    DevToolId.SYSTEM -> "Torch + caffeinate fixtures • hardware off"
+}
+
+/** Grouping used by the Sandboxes tab so 18 tools read as sections. */
 enum class DevToolGroup(val title: String) {
     HARDWARE("Hardware & sensors"),
     SYSTEM_LIKE("System & device"),
@@ -172,7 +186,7 @@ val DevToolId.group: DevToolGroup
     }
 
 /** Which primary screen the configurator's "Open tool" button navigates to. */
-val DevToolId.openRoute: String?
+val DevToolId.openRoute: String
     get() = when (this) {
         DevToolId.BATTERY -> "battery_info"
         DevToolId.DEVICE -> "device_info"

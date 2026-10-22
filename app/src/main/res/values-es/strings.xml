@@ -4550,4 +4550,17 @@
     <string name="st_Whisper_UpdateRequired_Message">Whisper necesita Toolz %1$s o más reciente para seguir funcionando. Actualiza para seguir chateando.</string>
     <string name="st_Whisper_UpdateRequired_Title">Actualización requerida</string>
     <string name="st_Whisper_UpdateRequired_UpdateNow">Actualizar ahora</string>
+
+    <!-- FocusLock overlay -->
+    <string name="st_FocusLock_Title">PROTOCOLO DE ENFOQUE</string>
+    <string name="st_FocusLock_MessageDefault">Se acabó el tiempo para esta app.</string>
+    <string name="st_FocusLock_MessageLimit">Se acabó el tiempo para %1$s.</string>
+    <string name="st_FocusLock_MessageSession">Sesión de enfoque en curso. %1$s está restringida.</string>
+    <string name="st_FocusLock_Subtitle">Alcanzaste tu límite diario. Mantente enfocado en lo que importa.</string>
+    <string name="st_FocusLock_BtnReturn">VOLVER A FOCUS FLOW</string>
+    <string name="st_FocusLock_BtnReturn_CD">Volver a Focus Flow</string>
+    <string name="st_FocusLock_BtnExit">SALIR AL INICIO</string>
+    <string name="st_FocusLock_BtnExit_CD">Salir de la app bloqueada al inicio</string>
+    <string name="st_FocusLock_ToastCantOpen">No se pudo abrir Toolz automáticamente — pulsa SALIR AL INICIO y abre Toolz manualmente.</string>
+
 </resources>

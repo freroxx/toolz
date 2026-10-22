@@ -96,7 +96,7 @@ fun ScannerScreen(
         )
     }
 
-    // DEV-SPOOF: QR sandbox keeps the camera/MLKit idle and shows the fake
+    // The QR sandbox keeps the camera/MLKit idle and shows the fixture
     // payload instead — no camera permission prompt, no analyzer binding,
     // even when the permission is already granted (sandbox wins).
     val qrSandboxActive = rememberSandboxActive(com.frerox.toolz.data.developer.DevToolId.QR)
@@ -144,8 +144,8 @@ fun ScannerScreen(
     }
 
     LaunchedEffect(hasCameraPermission, qrSandboxActive) {
-        // DEV-SPOOF: while the sandbox is on the camera never binds — a
-        // previously bound one unbinds, torch damped (no real hardware use).
+        // While the sandbox is on the camera never binds — a previously bound
+        // one unbinds, torch damped (no real hardware use).
         if (qrSandboxActive) {
             try { cameraController.unbind() } catch (_: Exception) {}
             isFlashOn = false
@@ -198,13 +198,13 @@ fun ScannerScreen(
                 .padding(top = padding.calculateTopPadding())
         ) {
             if (qrSandboxActive) {
-                // DEV-SPOOF: camera stays idle; the sandbox fabricates the scan.
+                // The camera stays idle; the sandbox fabricates the scan.
                 // Checked FIRST so a granted permission can't leak real camera
-                // frames while the QR sandbox is armed.
+                // frames while the QR sandbox is on.
                 Box(modifier = Modifier.fillMaxSize()) {
                     ScannerOverlay(performanceMode)
                     ResultCard(
-                        result = "WIFI:T:WPA;S:FakeFiber-5G;P:spoof-status-1234;;",
+                        result = "WIFI:T:WPA;S:FixtureFiber-5G;P:fixture-status-1234;;",
                         onClose = { },
                         onCopy = {
                             Toast.makeText(context, context.getString(R.string.st_ScannerScreen_3c4d), Toast.LENGTH_SHORT).show()

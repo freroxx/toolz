@@ -133,7 +133,7 @@ class AltimeterViewModel @Inject constructor(
                     s.copy(
                         altitudeMeters = alt,
                         pressureHpa = sim.pressureHpa(alt.toFloat()),
-                        source = "SPOOF",
+                        source = "Fixture",
                         maxAltitudeMeters = maxOf(s.maxAltitudeMeters, alt),
                         minAltitudeMeters = if (s.minAltitudeMeters == Double.MAX_VALUE) {
                             alt

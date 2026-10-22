@@ -51,6 +51,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
@@ -64,6 +65,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -1271,9 +1273,13 @@ fun NotepadScreen(
                                     .fadingEdges(top = 4.dp, bottom = 4.dp)
                                     .verticalScroll(rememberScrollState())
                             ) {
-                                Text(
+                                // One formatter per viewed note — not per frame.
+                                val viewerDateLabel = remember(note.timestamp) {
                                     SimpleDateFormat("MMMM d, yyyy · HH:mm", Locale.getDefault())
-                                        .format(Date(note.timestamp)).uppercase(java.util.Locale.ROOT),
+                                        .format(Date(note.timestamp)).uppercase(Locale.ROOT)
+                                }
+                                Text(
+                                    viewerDateLabel,
                                     style         = MaterialTheme.typography.labelSmall,
                                     color         = onColor.copy(0.38f),
                                     fontWeight    = FontWeight.Black,
@@ -1374,16 +1380,30 @@ fun NotepadScreen(
                                 )
 
                                 androidx.compose.foundation.text.selection.SelectionContainer {
-                                    Text(
-                                        note.content,
-                                        style = MaterialTheme.typography.bodyLarge.copy(
-                                            fontSize = note.fontSize.coerceIn(12f, 28f).sp,
-                                            fontWeight = if (note.isBold) FontWeight.Bold else FontWeight.Normal,
-                                            fontStyle = if (note.isItalic) FontStyle.Italic else FontStyle.Normal,
-                                            lineHeight = (note.fontSize.coerceIn(12f, 28f) * 1.4f).sp
-                                        ),
-                                        color = onColor.copy(0.88f)
-                                    )
+                                    if (looksLikeMarkdown(note.content)) {
+                                        NoteMarkdownBody(
+                                            content   = note.content,
+                                            baseStyle = MaterialTheme.typography.bodyLarge.copy(
+                                                fontSize = note.fontSize.coerceIn(12f, 28f).sp,
+                                                fontWeight = if (note.isBold) FontWeight.Bold else FontWeight.Normal,
+                                                fontStyle = if (note.isItalic) FontStyle.Italic else FontStyle.Normal,
+                                                lineHeight = (note.fontSize.coerceIn(12f, 28f) * 1.4f).sp
+                                            ),
+                                            baseColor   = onColor.copy(0.88f),
+                                            strongColor = onColor,
+                                        )
+                                    } else {
+                                        Text(
+                                            note.content,
+                                            style = MaterialTheme.typography.bodyLarge.copy(
+                                                fontSize = note.fontSize.coerceIn(12f, 28f).sp,
+                                                fontWeight = if (note.isBold) FontWeight.Bold else FontWeight.Normal,
+                                                fontStyle = if (note.isItalic) FontStyle.Italic else FontStyle.Normal,
+                                                lineHeight = (note.fontSize.coerceIn(12f, 28f) * 1.4f).sp
+                                            ),
+                                            color = onColor.copy(0.88f)
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -1582,6 +1602,142 @@ private fun CurrentTrackProgress(
     content(progress, live)
 }
 
+// ─────────────────────────────────────────────────────────────
+//  Markdown-aware note body
+// ─────────────────────────────────────────────────────────────
+
+/** Content that clearly carries markdown gets the rich renderer; plain notes
+ *  keep their exact line breaks instead of being re-flowed into paragraphs. */
+private val MARKDOWN_HINT = Regex(
+    "(^|\\n) {0,3}(#{1,6}\\s|[-*+]\\s|>\\s?|[0-9]+[.)]\\s|-\\s*\\[[ xX]\\s*])" +
+        "|\\*\\*[^*\\n]+\\*\\*" +
+        "|__[^_\\n]+__" +
+        "|~~[^~\\n]+~~" +
+        "|`[^`\\n]+`" +
+        "|\\[[^\\]]*\\]\\([^)]*\\)"
+)
+
+private fun looksLikeMarkdown(content: String): Boolean =
+    MARKDOWN_HINT.containsMatchIn(content)
+
+/**
+ * Rich note body: renders markdown through the app's shared parser while
+ * keeping the note's own typography (chosen font, bold/italic, size) as the
+ * base style — a styled note still looks like itself. Inline emphasis from
+ * the markdown spans composes on top of the base weight.
+ */
+@Composable
+private fun NoteMarkdownBody(
+    content: String,
+    baseStyle: TextStyle,
+    baseColor: Color,
+    strongColor: Color,
+    modifier: Modifier = Modifier,
+) {
+    val segments = remember(content) { parseMarkdownToSegments(content) }
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        segments.forEach { seg ->
+            when (seg) {
+                is MdSegment.Header -> {
+                    val scale = when (seg.level) {
+                        1 -> 1.35f
+                        2 -> 1.2f
+                        else -> 1.08f
+                    }
+                    Text(
+                        inlineMarkdownNoCompose(seg.text),
+                        style = baseStyle.copy(
+                            fontSize   = (baseStyle.fontSize.value * scale).sp,
+                            lineHeight = (baseStyle.fontSize.value * scale * 1.3f).sp,
+                            fontWeight = FontWeight.ExtraBold,
+                        ),
+                        color = strongColor,
+                    )
+                }
+                is MdSegment.Paragraph -> Text(seg.content, style = baseStyle, color = baseColor)
+                is MdSegment.BulletItem -> Row(
+                    Modifier.padding(start = (seg.depth * 12).dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (seg.isChecked != null) {
+                        Icon(
+                            if (seg.isChecked) Icons.Rounded.Check else Icons.Rounded.CheckBoxOutlineBlank,
+                            null,
+                            Modifier.size(15.dp).offset(y = 2.dp),
+                            tint = baseColor.copy(if (seg.isChecked) 1f else 0.45f),
+                        )
+                    } else {
+                        Box(
+                            Modifier
+                                .offset(y = 7.dp)
+                                .size(5.dp)
+                                .background(baseColor.copy(0.75f), CircleShape)
+                        )
+                    }
+                    Text(
+                        seg.content,
+                        style = baseStyle,
+                        color = baseColor,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                is MdSegment.NumberedItem -> Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        "${seg.index}.",
+                        style = baseStyle,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = strongColor,
+                    )
+                    Text(
+                        seg.content,
+                        style = baseStyle,
+                        color = baseColor,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                is MdSegment.Blockquote -> Row(Modifier.height(IntrinsicSize.Min)) {
+                    Box(
+                        Modifier
+                            .width(3.dp)
+                            .fillMaxHeight()
+                            .background(baseColor.copy(0.3f), RoundedCornerShape(2.dp))
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        seg.content,
+                        style = baseStyle.copy(fontStyle = FontStyle.Italic),
+                        color = baseColor.copy(0.85f),
+                    )
+                }
+                is MdSegment.Code -> Text(
+                    seg.code.trimEnd('\n'),
+                    style = baseStyle.copy(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = (baseStyle.fontSize.value * 0.85f).sp,
+                        lineHeight = (baseStyle.fontSize.value * 0.85f * 1.4f).sp,
+                    ),
+                    color = baseColor.copy(0.9f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(baseColor.copy(0.07f))
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                )
+                is MdSegment.Table -> MarkdownSegment(
+                    seg = seg,
+                    baseFontSize = (baseStyle.fontSize.value * 0.9f).sp,
+                    textColor = baseColor,
+                )
+                MdSegment.Divider -> HorizontalDivider(
+                    Modifier.padding(vertical = 2.dp),
+                    thickness = 0.5.dp,
+                    color = baseColor.copy(0.2f),
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun NoteCard(
     note                  : Note,
@@ -1629,15 +1785,21 @@ private fun NoteCard(
         label         = "selectionScale",
     )
 
-    val wordCount = remember(note.content) { com.frerox.toolz.data.notepad.NoteText.wordCount(note.content) }
+    // Markdown syntax tokens ("##", "**") shouldn't inflate the word count.
+    val wordCount = remember(note.content) {
+        com.frerox.toolz.data.notepad.NoteText.wordCount(stripMarkdown(note.content))
+    }
 
     // Small cards are genuinely compact: tighter paddings and type, a short
     // date, and no footer delete (the options sheet still offers it).
     val compact    = cardStyle.compact
+    // Narrow single-column cards (medium/auto): actions get their own row so
+    // the date and word count never fight the buttons for width.
+    val narrow     = cardStyle.span == 1 && !compact
     val padH       = if (compact) 14.dp else 18.dp
     val padTop     = if (compact) 12.dp else 16.dp
-    val actionSize = if (compact) 38.dp else 48.dp
-    val actionIcon = if (compact) 15.dp else 17.dp
+    val actionSize = when { compact -> 38.dp; narrow -> 42.dp; else -> 48.dp }
+    val actionIcon = when { compact -> 15.dp; narrow -> 16.dp; else -> 17.dp }
 
     // One formatter per card, keyed by pattern + timestamp (no per-frame allocs).
     val dateLabel = remember(note.timestamp, compact) {
@@ -1745,27 +1907,43 @@ private fun NoteCard(
                         }
                     }
 
-                    // ── Content preview ─────────────────────────────────
+                    // ── Content preview (markdown-aware) ────────────────
                     if (note.content.isNotBlank()) {
                         Spacer(Modifier.height(10.dp))
                         Box(
                             Modifier
                                 .heightIn(max = if (compact) 78.dp else 120.dp)
+                                .clipToBounds()
                                 .fadingEdges(bottom = 6.dp)
                         ) {
-                            Text(
-                                note.content,
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    fontFamily    = noteFontFamily(note.fontStyle),
-                                    fontWeight    = if (note.isBold) FontWeight.Bold else FontWeight.Normal,
-                                    fontStyle     = if (note.isItalic) FontStyle.Italic else FontStyle.Normal,
-                                    lineHeight    = 18.sp,
-                                    letterSpacing = 0.1.sp,
-                                ),
-                                color    = onColor.copy(0.68f),
-                                maxLines = cardStyle.contentLines,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                            if (looksLikeMarkdown(note.content)) {
+                                NoteMarkdownBody(
+                                    content   = note.content,
+                                    baseStyle = MaterialTheme.typography.bodySmall.copy(
+                                        fontFamily    = noteFontFamily(note.fontStyle),
+                                        fontWeight    = if (note.isBold) FontWeight.Bold else FontWeight.Normal,
+                                        fontStyle     = if (note.isItalic) FontStyle.Italic else FontStyle.Normal,
+                                        lineHeight    = 18.sp,
+                                        letterSpacing = 0.1.sp,
+                                    ),
+                                    baseColor   = onColor.copy(0.68f),
+                                    strongColor = onColor.copy(0.9f),
+                                )
+                            } else {
+                                Text(
+                                    note.content,
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontFamily    = noteFontFamily(note.fontStyle),
+                                        fontWeight    = if (note.isBold) FontWeight.Bold else FontWeight.Normal,
+                                        fontStyle     = if (note.isItalic) FontStyle.Italic else FontStyle.Normal,
+                                        lineHeight    = 18.sp,
+                                        letterSpacing = 0.1.sp,
+                                    ),
+                                    color    = onColor.copy(0.68f),
+                                    maxLines = cardStyle.contentLines,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                         }
                     }
 
@@ -1838,88 +2016,140 @@ private fun NoteCard(
                         thickness = 0.5.dp,
                         modifier  = Modifier.padding(bottom = 10.dp),
                     )
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        verticalAlignment     = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        // Info zone: opens the viewer.
-                        Box(
-                            Modifier
-                                .weight(1f)
-                                .bouncyClick(onClick = onClick, onLongClick = onLongClick)
+                    // Footer action buttons — declared once, reused by the
+                    // narrow (two-row) and wide (single-row) layouts.
+                    val pinButton: @Composable () -> Unit = {
+                        ToolzExpressiveIconButton(
+                            onClick = onTogglePin,
+                            modifier = Modifier.size(actionSize),
+                            colors = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = if (note.isPinned) onColor.copy(0.18f) else onColor.copy(0.08f),
+                                contentColor = onColor.copy(if (note.isPinned) 0.95f else 0.45f)
+                            )
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                            ) {
-                                Column(
-                                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text(
-                                        dateLabel,
-                                        style         = MaterialTheme.typography.labelSmall,
-                                        fontWeight    = FontWeight.ExtraBold,
-                                        color         = onColor.copy(0.5f),
-                                        letterSpacing = if (compact) 0.4.sp else 0.8.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                    if (wordCount > 0 && !compact) {
-                                        Text(
-                                            pluralStringResource(R.plurals.st_NotepadScreen_words61, wordCount, wordCount),
-                                            style         = MaterialTheme.typography.labelSmall,
-                                            color         = onColor.copy(0.35f),
-                                            fontWeight    = FontWeight.Bold,
-                                        )
-                                    }
-                                }
+                            Icon(
+                                Icons.Rounded.PushPin, contentDescription = if (note.isPinned) stringResource(R.string.st_NotepadScreen_cdunpin63) else stringResource(R.string.st_NotepadScreen_cdpin62),
+                                Modifier.size(actionIcon).graphicsLayer { rotationZ = if (note.isPinned) -20f else 0f }
+                            )
+                        }
+                    }
+                    val deleteButton: @Composable () -> Unit = {
+                        ToolzExpressiveIconButton(
+                            onClick = onDelete,
+                            modifier = Modifier.size(actionSize),
+                            colors = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = onColor.copy(0.08f),
+                                contentColor = onColor.copy(0.45f)
+                            )
+                        ) {
+                            Icon(Icons.Rounded.Delete, contentDescription = stringResource(R.string.st_NotepadScreen_cddel64), Modifier.size(actionIcon))
+                        }
+                    }
 
-                                // Attachment type badges
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                    modifier = Modifier.padding(horizontal = 6.dp)
-                                ) {
-                                    if (note.attachedAudioUri != null)
-                                        AttachmentIndicator(Icons.Rounded.MusicNote, onColor, stringResource(R.string.st_NotepadScreen_cdhaud66))
-                                    if (note.attachedPdfUri != null)
-                                        AttachmentIndicator(Icons.Rounded.Description, onColor, stringResource(R.string.st_NotepadScreen_cdhpdf67))
-                                    if (note.attachedImageUri != null)
-                                        AttachmentIndicator(Icons.Rounded.Image, onColor, stringResource(R.string.st_NotepadScreen_cdhimg68))
-                                }
+                    if (narrow) {
+                        // Narrow single-column cards: the meta line gets the
+                        // full width and actions sit on their own row — the
+                        // word count can never crush to one letter per line.
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .bouncyClick(onClick = onClick, onLongClick = onLongClick),
+                            verticalAlignment     = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Text(
+                                dateLabel,
+                                style         = MaterialTheme.typography.labelSmall,
+                                fontWeight    = FontWeight.ExtraBold,
+                                color         = onColor.copy(0.5f),
+                                letterSpacing = 0.8.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            if (wordCount > 0) {
+                                Text(
+                                    pluralStringResource(R.plurals.st_NotepadScreen_words61, wordCount, wordCount),
+                                    style      = MaterialTheme.typography.labelSmall,
+                                    color      = onColor.copy(0.35f),
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
                             }
                         }
-
-                        // Pin (+ delete on roomy cards): independent targets,
-                        // siblings of every viewer-opening zone — they can
-                        // never open the viewer.
-                        Row(horizontalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 8.dp)) {
-                            ToolzExpressiveIconButton(
-                                onClick = onTogglePin,
-                                modifier = Modifier.size(actionSize),
-                                colors = IconButtonDefaults.filledIconButtonColors(
-                                    containerColor = if (note.isPinned) onColor.copy(0.18f) else onColor.copy(0.08f),
-                                    contentColor = onColor.copy(if (note.isPinned) 0.95f else 0.45f)
-                                )
+                        Spacer(Modifier.height(10.dp))
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment     = Alignment.CenterVertically,
+                        ) {
+                            pinButton()
+                            Spacer(Modifier.width(8.dp))
+                            deleteButton()
+                        }
+                    } else {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment     = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            // Info zone: opens the viewer.
+                            Box(
+                                Modifier
+                                    .weight(1f)
+                                    .bouncyClick(onClick = onClick, onLongClick = onLongClick)
                             ) {
-                                Icon(
-                                    Icons.Rounded.PushPin, contentDescription = if (note.isPinned) stringResource(R.string.st_NotepadScreen_cdunpin63) else stringResource(R.string.st_NotepadScreen_cdpin62),
-                                    Modifier.size(actionIcon).graphicsLayer { rotationZ = if (note.isPinned) -20f else 0f }
-                                )
-                            }
-                            // Compact cards drop the footer delete: the
-                            // options sheet, selection state and trash cover it.
-                            if (!compact) {
-                                ToolzExpressiveIconButton(
-                                    onClick = onDelete,
-                                    modifier = Modifier.size(actionSize),
-                                    colors = IconButtonDefaults.filledIconButtonColors(
-                                        containerColor = onColor.copy(0.08f),
-                                        contentColor = onColor.copy(0.45f)
-                                    )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
                                 ) {
-                                    Icon(Icons.Rounded.Delete, contentDescription = stringResource(R.string.st_NotepadScreen_cddel64), Modifier.size(actionIcon))
+                                    Column(
+                                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text(
+                                            dateLabel,
+                                            style         = MaterialTheme.typography.labelSmall,
+                                            fontWeight    = FontWeight.ExtraBold,
+                                            color         = onColor.copy(0.5f),
+                                            letterSpacing = if (compact) 0.4.sp else 0.8.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        if (wordCount > 0 && !compact) {
+                                            Text(
+                                                pluralStringResource(R.plurals.st_NotepadScreen_words61, wordCount, wordCount),
+                                                style         = MaterialTheme.typography.labelSmall,
+                                                color         = onColor.copy(0.35f),
+                                                fontWeight    = FontWeight.Bold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
+                                    }
+
+                                    // Attachment type badges
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        modifier = Modifier.padding(horizontal = 6.dp)
+                                    ) {
+                                        if (note.attachedAudioUri != null)
+                                            AttachmentIndicator(Icons.Rounded.MusicNote, onColor, stringResource(R.string.st_NotepadScreen_cdhaud66))
+                                        if (note.attachedPdfUri != null)
+                                            AttachmentIndicator(Icons.Rounded.Description, onColor, stringResource(R.string.st_NotepadScreen_cdhpdf67))
+                                        if (note.attachedImageUri != null)
+                                            AttachmentIndicator(Icons.Rounded.Image, onColor, stringResource(R.string.st_NotepadScreen_cdhimg68))
+                                    }
+                                }
+                            }
+
+                            // Pin (+ delete on roomy cards): independent targets,
+                            // siblings of every viewer-opening zone — they can
+                            // never open the viewer.
+                            Row(horizontalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 8.dp)) {
+                                pinButton()
+                                if (!compact) {
+                                    deleteButton()
                                 }
                             }
                         }
@@ -3562,12 +3792,20 @@ private fun NotepadActionComponent(
                             ) {
                                 Icon(Icons.Rounded.MoreVert, contentDescription = stringResource(R.string.st_NotepadScreen_cdopt74))
                             }
-                            Spacer(Modifier.width(6.dp))
-                            VerticalDivider(
-                                modifier = Modifier.height(22.dp),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.3f)
+                            Spacer(Modifier.width(4.dp))
+                            // Solid rounded keyline, centered in the pill —
+                            // reads as a real separator, not a stray hairline.
+                            Box(
+                                Modifier
+                                    .align(Alignment.CenterVertically)
+                                    .width(1.5.dp)
+                                    .height(24.dp)
+                                    .background(
+                                        MaterialTheme.colorScheme.onSurfaceVariant.copy(0.5f),
+                                        RoundedCornerShape(2.dp),
+                                    )
                             )
-                            Spacer(Modifier.width(6.dp))
+                            Spacer(Modifier.width(4.dp))
                             ToolzExpressiveIconButton(
                                 onClick = {
                                     haptic.longClick()
@@ -3707,9 +3945,11 @@ private fun FullExpressiveEditor(
     ).value
     val onColor = noteContentColor(noteColor)
 
-    val words = remember(currentNote.content) { com.frerox.toolz.data.notepad.NoteText.wordCount(currentNote.content) }
+    // Count real words, not markdown syntax tokens.
+    val plainContent = remember(currentNote.content) { stripMarkdown(currentNote.content) }
+    val words = remember(plainContent) { com.frerox.toolz.data.notepad.NoteText.wordCount(plainContent) }
     val chars = currentNote.content.length
-    val readingTime = remember(currentNote.content) { com.frerox.toolz.data.notepad.NoteText.readingMinutes(currentNote.content) }
+    val readingTime = remember(plainContent) { com.frerox.toolz.data.notepad.NoteText.readingMinutes(plainContent) }
 
     val optionsAlpha by animateFloatAsState(
         targetValue = if (isFocusMode) 0f else 1f,

@@ -1,52 +1,53 @@
 /*
  * Copyright (C) 2026 Toolz Contributors
  *
- * Logcat diagnostic stream: level chips, color-coded lines, live tail,
- * substring filter, copy/share, and privileged Shizuku ADB shell support.
- *
- * When Shizuku is authorized, commands execute as UID 2000 (shell), allowing
- * unrestricted logcat streaming across the app or full system without permission drops.
+ * Live log terminal for Developer Mode. It merges the local DevLogHub ring
+ * buffer with logcat, filters by severity and text, follows the tail unless
+ * paused, and never uploads anything. Full-system scope is available only
+ * through an authorized Shizuku service.
  */
 
 package com.frerox.toolz.ui.screens.developer.components
 
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.Clear
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
-import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.DeleteSweep
+import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.Security
-import androidx.compose.material.icons.rounded.Warning
+import androidx.compose.material.icons.rounded.Terminal
+import androidx.compose.material.icons.rounded.WarningAmber
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -60,271 +61,259 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.frerox.toolz.ui.screens.developer.LogcatScope
+import com.frerox.toolz.data.developer.DevShizukuState
+import com.frerox.toolz.data.developer.MAX_LOGCAT_LINES
+import com.frerox.toolz.data.developer.LogcatLevel
+import com.frerox.toolz.data.developer.LogcatScope
+import com.frerox.toolz.data.developer.LogcatSeverity
+import com.frerox.toolz.data.developer.filterLogcatLines
+import com.frerox.toolz.data.developer.formatLogcatClock
+import com.frerox.toolz.data.developer.logLineLevel
+import com.frerox.toolz.data.developer.prettyLogcatLine
 
-private val levelRegex = Regex("""(?:\s|\b)([VDIWEF])[/ ]""")
-
-private fun levelColor(level: Char?, fallback: Color): Color = when (level) {
-    'E' -> Color(0xFFFF6B6B)
-    'F' -> Color(0xFFFF5252)
-    'W' -> Color(0xFFFFB74D)
-    'I' -> Color(0xFF81C784)
-    'D' -> Color(0xFF64B5F6)
-    'V' -> Color(0xFFB0BEC5)
-    else -> fallback
-}
-
-@Composable
-private fun LogLine(text: String, defaultColor: Color) {
-    val level = remember(text) { levelRegex.find(text)?.groupValues?.getOrNull(1)?.first() }
-    val color = levelColor(level, defaultColor)
-    Text(
-        text,
-        color = color,
-        fontFamily = FontFamily.Monospace,
-        fontSize = 11.sp,
-        softWrap = false,
-        lineHeight = 16.sp,
-    )
-}
-
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun LogcatViewer(
     lines: List<String>,
     tail: Boolean,
-    onTail: (Boolean) -> Unit,
-    shizukuActive: Boolean,
-    forceShizuku: Boolean,
-    onToggleForceShizuku: (Boolean) -> Unit,
-    onRequestShizuku: () -> Unit,
     scope: LogcatScope,
+    shizuku: DevShizukuState,
+    clearedAtMs: Long?,
+    onToggleTail: () -> Unit,
     onScopeChange: (LogcatScope) -> Unit,
+    onRequestShizukuPermission: () -> Unit,
     onRefresh: () -> Unit,
-    onTestLog: () -> Unit,
     onClear: () -> Unit,
     onCopyAll: () -> Unit,
-    onCopyWarningsAndErrors: () -> Unit,
+    onCopyWarnings: () -> Unit,
+    onSendTestLog: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var selectedLevel by remember { mutableStateOf<Char?>('A') } // 'A' = All
     var query by remember { mutableStateOf("") }
+    var severity by remember { mutableStateOf(LogcatSeverity.ALL) }
+    val filtered = remember(lines, query, severity) {
+        filterLogcatLines(lines, query = query, severity = severity)
+    }
     val listState = rememberLazyListState()
 
-    val filtered = remember(lines, selectedLevel, query) {
-        lines.filter { line ->
-            val lvl = levelRegex.find(line)?.groupValues?.getOrNull(1)?.first() ?: 'I'
-            val matchesLevel = when (selectedLevel) {
-                'A', null -> true
-                'V' -> true
-                'D' -> lvl in "DIWEF"
-                'I' -> lvl in "IWEF"
-                'W' -> lvl in "WEF"
-                'E' -> lvl in "EF"
-                else -> true
-            }
-            matchesLevel && (query.isBlank() || line.contains(query, ignoreCase = true))
-        }
-    }
-
-    LaunchedEffect(filtered.size, tail) {
+    LaunchedEffect(filtered, tail) {
         if (tail && filtered.isNotEmpty()) {
-            listState.scrollToItem((filtered.size - 1).coerceAtLeast(0))
+            listState.scrollToItem(filtered.lastIndex)
         }
     }
 
-    Column(modifier.fillMaxWidth()) {
-        // ── Top Status & Action Bar ──────────────────────────────────────────
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        FlowRow(
             modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            // Live indicator dot
-            Box(
-                modifier = Modifier
-                    .size(8.dp)
-                    .background(
-                        if (tail) Color(0xFF4CAF50) else MaterialTheme.colorScheme.outlineVariant,
-                        CircleShape,
-                    ),
-            )
-            Spacer(Modifier.width(6.dp))
-            Text(
-                if (tail) "Live (${filtered.size} lines)" else "Paused (${filtered.size} lines)",
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f),
-            )
-
-            // Copy Warnings & Errors action
-            IconButton(
-                onClick = onCopyWarningsAndErrors,
-                modifier = Modifier.size(34.dp),
-            ) {
+            FilledTonalIconButton(onClick = onToggleTail) {
                 Icon(
-                    Icons.Rounded.Warning,
-                    contentDescription = "Copy Warnings & Errors",
-                    tint = Color(0xFFFFB74D),
-                    modifier = Modifier.size(18.dp),
+                    imageVector = if (tail) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                    contentDescription = if (tail) "Pause live log" else "Resume live log",
                 )
             }
-
-            // Copy All
-            IconButton(
-                onClick = onCopyAll,
-                modifier = Modifier.size(34.dp),
-            ) {
-                Icon(
-                    Icons.Rounded.ContentCopy,
-                    contentDescription = "Copy all logs",
-                    modifier = Modifier.size(18.dp),
-                )
+            IconButton(onClick = onRefresh) {
+                Icon(Icons.Rounded.Refresh, contentDescription = "Refresh logcat")
             }
-
-            // Emit Test Log
-            IconButton(
-                onClick = onTestLog,
-                modifier = Modifier.size(34.dp),
-            ) {
-                Icon(
-                    Icons.Rounded.Add,
-                    contentDescription = "Emit test log",
-                    modifier = Modifier.size(18.dp),
-                )
+            IconButton(onClick = onCopyAll, enabled = lines.isNotEmpty()) {
+                Icon(Icons.Rounded.ContentCopy, contentDescription = "Copy all log lines")
             }
-
-            // Refresh
-            IconButton(
-                onClick = onRefresh,
-                modifier = Modifier.size(34.dp),
-            ) {
-                Icon(
-                    Icons.Rounded.Refresh,
-                    contentDescription = "Refresh",
-                    modifier = Modifier.size(18.dp),
-                )
+            IconButton(onClick = onCopyWarnings, enabled = lines.isNotEmpty()) {
+                Icon(Icons.Rounded.WarningAmber, contentDescription = "Copy warnings and errors")
             }
-
-            // Clear
-            IconButton(
-                onClick = onClear,
-                modifier = Modifier.size(34.dp),
-            ) {
-                Icon(
-                    Icons.Rounded.Delete,
-                    contentDescription = "Clear",
-                    tint = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.size(18.dp),
-                )
+            IconButton(onClick = onClear, enabled = lines.isNotEmpty()) {
+                Icon(Icons.Rounded.DeleteSweep, contentDescription = "Clear the log stream")
+            }
+            TextButton(onClick = onSendTestLog) {
+                Text("Test entry", style = MaterialTheme.typography.labelMedium)
             }
         }
 
-        Spacer(Modifier.height(8.dp))
-
-        // ── Search & Filter Row ───────────────────────────────────────────────
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
-            placeholder = { Text("Filter logcat by tag, msg, pid…", fontSize = 12.sp) },
-            leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            label = { Text("Filter lines") },
+            leadingIcon = {
+                Icon(Icons.Rounded.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+            },
             trailingIcon = {
                 if (query.isNotEmpty()) {
                     IconButton(onClick = { query = "" }) {
-                        Icon(Icons.Rounded.Clear, contentDescription = "Clear query", modifier = Modifier.size(16.dp))
+                        Icon(Icons.Rounded.Close, contentDescription = "Clear filter")
                     }
                 }
             },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(14.dp),
         )
 
-        Spacer(Modifier.height(8.dp))
-
-        // ── Level Selector Chips + Scope ─────────────────────────────────────
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            listOf(
-                'A' to "All",
-                'V' to "Verbose",
-                'D' to "Debug",
-                'I' to "Info",
-                'W' to "Warn",
-                'E' to "Error",
-            ).forEach { (lvl, label) ->
+            Text(
+                text = "Severity",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = "${filtered.size}/${lines.size} lines",
+                style = MaterialTheme.typography.labelMedium,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            LogcatSeverity.entries.forEach { option ->
                 FilterChip(
-                    selected = selectedLevel == lvl,
-                    onClick = { selectedLevel = lvl },
-                    label = { Text(label, fontSize = 11.sp, fontWeight = if (selectedLevel == lvl) FontWeight.Bold else FontWeight.Normal) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = when (lvl) {
-                            'W' -> Color(0xFFFFB74D).copy(alpha = 0.25f)
-                            'E' -> Color(0xFFFF6B6B).copy(alpha = 0.25f)
-                            else -> MaterialTheme.colorScheme.primaryContainer
-                        },
-                    ),
+                    selected = severity == option,
+                    onClick = { severity = option },
+                    label = { Text(option.label, style = MaterialTheme.typography.labelMedium) },
                 )
             }
+        }
 
-            if (shizukuActive) {
-                FilterChip(
-                    selected = forceShizuku,
-                    onClick = { onToggleForceShizuku(!forceShizuku) },
-                    label = { Text(if (forceShizuku) "Shizuku Privileged" else "Standard", fontSize = 11.sp) },
-                )
-                if (forceShizuku) {
-                    LogcatScope.entries.forEach { s ->
-                        FilterChip(
-                            selected = scope == s,
-                            onClick = { onScopeChange(s) },
-                            label = { Text(s.title, fontSize = 11.sp) },
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            LogcatScope.entries.forEachIndexed { index, option ->
+                SegmentedButton(
+                    selected = scope == option,
+                    onClick = { onScopeChange(option) },
+                    enabled = option == LogcatScope.APP || shizuku.authorized,
+                    shape = SegmentedButtonDefaults.itemShape(index, LogcatScope.entries.size),
+                    colors = SegmentedButtonDefaults.colors(
+                        activeContainerColor = MaterialTheme.colorScheme.primary,
+                        activeContentColor = MaterialTheme.colorScheme.onPrimary,
+                    ),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        if (option == LogcatScope.SYSTEM && !shizuku.authorized) {
+                            Icon(
+                                imageVector = Icons.Rounded.Lock,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                            )
+                        }
+                        Text(option.label, style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
+        }
+
+        DevInlineNotice(
+            icon = if (shizuku.authorized) Icons.Rounded.CheckCircle else Icons.Rounded.Lock,
+            text = shizukuStatusText(shizuku),
+            containerColor = if (shizuku.authorized) {
+                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+            } else {
+                MaterialTheme.colorScheme.surfaceContainerHighest
+            },
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            action = if (!shizuku.authorized && shizuku.installed && shizuku.available) {
+                {
+                    TextButton(onClick = onRequestShizukuPermission) {
+                        Text("Authorize", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            } else {
+                null
+            },
+        )
+
+        DevMonoBox(modifier = Modifier.fillMaxWidth().height(320.dp)) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                if (filtered.isEmpty()) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillParentMaxSize()
+                                .padding(24.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Terminal,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Text(
+                                    text = if (lines.isEmpty()) "No log lines yet" else "No lines match this filter",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.padding(top = 8.dp),
+                                )
+                                Text(
+                                    text = if (tail) "Waiting for the next event…" else "Resume the tail or refresh the stream.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    items(filtered) { line ->
+                        Text(
+                            text = prettyLogcatLine(line),
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 10.sp,
+                                lineHeight = 14.sp,
+                            ),
+                            color = logLineColor(line),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 1.dp),
                         )
                     }
                 }
-            } else {
-                OutlinedButton(
-                    onClick = onRequestShizuku,
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                ) {
-                    Icon(Icons.Rounded.Security, contentDescription = null, modifier = Modifier.size(12.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Enable Shizuku", fontSize = 10.sp)
-                }
             }
         }
 
-        Spacer(Modifier.height(8.dp))
+        Text(
+            text = buildString {
+                append(if (tail) "Tail running" else "Tail paused")
+                append(" · ")
+                append(if (scope == LogcatScope.SYSTEM) "system stream" else "app stream")
+                append(" · ")
+                append(if (clearedAtMs != null) "cleared ${formatLogcatClock(clearedAtMs)}" else "session buffer")
+                append(" · newest $MAX_LOGCAT_LINES lines")
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
 
-        // ── Terminal Logcat Box (Spacious 340dp) ──────────────────────────────
-        DevMonoBox(modifier = Modifier.fillMaxWidth().height(340.dp)) {
-            if (filtered.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxWidth().padding(32.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        if (lines.isEmpty()) "Waiting for log events… Tap '+' to emit test log."
-                        else "No logs match the current filter.",
-                        color = Color(0xFF90A4AE),
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 12.sp,
-                    )
-                }
-            } else {
-                SelectionContainer {
-                    LazyColumn(state = listState) {
-                        items(filtered.size) { i ->
-                            LogLine(filtered[i], Color(0xFFCFD8DC))
-                        }
-                    }
-                }
-            }
-        }
+private fun shizukuStatusText(state: DevShizukuState): String = when {
+    state.authorized -> "Shizuku authorized · full system logcat is available"
+    !state.installed -> "Shizuku not installed · using the local app stream"
+    !state.available -> "Shizuku installed but not running · using the local app stream"
+    else -> "Authorize Shizuku to read logs from every process"
+}
+
+@Composable
+private fun logLineColor(line: String): Color {
+    return when (logLineLevel(line)) {
+        LogcatLevel.WARN -> MaterialTheme.colorScheme.tertiary
+        LogcatLevel.ERROR, LogcatLevel.FATAL -> MaterialTheme.colorScheme.error
+        LogcatLevel.INFO -> MaterialTheme.colorScheme.onSurface
+        LogcatLevel.DEBUG, LogcatLevel.VERBOSE -> MaterialTheme.colorScheme.onSurfaceVariant
+        null -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 }

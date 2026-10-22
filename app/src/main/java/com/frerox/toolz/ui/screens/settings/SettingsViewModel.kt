@@ -172,25 +172,13 @@ class SettingsViewModel @Inject constructor(
     val pdfAiToolsEnabled = repository.pdfAiToolsEnabled
     val notepadAiToolsEnabled = repository.notepadAiToolsEnabled
 
-    // ---- Developer Mode (master + controlled spoofs) ----
+    // ---- Developer Mode (master + sandboxes) ----
     val developerModeEnabled = repository.developerModeEnabled
     val allSpoofFlags = repository.allSpoofFlags
-    val devVerboseLogging = repository.devVerboseLogging
-    val devMockDelayMs = repository.devMockDelayMs
-    val devPerfHud = repository.devPerfHud
-    val devForceOffline = repository.devForceOffline
-    val devShakeToOpen = repository.devShakeToOpen
 
-    fun setDeveloperModeEnabled(enabled: Boolean) = viewModelScope.launch { repository.setDeveloperModeEnabled(enabled) }
-    fun setSpoofFlag(prefKey: String, enabled: Boolean) = viewModelScope.launch { repository.setSpoofFlag(prefKey, enabled) }
-    fun clearAllSpoofs() = viewModelScope.launch { repository.clearAllSpoofs() }
-    fun resetDeveloperMode() = viewModelScope.launch { repository.resetDeveloperMode() }
-    fun setDevVerboseLogging(enabled: Boolean) = viewModelScope.launch { repository.setDevVerboseLogging(enabled) }
-    fun setDevMockDelayMs(ms: Int) = viewModelScope.launch { repository.setDevMockDelayMs(ms) }
-    fun setDevPerfHud(enabled: Boolean) = viewModelScope.launch { repository.setDevPerfHud(enabled) }
-    fun setDevForceOffline(enabled: Boolean) = viewModelScope.launch { repository.setDevForceOffline(enabled) }
-    fun ensureDeveloperModeVersion(code: Long, onReset: () -> Unit = {}) = viewModelScope.launch {
-        if (repository.ensureDeveloperModeVersion(code)) onReset()
+    fun setDeveloperModeEnabled(enabled: Boolean, onComplete: (Boolean) -> Unit = {}) = viewModelScope.launch {
+        val success = runCatching { repository.setDeveloperModeEnabled(enabled) }.isSuccess
+        onComplete(success)
     }
 
     fun setStepGoal(goal: Int) = viewModelScope.launch { repository.setStepGoal(goal) }

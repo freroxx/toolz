@@ -258,7 +258,7 @@ class WifiTweaksViewModel @Inject constructor(
                             )
                         }
                     } catch (e: Exception) {
-                        addLog("TELEMETRY", "Shizuku telemetry failed: ${e.message ?: e.javaClass.simpleName}", LogLevel.WARNING)
+                        addLog("PRIVILEGED", "Shizuku network read failed: ${e.message ?: e.javaClass.simpleName}", LogLevel.WARNING)
                     }
                 }
                 delay(10_000)

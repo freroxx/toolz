@@ -1,127 +1,190 @@
 # Developer Mode
 
-Internal console for diagnostics + controlled local-only spoofs. Ships in release, gated behind a visible Settings toggle with a warning popup. **No telemetry of any kind**: bug reports are built as local text and leave the device only via clipboard / the system share sheet, with the Toolz Discord (`https://discord.gg/aAswRUerwh` — same link as the Settings DISCORD button) as the handoff where the user pastes them.
+Developer Mode is Toolz's on-device sandbox and diagnostics console. It ships in
+release builds behind a visible Settings switch, but every fixture and diagnostic
+is local. There is no account, no upload path and no telemetry: reports leave only
+when the user copies them or chooses a destination in the system share sheet.
 
-**Naming**: user-facing strings say **Toolz Demo Mode** (mode name, dialogs, dashboard long-press). Internal identifiers are deliberately unchanged (`SpoofGate`, `spoofAll()`, `spoof_*` pref keys, the `DevSpoof` logcat tag) so greps and logcat contracts stay stable.
+## Naming and contracts
+
+- User-facing copy uses **Developer Mode**, **Developer console**, **sandbox** and
+  **fixture**. Avoid “demo mode”, “mock” and “spoofed” in UI text.
+- Internal identifiers are stable: `SpoofGate`, `spoofAll()`, `spoof_*` preference
+  keys and the `DevSpoof` logcat tag.
+- The master switch is the final gate. When it is off, every tool reads live data
+  and the console shows its locked panel.
+- Sandbox fixtures are in-memory values. They must not be written into real Room
+  tables, MediaStore, user files or network requests.
+- Destructive developer actions always require confirmation. Enabling or disabling
+  sandboxes never restarts the app automatically.
 
 ## Entry
 
-- Settings → DEVELOPER section (`SettingsScreen.kt`, index 11): master toggle + `Developer console` row → `developer_mode` route (`Screen.DeveloperMode`, wired in `MainActivity.kt` `ToolzNavHost`).
-- **Gating**: the `Developer console` row is only visible while the master switch is ON, and the console screen itself renders a locked panel ("Console locked") whenever the master is OFF — covering every entry path (Settings, shake, stale back stack). Re-enabling goes through the same warning dialog.
-- Enabling shows a warning dialog (local-only fakes, crash/wipe risks, auto-disable on update) — in Settings AND in the console's own power card. Disabling is instant, no dialog.
-- Optional shake-to-open: master ON + toggle ON → accelerometer (2.6g, 2s cooldown) navigates to the console. Zero sensor cost otherwise.
-- The console itself also has a master switch (Home tab) — no Settings round-trip needed.
+- **Settings → Developer Mode** controls the master switch. The developer console
+  row is visible only while Developer Mode is on. Navigation waits for the
+  DataStore write to finish, so the console cannot open before its flag is saved.
+  If the write fails, the switch reflects the stored value and a snackbar reports
+  that Developer Mode could not be enabled or turned off.
+- `Screen.DeveloperMode` is also reachable from the optional shake gesture. A stale
+  back-stack entry still renders the locked panel when the master is off.
+- Enabling uses a warning dialog that explains fixtures, blocked live data and the
+  version-change reset.
+- Shake-to-open is opt-in in **System → Behavior**. The accelerometer listener is
+  registered only while Developer Mode and shake-to-open are both enabled.
+- Turning Developer Mode off dismisses any open command palette and returns every
+  tool to live data immediately. The per-tool selection is kept for the next
+  session; **Reset Developer Mode** clears it.
 
-## Spoofed mode (Spoof all → relaunch)
+## Console layout
 
-- **Spoof all** (Home quick actions `SPOOF ALL` hero button, Spoofs tab header, command palette "Spoof all + relaunch"): `DeveloperModeViewModel.spoofAll()` turns master ON + all `DEV_TOOL` flags ON in one atomic write (`SettingsRepository.setAllSpoofs(true)`), then the Activity `recreate()`s so the whole app relaunches straight into full Spoofed mode.
-- **Version status in Settings**: with master ON, the About section appends the console state to the version string — `V1.1.7 - Spoofed - Developer Mode` (the `- Spoofed` part appears only when at least one sandbox is effectively active; `- Developer Mode` when the master is on).
+The top bar shows the active sandbox count and a command palette. The console has
+four tabs:
 
-## Controlled-spoof contract (the important part)
+### Overview
 
-Spoofs are a **local sandbox, not mocks**:
+- Master power card with the current sandbox count.
+- Active sandbox chips. Each chip removes one sandbox from the active set;
+  **Manage all sandboxes** opens the full list and its configurators.
+- **Presets**: Showcase, Edge cases and Travel. Applying a preset is one atomic
+  write that sets the master switch, the exact sandbox set and the fixture values.
+- Live runtime stats: uptime, heap, native heap, threads and a short heap history.
+- Diagnostic report summary with a route to Diagnostics.
 
-1. `DeveloperSpoofController` is the facade tool ViewModels ask; all state is delegated to `SpoofGate` (single hot cache of master + flags + params). Master OFF forces every tool to real data.
-2. Each tool declares a `SpoofNetworkPolicy` (`DevToolId.kt`): `BLOCK_ALL`, `BLOCK_REMOTE_SPECS`, `SENSORS_OFF`, `JOBS_PAUSED`, `LOCAL_ONLY`.
-3. When sandboxed, the real client is **never constructed/called** — fixtures come from RAM (`SpoofParams`, `FakeWhisperSandbox`, `FakeMusicSandbox`, `FakeCleanerSandbox`, …). Nothing is written to real Room tables, MediaStore, the real file system or the network.
-4. Every injection is marked `// DEV-SPOOF:` — audit with `grep -rn DEV-SPOOF app/src/main`.
-5. **Demo screens show no overlay of any kind** — no banner, no chip on the tool screen, no tint. The fake data IS the demo: everything on screen is shaped like the real thing (real phases, real delays, real widgets, honest refusals where a fake would lie). The demo flag surfaces only on the dashboard (red star) and the card long-press dialog.
+### Sandboxes
 
-### Whisper (exemplar)
+- Search, an **Active** filter and group filters across all 18 sandboxes.
+- Grouped list rows keep the set scannable. Tapping a row opens the configurator;
+  the switch turns that sandbox on or off without opening the sheet.
+- Each row shows the tool, group, network policy and a fixture-accurate summary.
 
-`spoof_whisper` + master ON → `WhisperRepository.sendMessage` / `sendEncryptedImage` throw `SpoofSandboxException` **before** touching Supabase; `sendTypingStatus` early-returns. The console shows `FakeWhisperSandbox` fixtures (contacts + thread, bubbles preview in the configurator) with an `OFFLINE • NOTHING LEAVES THIS DEVICE` banner. Turning master OFF discards the thread and re-observes real chats.
+The configurator is a bottom sheet with the live fixture summary, active switch
+and editable fixture fields. Slider writes happen on release. Text writes
+are debounced by 350 ms and local edits survive DataStore echoes. Pending text is
+flushed on dismissal or disposal. The sticky footer opens the live tool screen and
+dismisses the sheet once.
 
-### Battery (exemplar)
+### Diagnostics
 
-Sandboxed → `BatteryInfoViewModel` skips receiver registration + remote spec fetch and emits slider-driven fixtures (`SpoofParams.batteryLevel/batteryTempC/batteryCharging`). The screen stays watermark-free — only the fixture readings differ from reality.
+- **Diagnostic report**: copy or share an on-device snapshot containing app/build,
+  device, process, runtime, appearance, active sandbox names and crash-lab history.
+  Log lines are never included automatically.
+- **Logcat**: merges the local `DevLogHub` ring buffer with an app-PID logcat
+  stream. Full-system scope requires authorized Shizuku. The viewer supports live
+  tail, severity filters, text search, copy-all, copy warnings/errors and a true
+  clear. Clearing empties the local hub and applies a cutoff so stale system lines
+  do not immediately reappear. Tailing runs only while Diagnostics is visible and
+  the screen is resumed; switching tabs or backgrounding the app stops it.
+- **Crash lab**: crash-on-next-launch plus NPE, IllegalState, ANR and OOM tests.
+  History is written before the failure and survives the crash. If the history
+  write fails, the test aborts with an error snackbar and the app keeps running.
+- **Crash history**: the newest 20 events, presented newest-first.
+- **Notification lab**: six real test notifications on app channels with the stable
+  ID band `60001–60006`. Sending respects `POST_NOTIFICATIONS`; cancel only removes
+  that band. The matrix reflects notifications currently active in the system, not
+  just IDs sent during this process.
 
-## Auto-reset on version change
+### System
 
-`SettingsRepository.ensureDeveloperModeVersion()` (called from `MainActivity.onCreate`) disables master + all 18 spoofs + crash/force-offline flags + crash history when `VERSION_CODE` changes. Slider values (`SPOOF_PARAMS_JSON`) and the shake toggle survive — they are harmless prefs, not fakes. `resetDeveloperMode()` behaves the same on demand.
+- Application and build context, refreshed from the running process.
+- Appearance context: theme, language, font scale and layout direction are
+  read-only summaries with a route to the real appearance settings.
+- Behavior: shake-to-open.
+- Session: explicit **Restart app** and **Reset onboarding**.
+- Storage: cache size, app storage and a guarded clear-cache action that reports
+  the bytes actually freed.
+- Room inspector: read-only table names and row counts. SQLite/Room bookkeeping
+  tables are skipped; application tables are listed by name without redaction.
+- Preferences inspector: sorted, bounded and redacted for secrets, tokens, keys,
+  passwords and cryptographic material.
+- Screen launcher and system/community links, including the Toolz Discord.
+- **Danger zone**: clear all Room tables, reset fixture values and reset Developer
+  Mode. Each action asks for confirmation.
 
-## Console (Mission Control, 4 tabs)
+## Sandbox data model
 
-Fixed top bar: back, live `SPOOF` count chip, **command palette** (`Tune` icon) and **reset**. Tabs: Home / Spoofs / Labs / System.
+- `DevToolId` is the single source of truth for the 18 tools, their stable
+  `spoof_*` preference keys, display order, group, network policy and open route.
+  `SettingsRepository.spoofKeyMap` is derived from that enum, so a new sandbox
+  cannot silently lose its persisted flag.
+- `SpoofGrid(master, flags)` computes effective state. Persisted per-tool flags do
+  not bypass the master switch.
+- `SpoofParams` is persisted as one JSON value. Parsing tolerates malformed,
+  missing, non-finite and out-of-range values by falling back or clamping; text is
+  capped at the documented limits.
+- Master changes, enable-all, presets, fixture reset and the version reset are
+  atomic DataStore edits. A preset cannot leave the master on with a half-applied
+  tool set.
+- `SpoofGate` is the hot read path used by tool ViewModels. `SpoofSandboxException`
+  is the fail-closed guard for network-backed sends such as Whisper.
+- Tool screens render fixture-shaped content without banners or watermarks. The
+  dashboard star and long-press dialog identify an active sandbox and can turn it
+  off. `routeToDevTool()` is the only route-to-sandbox map.
 
-- **Home**: master power card (icon tile + "LOCAL ONLY • NO TELEMETRY" plate), live telemetry (heap/native/threads/uptime + rolling 48s heap sparkline, `TelemetryCard`), quick actions grid (`Spoof all` filled-primary relaunch, bug-report copy/share, Discord, all-spoofs-off, refresh storage), active-sandbox list (tap → configurator).
-- **Spoofs**: 2-column tile grid grouped by `DevToolGroup` (Hardware/System-like/Network/App machinery), real icon per tool (`DevToolId.icon`), policy chip, glow border + `SPOOF • LOCAL` chip when armed, own search field. Tap = **bottom-sheet configurator** (`SpoofConfiguratorSheet`) rendered from `SpoofFieldSpec`s in `SpoofToolSpecs.kt` (number sliders / switches / text fields, bounds mirroring `SpoofParams.parse` — via the shared `DebouncedSlider`, all writes debounced 300ms); "Open tool screen" jumps to the real route. Whisper gets the bubble-thread preview.
-- **Labs**: crash lab (+ **crash history**, last 8 of 20 stored events — DataStore `dev_crash_history_json`, auto-cleared on version bump) • notification lab (`[SPOOF TEST]`-tagged, 60001+ ID band, flood/cancel) • **logcat v2** (`LogcatViewer`: level chips, color-coded lines, live tail 1s — tail auto-stops when the tab or app is no longer visible —, filter, copy/clear; local `logcat -d` reads only) • data lab (verbose, force-offline, debounced mock-delay slider, range 0–10s matching the repository coercion) • deep-link launchpad (searchable, ~37 arg-free routes) • UI playground (segmented buttons for font scale / appearance / language **reflect the real current state**, incl. "current %.2f×" readout; RTL, perf HUD, endpoints).
-- **System**: status & build (+ copy/share report + shake toggle), storage/DB inspector (counts only; vault/whisper/key tables redacted), DataStore inspector (own search field; sensitive values redacted by `snapshotPrefs()`), **Danger zone with ARM-then-fire** (arm switch first, then all-spoofs-off / reset).
+## Version changes and reset
 
-## Bug report & Discord handoff (no telemetry)
+`SettingsRepository.ensureDeveloperModeVersion()` runs from `MainActivity.onCreate`.
+When the version code changes it atomically:
 
-- `DeveloperModeViewModel.buildBugReport(info)` → app/device/spoofs/heap/uptime + local crash-lab history. Copyable anywhere in the console.
-- Share = `DevUiOverrider.shareText` (system chooser — the user picks the destination; the app uploads nothing).
-- `DevUiOverrider.openToolzDiscord` opens the same invite the Settings DISCORD button uses (`TOOLZ_DISCORD_URL` = `https://discord.gg/aAswRUerwh`). The user pastes the report there.
+- turns the master switch off;
+- turns all 18 sandbox flags off;
+- clears crash history and the crash-on-next-launch marker;
+- keeps shake-to-open and fixture values, which carry no live-data risk.
 
-## Testing checklist
+**Reset Developer Mode** applies the same reset on demand. **Reset fixture values**
+restores `SpoofParams()` defaults without changing the current sandbox selection.
+The Settings subtitle reflects the live count: `Off · local console locked` when
+the master is off, `On · console unlocked` when no sandbox is active, or
+`On · N sandbox(es) active · console unlocked`.
 
-- Fresh install: Settings toggle works, warning shows once per enable, console opens; console power card mirrors master.
-- Master OFF → console row hidden in Settings + console route shows the locked panel; every sandbox inert.
-- **Spoof all** → master + all 18 flags ON, app relaunches, screens render pure fixture data (no banners — Demo Mode contract), Settings About shows `V… - Spoofed - Developer Mode`.
-- Battery spoof → 7%/overheat fixture; slider in configurator updates the tile summary (debounced, no per-tick DataStore storm).
-- Whisper spoof → send fails closed locally; zero Supabase traffic (verify via logcat + network).
-- Cleaner spoof → staged fake scan (≈1.2 s phases), trashing/restore/undo/permanent-delete all RAM-only; disarm restores the real storage view.
-- Notification vault spoof → RAM backlog + Shizuku faked authorized; hide/delete leave real rows untouched.
-- Update/news spoof → 9.9.9-demo release cycles Checking→Downloading→ReadyToInstall in RAM; install answers honest Error; news backlog with pinned Demo welcome item, sync never runs.
-- Tasks spoof → board + calendar on RAM fixtures (ids ≥1000), sessions tick in-process, no alarm ever scheduled/cancelled/re-armed; calendar AI pass refuses honestly.
-- Search spoof → `.demo` domains that never resolve; DNS benchmark answers fake latencies without probes.
-- Media downloader spoof → extract fakes the option ladder from the URL; download tap says no network/no file; history RAM-only.
-- Crash lab → event recorded BEFORE the crash, appears in history after relaunch; version bump clears it.
-- Flood → 6 tagged notifications; Cancel clears them.
-- Playground: font scale / appearance / language segmented buttons highlight the actual current values after relaunch/apply.
-- Bump `VERSION_CODE` → master + spoofs + crash history reset on next launch.
-- Export/copy paths contain no vault secrets (redaction lists in `snapshotPrefs()` + table inspector).
+## Privacy
 
-## Screen overlays — none (removed 2026-10)
+- Diagnostics are generated locally and never uploaded by Toolz.
+- Reports include active sandbox names and crash-lab history, never raw log lines,
+  clipboard contents, tokens or account data.
+- Share opens the system chooser; the app does not choose a destination. Discord is
+  a manual paste handoff: `https://discord.gg/aAswRUerwh`.
+- Preference snapshots redact sensitive key/value pairs before display.
 
-Demo mode ships **watermark-free by design**: a banner overlay defeats the point of a realistic demo, so the fake data itself is the tell on every tool screen.
+## Source map
 
-- `RouteSpoofBanner.kt` still mounts `SpoofWatermarkOverlay`/`SandboxWatermarkHost`, but both now render their content only — no visual, no tap target. The names are kept for call-site stability; the inline `SpoofBanner()` composable remains in `SpoofChip.kt` as uncalled dead code (compiles fine, kept for API stability; delete at the next API break).
-- `routeToDevTool()` is still the single route→tool map and still must cover every tool route — it now feeds the dashboard star + long-press dialog.
-- `SpoofStateViewModel.isSandbox(tool)` unchanged for screens/VMs that need the flag.
-- Audit rules unchanged: `grep -rn DEV-SPOOF app/src/main` must hit every tool VM; a tool screen may only show fixture-shaped content while sandboxed.
+| Area | Files |
+|---|---|
+| Console shell | `ui/screens/developer/DeveloperModeScreen.kt`, `DeveloperConsole.kt`, `DeveloperConsoleComponents.kt`, `DeveloperCommands.kt` |
+| Tabs | `DeveloperOverviewTab.kt`, `DeveloperSandboxesTab.kt`, `DeveloperDiagnosticsTab.kt`, `DeveloperSystemTab.kt` |
+| Pure catalogs | `DevModels.kt`, `DevFormatters.kt`, `DevLogcat.kt`, `DevPresets.kt`, `DevRoutes.kt`, `DevToolFilters.kt`, `SpoofToolSpecs.kt` |
+| State/actions | `DeveloperModeViewModel.kt` |
+| Components | `DevWidgets.kt`, `SpoofTileGrid.kt`, `SpoofConfiguratorSheet.kt`, `LogcatViewer.kt`, `RuntimeStatsCard.kt`, `CommandPalette.kt`, `CrashHistoryCard.kt`, `RouteLauncherSheet.kt`, `SpoofQuickFix.kt`, `DevRouteMap.kt`, `SpoofSandboxState.kt` |
+| Data layer | `data/developer/DevToolId.kt`, `SpoofParams.kt`, `SpoofGrid.kt`, `SpoofGate.kt`, `SpoofSandboxException.kt`, `DevLogHub.kt`, `DevUiOverrider.kt`, `ShakeDetector.kt`, plus the `Fake*Sandbox` fixtures |
+| Persistence | `data/settings/SettingsRepository.kt`, `SettingsViewModel.kt` |
+| Entry points | `MainActivity.kt`, `SettingsScreen.kt` |
 
-## Permission skips (sandboxed screens never prompt)
+## Verification
 
-- `ui/screens/developer/components/SpoofSandboxState.kt` exposes `rememberSandboxActive(tool)` (Hilt `SpoofGateEntryPoint`, no VM surgery needed) so composable screens can drop permission gates while their sandbox is on.
-- Sandbox-first screens implemented so far: Music (audio placeholder skipped — the fake library needs no real files), QR scanner (camera prompt + analyzer binding skipped, fixture payload card shown), Whisper (auth/onboarding never shown).
-- Contract: the skip is screen-local; flipping the sandbox off restores the real permission flow untouched.
+Focused JVM tests cover fixture parsing, key coverage, effective sandbox state,
+presets, field specs, route mapping, report formatting, logcat parsing/merging and
+the notification ID band:
 
-## Dashboard affordances (star + quick-fix)
+```bash
+./gradlew :app:testDebugUnitTest --tests 'com.frerox.toolz.developer.*'
+./gradlew :app:compileDebugKotlin
+```
 
-- Sandboxed tools get a small red star on their dashboard card — top-right in grid layout, right-center in list layout (`SpoofSandboxStar`, fed by `SpoofQuickFixViewModel.activeSandboxes`; cards resolve their tool via the same `routeToDevTool` map that used to drive the watermark).
-- Long-pressing a spoofed card replaces the default long-press (pin/detail sheet) with `SpoofQuickFixDialog`: the tool's data is announced fake and spoofed, with **Disable spoof** (writes the same pref the console toggle writes) and **Developer options** (navigates to `developer_mode`). Disabling drops the star instantly — the live flags flow repaints the card without a relaunch.
+Manual checks:
 
-## Sandbox coverage (all enforced, all local-only)
-
-| Tool | Hook | Fixture | Blocked |
-|---|---|---|---|
-| Battery | VM gate + receiver skip | `SpoofParams` level/temp/charging | remote spec fetch |
-| Whisper | auto-auth + VM/chat fixture swap (`FakeWhisperSandbox.hubState()/threadFor()`) | fixture account, contacts, threads, canned auto-replies | login/accounts, Supabase, realtime, push, tombstone/prekey/heartbeat hydration, image sends |
-| Steps | `gate.active(STEPS)` walking-clock ticker | slider steps + `SpoofSim.addedSteps` accrued cadence | real step sensor (Room untouched) |
-| Sensors (compass/bubble/altimeter/speed/sound/light) | listener unregister + event guards | `SpoofSim` drive cycle, dB, lux, tilt, altitude+pressure streams | accel, baro, GPS, mic, light sensor |
-| Music | `FakeMusicSandbox` + full transport intercept | 7-track `spoof://` library, ticker/visualizer, queue/favs in RAM | MediaStore scan, Room, MediaController binding, audio permission |
-| Clipboard | `FakeClipboardSandbox` + entries swap | 30 typed clips (OTP/links/code…), capture gate=fake Shizuku | device clipboard read, capture service, Room, AI summarize |
-| Timers | fixture countdown/counter + service detach (timer, stopwatch, pomodoro) | 3s loop timer, RAM stopwatch + laps (200 cap), RAM pomodoro ticking real phase rules (`nextModeAfterWork`), auto-start + skip counts | ToolService bind/start, AlarmManager, notifications |
-| QR | scanner `rememberSandboxActive` bypass | fake WIFI: payload card, camera idle | camera permission prompt, analyzer binding |
-| Device info | `refresh`/`executeSearch` gates | flagship-almost-full fixture | spec API, disk rescan |
-| Network | trigger + monitor guards | `SpoofSim` ping/RSSI drift ×2 sites, FakeFiber-5G | scans, DNS, ping, traceroute, Shizuku system writes |
-| Flashlight | 5 choke-point guards (apply/setTorch/pulse/mode loops) + service-sync suppression | fake SOS toggle + beam-off state | torch hardware (can never fire), ToolService state |
-| Cleaner | `FakeCleanerSandbox` + `CleanerViewModel` source-flow swap, `gate.active(CLEANER)` combine | 7 categories w/ RAM trash, staged ≈1.2 s scan phases, duplicate-group keepers | disk scan, real deletes (RAM trash + restore/undo/empty/permanent), Shizuku, weekly auto-clear reminders |
-| Notification vault | `FakeNotificationSandbox` source-flow swap | 11 notifications across 6 apps, 3-day spread | Shizuku read (faked authorized), listener shell, Room hide/delete (RAM only), app-details intent (fixture lookup) |
-| Update + News | `FakeNewsSandbox` history/pagination/search swap; `UpdateViewModel` RAM lifecycle | 7-item backlog + pinned Demo welcome item; 9.9.9-demo lifecycle Checking→Available→Downloading→ReadyToInstall | GitHub fetch, downloads, install sessions (install answers honest Error), notify/snooze/dismiss repo writes |
-| Tasks (todo) | `FakeTasksSandbox` active/completedToday/history source swap (ids ≥1000) | 6-task board (5 priorities, subtasks), completed-today counter | Room writes, reminder alarm schedule/cancel/global re-arm, ToolService session (in-process 1 Hz tick), add-to-calendar (refused silently) |
-| Tasks (calendar) | event + dated-task source swaps (dated tasks ARE the todo fixture) | 5 events around "today" (DEADLINE/EXAM/sync/gym), recurring-rule shape | Room events, event/task reminder alarms, AI prompt pass (honest refusal — no model call, no image upload) |
-| Search | `FakeSearchSandbox` results/history/visits/engine-health swap | query-woven tiles on non-resolving `.demo` domains, seeded history + browser trail, fake engine health | engine HTTP + suggestion API, DNS UDP probes (fake latencies), Room history (RAM); bookmarks/quick-links (user's own rows) protected |
-| Media downloader | extract/download/demo-history branches | option ladder (1080/720/480) fabricated from the URL, RAM history rows | extraction API + catalog prober, WorkManager enqueues, converters, persisted history |
-| Files group (converter/PDF/encrypter/bg-remover) | VM gates in all four VMs (`FILES`) | converter: RAM progress walk + type-keyed demo output path; encrypter: genuine local transforms with no history write; bg-remover: faked model download (RAM "installed"), honest inference refusal | converter service + file writes, ONNX model download + inference, /Downloads/Toolz writes, history/pin/delete/rename/AI paths, user's real prefs & rows protected |
-
-## File map (console)
-
-- `ui/screens/developer/DeveloperModeScreen.kt` — 4-tab console (the only screen file), incl. the locked panel reachable when master is OFF and the `spoofAllAndRelaunch` wiring.
-- `ui/screens/developer/DeveloperModeViewModel.kt` — flows/actions; lazy telemetry (cold flow, only runs while watched) + heap history, crash history, logcat tail, bug report builder, `spoofAll()`.
-- `ui/screens/developer/SpoofToolSpecs.kt` — per-tool icon, fixture summary, group, open route, editable field specs.
-- `ui/screens/developer/components/` — `DevWidgets` (DevCard/DevCardTitle/DevBtn/DevToggleLine/DevDivider/DevKv, `DevSpacing` scale, shared `DebouncedSlider`), `TelemetryCard`, `SpoofTileGrid`, `SpoofConfiguratorSheet`, `LogcatViewer`, `CrashHistoryCard`, `CommandPalette`, `SpoofChip`, `RouteSpoofBanner`, `SpoofSandboxState` (`rememberSandboxActive`).
-- Design language: M3 Expressive — 28dp cards / 24dp tiles with 16–20dp content padding, 24dp screen gutters, title-style uppercase section headers; all spacing comes from the `DevSpacing` scale so the tabs stay visually consistent.
-- `data/developer/` — `DevToolId`, `SpoofParams`, `SpoofSim` (deterministic live streams), `SpoofGate` (state), `DeveloperSpoofController` (facade), `DevUiOverrider`, `ShakeDetector`, `FakeWhisperSandbox`, `FakeMusicSandbox`, `FakeClipboardSandbox`, `FakeCleanerSandbox`, `FakeNotificationSandbox`, `FakeNewsSandbox`, `FakeTasksSandbox` (todo + calendar fixtures), `FakeSearchSandbox`.
+1. Master off: Settings console row hidden, stale route shows the locked panel,
+   every sandbox inert.
+2. Enable: warning appears, console opens after the write completes, no locked
+   flash.
+3. Enable all: all 18 flags and the master switch update atomically without a
+   relaunch; use **Restart app** when a tool needs a cold process.
+4. Apply a preset: exact tool set and fixture values persist across process death.
+5. Configurator: sliders commit on release, text survives echoes, pending text is
+   flushed on dismissal, and the tool route opens once.
+6. Logcat: tail pause/resume, app/system scope, severity and text filters, clear,
+   copy, Shizuku fallback.
+7. Crash lab: the history event exists before the crash; crash-on-next-launch
+   fires once.
+8. Notifications: send all six, cancel only the band, restore permission state.
+9. System: cache clear reports freed bytes, Room/prefs refresh, report redaction,
+   destructive confirmations.
+10. Dashboard star and long-press quick fix work for every mapped route.

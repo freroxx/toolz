@@ -1,9 +1,9 @@
 /*
  * Copyright (C) 2026 Toolz Contributors
  *
- * Clipboard sandbox: 30 RAM-only fake clips (OTP/links/code/pins/etc.).
+ * Clipboard sandbox: 30 RAM-only fixture clips (OTP/links/code/pins/etc.).
  * The real clipboard Room table is never read or written while the
- * CLIPBOARD spoof is active. All mutations below only touch this list.
+ * spoof_clipboard key is active. All mutations below only touch this list.
  */
 
 package com.frerox.toolz.data.developer
@@ -19,27 +19,27 @@ object FakeClipboardSandbox {
     /** Live list the VM serves while sandboxed. */
     fun entries(): MutableStateFlow<List<ClipboardEntry>> = clips
 
-    /** DEV-SPOOF: RAM-only delete. */
+    /** RAM-only delete. */
     fun delete(id: Int) {
         clips.update { list -> list.filterNot { it.id == id } }
     }
 
-    /** DEV-SPOOF: RAM-only pin flip. */
+    /** RAM-only pin flip. */
     fun togglePin(id: Int) {
         clips.update { list -> list.map { if (it.id == id) it.copy(isPinned = !it.isPinned) else it } }
     }
 
-    /** DEV-SPOOF: RAM-only wipe of unpinned fixtures. */
+    /** RAM-only wipe of unpinned fixtures. */
     fun clearUnpinned() {
         clips.update { list -> list.filter { it.isPinned } }
     }
 
-    /** DEV-SPOOF: restore a deleted fixture back into the RAM list. */
+    /** Restore a deleted fixture back into the RAM list. */
     fun insert(entry: ClipboardEntry) {
         clips.update { list -> list + entry.copy(timestamp = System.currentTimeMillis()) }
     }
 
-    /** DEV-SPOOF: back to the pristine fixture set (sandbox on). */
+    /** Back to the pristine fixture set (sandbox on). */
     fun reset() {
         clips.value = seeded()
     }
@@ -60,23 +60,23 @@ object FakeClipboardSandbox {
             "sqrt(1337) ≈ 36.565" to ("MATHS" to "Calculator"),
             "Nothing real in this list — sandbox fixtures only" to ("TEXT" to "Toolz"),
             "1600 Bit Street, Sandbox, CA 90210" to ("ADDRESS" to "Maps"),
-            "https://toolz.app/docs/dev-spoof" to ("URL" to "Chrome"),
+            "https://toolz.app/docs/dev-sandbox" to ("URL" to "Chrome"),
             "SELECT * FROM fake_clips WHERE id = 30;" to ("CODE" to "DB Browser"),
             "7 1 3 4 2" to ("OTP" to "Bank"),
             "Do not ship this device state anywhere" to ("TEXT" to "Notes"),
             "https://github.com/toolz/toolz/pull/5373" to ("URL" to "Chrome"),
             "#00E5FF" to ("COLOR" to "Palette"),
-            "Lorem dummy paste for the demo gallery" to ("TEXT" to "Toolz"),
+            "Lorem dummy paste for the fixture gallery" to ("TEXT" to "Toolz"),
             "+44 20 7946 0009" to ("PHONE" to "Dialer"),
             "docker compose up -d --build" to ("CODE" to "Terminal"),
             "Kaiserdamm 12, Berlin (fictional)" to ("ADDRESS" to "Maps"),
             "0 2 9 4 7" to ("OTP" to "Authenticator"),
             "Alpha test seed line" to ("TEXT" to "Toolz"),
-            "spoof-squad@toolz.local" to ("EMAIL" to "Spark"),
+            "fixture-squad@toolz.local" to ("EMAIL" to "Spark"),
             "42 * 1.618 ≈ 67.956" to ("MATHS" to "Calculator"),
             "git rebase -i HEAD~3" to ("CODE" to "Terminal"),
             "https://nebula.tools/status/12345" to ("URL" to "Nebula"),
-            "Universal product code demo value" to ("TEXT" to "Retail"),
+            "Universal product code fixture value" to ("TEXT" to "Retail"),
             "+65 6000 0100" to ("PHONE" to "Dialer"),
             "#FFB300" to ("COLOR" to "Material"),
             "Pinned fixture — survives clearAll in the sandbox" to ("TEXT" to "Toolz"),
@@ -96,7 +96,7 @@ object FakeClipboardSandbox {
                 summary = if (i % 7 == 3) "Fixture summary — processed locally, not by AI." else null,
                 isAiProcessed = i % 7 == 3,
                 contentHash = content.hashCode(),
-                source = "SPOOF",
+                source = "Fixture",
             )
         }
     }

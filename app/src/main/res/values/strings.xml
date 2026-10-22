@@ -711,10 +711,6 @@
     <string name="st_SettingsScreen_q7r9">Choose Audio File</string>
     <string name="st_SettingsScreen_s9t1">Custom audio active</string>
     <string name="st_SettingsScreen_u1v3">RESET</string>
-    <string name="st_DeveloperMode_title">Developer Mode</string>
-    <string name="st_DeveloperMode_subtitle_off">Internal tools, diagnostics &amp; local test data</string>
-    <string name="st_DeveloperMode_console_title">Developer console</string>
-    <string name="st_DeveloperMode_console_subtitle">Crashes, spoofs, logs, deep links — local only</string>
     <string name="st_AppSkin_custom_title">Use photo from device</string>
     <string name="st_AppSkin_custom_subtitle">Your image becomes the in-app icon (launcher keeps the closest tile)</string>
     <string name="st_AppSkin_custom_pick">Choose photo</string>
@@ -4514,7 +4510,7 @@
     <string name="st_Update_ErrorNotNewer">That file is the same version or older than the one installed.</string>
     <string name="st_Update_ErrorSignerUnavailable">Toolz couldn\'t read the app signature, so the install was stopped.</string>
     <string name="st_Update_ErrorSignerMismatch">That file wasn\'t signed with Toolz\'s key, so it was rejected.</string>
-    <string name="st_Update_DemoBlocked">Demo mode: this release is a local fixture, so nothing was installed.</string>
+    <string name="st_Update_DeveloperModeBlocked">Developer Mode: this release is a local fixture, so nothing was installed.</string>
     <string name="st_Update_ErrorNoDownloadLink">This release has no download link.</string>
     <string name="st_Update_ErrorDetailsExpired">The update details expired. Check for updates again.</string>
     <string name="st_Update_ErrorInstallerOpen">The system installer couldn\'t be opened.</string>
@@ -4609,4 +4605,17 @@
     <string name="st_Update_DiscordBody">Join the Discord server to get early APKs and share feedback with frerox.</string>
     <string name="st_Update_DiscordAction">Join the Discord server</string>
     <string name="st_Update_DiscordContentDesc">Open the Toolz Discord invite</string>
+
+    <!-- FocusLock overlay -->
+    <string name="st_FocusLock_Title">FOCUS PROTOCOL</string>
+    <string name="st_FocusLock_MessageDefault">Time\'s up for this app.</string>
+    <string name="st_FocusLock_MessageLimit">Time\'s up for %1$s.</string>
+    <string name="st_FocusLock_MessageSession">Focus session in progress. %1$s is restricted.</string>
+    <string name="st_FocusLock_Subtitle">You\'ve reached your daily limit. Stay focused on what matters.</string>
+    <string name="st_FocusLock_BtnReturn">RETURN TO FOCUS FLOW</string>
+    <string name="st_FocusLock_BtnReturn_CD">Return to Focus Flow</string>
+    <string name="st_FocusLock_BtnExit">EXIT TO HOME</string>
+    <string name="st_FocusLock_BtnExit_CD">Exit blocked app to Home</string>
+    <string name="st_FocusLock_ToastCantOpen">Couldn\'t open Toolz automatically — tap EXIT TO HOME, then open Toolz manually.</string>
+
 </resources>

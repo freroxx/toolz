@@ -13,6 +13,8 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.os.Handler
+import android.os.Looper
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -25,19 +27,25 @@ class ShakeDetector @Inject constructor(
     private var manager: SensorManager? = null
     private var listening = false
     private var lastShakeAt = 0L
-    private var onShake: (() -> Unit)? = null
+    @Volatile private var onShake: (() -> Unit)? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val dispatch = Runnable {
+        try { onShake?.invoke() } catch (_: Exception) { }
+    }
 
     private val listener = object : SensorEventListener {
         override fun onSensorChanged(event: SensorEvent) {
             val x = event.values.getOrNull(0) ?: return
             val y = event.values.getOrNull(1) ?: return
             val z = event.values.getOrNull(2) ?: return
+            if (!x.isFinite() || !y.isFinite() || !z.isFinite()) return
             val g = sqrt((x * x + y * y + z * z).toDouble()) / SensorManager.GRAVITY_EARTH
             if (g > 2.6) {
                 val now = android.os.SystemClock.elapsedRealtime()
-                if (now - lastShakeAt > 2000) {
+                if (now - lastShakeAt > 2_000) {
                     lastShakeAt = now
-                    try { onShake?.invoke() } catch (_: Exception) { }
+                    // Sensor callbacks are not on the main thread; navigation must be.
+                    mainHandler.post(dispatch)
                 }
             }
         }
@@ -46,22 +54,32 @@ class ShakeDetector @Inject constructor(
     }
 
     fun start(callback: () -> Unit) {
-        if (listening) {
-            onShake = callback
-            return
-        }
         onShake = callback
+        if (listening) return
         try {
-            val sm = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager ?: return
-            val accel = sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) ?: return
-            sm.registerListener(listener, accel, SensorManager.SENSOR_DELAY_UI)
+            val sm = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
+            val accel = sm?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+            if (sm == null || accel == null) {
+                onShake = null
+                return
+            }
+            lastShakeAt = 0L
+            if (!sm.registerListener(listener, accel, SensorManager.SENSOR_DELAY_UI)) {
+                onShake = null
+                return
+            }
             manager = sm
             listening = true
-        } catch (_: Exception) { }
+        } catch (_: Exception) {
+            onShake = null
+            manager = null
+            listening = false
+        }
     }
 
     fun stop() {
         onShake = null
+        mainHandler.removeCallbacks(dispatch)
         if (!listening) return
         try { manager?.unregisterListener(listener) } catch (_: Exception) { }
         manager = null

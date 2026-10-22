@@ -131,6 +131,7 @@ import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.components.FinishedOverlay
 import com.frerox.toolz.ui.screens.time.components.PomodoroSuccessConfetti
 import com.frerox.toolz.ui.screens.time.components.PreferenceRow
+import com.frerox.toolz.ui.screens.time.components.RingtonePickerRow
 import com.frerox.toolz.ui.screens.time.components.SettingsSection
 import com.frerox.toolz.ui.screens.time.components.TimeSettingsBottomSheet
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
@@ -346,6 +347,11 @@ fun TimerScreen(
                     )
                 }
                 SettingsSection(title = stringResource(R.string.st_TimerScreen_s9t0), icon = Icons.Rounded.Notifications, accent = accent) {
+                    RingtonePickerRow(
+                        currentUri = state.ringtoneUri,
+                        activeColor = accent,
+                        onRingtoneChanged = viewModel::setRingtoneUri,
+                    )
                     PreferenceRow(
                         title = stringResource(R.string.st_TimerScreen_u1v2),
                         subtitle = stringResource(R.string.st_TimerScreen_w3x4),

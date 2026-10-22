@@ -1,45 +1,73 @@
 /*
  * Copyright (C) 2026 Toolz Contributors
  *
- * Developer console ViewModel. Everything here stays LOCAL: logs are read
- * from local logcat, the bug report is built as text and only leaves the
- * device via the system share sheet / clipboard when the user chooses.
- * There is no telemetry of any kind.
+ * Developer console ViewModel. Everything here stays LOCAL: the app ring
+ * buffer, PID-filtered logcat, Room counts, DataStore snapshot and the
+ * diagnostic report. Nothing is uploaded; text leaves only through the
+ * clipboard or the system share sheet when the user explicitly asks.
+ *
+ * Sandboxes are local fixtures. The master switch never touches real data;
+ * turning it off makes every tool report live hardware immediately while
+ * keeping the per-tool selection for the next session.
  */
 
 package com.frerox.toolz.ui.screens.developer
 
+import android.Manifest
 import android.app.Activity
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Debug
 import android.os.Handler
 import android.os.Looper
 import android.os.Process
-import androidx.appcompat.app.AppCompatDelegate
-import androidx.core.os.LocaleListCompat
+import android.os.SystemClock
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.BuildConfig
 import com.frerox.toolz.data.AppDatabase
+import com.frerox.toolz.data.developer.CrashLabEvent
+import com.frerox.toolz.data.developer.DevAppInfo
 import com.frerox.toolz.data.developer.DevLogHub
+import com.frerox.toolz.data.developer.DevMessage
+import com.frerox.toolz.data.developer.DevPrefsState
+import com.frerox.toolz.data.developer.DevShizukuState
+import com.frerox.toolz.data.developer.DevStorageInfo
+import com.frerox.toolz.data.developer.DevStorageState
+import com.frerox.toolz.data.developer.DevTableCount
+import com.frerox.toolz.data.developer.DevTableState
 import com.frerox.toolz.data.developer.DevToolId
-import com.frerox.toolz.data.developer.DeveloperSpoofController
+import com.frerox.toolz.data.developer.DevUiOverrider
+import com.frerox.toolz.data.developer.LogcatLevel
+import com.frerox.toolz.data.developer.LogcatScope
+import com.frerox.toolz.data.developer.LogcatSeverity
+import com.frerox.toolz.data.developer.MAX_LOGCAT_LINES
 import com.frerox.toolz.data.developer.SpoofGrid
 import com.frerox.toolz.data.developer.SpoofParams
+import com.frerox.toolz.data.developer.buildDiagnosticReport
+import com.frerox.toolz.data.developer.filterLogcatLines
+import com.frerox.toolz.data.developer.filterLogcatSince
+import com.frerox.toolz.data.developer.formatBytes
+import com.frerox.toolz.data.developer.mergeLogcatLines
+import com.frerox.toolz.data.developer.parseCrashHistory
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.util.NotificationHelper
 import com.frerox.toolz.util.shizuku.ShizukuHelper
 import com.frerox.toolz.util.shizuku.ShizukuShellExecutor
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -51,197 +79,89 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
+import java.io.File
+import java.util.Locale
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
-data class DevAppInfo(
-    val versionName: String = BuildConfig.VERSION_NAME,
-    val versionCode: String = BuildConfig.VERSION_CODE.toString(),
-    val packageName: String = "com.frerox.toolz",
-    val uptimeMs: Long = 0L,
-    val heapMb: String = "",
-    val nativeHeapMb: String = "",
-    val threads: Int = 0,
-    val heapUsedFraction: Float = 0f,
-)
-
-data class DevTableCount(val name: String, val rows: Int)
-
-/** One crash-lab event. Diagnostics only — stored in DataStore, never uploaded. */
-data class CrashLabEvent(
-    val type: String,
-    val atMs: Long,
-    val note: String = "",
-)
-
-data class DevStorageInfo(
-    val cacheBytes: Long = 0L,
-    val filesBytes: Long = 0L,
-) {
-    fun format(bytes: Long): String = when {
-        bytes < 1024 -> "${bytes} B"
-        bytes < 1024 * 1024 -> "${bytes / 1024} KB"
-        bytes < 1024 * 1024 * 1024 -> "%.1f MB".format(bytes / (1024f * 1024f))
-        else -> "%.2f GB".format(bytes / (1024f * 1024f * 1024f))
-    }
-}
-
-enum class DemoPreset(val title: String, val subtitle: String) {
-    SHOWCASE("Showcase Demo", "Photogenic values for presentations & UI demos"),
-    EDGE_CASES("Edge Cases & Stress", "Critical battery, zero network speed, loud noise"),
-    TRAVEL("Travel & Offline", "Airplane mode, cruising altitude, offline sensors"),
-}
-
-enum class LogcatScope(val title: String) {
-    APP("App (PID)"),
-    SYSTEM("Full System"),
+/**
+ * Result wrapper for coroutine work: ordinary failures become a [Result],
+ * while cancellation is rethrown so a cleared/recreated ViewModel never
+ * reports a stale operation as failed.
+ */
+private inline fun <T> devCatching(block: () -> T): Result<T> = try {
+    Result.success(block())
+} catch (e: CancellationException) {
+    throw e
+} catch (e: Exception) {
+    Result.failure(e)
 }
 
 @HiltViewModel
 class DeveloperModeViewModel @Inject constructor(
     private val repository: SettingsRepository,
-    private val spoofController: DeveloperSpoofController,
     private val database: AppDatabase,
     private val shizukuExecutor: ShizukuShellExecutor,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
-    val devModeEnabled = repository.developerModeEnabled
-    val allSpoofFlags = repository.allSpoofFlags
+    // ---- Sandboxes ---------------------------------------------------------
 
-    /** Effective sandbox state per tool (master ON + flag ON), hot. */
+    /** Null until DataStore has emitted, so the lock screen never flashes. */
+    val devModeEnabled: StateFlow<Boolean?> = repository.developerModeEnabled
+        .map<Boolean, Boolean?> { it }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** Effective state per tool (master ON + per-tool flag). */
     val spoofSnapshot: StateFlow<Map<DevToolId, Boolean>> = combine(
         repository.developerModeEnabled,
         repository.allSpoofFlags,
     ) { master, flags -> SpoofGrid(master, flags) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
-
-    val activeSandboxCount = spoofController.activeSandboxCount
-    val devShakeToOpen = repository.devShakeToOpen
-    val devCrashOnNextLaunch = repository.devCrashOnNextLaunch
-    val spoofParamsJson = repository.spoofParamsJson
-
-    val themeMode: StateFlow<String> = repository.themeMode
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "SYSTEM")
-
-    val appLanguage: StateFlow<String> = repository.appLanguage
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "en")
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
     val spoofParams: StateFlow<SpoofParams> = repository.spoofParamsJson
-        .map { SpoofParams.parse(it) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), SpoofParams())
+        .map(SpoofParams::parse)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SpoofParams())
 
-    // ---- Crash lab history (local DataStore, auto-cleared on version bump) ----
+    val devShakeToOpen: StateFlow<Boolean> = repository.devShakeToOpen
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    val devCrashOnNextLaunch: StateFlow<Boolean> = repository.devCrashOnNextLaunch
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    // ---- Appearance readout ------------------------------------------------
+
+    val themeMode: StateFlow<String> = repository.themeMode
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "SYSTEM")
+
+    val appLanguage: StateFlow<String> = repository.appLanguage
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "en")
+
+    // ---- Crash lab ---------------------------------------------------------
+
     val crashHistory: StateFlow<List<CrashLabEvent>> = repository.devCrashHistoryJson
         .map(::parseCrashHistory)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    private fun parseCrashHistory(raw: String): List<CrashLabEvent> = try {
-        val arr = JSONArray(raw)
-        (0 until arr.length()).map { i ->
-            val o = arr.getJSONObject(i)
-            CrashLabEvent(
-                type = o.optString("type", "?"),
-                atMs = o.optLong("atMs", 0L),
-                note = o.optString("note", ""),
-            )
-        }
-    } catch (_: Exception) {
-        emptyList()
+    // ---- Diagnostics -------------------------------------------------------
+
+    private val _message = MutableStateFlow<DevMessage?>(null)
+    val message: StateFlow<DevMessage?> = _message.asStateFlow()
+    private var nextMessageId = 0L
+
+    private fun postMessage(text: String) {
+        nextMessageId += 1
+        _message.value = DevMessage(nextMessageId, text)
     }
 
-    private val _searchQuery = MutableStateFlow("")
-    val searchQuery = _searchQuery.asStateFlow()
-    fun onSearchQueryChange(q: String) { _searchQuery.value = q }
-
-    private val _lastAction = MutableStateFlow<String?>(null)
-    val lastAction = _lastAction.asStateFlow()
-
-    private val _logLines = MutableStateFlow<List<String>>(emptyList())
-    val logLines = _logLines.asStateFlow()
-
-    private val _logcatTail = MutableStateFlow(true)
-    val logcatTail = _logcatTail.asStateFlow()
-
-    private val _shizukuActive = MutableStateFlow(false)
-    val shizukuActive = _shizukuActive.asStateFlow()
-
-    private val _forceShizukuLogcat = MutableStateFlow(true)
-    val forceShizukuLogcat = _forceShizukuLogcat.asStateFlow()
-
-    private val _logcatScope = MutableStateFlow(LogcatScope.APP)
-    val logcatScope = _logcatScope.asStateFlow()
-
-    fun setForceShizukuLogcat(enabled: Boolean) {
-        _forceShizukuLogcat.value = enabled
-        refreshLogcat()
-        _lastAction.value = if (enabled) "Shizuku privileged logcat enabled" else "Standard logcat enabled"
+    fun consumeMessage() {
+        _message.value = null
     }
 
-    fun setLogcatScope(scope: LogcatScope) {
-        _logcatScope.value = scope
-        refreshLogcat()
-        _lastAction.value = "Logcat scope: ${scope.title}"
-    }
-
-    fun requestShizukuPermission() {
-        try {
-            ShizukuHelper.requestPermission(1001)
-            _lastAction.value = "Requesting Shizuku authorization"
-        } catch (e: Exception) {
-            _lastAction.value = "Shizuku service unreachable: ${e.message}"
-        }
-    }
-
-    fun checkShizukuStatus(): Boolean {
-        val active = try {
-            ShizukuHelper.isAuthorized()
-        } catch (_: Exception) {
-            false
-        }
-        _shizukuActive.value = active
-        return active
-    }
-
-    init {
-        checkShizukuStatus()
-        refreshLogcat()
-        startTail()
-    }
-
-    private var tailJob: Job? = null
-
-    private fun startTail() {
-        tailJob?.cancel()
-        tailJob = viewModelScope.launch {
-            while (isActive) {
-                withContext(Dispatchers.IO) { fetchLogcat() }
-                delay(1000)
-            }
-        }
-    }
-
-    fun setLogcatTail(enabled: Boolean) {
-        _logcatTail.value = enabled
-        if (enabled) {
-            refreshLogcat()
-            startTail()
-        } else {
-            tailJob?.cancel()
-        }
-    }
-
-    private val _tableCounts = MutableStateFlow<List<DevTableCount>>(emptyList())
-    val tableCounts = _tableCounts.asStateFlow()
-
-    private val _storageInfo = MutableStateFlow(DevStorageInfo())
-    val storageInfo = _storageInfo.asStateFlow()
-
-    private val _prefsSnapshot = MutableStateFlow<Map<String, String>>(emptyMap())
-    val prefsSnapshot = _prefsSnapshot.asStateFlow()
-
-    // ---- Live telemetry: only runs while a collector is actually watching ----
     private val _heapHistory = MutableStateFlow<List<Float>>(emptyList())
     val heapHistory: StateFlow<List<Float>> = _heapHistory.asStateFlow()
 
@@ -250,503 +170,901 @@ class DeveloperModeViewModel @Inject constructor(
             val info = collectAppInfo()
             _heapHistory.value = (_heapHistory.value + info.heapUsedFraction).takeLast(48)
             emit(info)
-            delay(1000)
+            delay(1_000)
         }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), collectAppInfo())
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), collectAppInfo())
 
     private fun collectAppInfo(): DevAppInfo {
         val runtime = Runtime.getRuntime()
-        val used = runtime.totalMemory() - runtime.freeMemory()
-        val max = runtime.maxMemory()
+        val used = (runtime.totalMemory() - runtime.freeMemory()).coerceAtLeast(0L)
+        val max = runtime.maxMemory().coerceAtLeast(1L)
+        val manufacturer = Build.MANUFACTURER
+            .replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.US) else it.toString() }
+            .trim()
+        val model = Build.MODEL.trim()
+        val device = when {
+            manufacturer.isBlank() -> model
+            model.isBlank() -> manufacturer
+            model.startsWith(manufacturer, ignoreCase = true) -> model
+            else -> "$manufacturer $model"
+        }
         return DevAppInfo(
-            uptimeMs = android.os.SystemClock.elapsedRealtime(),
-            heapMb = "${used / (1024 * 1024)} MB / ${max / (1024 * 1024)} MB",
-            nativeHeapMb = "${Debug.getNativeHeapAllocatedSize() / (1024 * 1024)} MB",
+            versionName = BuildConfig.VERSION_NAME,
+            versionCode = BuildConfig.VERSION_CODE.toLong(),
+            packageName = context.packageName,
+            pid = Process.myPid(),
+            processUptimeMs = (SystemClock.elapsedRealtime() - Process.getStartElapsedRealtime()).coerceAtLeast(0L),
+            heapUsedBytes = used,
+            heapMaxBytes = max,
+            nativeHeapBytes = Debug.getNativeHeapAllocatedSize().coerceAtLeast(0L),
             threads = Thread.activeCount(),
-            heapUsedFraction = (used.toFloat() / max.toFloat().coerceAtLeast(1f)).coerceIn(0f, 1f),
+            heapUsedFraction = (used.toFloat() / max.toFloat()).coerceIn(0f, 1f),
+            deviceLabel = device.ifBlank { "Unknown device" },
+            androidLabel = "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",
+            abi = Build.SUPPORTED_ABIS.firstOrNull().orEmpty(),
+            buildType = BuildConfig.BUILD_TYPE,
+            densityDpi = context.resources.displayMetrics.densityDpi,
+            debuggable = BuildConfig.DEBUG,
         )
     }
 
-    fun setDevMode(enabled: Boolean) = viewModelScope.launch {
-        repository.setDeveloperModeEnabled(enabled)
-        DevLogHub.i("ToolzDev", "Developer Mode master switch -> $enabled")
-        _lastAction.value = if (enabled) "Developer Mode enabled" else "Developer Mode disabled"
+    // ---- Logcat ------------------------------------------------------------
+
+    private val _logLines = MutableStateFlow<List<String>>(emptyList())
+    val logLines: StateFlow<List<String>> = _logLines.asStateFlow()
+
+    private val _logcatTail = MutableStateFlow(true)
+    val logcatTail: StateFlow<Boolean> = _logcatTail.asStateFlow()
+
+    private val _logcatScope = MutableStateFlow(LogcatScope.APP)
+    val logcatScope: StateFlow<LogcatScope> = _logcatScope.asStateFlow()
+
+    private val _logcatClearedAtMs = MutableStateFlow<Long?>(null)
+    val logcatClearedAtMs: StateFlow<Long?> = _logcatClearedAtMs.asStateFlow()
+
+    private val _shizukuState = MutableStateFlow(DevShizukuState())
+    val shizukuState: StateFlow<DevShizukuState> = _shizukuState.asStateFlow()
+
+    @Volatile private var logClearCutoffMs: Long? = null
+    @Volatile private var logGeneration = 0L
+    private var logcatVisible = false
+    private var tailJob: Job? = null
+    private val logFetchMutex = Mutex()
+    private val spoofParamsMutex = Mutex()
+
+    init {
+        checkShizukuStatus()
+        refreshNotificationsEnabled()
+        refreshLogcat()
     }
 
-    fun setSpoof(tool: DevToolId, enabled: Boolean) = viewModelScope.launch {
-        repository.setSpoofFlag(tool.prefKey, enabled)
-        DevLogHub.i("ToolzDev", "Sandbox for ${tool.title} -> ${if (enabled) "ENABLED" else "DISABLED"}")
-        _lastAction.value = if (enabled) "${tool.title} sandbox enabled" else "${tool.title} sandbox disabled"
+    fun checkShizukuStatus() {
+        val installed = ShizukuHelper.isInstalled(context)
+        val available = ShizukuHelper.isAvailable()
+        val authorized = ShizukuHelper.isAuthorized()
+        _shizukuState.value = DevShizukuState(
+            installed = installed,
+            available = available,
+            authorized = authorized,
+        )
+        if (!authorized && _logcatScope.value == LogcatScope.SYSTEM) {
+            _logcatScope.value = LogcatScope.APP
+        }
     }
 
-    fun clearAllSpoofs() = viewModelScope.launch {
-        repository.clearAllSpoofs()
-        DevLogHub.i("ToolzDev", "All tool sandboxes reset to live hardware")
-        _lastAction.value = "All tool sandboxes reset to live hardware"
-    }
-
-    fun spoofAll() = viewModelScope.launch {
-        repository.setDeveloperModeEnabled(true)
-        repository.setAllSpoofs(true)
-        DevLogHub.i("ToolzDev", "All 18 tool sandboxes enabled")
-        _lastAction.value = "All 18 tool sandboxes enabled"
-    }
-
-    fun applyPreset(preset: DemoPreset) = viewModelScope.launch {
-        repository.setDeveloperModeEnabled(true)
-        when (preset) {
-            DemoPreset.SHOWCASE -> {
-                repository.clearAllSpoofs()
-                listOf(
-                    DevToolId.BATTERY,
-                    DevToolId.STEPS,
-                    DevToolId.NETWORK,
-                    DevToolId.SENSORS,
-                    DevToolId.MUSIC,
-                    DevToolId.TIMERS,
-                    DevToolId.DEVICE,
-                ).forEach { repository.setSpoofFlag(it.prefKey, true) }
-
-                val params = SpoofParams(
-                    batteryLevel = 94,
-                    batteryTempC = 28.5f,
-                    batteryCharging = true,
-                    stepsToday = 8420,
-                    networkPingMs = 14,
-                    networkDownMbps = 450.0f,
-                    networkSsid = "Toolz-Fiber-WiFi",
-                    compassDeg = 45,
-                    soundDb = 38,
-                    lightLux = 420,
-                    speedKmh = 0,
-                    altitudeM = 125,
-                    deviceModel = "Pixel 9 Pro",
-                    musicTrack = "Midnight Symphony",
-                    musicArtist = "Toolz Studio",
-                    timerSecs = 120,
-                )
-                repository.setSpoofParamsJson(params.toJson())
-                DevLogHub.i("ToolzDev", "Applied SHOWCASE demo preset: core tools active with clean data")
-                _lastAction.value = "Applied Showcase Demo preset"
+    fun requestShizukuPermission() {
+        val state = _shizukuState.value
+        if (!state.installed) {
+            postMessage("Shizuku is not installed")
+            return
+        }
+        if (!state.available) {
+            postMessage("Start the Shizuku service, then try again")
+            return
+        }
+        if (state.authorized) {
+            postMessage("Shizuku is already authorized")
+            return
+        }
+        try {
+            ShizukuHelper.requestAuthorization { granted ->
+                viewModelScope.launch(Dispatchers.Main) {
+                    checkShizukuStatus()
+                    postMessage(if (granted) "Shizuku authorized" else "Shizuku permission denied")
+                }
             }
-            DemoPreset.EDGE_CASES -> {
-                repository.clearAllSpoofs()
-                listOf(
-                    DevToolId.BATTERY,
-                    DevToolId.NETWORK,
-                    DevToolId.SENSORS,
-                    DevToolId.DEVICE,
-                    DevToolId.CLEANER,
-                ).forEach { repository.setSpoofFlag(it.prefKey, true) }
+        } catch (e: Exception) {
+            DevLogHub.w(DevLogHub.TAG, "Shizuku permission request failed", e)
+            postMessage("Could not request Shizuku permission")
+        }
+    }
 
-                val params = SpoofParams(
-                    batteryLevel = 2,
-                    batteryTempC = 52.0f,
-                    batteryCharging = false,
-                    stepsToday = 99999,
-                    networkPingMs = 4500,
-                    networkDownMbps = 0.05f,
-                    networkSsid = "Weak-Public-WiFi",
-                    compassDeg = 358,
-                    soundDb = 125,
-                    lightLux = 150000,
-                    speedKmh = 380,
-                    altitudeM = 8848,
-                    storageFullPct = 99,
-                    deviceModel = "Edge Test Device",
-                )
-                repository.setSpoofParamsJson(params.toJson())
-                DevLogHub.w("ToolzDev", "Applied EDGE_CASES stress preset (2% battery, 125dB, 8848m)")
-                _lastAction.value = "Applied Edge Cases & Stress preset"
-            }
-            DemoPreset.TRAVEL -> {
-                repository.clearAllSpoofs()
-                listOf(
-                    DevToolId.NETWORK,
-                    DevToolId.BATTERY,
-                    DevToolId.SENSORS,
-                ).forEach { repository.setSpoofFlag(it.prefKey, true) }
+    /**
+     * The tail is scoped to the visible Diagnostics tab. The screen calls this
+     * on tab changes and lifecycle pause/resume; [setLogcatTail] alone can
+     * never start a background stream from another tab.
+     */
+    fun setLogcatVisible(visible: Boolean) {
+        logcatVisible = visible
+        if (visible) startLogcat() else stopLogcat()
+    }
 
-                val params = SpoofParams(
-                    batteryLevel = 68,
-                    batteryTempC = 25.0f,
-                    batteryCharging = false,
-                    networkPingMs = 9999,
-                    networkDownMbps = 0.0f,
-                    networkSsid = "In-Flight-Offline",
-                    compassDeg = 180,
-                    soundDb = 72,
-                    altitudeM = 10500,
-                    speedKmh = 860,
-                )
-                repository.setSpoofParamsJson(params.toJson())
-                DevLogHub.i("ToolzDev", "Applied TRAVEL preset (10,500m cruising altitude, 860km/h)")
-                _lastAction.value = "Applied Travel & Offline preset"
+    private fun startLogcat() {
+        checkShizukuStatus()
+        if (!logcatVisible || !_logcatTail.value) return
+        if (tailJob?.isActive == true) return
+        tailJob = viewModelScope.launch {
+            while (isActive) {
+                fetchLogcat()
+                delay(1_000)
             }
         }
     }
 
-    fun resetAll() = viewModelScope.launch {
-        repository.resetDeveloperMode()
-        DevLogHub.i("ToolzDev", "Developer mode reset to defaults")
-        _lastAction.value = "Developer mode reset to defaults"
+    private fun stopLogcat() {
+        tailJob?.cancel()
+        tailJob = null
     }
 
-    fun setCrashOnNextLaunch(enabled: Boolean) = viewModelScope.launch {
-        repository.setDevCrashOnNextLaunch(enabled)
-        _lastAction.value = if (enabled) "Crash-on-launch enabled" else "Crash-on-launch disabled"
+    fun setLogcatTail(enabled: Boolean) {
+        _logcatTail.value = enabled
+        if (enabled) {
+            startLogcat()
+            postMessage("Live log tail resumed")
+        } else {
+            stopLogcat()
+            postMessage("Live log tail paused")
+        }
     }
 
-    fun setShakeToOpen(enabled: Boolean) = viewModelScope.launch {
-        repository.setDevShakeToOpen(enabled)
-        _lastAction.value = if (enabled) "Shake-to-open enabled" else "Shake-to-open disabled"
+    fun setLogcatScope(scope: LogcatScope) {
+        if (scope == LogcatScope.SYSTEM && !_shizukuState.value.authorized) {
+            postMessage("Authorize Shizuku to read the full system log")
+            return
+        }
+        _logcatScope.value = scope
+        refreshLogcat()
     }
 
-    fun setThemeMode(mode: String) = viewModelScope.launch {
-        repository.setThemeMode(mode)
+    fun refreshLogcat() {
+        viewModelScope.launch { fetchLogcat() }
     }
 
-    fun updateSpoofParams(transform: (SpoofParams) -> SpoofParams) = viewModelScope.launch {
-        val current = SpoofParams.parse(try {
-            spoofParamsJson.first()
-        } catch (_: Exception) { "{}" })
-        repository.setSpoofParamsJson(transform(current).toJson())
+    fun clearLogcat() {
+        val now = System.currentTimeMillis()
+        // Keep lines produced after the tap (same millisecond included) while
+        // dropping every line that existed in the system buffer beforehand.
+        // Cutoff first, then the generation bump: a fetch that captures the new
+        // generation is guaranteed to observe the cutoff.
+        logClearCutoffMs = now - 1L
+        logGeneration += 1
+        _logcatClearedAtMs.value = now
+        DevLogHub.clear()
+        _logLines.value = emptyList()
+        viewModelScope.launch {
+            if (_shizukuState.value.authorized) {
+                devCatching {
+                    shizukuExecutor.executeForResult("logcat -c", timeoutMs = 2_000)
+                }.onSuccess { result ->
+                    if (result.exitCode != 0) {
+                        DevLogHub.w(
+                            DevLogHub.TAG,
+                            "logcat -c exited ${result.exitCode}: ${result.stderr.take(160)}",
+                        )
+                    }
+                }.onFailure {
+                    DevLogHub.w(DevLogHub.TAG, "logcat -c failed", it)
+                }
+            }
+            fetchLogcat()
+        }
+        postMessage("Log stream cleared")
+    }
+
+    fun sendTestLog(level: LogcatLevel = LogcatLevel.INFO) {
+        val suffix = "test ${level.label.lowercase(Locale.US)} entry"
+        when (level) {
+            LogcatLevel.VERBOSE -> DevLogHub.v("ToolzTest", suffix)
+            LogcatLevel.DEBUG -> DevLogHub.d("ToolzTest", suffix)
+            LogcatLevel.INFO -> DevLogHub.i("ToolzTest", suffix)
+            LogcatLevel.WARN -> DevLogHub.w("ToolzTest", suffix)
+            LogcatLevel.ERROR -> DevLogHub.e("ToolzTest", suffix, IllegalStateException("Sample developer exception"))
+            LogcatLevel.FATAL -> DevLogHub.e("ToolzTest", "$suffix (fatal test marker)", IllegalStateException("Fatal test marker"))
+        }
+        refreshLogcat()
+        postMessage("Added ${level.label} test entry")
+    }
+
+    fun logNonFatal() {
+        DevLogHub.e(
+            "ToolzTest",
+            "Handled non-fatal test exception",
+            IllegalStateException("Sample non-fatal developer issue"),
+        )
+        refreshLogcat()
+        postMessage("Logged a handled exception")
+    }
+
+    fun copyAllLogs() {
+        val lines = _logLines.value
+        if (lines.isEmpty()) {
+            postMessage("The log stream is empty")
+            return
+        }
+        copyText("Logcat", lines.joinToString("\n"))
+    }
+
+    fun copyWarningsAndErrors() {
+        val lines = filterLogcatLines(_logLines.value, severity = LogcatSeverity.WARNINGS)
+        if (lines.isEmpty()) {
+            postMessage("No warnings or errors in the current stream")
+            return
+        }
+        copyText("Warnings and errors", lines.joinToString("\n"))
+    }
+
+    private suspend fun fetchLogcat() = withContext(Dispatchers.IO) {
+        logFetchMutex.withLock {
+            val generation = logGeneration
+            val shizuku = _shizukuState.value
+            val scope = _logcatScope.value
+            val groups = mutableListOf<List<String>>()
+            groups += DevLogHub.getLines()
+
+            var fetched = false
+            if (shizuku.authorized) {
+                val command = if (scope == LogcatScope.SYSTEM) {
+                    "logcat -d -v epoch -t 350"
+                } else {
+                    "logcat -d -v epoch -t 250 --pid=${Process.myPid()}"
+                }
+                try {
+                    val result = shizukuExecutor.executeForResult(command, timeoutMs = 2_500)
+                    if (result.exitCode == 0) {
+                        groups += result.stdout.lines()
+                        fetched = true
+                    } else {
+                        val detail = result.stderr.take(160).ifBlank { "exit ${result.exitCode}" }
+                        DevLogHub.w(DevLogHub.TAG, "Shizuku logcat: $detail")
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    DevLogHub.w(DevLogHub.TAG, "Shizuku logcat failed", e)
+                }
+            }
+
+            if (!fetched) {
+                groups += readProcessLogcat()
+            }
+
+            val merged = filterLogcatSince(
+                mergeLogcatLines(groups, maxLines = MAX_LOGCAT_LINES),
+                logClearCutoffMs,
+            )
+            withContext(Dispatchers.Main) {
+                // A clear may have landed while this snapshot was in flight;
+                // never let pre-clear lines reappear after the stream is cleared.
+                if (generation == logGeneration) {
+                    _logLines.value = merged
+                }
+            }
+        }
+    }
+
+    private fun readProcessLogcat(): List<String> {
+        var process: java.lang.Process? = null
+        return try {
+            val running = ProcessBuilder(
+                "logcat",
+                "-d",
+                "-v",
+                "epoch",
+                "-t",
+                "250",
+                "--pid=${Process.myPid()}",
+            )
+                // Drain stderr into the same pipe so a failing logcat command
+                // can never block on a full error buffer while we read stdout.
+                .redirectErrorStream(true)
+                .start()
+            process = running
+            val output = ConcurrentLinkedQueue<String>()
+            val reader = Thread {
+                try {
+                    running.inputStream.bufferedReader().useLines { lines ->
+                        lines.forEach { output.add(it) }
+                    }
+                } catch (_: Exception) {
+                    // The process may be destroyed on timeout; partial output is
+                    // discarded rather than shown as a truncated log.
+                }
+            }.apply {
+                isDaemon = true
+                start()
+            }
+            // `logcat -d` should finish immediately. A watchdog prevents a
+            // wedged child process from holding the fetch mutex forever.
+            if (!running.waitFor(5, TimeUnit.SECONDS)) {
+                running.destroy()
+                reader.join(500)
+                return emptyList()
+            }
+            reader.join(500)
+            if (reader.isAlive || running.exitValue() != 0) emptyList()
+            else output.filter { it.isNotBlank() }
+        } catch (_: Exception) {
+            emptyList()
+        } finally {
+            process?.destroy()
+        }
+    }
+
+    // ---- Diagnostics report ------------------------------------------------
+
+    private fun currentActiveTools(): List<String> =
+        spoofSnapshot.value.filterValues { it }.keys.map { it.title }.sorted()
+
+    fun buildBugReport(info: DevAppInfo = appInfo.value): String = buildDiagnosticReport(
+        info = info,
+        activeSandboxes = currentActiveTools(),
+        crashes = crashHistory.value,
+        generatedAtMs = System.currentTimeMillis(),
+        themeMode = themeMode.value,
+        languageTag = appLanguage.value,
+    )
+
+    fun copyBugReport(info: DevAppInfo = appInfo.value) {
+        copyText("Diagnostic report", buildBugReport(info))
+    }
+
+    fun shareBugReport(info: DevAppInfo = appInfo.value) {
+        val opened = DevUiOverrider.shareText(
+            context,
+            "Share Toolz diagnostic report",
+            buildBugReport(info),
+        )
+        if (opened) {
+            postMessage("Opened the share sheet")
+        } else {
+            postMessage("No app can open the share sheet")
+        }
     }
 
     fun copyText(label: String, text: String) {
         try {
-            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            cm.setPrimaryClip(ClipData.newPlainText(label, text))
-            _lastAction.value = "$label copied to clipboard"
-        } catch (_: Exception) { }
-    }
-
-    fun buildBugReport(info: DevAppInfo): String {
-        val active = try {
-            spoofSnapshot.value.filter { it.value }.keys.joinToString(", ") { it.title }.ifBlank { "none" }
-        } catch (_: Exception) { "unknown" }
-        val history = runCatching { crashHistory.value }.getOrDefault(emptyList())
-        val crashSection = if (history.isEmpty()) "none" else history.joinToString("\n") { "- ${it.type} @ ${it.atMs}" }
-        return "## Toolz Diagnostic Report\n" +
-            "- App: Toolz ${info.versionName} (${info.versionCode})\n" +
-            "- Device: ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} (Android ${android.os.Build.VERSION.RELEASE}, API ${android.os.Build.VERSION.SDK_INT})\n" +
-            "- Active Sandboxes: $active\n" +
-            "- Memory: Heap ${info.heapMb} | Native ${info.nativeHeapMb} | Threads: ${info.threads}\n" +
-            "- Uptime: ${info.uptimeMs / 1000}s\n" +
-            "- Crash Test History: \n$crashSection\n"
-    }
-
-    fun copyBugReport(info: DevAppInfo) = copyText("Diagnostic report", buildBugReport(info))
-
-    fun shareBugReport(info: DevAppInfo) {
-        com.frerox.toolz.data.developer.DevUiOverrider.shareText(context, "Toolz Diagnostic Report", buildBugReport(info))
-        _lastAction.value = "Sharing diagnostic report"
-    }
-
-    fun applyLanguage(code: String) {
-        viewModelScope.launch {
-            try { repository.setAppLanguage(code) } catch (_: Exception) { }
-            try {
-                val tags = if (code == "system") "" else code
-                AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(tags))
-                _lastAction.value = if (code == "system") "Language reset to system" else "Language set to $code"
-            } catch (_: Exception) { }
+            val manager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            manager.setPrimaryClip(ClipData.newPlainText(label, text))
+            postMessage("$label copied")
+        } catch (e: Exception) {
+            DevLogHub.w(DevLogHub.TAG, "Clipboard write failed", e)
+            postMessage("Could not copy to the clipboard")
         }
     }
 
-    // ---- Notification testing ----
-    private val devPostedIds = mutableSetOf<Int>()
+    // ---- Notification test matrix -----------------------------------------
 
-    fun areNotificationsEnabled(): Boolean {
-        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return true
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            manager.areNotificationsEnabled()
-        } else true
+    private val _notificationsEnabled = MutableStateFlow(areNotificationsEnabledNow())
+    val notificationsEnabled: StateFlow<Boolean> = _notificationsEnabled.asStateFlow()
+
+    private val _postedNotificationIds = MutableStateFlow<Set<Int>>(emptySet())
+    val postedNotificationIds: StateFlow<Set<Int>> = _postedNotificationIds.asStateFlow()
+
+    fun refreshNotificationsEnabled() {
+        _notificationsEnabled.value = areNotificationsEnabledNow()
+        refreshPostedNotifications()
     }
 
-    fun sendSpoofNotification(channelId: String, title: String, body: String, id: Int) {
+    private fun refreshPostedNotifications() {
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+        val active = devCatching {
+            manager?.activeNotifications
+                ?.asSequence()
+                ?.map { it.id }
+                ?.filter(::isDevNotificationId)
+                ?.toSet()
+                .orEmpty()
+        }.getOrElse {
+            DevLogHub.w(DevLogHub.TAG, "Could not read active notifications", it)
+            emptySet()
+        }
+        _postedNotificationIds.value = active
+    }
+
+    private fun areNotificationsEnabledNow(): Boolean {
+        val permissionGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+        return permissionGranted && (manager?.areNotificationsEnabled() ?: true)
+    }
+
+    fun sendTestNotification(test: DevNotificationTest) {
+        refreshNotificationsEnabled()
+        if (!_notificationsEnabled.value) {
+            postMessage("Notifications are blocked; open system settings first")
+            return
+        }
         try {
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && !manager.areNotificationsEnabled()) {
-                _lastAction.value = "Notifications are disabled in system settings"
+            NotificationHelper.createAllChannels(context)
+            if (manager.getNotificationChannel(test.channelId)?.importance ==
+                NotificationManager.IMPORTANCE_NONE
+            ) {
+                postMessage("${test.label} channel is blocked; open notification settings")
                 return
             }
-            NotificationHelper.createAllChannels(context)
-            val notif = NotificationHelper.baseBuilder(context, channelId)
-                .setContentTitle("[DEV TEST] $title")
-                .setContentText(body)
+            val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+            val contentIntent = launchIntent?.let {
+                PendingIntent.getActivity(
+                    context,
+                    test.id,
+                    it,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                )
+            }
+            val notification = NotificationHelper.baseBuilder(context, test.channelId)
+                .setContentTitle(test.title)
+                .setContentText(test.body)
+                .setContentIntent(contentIntent)
                 .setAutoCancel(true)
                 .build()
-            manager.notify(id, notif)
-            synchronized(devPostedIds) { devPostedIds.add(id) }
-            _lastAction.value = "Notification posted: $title"
+            manager.notify(test.id, notification)
+            refreshPostedNotifications()
+            postMessage("Posted ${test.label} test notification")
         } catch (e: Exception) {
-            _lastAction.value = "Notify failed: ${e.message}"
+            DevLogHub.w(DevLogHub.TAG, "Test notification failed", e)
+            postMessage("Could not post the test notification")
         }
     }
 
     fun cancelDevNotifications() {
         try {
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            synchronized(devPostedIds) {
-                devPostedIds.forEach { runCatching { manager.cancel(it) } }
-                devPostedIds.clear()
+            for (id in DEV_NOTIFICATION_ID_START..DEV_NOTIFICATION_ID_END) {
+                manager.cancel(id)
             }
-            _lastAction.value = "Test notifications cleared"
-        } catch (_: Exception) { }
+            refreshPostedNotifications()
+            postMessage("Test notifications cleared")
+        } catch (e: Exception) {
+            DevLogHub.w(DevLogHub.TAG, "Cancelling test notifications failed", e)
+            postMessage("Could not clear test notifications")
+        }
     }
 
-    // ---- Database & Storage ----
-    fun refreshTableCounts() {
-        viewModelScope.launch(Dispatchers.IO) {
-            val out = mutableListOf<DevTableCount>()
-            try {
-                val db = database.openHelper.readableDatabase
-                db.query("SELECT name FROM sqlite_master WHERE type='table' " +
-                    "AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'room_%' " +
-                    "AND name NOT LIKE 'android_%' ORDER BY name").use { c ->
-                    while (c.moveToNext()) {
-                        val table = c.getString(0)
-                        val rows = try {
-                            db.query("SELECT COUNT(*) FROM \"$table\"").use { cc ->
-                                if (cc.moveToFirst()) cc.getInt(0) else 0
-                            }
-                        } catch (_: Exception) { -1 }
-                        val lower = table.lowercase()
-                        if (lower.contains("password") || lower.contains("whisper") || lower.contains("key")) {
-                            out.add(DevTableCount("$table (redacted)", rows))
-                        } else {
-                            out.add(DevTableCount(table, rows))
-                        }
-                    }
-                }
+    // ---- Sandbox actions ---------------------------------------------------
+
+    /**
+     * Master switch only. Per-tool flags are deliberately preserved so the
+     * previous selection returns when Developer Mode is switched back on.
+     */
+    fun setDevMode(enabled: Boolean) = viewModelScope.launch {
+        devCatching { repository.setDeveloperModeEnabled(enabled) }
+            .onSuccess {
+                DevLogHub.i(DevLogHub.TAG, "Developer Mode master -> $enabled")
+                postMessage(
+                    if (enabled) "Developer Mode enabled"
+                    else "Developer Mode off — sandbox selections kept",
+                )
+            }
+            .onFailure {
+                DevLogHub.e(DevLogHub.TAG, "Developer Mode switch failed", it)
+                postMessage("Could not update Developer Mode")
+            }
+    }
+
+    fun setSpoof(tool: DevToolId, enabled: Boolean) = viewModelScope.launch {
+        devCatching { repository.setSpoofFlag(tool.prefKey, enabled) }
+            .onSuccess {
+                DevLogHub.i(DevLogHub.TAG, "${tool.title} sandbox -> ${if (enabled) "ON" else "OFF"}")
+                postMessage("${tool.title} sandbox ${if (enabled) "enabled" else "disabled"}")
+            }
+            .onFailure {
+                DevLogHub.e(DevLogHub.TAG, "Sandbox toggle failed for ${tool.title}", it)
+                postMessage("Could not update ${tool.title}")
+            }
+    }
+
+    /** Stable action name used by the console and command palette. */
+    fun spoofAll() = viewModelScope.launch {
+        devCatching { repository.setDeveloperModeAndAllSpoofs(true) }
+            .onSuccess {
+                DevLogHub.i(DevLogHub.TAG, "All ${DevToolId.entries.size} sandboxes enabled")
+                postMessage("All ${DevToolId.entries.size} sandboxes enabled")
+            }
+            .onFailure {
+                DevLogHub.e(DevLogHub.TAG, "Enable-all failed", it)
+                postMessage("Could not enable every sandbox")
+            }
+    }
+
+    fun clearAllSpoofs() = viewModelScope.launch {
+        devCatching { repository.clearAllSpoofs() }
+            .onSuccess {
+                DevLogHub.i(DevLogHub.TAG, "All sandboxes returned to live data")
+                postMessage("All sandboxes returned to live data")
+            }
+            .onFailure {
+                DevLogHub.e(DevLogHub.TAG, "Disable-all failed", it)
+                postMessage("Could not disable the sandboxes")
+            }
+    }
+
+    fun applyPreset(preset: DevPreset) = viewModelScope.launch {
+        devCatching {
+            spoofParamsMutex.withLock {
+                repository.applySandboxSelection(preset.prefKeys, preset.params.toJson())
+            }
+        }.onSuccess {
+            DevLogHub.i(DevLogHub.TAG, "Preset applied: ${preset.title} (${preset.toolCount} sandboxes)")
+            postMessage("${preset.title} preset applied · ${preset.toolCount} sandboxes")
+        }.onFailure {
+            DevLogHub.e(DevLogHub.TAG, "Preset ${preset.title} failed", it)
+            postMessage("Could not apply the ${preset.title} preset")
+        }
+    }
+
+    fun resetAll() = viewModelScope.launch {
+        devCatching { repository.resetDeveloperMode() }
+            .onSuccess {
+                DevLogHub.i(DevLogHub.TAG, "Developer Mode reset")
+                postMessage("Developer Mode reset · shake-to-open and fixture values kept")
+            }
+            .onFailure {
+                DevLogHub.e(DevLogHub.TAG, "Developer Mode reset failed", it)
+                postMessage("Could not reset Developer Mode")
+            }
+    }
+
+    fun resetSpoofParams() = viewModelScope.launch {
+        devCatching {
+            spoofParamsMutex.withLock {
+                repository.setSpoofParamsJson(SpoofParams().toJson())
+            }
+        }.onSuccess {
+            DevLogHub.i(DevLogHub.TAG, "Fixture values reset to defaults")
+            postMessage("Fixture values reset to defaults")
+        }.onFailure {
+            DevLogHub.e(DevLogHub.TAG, "Fixture reset failed", it)
+            postMessage("Could not reset fixture values")
+        }
+    }
+
+    fun updateSpoofParams(transform: (SpoofParams) -> SpoofParams) = viewModelScope.launch {
+        spoofParamsMutex.withLock {
+            val raw = try {
+                repository.spoofParamsJson.first()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                withContext(Dispatchers.Main) { _lastAction.value = "DB inspect error: ${e.message}" }
+                DevLogHub.e(DevLogHub.TAG, "Could not read fixture values", e)
+                postMessage("Could not read fixture values")
+                return@withLock
+            }
+            val current = SpoofParams.parse(raw)
+            devCatching { repository.setSpoofParamsJson(transform(current).toJson()) }
+                .onFailure {
+                    DevLogHub.e(DevLogHub.TAG, "Fixture parameter write failed", it)
+                    postMessage("Could not save fixture values")
+                }
+        }
+    }
+
+    fun setShakeToOpen(enabled: Boolean) = viewModelScope.launch {
+        devCatching { repository.setDevShakeToOpen(enabled) }
+            .onSuccess {
+                DevLogHub.i(DevLogHub.TAG, "Shake-to-open -> $enabled")
+                postMessage(if (enabled) "Shake-to-open enabled" else "Shake-to-open disabled")
+            }
+            .onFailure { postMessage("Could not update shake-to-open") }
+    }
+
+    fun setCrashOnNextLaunch(enabled: Boolean) = viewModelScope.launch {
+        devCatching { repository.setDevCrashOnNextLaunch(enabled) }
+            .onSuccess {
+                DevLogHub.w(DevLogHub.TAG, "Crash-on-next-launch -> $enabled")
+                postMessage(
+                    if (enabled) "The app will crash on the next launch"
+                    else "Crash-on-next-launch disabled",
+                )
+            }
+            .onFailure { postMessage("Could not update crash-on-next-launch") }
+    }
+
+    // ---- Crash lab ---------------------------------------------------------
+
+    private val oomHog = ArrayList<ByteArray>()
+
+    fun triggerCrash(test: DevCrashTest) {
+        postMessage("Recording ${test.title} test event…")
+        viewModelScope.launch {
+            val recorded = devCatching {
+                repository.appendDevCrashHistoryEvent(
+                    type = test.historyType,
+                    atMs = System.currentTimeMillis(),
+                    note = "Manual test trigger",
+                )
+            }
+            if (recorded.isFailure) {
+                DevLogHub.e(
+                    DevLogHub.TAG,
+                    "Could not record crash-lab event; test aborted",
+                    recorded.exceptionOrNull(),
+                )
+                postMessage("Could not record the test event · crash aborted")
                 return@launch
             }
-            val snapshot = out.toList()
+            DevLogHub.e(DevLogHub.TAG, "Crash-lab test triggering: ${test.historyType}")
             withContext(Dispatchers.Main) {
-                _tableCounts.value = snapshot
+                // Let DataStore commit and the snackbar render before the process dies.
+                Handler(Looper.getMainLooper()).postDelayed({ performCrash(test) }, 350)
             }
         }
+    }
+
+    private fun performCrash(test: DevCrashTest): Nothing? {
+        when (test) {
+            DevCrashTest.NPE -> throw NullPointerException("[DEV TEST] Simulated NPE on the main thread")
+            DevCrashTest.ILLEGAL_STATE ->
+                throw IllegalStateException("[DEV TEST] Simulated IllegalStateException on the main thread")
+            DevCrashTest.ANR -> {
+                Thread.sleep(10_000)
+                throw IllegalStateException("[DEV TEST] Main thread blocked for 10 seconds")
+            }
+            DevCrashTest.OOM -> {
+                while (true) {
+                    oomHog.add(ByteArray(8 * 1024 * 1024))
+                }
+            }
+        }
+    }
+
+    fun clearCrashHistory() = viewModelScope.launch {
+        devCatching { repository.clearDevCrashHistory() }
+            .onSuccess {
+                DevLogHub.i(DevLogHub.TAG, "Crash-lab history cleared")
+                postMessage("Crash-lab history cleared")
+            }
+            .onFailure { postMessage("Could not clear crash history") }
+    }
+
+    // ---- Database & storage ------------------------------------------------
+
+    private val _tableState = MutableStateFlow(DevTableState())
+    val tableState: StateFlow<DevTableState> = _tableState.asStateFlow()
+
+    private val _storageState = MutableStateFlow(DevStorageState())
+    val storageState: StateFlow<DevStorageState> = _storageState.asStateFlow()
+
+    private val _prefsState = MutableStateFlow(DevPrefsState())
+    val prefsState: StateFlow<DevPrefsState> = _prefsState.asStateFlow()
+
+    private var tableJob: Job? = null
+    private var storageJob: Job? = null
+    private var prefsJob: Job? = null
+
+    fun refreshTableCounts() {
+        tableJob?.cancel()
+        _tableState.value = _tableState.value.copy(loading = true, error = null)
+        tableJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val rows = readTableCounts()
+                withContext(Dispatchers.Main) {
+                    _tableState.value = DevTableState(tables = rows)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                DevLogHub.w(DevLogHub.TAG, "Database inspection failed", e)
+                withContext(Dispatchers.Main) {
+                    _tableState.value = DevTableState(
+                        tables = emptyList(),
+                        error = e.message ?: "Could not read the database",
+                    )
+                }
+            }
+        }
+    }
+
+    private suspend fun readTableCounts(): List<DevTableCount> {
+        val db = database.openHelper.readableDatabase
+        val counts = mutableListOf<DevTableCount>()
+        db.query(
+            "SELECT name FROM sqlite_master WHERE type='table' " +
+                "AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'room_%' " +
+                "AND name NOT LIKE 'android_%' ORDER BY name",
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                val table = cursor.getString(0)
+                val rows = try {
+                    val identifier = "\"" + table.replace("\"", "\"\"") + "\""
+                    db.query("SELECT COUNT(*) FROM $identifier").use { countCursor ->
+                        if (countCursor.moveToFirst()) countCursor.getInt(0) else 0
+                    }
+                } catch (_: Exception) {
+                    -1
+                }
+                counts += DevTableCount(name = table, rows = rows)
+            }
+        }
+        return counts
     }
 
     fun clearDatabase() {
+        tableJob?.cancel()
+        tableJob = null
         viewModelScope.launch(Dispatchers.IO) {
+            _tableState.value = _tableState.value.copy(loading = true)
             try {
                 database.clearAllTables()
-                refreshTableCounts()
+                DevLogHub.w(DevLogHub.TAG, "All Room tables cleared from Developer Mode")
                 withContext(Dispatchers.Main) {
-                    _lastAction.value = "All database tables cleared"
+                    postMessage("All database tables cleared")
                 }
+                refreshTableCounts()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
+                DevLogHub.e(DevLogHub.TAG, "Database clear failed", e)
                 withContext(Dispatchers.Main) {
-                    _lastAction.value = "Failed to clear database: ${e.message}"
+                    _tableState.value = _tableState.value.copy(loading = false)
+                    postMessage("Could not clear the database")
                 }
             }
         }
     }
 
-    fun resetOnboarding() {
-        viewModelScope.launch {
-            repository.resetOnboarding()
-            _lastAction.value = "Onboarding reset — app will show welcome screen on next start"
-        }
-    }
-
-    private fun dirSize(dir: java.io.File?): Long {
-        if (dir == null || !dir.exists()) return 0L
-        return try {
-            dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
-        } catch (_: Exception) { 0L }
-    }
-
     fun refreshStorageInfo() {
-        viewModelScope.launch(Dispatchers.IO) {
-            val info = DevStorageInfo(
-                cacheBytes = dirSize(context.cacheDir),
-                filesBytes = dirSize(context.filesDir),
-            )
-            withContext(Dispatchers.Main) { _storageInfo.value = info }
+        storageJob?.cancel()
+        _storageState.value = _storageState.value.copy(loading = true, error = null)
+        storageJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val info = DevStorageInfo(
+                    cacheBytes = directorySize(context.cacheDir),
+                    filesBytes = directorySize(context.filesDir),
+                    databaseBytes = devCatching {
+                        val path = database.openHelper.readableDatabase.path
+                        if (path == null) 0L else directorySize(File(path).parentFile)
+                    }.getOrDefault(0L),
+                )
+                withContext(Dispatchers.Main) {
+                    _storageState.value = DevStorageState(info = info)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                DevLogHub.w(DevLogHub.TAG, "Storage inspection failed", e)
+                withContext(Dispatchers.Main) {
+                    _storageState.value = DevStorageState(
+                        error = e.message ?: "Could not read storage",
+                    )
+                }
+            }
         }
     }
 
     fun clearCache() {
         viewModelScope.launch(Dispatchers.IO) {
+            val before = directorySize(context.cacheDir)
+            var failures = 0
             try {
-                context.cacheDir?.listFiles()?.forEach {
-                    runCatching { if (it.isDirectory) it.deleteRecursively() else it.delete() }
+                context.cacheDir.listFiles()?.forEach { child ->
+                    ensureActive()
+                    val deleted = devCatching {
+                        if (child.isDirectory) child.deleteRecursively() else child.delete()
+                    }.getOrDefault(false)
+                    if (!deleted) failures += 1
                 }
-                refreshStorageInfo()
-                withContext(Dispatchers.Main) {
-                    _lastAction.value = "Cache cleared"
-                }
+                ensureActive()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                withContext(Dispatchers.Main) { _lastAction.value = "Clear cache failed: ${e.message}" }
+                DevLogHub.e(DevLogHub.TAG, "Cache clear failed", e)
+                withContext(Dispatchers.Main) { postMessage("Could not clear the cache") }
+                return@launch
             }
+            val remaining = directorySize(context.cacheDir)
+            val freed = (before - remaining).coerceAtLeast(0L)
+            DevLogHub.i(
+                DevLogHub.TAG,
+                "Cache clear removed ${formatBytes(freed)} ($failures failures)",
+            )
+            refreshStorageInfo()
+            withContext(Dispatchers.Main) {
+                postMessage(
+                    when {
+                        freed > 0L -> "Cache cleared · ${formatBytes(freed)} removed"
+                        failures > 0 -> "Some cached files could not be removed"
+                        else -> "No cache files were removed"
+                    },
+                )
+            }
+        }
+    }
+
+    private fun directorySize(dir: File?): Long {
+        if (dir == null || !dir.exists()) return 0L
+        return try {
+            dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+        } catch (_: Exception) {
+            0L
         }
     }
 
     fun refreshPrefs() {
-        viewModelScope.launch(Dispatchers.IO) {
-            val snap = try { repository.snapshotPrefs() } catch (_: Exception) { emptyMap() }
-            withContext(Dispatchers.Main) {
-                _prefsSnapshot.value = snap
-            }
-        }
-    }
-
-    // ---- Crash Testing (Executed on main thread for real crashes) ----
-    fun triggerCrash(type: String) {
-        _lastAction.value = "Triggering $type crash..."
-        viewModelScope.launch(Dispatchers.IO) {
+        prefsJob?.cancel()
+        _prefsState.value = _prefsState.value.copy(loading = true, error = null)
+        prefsJob = viewModelScope.launch(Dispatchers.IO) {
             try {
-                repository.appendDevCrashHistoryEvent(type, System.currentTimeMillis(), note = "Manual test trigger")
-            } catch (_: Exception) { }
-        }
-
-        Handler(Looper.getMainLooper()).postDelayed({
-            when (type) {
-                "NPE" -> throw NullPointerException("[DEV TEST] Simulated NullPointerException on main thread")
-                "IllegalState" -> throw IllegalStateException("[DEV TEST] Simulated IllegalStateException on main thread")
-                "ANR" -> {
-                    // Block main thread for 10 seconds to cause real ANR
-                    Thread.sleep(10000)
+                val snapshot = repository.snapshotPrefs()
+                withContext(Dispatchers.Main) {
+                    _prefsState.value = DevPrefsState(values = snapshot)
                 }
-                "OOM" -> {
-                    val hog = mutableListOf<ByteArray>()
-                    while (true) {
-                        hog.add(ByteArray(32 * 1024 * 1024))
-                    }
-                }
-                else -> throw RuntimeException("[DEV TEST] Simulated $type crash on main thread")
-            }
-        }, 200)
-    }
-
-    fun clearCrashHistory() = viewModelScope.launch {
-        repository.clearDevCrashHistory()
-        _lastAction.value = "Crash history cleared"
-    }
-
-    fun logNonFatal() {
-        android.util.Log.e("ToolzDev", "[DEV TEST] Non-fatal test exception logged", IllegalStateException("Sample non-fatal issue"))
-        _lastAction.value = "Logged non-fatal exception to logcat"
-    }
-
-    // ---- Logcat & Diagnostics Log Stream ----
-    fun refreshLogcat() {
-        viewModelScope.launch(Dispatchers.IO) { fetchLogcat() }
-    }
-
-    fun sendTestLog(level: String = "INFO") {
-        val now = System.currentTimeMillis()
-        when (level.uppercase()) {
-            "VERBOSE", "V" -> DevLogHub.v("ToolzTest", "Test VERBOSE diagnostic trace event at $now")
-            "DEBUG", "D" -> DevLogHub.d("ToolzTest", "Test DEBUG state checkpoint at $now")
-            "INFO", "I" -> DevLogHub.i("ToolzTest", "Test INFO event emitted at $now")
-            "WARN", "W" -> DevLogHub.w("ToolzTest", "Test WARN: potential latency simulated at $now")
-            "ERROR", "E" -> DevLogHub.e("ToolzTest", "Test ERROR: simulated handled exception at $now", RuntimeException("Sample developer exception"))
-            else -> DevLogHub.i("ToolzTest", "Test log entry at $now")
-        }
-        refreshLogcat()
-        _lastAction.value = "Added $level test log entry"
-    }
-
-    fun copyWarningsAndErrors() {
-        val lines = _logLines.value
-        val regex = Regex("""(?:\s|\b)([WEF])[/ ]""")
-        val filtered = lines.filter { line ->
-            regex.containsMatchIn(line) || line.contains(" E/") || line.contains(" W/") || line.contains(" F/")
-        }
-        if (filtered.isEmpty()) {
-            _lastAction.value = "No warnings or errors found in logcat"
-        } else {
-            copyText("Warnings & Errors", filtered.joinToString("\n"))
-            _lastAction.value = "Copied ${filtered.size} warnings/errors to clipboard"
-        }
-    }
-
-    fun copyAllLogs() {
-        val lines = _logLines.value
-        if (lines.isEmpty()) {
-            _lastAction.value = "Logcat is empty"
-        } else {
-            copyText("Logcat", lines.joinToString("\n"))
-            _lastAction.value = "Copied ${lines.size} log lines to clipboard"
-        }
-    }
-
-    private suspend fun fetchLogcat() {
-        val isShizuku = checkShizukuStatus()
-        val preferShizuku = _forceShizukuLogcat.value
-        val scope = _logcatScope.value
-        val myPid = Process.myPid()
-
-        var lines: List<String> = emptyList()
-        var shizukuUsed = false
-
-        if (preferShizuku && isShizuku) {
-            val cmd = if (scope == LogcatScope.SYSTEM) {
-                "logcat -d -v time -t 300"
-            } else {
-                "logcat -d -v time -t 300 --pid=$myPid"
-            }
-            try {
-                val res = shizukuExecutor.executeForResult(cmd, timeoutMs = 2000)
-                if (res.exitCode == 0 && res.stdout.isNotBlank()) {
-                    lines = res.stdout.lines().filter { it.isNotBlank() }
-                    shizukuUsed = true
-                }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                DevLogHub.w("ToolzDev", "Shizuku logcat failed: ${e.message}")
-            }
-        }
-
-        if (!shizukuUsed) {
-            val hubLines = DevLogHub.getLines()
-            val systemLines = try {
-                val proc = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-v", "time", "-t", "200", "--pid=$myPid"))
-                val l = proc.inputStream.bufferedReader().readLines()
-                if (l.isEmpty()) {
-                    val fallbackProc = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-v", "time", "-t", "200"))
-                    fallbackProc.inputStream.bufferedReader().readLines().filter { it.contains("Toolz") || it.contains("$myPid") }
-                } else l
-            } catch (_: Exception) {
-                emptyList()
-            }
-            lines = (hubLines + systemLines).distinct().takeLast(350)
-        }
-
-        withContext(Dispatchers.Main) {
-            if (lines.isNotEmpty()) {
-                _logLines.value = lines.takeLast(350)
+                DevLogHub.w(DevLogHub.TAG, "Preference inspection failed", e)
+                withContext(Dispatchers.Main) {
+                    _prefsState.value = DevPrefsState(
+                        error = e.message ?: "Could not read preferences",
+                    )
+                }
             }
         }
     }
 
-    fun clearLogcat() {
-        DevLogHub.clear()
-        viewModelScope.launch(Dispatchers.IO) {
-            if (_forceShizukuLogcat.value && checkShizukuStatus()) {
-                try { shizukuExecutor.executeForResult("logcat -c", timeoutMs = 2000) } catch (_: Exception) { }
+    fun resetOnboarding() = viewModelScope.launch {
+        devCatching { repository.resetOnboarding() }
+            .onSuccess {
+                DevLogHub.i(DevLogHub.TAG, "Onboarding reset")
+                postMessage("Onboarding will appear on the next launch")
             }
-            try { Runtime.getRuntime().exec(arrayOf("logcat", "-c")) } catch (_: Exception) { }
-            withContext(Dispatchers.Main) { _logLines.value = emptyList() }
+            .onFailure { postMessage("Could not reset onboarding") }
+    }
+
+    // ---- System actions ----------------------------------------------------
+
+    fun openNotificationSettings() {
+        val opened = DevUiOverrider.openAppNotificationSettings(context)
+        postMessage(
+            if (opened) {
+                "Opening notification settings"
+            } else {
+                "Notification settings are unavailable on this device"
+            },
+        )
+    }
+
+    fun openSystemDeveloperOptions() {
+        if (!DevUiOverrider.openSystemDeveloperOptions(context)) {
+            postMessage("System Developer options are unavailable on this device")
         }
-        _lastAction.value = "Log stream cleared"
+    }
+
+    fun openDiscord() {
+        if (!DevUiOverrider.openToolzDiscord(context)) {
+            postMessage("No app can open the Discord invite")
+        }
     }
 
     fun restartApp(activity: Activity?) {
-        activity?.let { act ->
-            val intent = act.packageManager.getLaunchIntentForPackage(act.packageName)
-            intent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-            act.startActivity(intent)
+        if (activity == null) {
+            postMessage("Restart unavailable: no foreground activity")
+            return
+        }
+        val intent = activity.packageManager.getLaunchIntentForPackage(activity.packageName)
+        if (intent == null) {
+            postMessage("Restart unavailable: launch intent missing")
+            return
+        }
+        try {
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+            activity.startActivity(intent)
+            activity.finishAffinity()
             Runtime.getRuntime().exit(0)
+        } catch (e: Exception) {
+            DevLogHub.e(DevLogHub.TAG, "Restart failed", e)
+            postMessage("Could not restart the app")
         }
     }
-
-    fun consumeAction() { _lastAction.value = null }
-
-    fun appContext(): Context = context
 }

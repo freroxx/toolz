@@ -2177,17 +2177,29 @@ fun ToolGridCard(
 ) {
     val vibrationManager = LocalVibrationManager.current
 
-    // DEV-SPOOF: sandboxed tool → small red star + long-press quick-fix
+    // DEV-SPOOF: sandboxed tool → small accent star + long-press quick-fix
     // ("this data is fake") instead of the default long-press action.
     val spoofVm: SpoofQuickFixViewModel = hiltViewModel()
     val sandboxes by spoofVm.activeSandboxes.collectAsStateWithLifecycle()
+    val quickFix by spoofVm.quickFixState.collectAsStateWithLifecycle()
     val devTool = remember(item.route) { routeToDevTool(item.route) }
     val spoofed = devTool != null && devTool in sandboxes
     var showSpoofFix by remember { mutableStateOf(false) }
-    if (showSpoofFix && devTool != null) {
+    LaunchedEffect(spoofed) {
+        if (!spoofed) {
+            showSpoofFix = false
+            spoofVm.clearQuickFixState()
+        }
+    }
+    if (showSpoofFix && devTool != null && spoofed) {
         SpoofQuickFixDialog(
             tool = devTool,
-            onDismiss = { showSpoofFix = false },
+            busy = quickFix.busy,
+            error = quickFix.error,
+            onDismiss = {
+                showSpoofFix = false
+                spoofVm.clearQuickFixState()
+            },
             onDisable = { spoofVm.disableSandbox(devTool) },
             onOpenDeveloperOptions = { onNavigate("developer_mode") },
         )
@@ -2197,7 +2209,10 @@ fun ToolGridCard(
         onClick     = { vibrationManager?.vibrateClick(); onNavigate(item.route) },
         onLongClick = {
             vibrationManager?.vibrateLongClick()
-            if (spoofed) showSpoofFix = true else onLongClick()
+            if (spoofed) {
+                spoofVm.clearQuickFixState()
+                showSpoofFix = true
+            } else onLongClick()
         },
         modifier    = modifier.height(110.dp),
         shape       = RoundedCornerShape(24.dp), // More squared for grid
@@ -2263,17 +2278,29 @@ fun ToolListCard(
 ) {
     val vibrationManager = LocalVibrationManager.current
 
-    // DEV-SPOOF: sandboxed tool → red star (right center) + long-press
+    // DEV-SPOOF: sandboxed tool → accent star (right center) + long-press
     // quick-fix ("this data is fake") instead of the default action.
     val spoofVm: SpoofQuickFixViewModel = hiltViewModel()
     val sandboxes by spoofVm.activeSandboxes.collectAsStateWithLifecycle()
+    val quickFix by spoofVm.quickFixState.collectAsStateWithLifecycle()
     val devTool = remember(item.route) { routeToDevTool(item.route) }
     val spoofed = devTool != null && devTool in sandboxes
     var showSpoofFix by remember { mutableStateOf(false) }
-    if (showSpoofFix && devTool != null) {
+    LaunchedEffect(spoofed) {
+        if (!spoofed) {
+            showSpoofFix = false
+            spoofVm.clearQuickFixState()
+        }
+    }
+    if (showSpoofFix && devTool != null && spoofed) {
         SpoofQuickFixDialog(
             tool = devTool,
-            onDismiss = { showSpoofFix = false },
+            busy = quickFix.busy,
+            error = quickFix.error,
+            onDismiss = {
+                showSpoofFix = false
+                spoofVm.clearQuickFixState()
+            },
             onDisable = { spoofVm.disableSandbox(devTool) },
             onOpenDeveloperOptions = { onNavigate("developer_mode") },
         )
@@ -2283,7 +2310,10 @@ fun ToolListCard(
         onClick     = { vibrationManager?.vibrateClick(); onNavigate(item.route) },
         onLongClick = {
             vibrationManager?.vibrateLongClick()
-            if (spoofed) showSpoofFix = true else onLongClick()
+            if (spoofed) {
+                spoofVm.clearQuickFixState()
+                showSpoofFix = true
+            } else onLongClick()
         },
         modifier    = Modifier.fillMaxWidth().height(84.dp),
         shape       = ExtraLargeExpressiveShape, // Matching grid cards

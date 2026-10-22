@@ -25,6 +25,7 @@ import android.os.Build
 import android.os.IBinder
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.frerox.toolz.data.developer.SpoofParams
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.service.ToolService
 import com.frerox.toolz.util.NotificationHelper
@@ -64,6 +65,7 @@ data class TimerState(
     val alarmsEnabled: Boolean = true,
     val showMilliseconds: Boolean = false,
     val showStatusPill: Boolean = true,
+    val ringtoneUri: String? = null,
 )
 
 @HiltViewModel
@@ -76,9 +78,9 @@ class TimerViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(TimerState())
 
-    // DEV-SPOOF: fixture countdown (null = not sandboxed). A RAM 3-second
-    // demo that loops "arm → run → ring" with no alarm service, no FGS and
-    // no notifications.
+    // DEV-SPOOF: fixture countdown (null = not sandboxed). A RAM timer that
+    // loops "stage → run → ring" with no alarm service, no FGS and no
+    // notifications; its duration comes from the Timer sandbox parameter.
     private val _sandboxTimer = MutableStateFlow<TimerState?>(null)
     private var sandboxTickJob: Job? = null
     private var sandboxActiveNow = false
@@ -230,6 +232,11 @@ class TimerViewModel @Inject constructor(
         viewModelScope.launch {
             settingsRepository.timerShowStatusPill.distinctUntilChanged().collect { show ->
                 _uiState.update { it.copy(showStatusPill = show) }
+            }
+        }
+        viewModelScope.launch {
+            settingsRepository.ringtoneUri.distinctUntilChanged().collect { uri ->
+                _uiState.update { it.copy(ringtoneUri = uri) }
             }
         }
 
@@ -636,20 +643,29 @@ class TimerViewModel @Inject constructor(
 
     // ── DEV-SPOOF: fixture timer internals ─────────────────────────────────
 
-    private fun sandboxFixture(seconds: Long = 3L): TimerState = TimerState(
-        remainingTime = seconds * 1000L,
-        initialTime = seconds * 1000L,
-        isStarted = true,
-        isPaused = false,
-        hasRun = false,
-        selectedMinutes = 0,
-        selectedSeconds = seconds.toInt().coerceIn(0, 59),
-        alarmsEnabled = false, // sandbox: no notification/alarm machinery at all
-    )
+    private fun sandboxFixture(
+        seconds: Long = gate.params.value.timerSecs.toLong(),
+    ): TimerState {
+        val totalSeconds = seconds
+            .coerceIn(SpoofParams.TIMER_MIN.toLong(), SpoofParams.TIMER_MAX.toLong())
+            .toInt()
+        return TimerState(
+            remainingTime = totalSeconds * 1000L,
+            initialTime = totalSeconds * 1000L,
+            isStarted = true,
+            isPaused = false,
+            hasRun = false,
+            selectedHours = totalSeconds / 3_600,
+            selectedMinutes = (totalSeconds % 3_600) / 60,
+            selectedSeconds = totalSeconds % 60,
+            alarmsEnabled = false, // sandbox: no notification/alarm machinery at all
+        )
+    }
 
     private fun enterSandboxImmediately() {
         sandboxActiveNow = true
-        _sandboxTimer.value = sandboxFixture()
+        val seconds = gate.params.value.timerSecs.coerceIn(SpoofParams.TIMER_MIN, SpoofParams.TIMER_MAX)
+        _sandboxTimer.value = sandboxFixture(seconds.toLong())
         try { context.unbindService(connection) } catch (_: Exception) {}
         try { context.stopService(Intent(context, ToolService::class.java)) } catch (_: Exception) {}
         isBound = false
@@ -660,7 +676,7 @@ class TimerViewModel @Inject constructor(
         startSandboxTicker()
         android.util.Log.w(
             "DevSpoof",
-            "Timers sandbox active — 3s fixture loop, ToolService detached (no alarms)",
+            "Timers sandbox active — ${seconds}s fixture loop, ToolService detached (no alarms)",
         )
     }
 
@@ -831,8 +847,51 @@ class TimerViewModel @Inject constructor(
     }
 
     fun toggleAlarms() {
+        val next = !_uiState.value.alarmsEnabled
+        if (!next && _uiState.value.isRinging) {
+            stopRingtoneDirect()
+        }
         viewModelScope.launch {
-            try { settingsRepository.setTimerNotifications(!_uiState.value.alarmsEnabled) } catch (_: Exception) {}
+            try { settingsRepository.setTimerNotifications(next) } catch (_: Exception) {}
+        }
+    }
+
+    fun setRingtoneUri(uri: String) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val trimmed = uri.trim()
+                if (trimmed.isBlank()) {
+                    settingsRepository.setRingtoneUri("")
+                    return@launch
+                }
+                val parsed = runCatching { android.net.Uri.parse(trimmed) }.getOrNull()
+                if (parsed == null) {
+                    return@launch
+                }
+                val readable = try {
+                    context.contentResolver.openFileDescriptor(parsed, "r")?.close()
+                    true
+                } catch (_: SecurityException) {
+                    false
+                } catch (_: Exception) {
+                    true
+                }
+                if (readable) {
+                    try {
+                        if (parsed.scheme == "content") {
+                            try {
+                                context.contentResolver.takePersistableUriPermission(
+                                    parsed,
+                                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                                )
+                            } catch (_: Exception) {}
+                        }
+                    } catch (_: Exception) {}
+                    settingsRepository.setRingtoneUri(trimmed)
+                } else {
+                    settingsRepository.setRingtoneUri("")
+                }
+            } catch (_: Exception) {}
         }
     }
 
@@ -903,11 +962,12 @@ class TimerViewModel @Inject constructor(
 
     fun reset() {
         // DEV-SPOOF: sandboxed → re-arms onto the currently staged duration
-        // (3s demo default when nothing staged); no service action at all.
+        // (the configured fixture duration when nothing is staged); no
+        // service action at all.
         if (timersSandboxActive) {
             sandboxTickJob?.cancel()
             sandboxTickJob = null
-            val initial = (_sandboxTimer.value?.initialTime ?: 3000L).coerceAtLeast(0L)
+            val initial = _sandboxTimer.value?.initialTime?.coerceAtLeast(0L) ?: 0L
             _sandboxTimer.value =
                 if (initial > 0L) {
                     sandboxFixture(seconds = initial / 1000L).copy(

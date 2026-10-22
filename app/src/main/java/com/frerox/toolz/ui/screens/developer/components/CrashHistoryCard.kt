@@ -1,70 +1,39 @@
 /*
  * Copyright (C) 2026 Toolz Contributors
  *
- * Crash-lab history: test events recorded on-device (DataStore), cleared
- * by the same auto-reset net as everything else. Purely diagnostic —
- * nothing here leaves the device automatically.
- *
- * Revamp changes:
- *  - Each event row gets a 3dp left accent border coloured by crash type:
- *    NPE = amber, ANR = red, OOM = purple, other = primary
- *  - Timestamps shown as relative ("3 min ago", "just now") instead of raw
- *    absolute time (absolute is kept as a subtitle)
+ * Crash-lab history for the Diagnostics tab. Events are recorded locally in
+ * DataStore before a deliberate crash, so the next launch can show what was
+ * triggered. Nothing is uploaded.
  */
 
 package com.frerox.toolz.ui.screens.developer.components
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.DeleteSweep
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.frerox.toolz.ui.screens.developer.CrashLabEvent
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-
-private fun crashTypeColor(type: String): Color = when {
-    type.contains("NPE", ignoreCase = true) -> Color(0xFFF4B942)   // amber
-    type.contains("ANR", ignoreCase = true) -> Color(0xFFEF5350)   // red
-    type.contains("OOM", ignoreCase = true) -> Color(0xFFAB47BC)   // purple
-    else -> Color(0xFF42A5F5)                                        // blue
-}
-
-private fun relativeTime(atMs: Long): String {
-    val diff = System.currentTimeMillis() - atMs
-    return when {
-        diff < 60_000 -> "just now"
-        diff < 3_600_000 -> "${diff / 60_000} min ago"
-        diff < 86_400_000 -> "${diff / 3_600_000}h ago"
-        else -> "${diff / 86_400_000}d ago"
-    }
-}
+import com.frerox.toolz.data.developer.CrashLabEvent
+import com.frerox.toolz.data.developer.formatAbsoluteTime
+import com.frerox.toolz.data.developer.formatRelativeTime
 
 @Composable
 fun CrashHistoryCard(
@@ -72,92 +41,109 @@ fun CrashHistoryCard(
     onClear: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier.fillMaxWidth()) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "CRASH HISTORY (TEST ONLY)",
-                modifier = Modifier.weight(1f),
-                fontWeight = FontWeight.Black,
-                fontSize = 11.sp,
-                letterSpacing = 1.sp,
-            )
-            if (events.isNotEmpty()) {
-                Surface(
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.15f),
-                    modifier = Modifier.size(22.dp),
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(
-                            "${events.size}",
-                            fontWeight = FontWeight.Black,
-                            fontSize = 10.sp,
-                            color = MaterialTheme.colorScheme.error,
+    DevCard(modifier = modifier) {
+        DevSectionTitle(
+            title = "Crash-lab history",
+            supporting = if (events.isEmpty()) {
+                "No test events recorded"
+            } else {
+                "${events.size} local ${if (events.size == 1) "event" else "events"} · newest first"
+            },
+            action = if (events.isNotEmpty()) {
+                {
+                    IconButton(onClick = onClear) {
+                        Icon(
+                            imageVector = Icons.Rounded.DeleteSweep,
+                            contentDescription = "Clear crash-lab history",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(20.dp),
                         )
                     }
                 }
-                Spacer(Modifier.size(8.dp))
-                IconButton(onClick = onClear) {
-                    Icon(
-                        Icons.Rounded.DeleteSweep,
-                        contentDescription = "Clear crash history",
-                        modifier = Modifier.size(20.dp),
-                        tint = MaterialTheme.colorScheme.error,
-                    )
-                }
-            }
-        }
-        Spacer(Modifier.size(8.dp))
+            } else {
+                null
+            },
+        )
+
         if (events.isEmpty()) {
-            Text(
-                "No recorded crash-lab events.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            DevEmptyState(
+                icon = Icons.Rounded.History,
+                title = "Nothing has crashed",
+                body = "Crash-lab events are written here before a deliberate crash, so you can verify the next launch.",
             )
         } else {
-            val fmt = remember { SimpleDateFormat("dd MMM HH:mm:ss", Locale.getDefault()) }
-            events.asReversed().take(8).forEach { e ->
-                val accentColor = crashTypeColor(e.type)
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp)
-                        .clip(RoundedCornerShape(topEnd = 10.dp, bottomEnd = 10.dp))
-                        .background(accentColor.copy(alpha = 0.07f)),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    // 3dp left accent border
-                    Box(
-                        Modifier
-                            .width(3.dp)
-                            .height(38.dp)
-                            .background(accentColor.copy(alpha = 0.80f)),
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    Column(Modifier.weight(1f).padding(vertical = 5.dp)) {
-                        Text(
-                            e.type,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp,
-                            color = accentColor,
-                        )
-                        Text(
-                            fmt.format(Date(e.atMs)),
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Text(
-                        relativeTime(e.atMs),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(end = 10.dp),
-                    )
-                }
-                Spacer(Modifier.height(3.dp))
+            events.takeLast(6).reversed().forEach { event ->
+                CrashEventRow(event)
             }
         }
     }
+}
+
+@Composable
+private fun CrashEventRow(event: CrashLabEvent) {
+    val error = MaterialTheme.colorScheme.error
+    val container = error.copy(alpha = 0.08f)
+    val title = crashTitle(event.type)
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = container,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = error.copy(alpha = 0.16f),
+                contentColor = error,
+                modifier = Modifier.size(34.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.BugReport,
+                    contentDescription = null,
+                    modifier = Modifier.padding(7.dp),
+                )
+            }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (event.note.isNotBlank()) {
+                    Text(
+                        text = event.note,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Text(
+                    text = formatAbsoluteTime(event.atMs),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            DevPill(
+                text = formatRelativeTime(event.atMs),
+                containerColor = error.copy(alpha = 0.14f),
+                contentColor = error,
+            )
+        }
+    }
+}
+
+private fun crashTitle(type: String): String = when (type) {
+    "NPE" -> "Null pointer"
+    "ANR" -> "Not responding"
+    "OOM" -> "Out of memory"
+    "IllegalState" -> "Illegal state"
+    else -> type.ifBlank { "Unknown test event" }
 }

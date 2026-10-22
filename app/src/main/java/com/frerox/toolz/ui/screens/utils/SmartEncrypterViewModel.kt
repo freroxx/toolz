@@ -635,8 +635,8 @@ class SmartEncrypterViewModel @Inject constructor(
         val uri = state.selectedFileUri ?: return
         val operation = state.fileOperationIntent ?: return
 
-        // DEV-SPOOF: demo stages a believable file pass but writes nothing to
-        // /Downloads/Toolz and touches no real file.
+        // The Files sandbox stages a believable file pass but writes nothing
+        // to /Downloads/Toolz and touches no real file.
         if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.FILES)) {
             if (state.password.isBlank()) {
                 _uiState.update { it.copy(error = "Password required for file processing") }
@@ -651,14 +651,14 @@ class SmartEncrypterViewModel @Inject constructor(
                         it.copy(
                             isProcessingFile = true,
                             fileProcessingProgress = i / 10f,
-                            fileProcessingStatus = if (i < 10) "Processing (${i * 10}%)" else "Simulated (demo)",
+                            fileProcessingStatus = if (i < 10) "Processing (${i * 10}%)" else "Simulated (fixture)",
                         )
                     }
                 }
                 _uiState.update {
                     it.copy(
                         isProcessingFile = false,
-                        fileProcessingStatus = "Demo mode: nothing was written to storage.",
+                        fileProcessingStatus = "Files sandbox: this file pass used a local fixture and wrote nothing to storage.",
                     )
                 }
             }

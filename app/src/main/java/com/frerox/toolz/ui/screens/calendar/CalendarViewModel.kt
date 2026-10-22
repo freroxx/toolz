@@ -280,10 +280,10 @@ class CalendarViewModel @Inject constructor(
                 return@launch
             }
 
-            // DEV-SPOOF: demo never calls a live model — honest refusal, and
-            // the attached image is never uploaded anywhere.
+            // The Calendar sandbox never calls a live model — honest refusal,
+            // and the attached image is never uploaded anywhere.
             if (gate.sandboxed(TASKS)) {
-                handleAiFailure("Demo mode is on — AI parsing needs a live, networked model. Use Add event to put fixture entries on the calendar instead.")
+                handleAiFailure("The Calendar sandbox is on — AI parsing needs a live, networked model. Use Add event to put fixture entries on the calendar instead.")
                 return@launch
             }
 

@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2026 Toolz Contributors
  *
- * Controlled Whisper sandbox: RAM-only fixtures. No Supabase, no realtime,
+ * Sandboxed Whisper fixture: RAM-only data. No Supabase, no realtime,
  * no auth, no network. Used by the developer console preview AND (when
  * spoof_whisper is active) as the data source for Whisper screens instead
  * of the real repository. Everything the user sees here is local.
@@ -13,6 +13,7 @@ import com.frerox.toolz.data.whisper.WhisperConversation
 import com.frerox.toolz.data.whisper.WhisperMessage
 import com.frerox.toolz.data.whisper.WhisperProfile
 import com.frerox.toolz.data.whisper.WhisperUiState
+import java.util.Locale
 
 data class FakeWhisperContact(
     val id: String,
@@ -29,13 +30,13 @@ data class FakeWhisperMessage(
 )
 
 object FakeWhisperSandbox {
-    const val BANNER = "SPOOF SANDBOX • OFFLINE • NOTHING LEAVES THIS DEVICE"
+    const val BANNER = "SANDBOX FIXTURE • OFFLINE • NOTHING LEAVES THIS DEVICE"
 
     /** The local fixture account — no Supabase session backs this id. */
     const val MY_ID = "spoof-self"
 
     val contacts = listOf(
-        FakeWhisperContact("debug-ada", "Ada • Debug", "can you see this fake thread?", 3),
+        FakeWhisperContact("debug-ada", "Ada • Debug", "can you see this fixture thread?", 3),
         FakeWhisperContact("debug-null", "Null • Pointer", "this message never touched the server", 0),
         FakeWhisperContact("debug-group", "sandbox-testers (5)", "Ada: fixtures only, no sync", 12),
     )
@@ -45,7 +46,7 @@ object FakeWhisperSandbox {
         FakeWhisperMessage("m2", true, "So sending here does nothing online?", "09:42"),
         FakeWhisperMessage("m3", false, "Exactly. No Supabase, no realtime, no push. Airplane-safe.", "09:42"),
         FakeWhisperMessage("m4", false, "Turn master OFF to return to your real chats.", "09:43"),
-        FakeWhisperMessage("m5", true, "QR verify in sandbox always passes (fake).", "09:44"),
+        FakeWhisperMessage("m5", true, "QR verify in the sandbox always passes (fixture).", "09:44"),
     )
 
     // ─────────────────────────────────────────────────────────
@@ -53,9 +54,9 @@ object FakeWhisperSandbox {
     // ─────────────────────────────────────────────────────────
 
     private val partners = listOf(
-        TalkPartners("debug-ada", "ada_fixture", "Ada • Debug", lastText = "can you see this fake thread?", unread = 3),
+        TalkPartners("debug-ada", "ada_fixture", "Ada • Debug", lastText = "can you see this fixture thread?", unread = 3),
         TalkPartners("debug-null", "null_pointer", "Null • Pointer", lastText = "this message never touched the server", unread = 0),
-        TalkPartners("debug-sam", "sam_spoof", "Sam • Spoofer", lastText = "airplane mode? what airplane mode", unread = 1),
+        TalkPartners("debug-sam", "sam_fixture", "Sam • Fixture", lastText = "airplane mode? what airplane mode", unread = 1),
     )
 
     private data class TalkPartners(
@@ -71,10 +72,10 @@ object FakeWhisperSandbox {
     /** Fake local account shown in the profile tab. */
     val myProfile = WhisperProfile(
         id = MY_ID,
-        username = "spoof_self",
-        displayName = "Spoof Pilot",
+        username = "fixture_self",
+        displayName = "Fixture Pilot",
         bio = "Developer sandbox fixture — nothing here is real.",
-        publicKey = "SPOOF-LOCAL",
+        publicKey = "FIXTURE-LOCAL",
         createdAt = nowIso(),
         updatedAt = nowIso(),
     )
@@ -88,7 +89,7 @@ object FakeWhisperSandbox {
                 username = known.username,
                 displayName = known.name,
                 bio = "Local sandbox fixture — this contact is not real.",
-                publicKey = "SPOOF-${known.id.uppercase()}",
+                publicKey = "FIXTURE-${known.id.uppercase(Locale.ROOT)}",
                 createdAt = nowIso(),
                 updatedAt = nowIso(),
             )
@@ -98,7 +99,7 @@ object FakeWhisperSandbox {
                 username = id,
                 displayName = "Sandbox Ghost",
                 bio = "Local sandbox fixture — this contact is not real.",
-                publicKey = "SPOOF-LOCAL",
+                publicKey = "FIXTURE-LOCAL",
                 createdAt = nowIso(),
                 updatedAt = nowIso(),
             )
@@ -142,7 +143,7 @@ object FakeWhisperSandbox {
             "Fixture reply: \"$text\" stayed 100% on this device.",
             "Sandbox autonomy: nothing left the phone, nothing ever will.",
             "Received (RAM-only). Airplane mode approves this message.",
-            "Spoof thread confirms delivery to nowhere.",
+            "Fixture thread confirms delivery to nowhere.",
         )
         return canned[(text.hashCode().let { if (it < 0) -it else it }) % canned.size]
     }

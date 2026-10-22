@@ -337,7 +337,7 @@ class SearchViewModel @Inject constructor(
             gateActive.collect { demo ->
                 if (demo) {
                     fake.arm()
-                    android.util.Log.w("DevSpoof", "Search sandbox armed — RAM results, .demo domains only")
+                    android.util.Log.w("DevSpoof", "Search sandbox on — RAM results, .demo domains only")
                 } else {
                     fake.reset()
                 }

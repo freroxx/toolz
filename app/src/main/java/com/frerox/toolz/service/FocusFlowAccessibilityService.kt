@@ -133,7 +133,7 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         private const val TAG = "FocusFlowService"
         private const val CAFFEINATE_EXIT_GRACE_MS = 2500L
         private const val CAFFEINATE_START_DEBOUNCE_MS = 300L
-        private const val DISMISS_GRACE_PERIOD_MS = 8000L
+        private const val DISMISS_GRACE_PERIOD_MS = 3000L
         // Anti-bypass keep-alive is bounded: after this long on Home the
         // overlay auto-hides so the user can never be permanently stuck.
         private const val HOME_KEEP_OVERLAY_MS = 3000L
@@ -1264,8 +1264,8 @@ class FocusFlowAccessibilityService : AccessibilityService() {
     }
 
     private fun lockMessage(packageName: String, isSessionBlock: Boolean, appName: String): String =
-        if (isSessionBlock) "Focus session in progress. $appName is restricted."
-        else "Time's up for $appName."
+        if (isSessionBlock) getString(R.string.st_FocusLock_MessageSession, appName)
+        else getString(R.string.st_FocusLock_MessageLimit, appName)
 
     private fun showOverlay(packageName: String, isSessionBlock: Boolean = false) {
         // Instant block: show immediately with the cached label (or pkg as
@@ -1328,9 +1328,9 @@ class FocusFlowAccessibilityService : AccessibilityService() {
             val view = inflater.inflate(R.layout.layout_focus_lock, null)
 
             val message = if (isSessionBlock) {
-                "Focus session in progress. $appName is restricted."
+                getString(R.string.st_FocusLock_MessageSession, appName)
             } else {
-                "Time's up for $appName."
+                getString(R.string.st_FocusLock_MessageLimit, appName)
             }
             view.findViewById<TextView>(R.id.tv_lock_message)?.text = message
 
@@ -1433,7 +1433,7 @@ class FocusFlowAccessibilityService : AccessibilityService() {
                         try {
                             Toast.makeText(
                                 this@FocusFlowAccessibilityService,
-                                "Couldn't open Toolz automatically — use EXIT TO HOME, then open Toolz manually.",
+                                getString(R.string.st_FocusLock_ToastCantOpen),
                                 Toast.LENGTH_LONG
                             ).show()
                         } catch (_: Exception) {}

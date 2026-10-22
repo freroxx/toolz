@@ -27,7 +27,7 @@ interface SpoofGateEntryPoint {
 }
 
 /**
- * DEV-SPOOF: true while [tool]'s sandbox is active (master ON + tool flag ON).
+ * DEV-SANDBOX: true while [tool]'s sandbox is active (master ON + tool flag ON).
  * Defaults to false for the first frame, then updates reactively — screens use
  * it to skip permission placeholders and setup flows the sandbox renders moot.
  */

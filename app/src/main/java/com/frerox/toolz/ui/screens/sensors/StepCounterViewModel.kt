@@ -330,8 +330,8 @@ class StepCounterViewModel @Inject constructor(
                 bestDaySteps = maxOf(s.bestDaySteps, base),
                 averageSteps = base / 7,
                 streak = 7,
-                motionStatus = "SPOOF",
-                debugLogs = listOf("SPOOF sandbox: walking counter (from ${gate.params.value.stepsToday} steps)"),
+                motionStatus = "Fixture",
+                debugLogs = listOf("Fixture sandbox: walking counter (from ${gate.params.value.stepsToday} steps)"),
             )
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), StepState())

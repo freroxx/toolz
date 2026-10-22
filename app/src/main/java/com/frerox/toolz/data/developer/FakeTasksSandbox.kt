@@ -42,7 +42,7 @@ object FakeTasksSandbox {
 
     private var nextId = 1000
 
-    /** DEV-SPOOF: seeds a believable mixed-backlog board on every demo arm. */
+    /** DEV-SPOOF: seeds a believable mixed-backlog board whenever the sandbox activates. */
     fun arm() {
         nextId = 1000
         seedEvents()
@@ -60,7 +60,7 @@ object FakeTasksSandbox {
         active.value = listOf(
             TaskEntry(
                 id = nextId++, title = "Ship v2.6.0 release notes",
-                description = "Feature list + demo mode blurb. Screenshot pass before upload.",
+                description = "Feature list + Developer Mode blurb. Screenshot pass before upload.",
                 category = "Dev", priority = 1,
                 dueDate = now + 5 * hour, createdAt = now - 2 * day,
                 subTasks = listOf(
@@ -199,7 +199,7 @@ object FakeTasksSandbox {
                 atDayOffset(3, 10), "EXAM", "#3F51B5", duration = 90,
             ),
             event(
-                "Demo build handoff", "Signed APK to the testers channel.",
+                "Release build handoff", "Signed APK to the testers channel.",
                 atDayOffset(-1, 15), "DEADLINE", "#FF9800", completed = true,
             ),
             event(

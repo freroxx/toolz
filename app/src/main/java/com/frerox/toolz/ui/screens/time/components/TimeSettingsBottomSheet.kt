@@ -17,8 +17,11 @@
 
 package com.frerox.toolz.ui.screens.time.components
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
@@ -27,6 +30,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -121,5 +125,84 @@ fun PreferenceRow(
             onCheckedChange = onCheckedChange,
             modifier = Modifier.semantics { contentDescription = title },
         )
+    }
+}
+
+@Composable
+fun PreferenceRow(
+    title: String,
+    subtitle: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    accent: Color = MaterialTheme.colorScheme.primary,
+    action: @Composable () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {},
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.weight(1f)
+        ) {
+            if (icon != null) {
+                Surface(
+                    shape = CircleShape,
+                    color = accent.copy(alpha = 0.12f),
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(icon, contentDescription = null, tint = accent, modifier = Modifier.size(20.dp))
+                    }
+                }
+            }
+            Column(modifier = Modifier.weight(1f, fill = false)) {
+                Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        action()
+    }
+}
+
+@Composable
+fun RingtonePickerRow(
+    currentUri: String?,
+    activeColor: Color,
+    onRingtoneChanged: (String) -> Unit,
+) {
+    val context = LocalContext.current
+    val launcher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            } catch (_: Exception) {}
+            onRingtoneChanged(uri.toString())
+        }
+    }
+    val isCustom = !currentUri.isNullOrBlank()
+    PreferenceRow(
+        title = "Alarm sound",
+        subtitle = if (!isCustom) "System default" else "Custom sound",
+        icon = Icons.Rounded.MusicNote,
+        accent = activeColor,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (isCustom) {
+                TextButton(onClick = { onRingtoneChanged("") }) { Text("Default") }
+            }
+            ToolzOutlinedExpressiveButton(
+                onClick = { launcher.launch(arrayOf("audio/*")) },
+                shape = SmallExpressiveShape,
+            ) {
+                Text("Pick sound")
+            }
+        }
     }
 }

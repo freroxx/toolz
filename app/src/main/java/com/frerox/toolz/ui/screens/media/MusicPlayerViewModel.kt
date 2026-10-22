@@ -453,7 +453,7 @@ class MusicPlayerViewModel @Inject constructor(
                 favoriteTracks = listOf(tracks[0], tracks[2]),
                 recentlyPlayed = tracks.take(3),
                 mostPlayed = listOf(tracks[2], tracks[1]),
-                folders = mapOf("SPOOF" to tracks),
+                folders = mapOf("Fixture" to tracks),
                 currentTrack = tracks[0],
                 isPlaying = true,
                 playWhenReady = true,

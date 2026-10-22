@@ -30,7 +30,7 @@ import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * DEV-SPOOF: RAM-only file cleaner fixture. Mirrors the real engine's data
- * shapes so the cleaner screen is fully explorable in demo mode — scan, pick,
+ * shapes so the cleaner screen is fully explorable while the sandbox is active — scan, pick,
  * clean, trash, restore, empty — while the real filesystem, the trash Room
  * table and the accessibility service are never touched.
  */
@@ -47,13 +47,16 @@ object FakeCleanerSandbox {
     private val trashed = mutableListOf<Trashed>()
     private var nextTrashId = 1L
 
-    fun storageInfo(): StorageInfo {
+    fun storageInfo(fullPercent: Int = 68): StorageInfo {
         val res = snapshotResults()
+        val totalBytes = 128L * 1024 * 1024 * 1024
+        val usedBytes = totalBytes * fullPercent.coerceIn(0, 100) / 100
+        val freeBytes = totalBytes - usedBytes
         return StorageInfo(
-            totalBytes = (60 + 68) * 1024L * 1024 * 1024,
-            usedBytes = 68L * 1024 * 1024 * 1024,
-            freeBytes = 60L * 1024 * 1024 * 1024,
-            cleanableBytes = res.totalCleanableBytes,
+            totalBytes = totalBytes,
+            usedBytes = usedBytes,
+            freeBytes = freeBytes,
+            cleanableBytes = res.totalCleanableBytes.coerceAtMost(freeBytes),
         )
     }
 
@@ -101,13 +104,13 @@ object FakeCleanerSandbox {
 
         val dupes = listOf(
             CleanItem.Duplicate(com.frerox.toolz.data.cleaner.DuplicateGroup(
-                hash = "demo-dup-1", sizeBytes = mb(9),
+                hash = "fixture-dup-1", sizeBytes = mb(9),
                 files = listOf(
                     com.frerox.toolz.data.cleaner.DuplicateFile("/storage/emulated/0/Download/photo_trip.jpg", now - 12 * day),
                     com.frerox.toolz.data.cleaner.DuplicateFile("/storage/emulated/0/DCIM/photo_trip.jpg", now - 12 * day),
                 ))),
             CleanItem.Duplicate(com.frerox.toolz.data.cleaner.DuplicateGroup(
-                hash = "demo-dup-2", sizeBytes = mb(24),
+                hash = "fixture-dup-2", sizeBytes = mb(24),
                 files = listOf(
                     com.frerox.toolz.data.cleaner.DuplicateFile("/storage/emulated/0/Download/invoice_q1.pdf", now - 31 * day),
                     com.frerox.toolz.data.cleaner.DuplicateFile("/storage/emulated/0/Documents/invoice_q1.pdf", now - 31 * day),
@@ -166,7 +169,7 @@ object FakeCleanerSandbox {
 
         categories.value = listOf(
             cat("junk", "Junk files", "delete", junk, safe = true, description = "Stale downloads and temp renders."),
-            cat("app_cache", "App caches", "cached", appCache, safe = true, description = "Clear per app (demo: RAM only)."),
+            cat("app_cache", "App caches", "cached", appCache, safe = true, description = "Clear per app (fixture: RAM only)."),
             cat("empty_dirs", "Empty folders", "folder_off", emptyDirs, safe = true),
             cat("dupes", "Duplicates", "difference", dupes, safe = true, description = "One copy per group stays."),
             cat("media", "Large media", "photo", media, safe = false, description = "Review before removing."),
@@ -427,7 +430,7 @@ object FakeCleanerSandbox {
         return n
     }
 
-    /** DEV-SPOOF: files reappear under their demo category; caches don't. */
+    /** DEV-SPOOF: files reappear under their fixture category; caches don't. */
     private fun reinsert(t: Trashed) {
         val catId = t.categoryId ?: return
         if (t.item is CleanItem.AppCache) return // cleared cache has no file back

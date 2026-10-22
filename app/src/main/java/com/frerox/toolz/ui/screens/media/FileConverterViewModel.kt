@@ -148,11 +148,11 @@ class FileConverterViewModel @Inject constructor(
             )
         }
 
-        // DEV-SPOOF: demo conversion — RAM progress walk + demo output paths;
+        // Files sandbox conversion — RAM progress walk + fixture output paths;
         // FileConversionService is never started and no file is written.
         if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.FILES)) {
-            android.util.Log.w("DevSpoof", "FileConverter sandbox: fake conversion, no service")
-            val outPath = "/storage/emulated/0/Toolz/demo/demo-converted-1.${type.extension}"
+            android.util.Log.w("DevSpoof", "FileConverter sandbox: fixture conversion, no service")
+            val outPath = "/storage/emulated/0/Toolz/fixtures/fixture-converted-1.${type.extension}"
             viewModelScope.launch {
                 for (p in 10..100 step 10) {
                     kotlinx.coroutines.delay(140)
@@ -194,7 +194,7 @@ class FileConverterViewModel @Inject constructor(
     }
 
     fun cancelConversion() {
-        // DEV-SPOOF: demo never started a service — drop the RAM walk only.
+        // The sandbox never started a service — drop the RAM walk only.
         if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.FILES)) {
             _uiState.update { it.copy(isConverting = false, progress = 0, error = null) }
             return
@@ -280,14 +280,14 @@ class FileConverterViewModel @Inject constructor(
     }
 
     fun clearHistory() {
-        // DEV-SPOOF: demo keeps the user's real conversion history intact.
+        // The sandbox keeps the user's real conversion history intact.
         if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.FILES)) return
         prefs.edit().remove("recent_conversions").apply()
         _uiState.update { it.copy(recentConversions = emptyList()) }
     }
 
     fun removeHistoryItem(recent: RecentConversion) {
-        // DEV-SPOOF: demo keeps the user's real conversion history intact.
+        // The sandbox keeps the user's real conversion history intact.
         if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.FILES)) return
         val updated = _uiState.value.recentConversions - recent
         _uiState.update { it.copy(recentConversions = updated) }

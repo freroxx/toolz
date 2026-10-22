@@ -33,7 +33,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="32dp"
-            android:text="FOCUS PROTOCOL"
+            android:text="@string/st_FocusLock_Title"
             android:textColor="#D32F2F"
             android:textSize="14sp"
             android:textStyle="bold"
@@ -44,7 +44,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            android:text="Time's up for this app."
+            android:text="@string/st_FocusLock_MessageDefault"
             android:textAlignment="center"
             android:textColor="#FFFFFF"
             android:textSize="28sp"
@@ -54,7 +54,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="You've reached your daily limit. Stay focused on what matters."
+            android:text="@string/st_FocusLock_Subtitle"
             android:textAlignment="center"
             android:textColor="#9E9E9E"
             android:textSize="16sp" />
@@ -66,11 +66,11 @@
             android:layout_marginTop="64dp"
             android:backgroundTint="#FFFFFF"
             android:textColor="#000000"
-            android:text="RETURN TO FOCUS FLOW"
+            android:text="@string/st_FocusLock_BtnReturn"
             android:textStyle="bold"
             android:textSize="14sp"
             android:letterSpacing="0.1"
-            android:contentDescription="Return to Focus Flow"
+            android:contentDescription="@string/st_FocusLock_BtnReturn_CD"
             android:nextFocusDown="@+id/btn_dismiss" />
 
         <Button
@@ -81,11 +81,11 @@
             android:layout_marginTop="12dp"
             android:backgroundTint="#212121"
             android:textColor="#9E9E9E"
-            android:text="EXIT TO HOME"
+            android:text="@string/st_FocusLock_BtnExit"
             android:textStyle="bold"
             android:textSize="12sp"
             android:letterSpacing="0.1"
-            android:contentDescription="Exit blocked app to Home"
+            android:contentDescription="@string/st_FocusLock_BtnExit_CD"
             android:nextFocusUp="@+id/btn_exit" />
 
     </LinearLayout>

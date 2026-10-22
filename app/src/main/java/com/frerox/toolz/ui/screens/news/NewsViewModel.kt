@@ -102,7 +102,7 @@ class NewsViewModel @Inject constructor(
             gateActive.collect { demo ->
                 if (demo) {
                     com.frerox.toolz.data.developer.FakeNewsSandbox.arm()
-                    android.util.Log.w("DevSpoof", "News sandbox armed — RAM editorial backlog")
+                    android.util.Log.w("DevSpoof", "News sandbox on — RAM editorial backlog")
                 } else {
                     com.frerox.toolz.data.developer.FakeNewsSandbox.reset()
                 }

@@ -2,33 +2,26 @@
  * Copyright (C) 2026 Toolz Contributors
  *
  * In-memory thread-safe log recorder for developer mode diagnostics.
- * Captures all internal app events, sandbox state transitions, database operations,
- * and errors into a rolling ring buffer (up to 500 lines).
+ * Captures internal app events, sandbox transitions, database operations and
+ * handled errors in a rolling ring buffer (up to 500 lines).
  *
- * This guarantees live, reliable log streaming even on devices where Android OS
- * restricts third-party process access to system logcat.
+ * Lines use the same `seconds.millis pid tid LEVEL/Tag: message` shape as
+ * Android's `logcat -v epoch`, so the local buffer and real logcat can be
+ * merged chronologically by the developer console.
  */
 
 package com.frerox.toolz.data.developer
 
 import android.util.Log
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import java.util.concurrent.ConcurrentLinkedDeque
 
 object DevLogHub {
+    const val TAG = "DevSpoof"
     private const val MAX_LOG_LINES = 500
     private val buffer = ConcurrentLinkedDeque<String>()
-    private val dateFormat = SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US)
-    private val _linesFlow = MutableStateFlow<List<String>>(emptyList())
-    val linesFlow: StateFlow<List<String>> = _linesFlow.asStateFlow()
 
     init {
-        log(Log.INFO, "ToolzDev", "Developer diagnostic log recorder initialized")
+        log(Log.INFO, TAG, "Developer diagnostic log recorder initialized")
     }
 
     fun v(tag: String, msg: String) = log(Log.VERBOSE, tag, msg)
@@ -48,34 +41,31 @@ object DevLogHub {
             else -> 'I'
         }
 
-        val timestamp = synchronized(dateFormat) { dateFormat.format(Date()) }
+        val nowMs = System.currentTimeMillis()
+        val seconds = nowMs / 1000L
+        val millis = (nowMs % 1000L).toString().padStart(3, '0')
         val pid = android.os.Process.myPid()
         val tid = android.os.Process.myTid()
         val errorSuffix = if (tr != null) "\n${Log.getStackTraceString(tr)}" else ""
-        val formatted = "$timestamp $pid $tid $levelChar $tag: $msg$errorSuffix"
+        val formatted = "$seconds.$millis $pid $tid $levelChar/$tag: $msg$errorSuffix"
 
-        // Also output to system logcat
+        // Mirror to system logcat so privileged/full-system views include it.
         try {
-            if (tr != null) {
-                Log.println(priority, tag, "$msg\n${Log.getStackTraceString(tr)}")
-            } else {
-                Log.println(priority, tag, msg)
-            }
-        } catch (_: Exception) {}
+            Log.println(priority, tag, if (tr != null) "$msg\n${Log.getStackTraceString(tr)}" else msg)
+        } catch (_: Exception) {
+            // logcat may be unavailable; the in-memory ring buffer still works.
+        }
 
         buffer.addLast(formatted)
         while (buffer.size > MAX_LOG_LINES) {
             buffer.pollFirst()
         }
-
-        _linesFlow.value = buffer.toList()
     }
 
     fun getLines(): List<String> = buffer.toList()
 
+    /** Empties the local buffer; callers own any "cleared" status message. */
     fun clear() {
         buffer.clear()
-        _linesFlow.value = emptyList()
-        log(Log.INFO, "ToolzDev", "Logcat buffer cleared by user")
     }
 }

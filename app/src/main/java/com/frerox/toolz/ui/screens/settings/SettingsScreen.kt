@@ -58,6 +58,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
 import androidx.compose.ui.window.Dialog
@@ -86,6 +87,8 @@ fun SettingsScreen(
 ) {
     val vibrationManager = LocalVibrationManager.current
     val context = LocalContext.current
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
 
     val stepGoal by viewModel.stepGoal.collectAsState(initial = 10000)
     val skinPresetId by viewModel.appIconPresetId.collectAsState(initial = "grape-haze")
@@ -195,7 +198,7 @@ fun SettingsScreen(
     val developerModeEnabled by viewModel.developerModeEnabled.collectAsState(initial = false)
     val allSpoofFlags by viewModel.allSpoofFlags.collectAsState(initial = emptyMap())
     var showDevWarningDialog by remember { mutableStateOf(false) }
-    val devActiveSpoofs = allSpoofFlags.values.count { it }
+    val devActiveSpoofs = if (developerModeEnabled) allSpoofFlags.values.count { it } else 0
 
     var expandedSection by remember { mutableStateOf<String?>(null) }
 
@@ -269,27 +272,33 @@ fun SettingsScreen(
     if (showDevWarningDialog) {
         AlertDialog(
             onDismissRequest = { showDevWarningDialog = false },
-            title = { Text("Enable Developer Mode?", fontWeight = FontWeight.Black, letterSpacing = 1.sp) },
+            title = { Text("Enable Developer Mode?", fontWeight = FontWeight.Bold) },
             text = {
                 Text(
-                    "• Shows internal diagnostics and test tools.\n" +
-                        "• Spoof toggles show LOCAL FAKE DATA ONLY — e.g. fake Whisper chats never touch the server, fake downloads never use network.\n" +
-                        "• Can spam notifications, crash the app, or wipe test tables.\n" +
-                        "• Auto-disables after every app update."
+                    "• Opens a local sandbox console with fixture data, diagnostics and logcat.\n" +
+                        "• Sandboxes never write to your real tools, network, files or sensors.\n" +
+                        "• Crash tests can close the app; database maintenance can delete rows.\n" +
+                        "• Sandboxes switch off automatically after every app update."
                 )
             },
             confirmButton = {
                 Button(
                     onClick = {
                         vibrationManager?.vibrateLongClick()
-                        viewModel.setDeveloperModeEnabled(true)
                         showDevWarningDialog = false
-                        onNavigateToDeveloperMode()
+                        viewModel.setDeveloperModeEnabled(true) { success ->
+                            if (success) {
+                                onNavigateToDeveloperMode()
+                            } else {
+                                scope.launch {
+                                    snackbarHostState.showSnackbar("Could not enable Developer Mode")
+                                }
+                            }
+                        }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
                     shape = RoundedCornerShape(16.dp)
                 ) {
-                    Text("ENABLE", fontWeight = FontWeight.Black)
+                    Text("Turn on", fontWeight = FontWeight.SemiBold)
                 }
             },
             dismissButton = {
@@ -297,7 +306,7 @@ fun SettingsScreen(
                     vibrationManager?.vibrateClick()
                     showDevWarningDialog = false
                 }) {
-                    Text("CANCEL", fontWeight = FontWeight.Bold)
+                    Text("Cancel", fontWeight = FontWeight.Medium)
                 }
             },
             shape = RoundedCornerShape(40.dp),
@@ -307,6 +316,7 @@ fun SettingsScreen(
 
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             ExpressiveTopAppBar(
                 title = stringResource(R.string.st_SettingsScreen_q7r8),
@@ -1501,10 +1511,19 @@ fun SettingsScreen(
                             isExpanded = expandedSection == "DEVELOPER" || searchQuery.isNotEmpty(),
                             onExpandToggle = { expandedSection = if (expandedSection == "DEVELOPER") null else "DEVELOPER" }
                         ) {
-                            if (matches(searchQuery, "developer", "dev", "debug", "spoof", "fake", "test", "sandbox", "console")) {
+                            if (matches(searchQuery, "developer", "dev", "debug", "fixture", "test", "sandbox", "console", "logcat")) {
                                 SettingsToggleItem(
                                     title = "Developer Mode",
-                                    subtitle = if (developerModeEnabled) "ON • $devActiveSpoofs spoof${if (devActiveSpoofs == 1) "" else "s"} active • Console unlocked" else "Internal tools & local test data — console stays locked while OFF",
+                                    subtitle = if (developerModeEnabled) {
+                                        if (devActiveSpoofs == 0) {
+                                            "On · console unlocked"
+                                        } else {
+                                            val suffix = if (devActiveSpoofs == 1) "sandbox" else "sandboxes"
+                                            "On · $devActiveSpoofs $suffix active · console unlocked"
+                                        }
+                                    } else {
+                                        "Off · local console locked"
+                                    },
                                     icon = Icons.Rounded.BugReport,
                                     checked = developerModeEnabled,
                                     onCheckedChange = { enabled ->
@@ -1512,14 +1531,20 @@ fun SettingsScreen(
                                             showDevWarningDialog = true
                                         } else {
                                             vibrationManager?.vibrateClick()
-                                            viewModel.setDeveloperModeEnabled(false)
+                                            viewModel.setDeveloperModeEnabled(false) { success ->
+                                                if (!success) {
+                                                    scope.launch {
+                                                        snackbarHostState.showSnackbar("Could not turn off Developer Mode")
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 )
                                 if (developerModeEnabled) {
                                     SettingsItem(
                                         title = "Developer console",
-                                        subtitle = "Spoofs, labs, logcat, deep links — local only",
+                                        subtitle = "Sandboxes, diagnostics, logcat, screen launcher — local only",
                                         icon = Icons.Rounded.Terminal,
                                         onClick = {
                                             vibrationManager?.vibrateClick()
@@ -1536,10 +1561,10 @@ fun SettingsScreen(
                         AboutSection(
                             onCheckUpdate = onNavigateToUpdate,
                             onNewsClick = onNavigateToNews,
-                            // Mirrors the console state: "V1.2.0 - Spoofed - Developer Mode".
+                            // Mirrors the console state: "V1.2.0 · Sandboxes · Developer Mode".
                             statusSuffix = buildString {
-                                if (developerModeEnabled && devActiveSpoofs > 0) append(" - Spoofed")
-                                if (developerModeEnabled) append(" - Developer Mode")
+                                if (developerModeEnabled && devActiveSpoofs > 0) append(" · Sandboxes")
+                                if (developerModeEnabled) append(" · Developer Mode")
                             },
                         )
                     }

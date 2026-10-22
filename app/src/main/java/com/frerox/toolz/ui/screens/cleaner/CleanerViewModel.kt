@@ -67,9 +67,9 @@ class CleanerViewModel @Inject constructor(
     }.stateIn(viewModelScope, SharingStarted.Eagerly, ScanState.Idle)
 
     val storageInfo: StateFlow<StorageInfo> = combine(
-        engine.storageInfo, gate.active(CLEANER),
-    ) { real, demo ->
-        if (demo) FakeCleanerSandbox.storageInfo() else real
+        engine.storageInfo, gate.active(CLEANER), gate.params,
+    ) { real, sandboxed, params ->
+        if (sandboxed) FakeCleanerSandbox.storageInfo(params.storageFullPct) else real
     }.stateIn(viewModelScope, SharingStarted.Eagerly, StorageInfo())
 
     /** DEV-SPOOF: Shizuku reads no longer gate corpse cleanup in demo mode. */
@@ -114,10 +114,10 @@ class CleanerViewModel @Inject constructor(
         engine.refreshStorageInfo()
         loadTrash()
         viewModelScope.launch {
-            gate.active(CLEANER).collect { demo ->
-                if (demo) {
-                    // Fresh fixture per demo arm; real state untouched.
-                    Log.w("DevSpoof", "Cleaner sandbox armed — RAM fixtures only")
+            gate.active(CLEANER).collect { sandboxActive ->
+                if (sandboxActive) {
+                    // Fresh fixture each time the sandbox turns on; real state untouched.
+                    Log.w("DevSpoof", "Cleaner sandbox on — RAM fixtures only")
                 } else {
                     FakeCleanerSandbox.reset()
                 }
@@ -444,9 +444,9 @@ class CleanerViewModel @Inject constructor(
     }
 
     fun scheduleWeeklyReminder() {
-        // DEV-SPOOF: no WorkManager writes in demo mode.
+        // No WorkManager writes while the Cleaner sandbox is on.
         if (gate.sandboxed(CLEANER)) {
-            _undoEvent.value = "Demo mode: schedule is a local fixture only"
+            _undoEvent.value = "The Cleaner sandbox is on: this schedule is a local fixture only"
             return
         }
         try {
@@ -459,7 +459,7 @@ class CleanerViewModel @Inject constructor(
     }
 
     fun resetState() {
-        // DEV-SPOOF: drop the fixture, back to a clean Idle — like a fresh scan.
+        // Drop the fixture and return to a clean Idle — like a fresh scan.
         if (gate.sandboxed(CLEANER)) {
             FakeCleanerSandbox.reset()
             _fixtureScan.value = ScanState.Idle
@@ -478,9 +478,9 @@ class CleanerViewModel @Inject constructor(
         engine.refreshShizuku()
     }
     fun requestShizukuPermission(requestCode: Int = 1001) {
-        // DEV-SPOOF: Shizuku is faked granted in demo mode.
+        // Shizuku is treated as granted while the Cleaner sandbox is on.
         if (gate.sandboxed(CLEANER)) {
-            _undoEvent.value = "Demo mode: Shizuku is simulated as granted"
+            _undoEvent.value = "The Cleaner sandbox is on: Shizuku is simulated as granted"
             return
         }
         try { com.frerox.toolz.util.shizuku.ShizukuHelper.requestPermission(requestCode) } catch(_:Exception){}

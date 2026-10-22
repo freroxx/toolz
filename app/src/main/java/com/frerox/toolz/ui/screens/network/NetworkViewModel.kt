@@ -122,12 +122,12 @@ class NetworkViewModel @Inject constructor(
     /** True when the call must NOT run: logs + returns true. */
     private fun blockedBySpoof(what: String): Boolean {
         if (!gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.NETWORK)) return false
-        appendLog("[SPOOF] blocked $what — sandbox active (local only)")
+        appendLog("[SANDBOX] blocked $what — sandbox active (local only)")
         return true
     }
 
     private fun emitSpoofNet() {
-        // DEV-SPOOF fixture: terrible hotel wifi. RAM-only, zero packets sent.
+        // Fixture: terrible hotel Wi-Fi. RAM-only, zero packets sent.
         val p = gate.params.value
         val now = System.currentTimeMillis()
         updateState {
@@ -140,7 +140,7 @@ class NetworkViewModel @Inject constructor(
                     bssid = "02:00:00:00:00:00",
                     frequency = 2462,
                     ipAddress = "192.0.2.44",
-                    wifiStandard = "Wi-Fi 4 (SPOOF)",
+                    wifiStandard = "Wi-Fi 4 (fixture)",
                     band = "2.4 GHz",
                     channel = 6,
                     signalLevel = 1,

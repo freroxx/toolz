@@ -546,8 +546,8 @@ class BackgroundRemoverViewModel @Inject constructor(
         if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.FILES)) {
             kotlinx.coroutines.delay(600)
             fail(
-                "Demo mode is on — ONNX inference runs no model and touches no weights: " +
-                    "the picture stays as it is. Disable demo mode to remove backgrounds for real.",
+                "The Background Remover sandbox is on — ONNX inference runs no model and touches no weights: " +
+                    "the picture stays as it is. Turn off the sandbox to remove backgrounds for real.",
                 null,
             )
             return

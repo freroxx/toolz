@@ -25,7 +25,7 @@ import kotlinx.coroutines.flow.asStateFlow
 /**
  * DEV-SPOOF: RAM-only notification vault fixture. A believable cross-app
  * notification backlog spread over several days so date filters, categories,
- * per-app details, delete and clear-all are all demoable — while the real
+ * per-app details, delete and clear-all are all explorable — while the real
  * listener, Room vault and Shizuku listener-grant stay untouched.
  */
 object FakeNotificationSandbox {
@@ -38,7 +38,7 @@ object FakeNotificationSandbox {
     private val hidden = MutableStateFlow<Set<String>>(emptySet())
     val fixtureHidden: StateFlow<Set<String>> = hidden.asStateFlow()
 
-    /** DEV-SPOOF: (re)seeds a fresh backlog — called on every demo arm. */
+    /** DEV-SPOOF: (re)seeds a fresh backlog whenever the sandbox activates. */
     fun arm() {
         nextId = 1L
         hidden.value = emptySet()
@@ -55,7 +55,7 @@ object FakeNotificationSandbox {
             ),
             notif(
                 "com.example.chat", "WireChat", "Team Atlas · 3 new",
-                "Kai: standup notes are up, demo builds attached", now - 26 * min,
+                "Kai: standup notes are up, fixture builds attached", now - 26 * min,
                 "Work",
             ),
             notif(
@@ -85,7 +85,7 @@ object FakeNotificationSandbox {
             ),
             notif(
                 "com.example.mail", "Bullet Mail", "Toolz",
-                "Changelog v2.6.0 — new demo mode, minus watermark 👀", now - 1 * day,
+                "Changelog v2.6.0 — sandbox mode, minus watermark 👀", now - 1 * day,
                 "General",
             ),
             notif(

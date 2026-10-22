@@ -20,9 +20,9 @@ package com.frerox.toolz.data.developer
 import com.frerox.toolz.data.music.MusicTrack
 
 /**
- * DEV-SPOOF fixtures for the music sandbox. RAM-only: these tracks are never
+ * Fixtures for the music sandbox. RAM-only: these tracks are never
  * persisted to Room, never queued into a real media session, and no file on
- * disk backs them (`spoof://` URIs). The head track is whatever title/artist
+ * disk backs them (`fixture://` URIs). The head track is whatever title/artist
  * the console sliders are configured with.
  */
 object FakeMusicSandbox {
@@ -40,7 +40,7 @@ object FakeMusicSandbox {
     /** The simulated library, headed by the console-configured track. */
     fun library(p: SpoofParams): List<MusicTrack> {
         val head = MusicTrack(
-            uri = "spoof://0",
+            uri = "fixture://0",
             title = p.musicTrack.ifBlank { "Debug Symphony" },
             artist = p.musicArtist.ifBlank { "Null Pointer" },
             album = "Fixture Sessions",
@@ -48,7 +48,7 @@ object FakeMusicSandbox {
         )
         return listOf(head) + pool.mapIndexed { i, (title, artist, duration) ->
             MusicTrack(
-                uri = "spoof://${i + 1}",
+                uri = "fixture://${i + 1}",
                 title = title,
                 artist = artist,
                 album = "Fixture Sessions",

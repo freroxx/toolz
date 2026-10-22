@@ -24,10 +24,11 @@ import com.frerox.toolz.data.search.engine.EngineHealth
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.Locale
 
 /**
- * DEV-SPOOF: RAM-only demo search. Every fabricated URL lives under
- * `.demo` — they intentionally do not resolve, so a demo tap can never
+ * DEV-SPOOF: RAM-only search sandbox. Every fabricated URL lives under
+ * `.demo` — they intentionally do not resolve, so a stray tap can never
  * touch the real web. Results, suggestions, history, browser-visit trail
  * and engine health all come from here; the metasearch engines, the DNS
  * benchmark probes and the Room history table are bypassed entirely.
@@ -39,7 +40,7 @@ object FakeSearchSandbox {
 
     private var nextHistoryId = 1L
 
-    /** Seeded browser-visit trail — `.demo` domains again, RAM only. */
+    /** Seeded browser-visit trail — non-resolving `.demo` domains, RAM only. */
     private val browserVisits = MutableStateFlow<List<BrowserHistoryItem>>(emptyList())
     val fixtureBrowserHistory: StateFlow<List<BrowserHistoryItem>> =
         browserVisits.asStateFlow()
@@ -57,15 +58,15 @@ object FakeSearchSandbox {
         browserVisits.value = listOf(
             BrowserHistoryItem(
                 "https://guides.toolz.demo/thermal",
-                "Thermal tuning guide · Toolz demo", now - 2 * hour, visitCount = 4,
+                "Thermal tuning guide · Toolz", now - 2 * hour, visitCount = 4,
             ),
             BrowserHistoryItem(
                 "https://forum.devstack.demo/t/compose-basics",
-                "Compose basics thread · DevStack demo", now - 20 * hour, visitCount = 2,
+                "Compose basics thread · DevStack", now - 20 * hour, visitCount = 2,
             ),
             BrowserHistoryItem(
                 "https://wiki.openproject.demo/latte",
-                "Latte dial-in wiki · OpenProject demo", now - 2 * 24 * hour, visitCount = 1,
+                "Latte dial-in wiki · OpenProject", now - 2 * 24 * hour, visitCount = 1,
             ),
         )
     }
@@ -86,12 +87,12 @@ object FakeSearchSandbox {
 
     /**
      * DEV-SPOOF: believable result tiles for any query. Titles weave the query
-     * in, snippets read like realSEO write-ups, ranks/engines mimic the merged-
+     * in, snippets read like real SEO write-ups, ranks/engines mimic the merged-
      * results look — all on non-resolving `.demo` domains.
      */
     fun resultsFor(query: String, page: Int, count: Int = 10): List<SearchResult> {
         val q = query.trim()
-        val base = q.ifBlank { "your search" }.replaceFirstChar { it.uppercase() }
+        val base = q.ifBlank { "your search" }.replaceFirstChar { it.uppercase(Locale.ROOT) }
         val domains = listOf(
             "guides.toolz.demo", "wiki.openproject.demo", "answers.stackline.demo",
             "forum.devstack.demo", "blog.millpost.demo", "tools.review.demo",
@@ -114,7 +115,7 @@ object FakeSearchSandbox {
                 },
                 snippet = "Everything about $base " +
                     "— plain-English breakdown, common pitfalls, and a field-tested " +
-                    "checklist. (Demo fixture: this article does not exist and the " +
+                    "checklist. (Fixture: this article does not exist and the " +
                     "link intentionally does not resolve.)",
                 url = "https://$domain/${slug(q)}-${(global + 3)}",
                 displayUrl = "$domain › articles",
@@ -132,7 +133,7 @@ object FakeSearchSandbox {
     }
 
     private fun slug(q: String) =
-        q.trim().lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-').take(28)
+        q.trim().lowercase(Locale.ROOT).replace(Regex("[^a-z0-9]+"), "-").trim('-').take(28)
             .ifBlank { "topic" }
 
     /** DEV-SPOOF: healthy engines with one believable cooldown. */
@@ -154,7 +155,7 @@ object FakeSearchSandbox {
             "$q tutorial", "$q vs alternatives", "$q 2026 review",
             "is $q worth it", "$q explained simply",
         )
-        return (local + canned).distinctBy { it.lowercase() }.take(8)
+        return (local + canned).distinctBy { it.lowercase(Locale.ROOT) }.take(8)
     }
 
     /** DEV-SPOOF: plausible per-provider DNS latencies, no UDP packets sent. */

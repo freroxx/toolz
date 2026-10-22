@@ -250,11 +250,29 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
                     settingsRepository.devCrashOnNextLaunch.first()
                 } catch (_: Exception) { false }
                 if (crashNext) {
-                    try { settingsRepository.setDevCrashOnNextLaunch(false) } catch (_: Exception) { }
-                    throw RuntimeException("[DEMO TEST] crash-on-next-launch flag was set")
+                    val cleared = try {
+                        settingsRepository.setDevCrashOnNextLaunch(false)
+                        true
+                    } catch (_: Exception) {
+                        false
+                    }
+                    if (!cleared) {
+                        com.frerox.toolz.data.developer.DevLogHub.e(
+                            com.frerox.toolz.data.developer.DevLogHub.TAG,
+                            "Crash-on-next-launch skipped — could not clear the flag",
+                        )
+                    } else {
+                        com.frerox.toolz.data.developer.DevLogHub.e(
+                            com.frerox.toolz.data.developer.DevLogHub.TAG,
+                            "Crash-on-next-launch flag consumed — crashing the app now",
+                        )
+                        // A main-thread throw is a real process crash (not a swallowed
+                        // coroutine failure), which is what the crash lab promises.
+                        android.os.Handler(android.os.Looper.getMainLooper()).post {
+                            throw RuntimeException("[DEV TEST] crash-on-next-launch flag was set")
+                        }
+                    }
                 }
-            } catch (e: RuntimeException) {
-                throw e
             } catch (_: Exception) { }
         }
 
@@ -407,8 +425,20 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
                             DisposableEffect(devModeOn, shakeOn) {
                                 if (devModeOn && shakeOn) {
                                     shakeDetector.start {
+                                        if (!this@MainActivity.lifecycle.currentState
+                                                .isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)
+                                        ) {
+                                            return@start
+                                        }
+                                        if (navController.currentDestination?.route ==
+                                            com.frerox.toolz.ui.navigation.Screen.DeveloperMode.route
+                                        ) {
+                                            return@start
+                                        }
                                         try {
-                                            navController.navigate(com.frerox.toolz.ui.navigation.Screen.DeveloperMode.route)
+                                            navController.navigate(
+                                                com.frerox.toolz.ui.navigation.Screen.DeveloperMode.route,
+                                            ) { launchSingleTop = true }
                                         } catch (_: Exception) { }
                                     }
                                 } else {
@@ -417,26 +447,17 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
                                 onDispose { shakeDetector.stop() }
                             }
 
-                            com.frerox.toolz.ui.screens.developer.components.SpoofWatermarkOverlay(
+                            ToolzNavHost(
                                 navController = navController,
-                                onOpenControls = {
-                                    try {
-                                        navController.navigate(com.frerox.toolz.ui.navigation.Screen.DeveloperMode.route)
-                                    } catch (_: Exception) { }
-                                },
-                            ) {
-                                ToolzNavHost(
-                                    navController = navController,
-                                    settingsRepository = settingsRepository,
-                                    aiSettingsManager = aiSettingsManager,
-                                    pdfViewModel = pdfViewModel,
-                                    performanceMode = performanceMode,
-                                    backgroundGradientEnabled = backgroundGradientEnabled,
-                                    incomingIntent = incomingIntent,
-                                    incomingIntentVersion = incomingIntentVersion,
-                                    onboardingCompleted = onboardingCompleted
-                                )
-                            }
+                                settingsRepository = settingsRepository,
+                                aiSettingsManager = aiSettingsManager,
+                                pdfViewModel = pdfViewModel,
+                                performanceMode = performanceMode,
+                                backgroundGradientEnabled = backgroundGradientEnabled,
+                                incomingIntent = incomingIntent,
+                                incomingIntentVersion = incomingIntentVersion,
+                                onboardingCompleted = onboardingCompleted
+                            )
 
                             UpdateOverlay(
                                 settingsRepository = settingsRepository,
