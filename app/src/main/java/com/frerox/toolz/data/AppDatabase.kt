@@ -73,6 +73,8 @@ import com.frerox.toolz.data.whisper.WhisperGroupEventEntity
 import com.frerox.toolz.data.whisper.WhisperGroupDao
 import com.frerox.toolz.data.whisper.WhisperStoryLocalEntity
 import com.frerox.toolz.data.whisper.WhisperStoryLocalDao
+import com.frerox.toolz.data.whisper.WhisperSelfReadEntity
+import com.frerox.toolz.data.whisper.WhisperSelfReadDao
 import com.frerox.toolz.data.device.cache.DeviceSpecCacheEntity
 import com.frerox.toolz.data.device.cache.DeviceSpecsDao
 import com.frerox.toolz.data.device.cache.DeviceSpecConverters
@@ -120,6 +122,9 @@ import com.frerox.toolz.data.purgeshot.PurgeShotEntity
         WhisperGroupMemberEntity::class,
         WhisperGroupEventEntity::class,
         WhisperStoryLocalEntity::class,
+        // v66: device-sealed copies of the user's OWN sent plaintext so sent
+        // history survives process death / account switches (see MIGRATION_65_66).
+        WhisperSelfReadEntity::class,
         SpeedHistoryEntity::class,
         DeviceInventoryEntity::class,
         ScanSnapshotEntity::class,
@@ -163,7 +168,11 @@ import com.frerox.toolz.data.purgeshot.PurgeShotEntity
     // warm-device log re-verification uses the SAME key the event was
     // published with (creator reinstall keeps verifying history; see
     // MIGRATION_64_65 in DatabaseModule). Purely additive.
-    version = 65,
+    // Sent-history self-read (66): whisper_self_read holds device-sealed copies of
+    // the user's OWN sent plaintext (Keystore AES, bound to the message id) so a
+    // sent v3 frame stays readable after process death — v3 ratchet frames cannot
+    // be re-opened by their sender. Account-keyed; wiped on account deletion.
+    version = 66,
     // H-10 FIX (reviewwhisper.md): schemas are now exported to app/schemas (see
     // build.gradle.kts room.schemaLocation). Every future bump MUST ship a Migration —
     // the DatabaseModule comment documents this contract too.
@@ -194,6 +203,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun whisperLocalTombstoneDao(): WhisperLocalTombstoneDao
     abstract fun whisperGroupDao(): WhisperGroupDao
     abstract fun whisperStoryLocalDao(): WhisperStoryLocalDao
+    abstract fun whisperSelfReadDao(): WhisperSelfReadDao
     abstract fun speedHistoryDao(): SpeedHistoryDao
     abstract fun deviceInventoryDao(): DeviceInventoryDao
     abstract fun scanSnapshotDao(): ScanSnapshotDao
