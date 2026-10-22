@@ -787,10 +787,57 @@ private fun LiquidCoffeeHeroButton(
     }
 }
 
+// Easter-egg quotes shown when the timer exceeds 99 years (physically impossible in practice).
+private val TIME_QUOTES = listOf(
+    "\"Time is a flat circle.\" — Rust Cohle",
+    "\"The two most powerful warriors are patience and time.\" — Tolstoy",
+    "\"Lost time is never found again.\" — Benjamin Franklin",
+    "\"Time flies over us, but leaves its shadow behind.\" — Hawthorne",
+    "\"The present moment always will have been.\" — Unknown",
+    "\"Tempus fugit.\" — Virgil",
+    "\"Time is the longest distance between two places.\" — Tennessee Williams",
+    "\"We are time's subjects, and time bids be gone.\" — Shakespeare",
+    "\"Time, which sees all things, has found you out.\" — Sophocles",
+    "\"An inch of gold cannot buy an inch of time.\" — Chinese proverb"
+)
+
+/** Resolved display tier for the elapsed time counter. */
+private enum class TimerTier {
+    HMS,   // hours : minutes : seconds  (default, up to 98 h 59 m 59 s)
+    DHM,   // days  : hours   : minutes  (99+ hours)
+    MDH,   // months: days    : hours    (99+ days)
+    YMD,   // years : months  : days     (99+ months)
+    LEGEND // 99+ years — easter egg
+}
+
+private fun resolveTimerTier(ms: Long): TimerTier {
+    val totalSeconds = ms / 1_000L
+    val totalMinutes = totalSeconds / 60L
+    val totalHours   = totalMinutes / 60L
+    val totalDays    = totalHours   / 24L
+    // Approximate: 1 month = 30 days, 1 year = 365 days
+    val totalMonths  = totalDays    / 30L
+    val totalYears   = totalDays    / 365L
+    return when {
+        totalYears  >= 99 -> TimerTier.LEGEND
+        totalMonths >= 99 -> TimerTier.YMD
+        totalDays   >= 99 -> TimerTier.MDH
+        totalHours  >= 99 -> TimerTier.DHM
+        else              -> TimerTier.HMS
+    }
+}
+
 /**
  * M3 Expressive countdown: oversized tabular numerals in segmented containers,
  * status pill, and auto-stop progress. Stable width (monospace) so digits never
  * jitter while ticking every second.
+ *
+ * Layout adapts automatically as the session grows:
+ *   < 99 h           →  HH : MM : SS
+ *   99 h – 98 days   →  DD : HH : MM
+ *   99 days – 98 mo  →  MM : DD : HH
+ *   99 mo – 98 years →  YY : MM : DD
+ *   99+ years        →  ✨ easter egg quote ✨
  */
 @Composable
 private fun ExpressiveCaffeinateCountdown(
@@ -803,12 +850,36 @@ private fun ExpressiveCaffeinateCountdown(
     val isManuallyActive = isRunning && !isAutoRunning
     val isAnyActive = isRunning || isAutoRunning
 
-    val hours = TimeUnit.MILLISECONDS.toHours(elapsedTimeMillis)
-    val minutes = TimeUnit.MILLISECONDS.toMinutes(elapsedTimeMillis) % 60
-    val seconds = TimeUnit.MILLISECONDS.toSeconds(elapsedTimeMillis) % 60
-    val hh = String.format(Locale.getDefault(), "%02d", hours)
-    val mm = String.format(Locale.getDefault(), "%02d", minutes)
-    val ss = String.format(Locale.getDefault(), "%02d", seconds)
+    val tier = resolveTimerTier(elapsedTimeMillis)
+
+    // Derive all raw units once
+    val totalSeconds = elapsedTimeMillis / 1_000L
+    val totalMinutes = totalSeconds / 60L
+    val totalHours   = totalMinutes / 60L
+    val totalDays    = totalHours   / 24L
+    val totalMonths  = totalDays    / 30L
+    val totalYears   = totalDays    / 365L
+
+    val seconds = totalSeconds % 60L
+    val minutes = totalMinutes % 60L
+    val hours   = totalHours   % 24L
+    val days    = totalDays    % 30L
+    val months  = totalMonths  % 12L
+
+    // Stable quote picked once per composition (won't flicker on recomposition)
+    val easterEggQuote = remember { TIME_QUOTES.random() }
+
+    // Helper: two-digit formatted string
+    fun fmt(v: Long) = String.format(Locale.getDefault(), "%02d", v)
+
+    // Triple (value, caption) for the three visible segments, left to right
+    val (seg1, seg2, seg3) = when (tier) {
+        TimerTier.HMS    -> Triple(fmt(totalHours) to "HRS", fmt(minutes) to "MIN", fmt(seconds) to "SEC")
+        TimerTier.DHM    -> Triple(fmt(totalDays)  to "DAY", fmt(hours)   to "HRS", fmt(minutes) to "MIN")
+        TimerTier.MDH    -> Triple(fmt(totalMonths) to "MON", fmt(days)   to "DAY", fmt(hours)   to "HRS")
+        TimerTier.YMD    -> Triple(fmt(totalYears)  to "YRS", fmt(months) to "MON", fmt(days)    to "DAY")
+        TimerTier.LEGEND -> Triple("" to "", "" to "", "" to "") // unused
+    }
 
     ExpressiveCard(
         onClick = {},
@@ -827,15 +898,42 @@ private fun ExpressiveCaffeinateCountdown(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // Segmented HH : MM : SS — M3 Expressive display type, tabular.
+            if (tier == TimerTier.LEGEND) {
+                // ✨ Easter egg: replace segments with a deep time quote
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "⏳",
+                        style = MaterialTheme.typography.displayMedium,
+                        textAlign = TextAlign.Center
+                    )
+                    Text(
+                        text = easterEggQuote,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = "~${totalYears} years awake. Truly legendary.",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            } else {
+            // Segmented display — layout switches tier automatically
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 CountdownSegment(
-                    value = hh,
-                    caption = "HRS",
+                    value = seg1.first,
+                    caption = seg1.second,
                     highlighted = isAnyActive,
                     modifier = Modifier.weight(1f)
                 )
@@ -847,8 +945,8 @@ private fun ExpressiveCaffeinateCountdown(
                     else MaterialTheme.colorScheme.outline
                 )
                 CountdownSegment(
-                    value = mm,
-                    caption = "MIN",
+                    value = seg2.first,
+                    caption = seg2.second,
                     highlighted = isAnyActive,
                     modifier = Modifier.weight(1f)
                 )
@@ -860,13 +958,14 @@ private fun ExpressiveCaffeinateCountdown(
                     else MaterialTheme.colorScheme.outline
                 )
                 CountdownSegment(
-                    value = ss,
-                    caption = "SEC",
+                    value = seg3.first,
+                    caption = seg3.second,
                     highlighted = isAnyActive,
                     accent = true,
                     modifier = Modifier.weight(1f)
                 )
             }
+            } // end non-LEGEND branch
 
             // Footer: auto-stop progress when armed, else contextual hint.
             if (isManuallyActive && autoStopEnabled) {
