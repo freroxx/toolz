@@ -30,8 +30,9 @@ import com.frerox.toolz.data.livingframes.LivingFrameFps
 import com.frerox.toolz.data.livingframes.LivingFrameImportResult
 import com.frerox.toolz.data.livingframes.LivingFrameImporter
 import com.frerox.toolz.data.livingframes.LivingFrameLoopMode
-import com.frerox.toolz.data.livingframes.LivingFramePlayback
 import com.frerox.toolz.data.livingframes.LivingFrameQuality
+import com.frerox.toolz.data.livingframes.LivingFrameResolution
+import com.frerox.toolz.data.livingframes.LivingFrameSpeed
 import com.frerox.toolz.data.livingframes.LivingFrameTapAction
 import com.frerox.toolz.data.livingframes.LivingFramesRepository
 import com.frerox.toolz.data.livingframes.LivingFramesStorage
@@ -67,7 +68,12 @@ import kotlin.math.roundToInt
 
 data class ImportState(val label: String, val progress: Float?)
 
-data class PendingVideo(val uri: Uri, val durationMs: Long)
+data class PendingVideo(
+    val uri: Uri,
+    val durationMs: Long,
+    val width: Int,
+    val height: Int
+)
 
 /** One home-screen instance of the selected set, plus how it was last rendered. */
 data class PlacedWidget(
@@ -82,6 +88,8 @@ data class LivingFramesUiState(
     val selectedId: String? = null,
     val loaded: Boolean = false,
     val import: ImportState? = null,
+    /** True when the user hid the import dialog to keep customizing. */
+    val importHidden: Boolean = false,
     val pendingVideo: PendingVideo? = null,
     val storage: LivingFramesStorage? = null,
     val loadFailed: Boolean = false,
@@ -217,14 +225,34 @@ class LivingFramesViewModel @Inject constructor(
             return
         }
         importJob = viewModelScope.launch {
-            _ui.update { it.copy(import = ImportState(label, 0f)) }
+            LivingFramesImportCancellation.reset()
+            _ui.update { it.copy(import = ImportState(label, 0f), importHidden = false) }
+            LivingFramesImportNotifications.start(context, label)
+            var lastNotifiedPct = -1
             try {
                 val res = block { p ->
-                    _ui.update { s -> s.copy(import = s.import?.copy(progress = p.coerceIn(0f, 1f))) }
+                    // The notification's Cancel action cannot cancel a
+                    // coroutine directly; it raises this flag and the next
+                    // progress callback aborts through the normal cleanup path.
+                    if (LivingFramesImportCancellation.consume()) {
+                        throw CancellationException("Import cancelled")
+                    }
+                    val progress = p.coerceIn(0f, 1f)
+                    _ui.update { s ->
+                        s.copy(import = s.import?.copy(progress = progress))
+                    }
+                    val pct = (progress * 100).toInt()
+                    if (pct / 5 != lastNotifiedPct / 5) {
+                        lastNotifiedPct = pct
+                        LivingFramesImportNotifications.update(context, label, progress)
+                    }
                 }
                 _ui.update { it.copy(selectedId = res.frame.id) }
                 _messages.emit(res.note ?: "“${res.frame.name}” is ready. Add it to your home screen.")
             } catch (e: CancellationException) {
+                if (LivingFramesImportCancellation.consume()) {
+                    _messages.tryEmit("Import cancelled.")
+                }
                 throw e
             } catch (e: Throwable) {
                 if (e is CancellationException) throw e
@@ -235,13 +263,22 @@ class LivingFramesViewModel @Inject constructor(
                     }
                 )
             } finally {
-                _ui.update { it.copy(import = null) }
+                LivingFramesImportCancellation.reset()
+                LivingFramesImportNotifications.cancel(context)
+                _ui.update { it.copy(import = null, importHidden = false) }
                 refreshStorage()
             }
         }
     }
 
-    fun cancelImport() { importJob?.cancel() }
+    fun hideImport() = _ui.update { it.copy(importHidden = true) }
+
+    fun showImport() = _ui.update { it.copy(importHidden = false) }
+
+    fun cancelImport() {
+        LivingFramesImportCancellation.request()
+        importJob?.cancel()
+    }
 
     fun setImportQuality(quality: LivingFrameQuality) {
         _ui.update { it.copy(importQuality = quality) }
@@ -268,16 +305,29 @@ class LivingFramesViewModel @Inject constructor(
             if (probe == null || probe.durationMs <= 0L) {
                 _messages.emit("Couldn't read that video.")
             } else {
-                _ui.update { it.copy(pendingVideo = PendingVideo(uri, probe.durationMs)) }
+                _ui.update {
+                    it.copy(
+                        pendingVideo = PendingVideo(
+                            uri = uri,
+                            durationMs = probe.durationMs,
+                            width = probe.width,
+                            height = probe.height
+                        )
+                    )
+                }
             }
         }
     }
 
     fun cancelVideo() = _ui.update { it.copy(pendingVideo = null) }
 
-    fun confirmVideo(startMs: Long, lengthMs: Long, fps: Int) {
+    fun confirmVideo(
+        startMs: Long,
+        lengthMs: Long,
+        fps: Int,
+        quality: LivingFrameQuality = _ui.value.importQuality
+    ) {
         val pv = _ui.value.pendingVideo ?: return
-        val quality = _ui.value.importQuality
         _ui.update { it.copy(pendingVideo = null) }
         runImport("Decoding video") { p ->
             importer.importVideo(pv.uri, startMs, lengthMs, quality, fps, p)
@@ -303,10 +353,33 @@ class LivingFramesViewModel @Inject constructor(
     }
 
     fun setFps(id: String, fps: Int) = edit(id) { it.copy(fps = LivingFrameFps.snap(fps)) }
-    fun setPlayback(id: String, playback: LivingFramePlayback) = edit(id) { it.copy(playback = playback) }
+
+    fun setSpeed(id: String, speed: Float) =
+        edit(id) { it.copy(speed = LivingFrameSpeed.snap(speed)) }
+
+    fun setResolution(id: String, percent: Int) =
+        edit(id) { it.copy(resolutionPercent = LivingFrameResolution.snap(percent)) }
+
     fun setLoopMode(id: String, mode: LivingFrameLoopMode) = edit(id) { it.copy(loopMode = mode) }
     fun setFit(id: String, fit: LivingFrameFit) = edit(id) { it.copy(fit = fit) }
-    fun setTapAction(id: String, action: LivingFrameTapAction) = edit(id) { it.copy(tapAction = action) }
+
+    fun setTapAction(id: String, action: LivingFrameTapAction) = edit(id) { frame ->
+        if (action == LivingFrameTapAction.OPEN_TOOL && frame.tapTargetRoute.isBlank()) {
+            frame.copy(
+                tapAction = action,
+                tapTargetRoute = LivingFrameTools.ALL.first().route
+            )
+        } else {
+            frame.copy(tapAction = action)
+        }
+    }
+
+    fun setTapTarget(id: String, route: String) = edit(id) { frame ->
+        frame.copy(
+            tapAction = LivingFrameTapAction.OPEN_TOOL,
+            tapTargetRoute = LivingFrameTools.routeOrNull(route) ?: frame.tapTargetRoute
+        )
+    }
     fun setOpacity(id: String, opacity: Float) = edit(id) { it.copy(opacity = opacity.coerceIn(0.4f, 1f)) }
     fun setCorner(id: String, dp: Int) = edit(id) { it.copy(cornerRadiusDp = dp.coerceIn(0, 40)) }
     fun setShowCaption(id: String, show: Boolean) = edit(id) { it.copy(showCaption = show) }

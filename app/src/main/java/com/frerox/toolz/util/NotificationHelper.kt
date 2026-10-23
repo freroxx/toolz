@@ -59,6 +59,7 @@ object NotificationHelper {
     const val CHANNEL_VIDEO_DOWNLOADS = "toolz_video_downloads"
     const val CHANNEL_BACKUPS = "backups_channel"
     const val CHANNEL_TOOLZ_NEWS = "toolz_news"
+    const val CHANNEL_LIVING_FRAMES_IMPORT = "living_frames_import"
 
     // Notification IDs
     const val ID_FOREGROUND_SERVICE = 1000
@@ -76,6 +77,7 @@ object NotificationHelper {
     const val ID_UPDATE_READY = 8002
     const val ID_MUSIC_DOWNLOAD_BASE = 9000
     const val ID_BACKUP_OPERATION = 10001
+    const val ID_LIVING_FRAMES_IMPORT = 11001
     const val ID_NEWS_BASE = 8100
 
     // Non-overlapping download ID namespaces. Each band is 1000 wide so
@@ -213,6 +215,15 @@ object NotificationHelper {
                 NotificationManager.IMPORTANCE_DEFAULT
             ).apply {
                 description = "Announcements from the Toolz team"
+            },
+            NotificationChannel(
+                CHANNEL_LIVING_FRAMES_IMPORT,
+                "Living Widget imports",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Progress while a video or photo set is being decoded"
+                setShowBadge(false)
+                enableVibration(false)
             }
         )
 

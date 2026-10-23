@@ -1862,6 +1862,12 @@
             android:name=".widget.livingframes.LivingFramesActionReceiver"
             android:exported="false" />
 
+        <!-- Cancel action on the import progress notification. Explicit
+             PendingIntent only; unexported so no other app can cancel work. -->
+        <receiver
+            android:name=".widget.livingframes.LivingFramesImportCancelReceiver"
+            android:exported="false" />
+
         <receiver android:name=".widget.livingframes.LivingFramesBootReceiver"
             android:enabled="true"
             android:exported="false">
