@@ -31,6 +31,8 @@ import com.frerox.toolz.MainActivity
 import com.frerox.toolz.R
 import com.frerox.toolz.data.livingframes.LivingFrame
 import com.frerox.toolz.data.livingframes.LivingFrameEngine
+import com.frerox.toolz.data.livingframes.LivingFrameFps
+import com.frerox.toolz.data.livingframes.LivingFramePlayback
 import com.frerox.toolz.data.livingframes.LivingFrameRenderer
 import com.frerox.toolz.data.livingframes.LivingFrameTapAction
 import com.frerox.toolz.data.livingframes.LivingFramesRepository
@@ -139,6 +141,11 @@ object LivingFramesWidgetHelper {
 
     // -- layouts --------------------------------------------------------------
 
+    /**
+     * Single-RemoteViews fallback. Every frame is embedded in one ViewFlipper;
+     * this is only used for very short loops or when the user picks Standard
+     * playback, because the launcher's bitmap budget cannot hold a long clip.
+     */
     private fun flipperLayout(fps: Int): Int = when (fps) {
         1 -> R.layout.living_frames_widget_f1
         2 -> R.layout.living_frames_widget_f2
@@ -151,8 +158,47 @@ object LivingFramesWidgetHelper {
         20 -> R.layout.living_frames_widget_f20
         24 -> R.layout.living_frames_widget_f24
         30 -> R.layout.living_frames_widget_f30
+        40 -> R.layout.living_frames_widget_f40
+        48 -> R.layout.living_frames_widget_f48
+        60 -> R.layout.living_frames_widget_f60
         else -> R.layout.living_frames_widget_f12
     }
+
+    /**
+     * Streaming layout. The AdapterViewFlipper asks the RemoteViewsService for
+     * one frame at a time, so long/high-fps clips are never squashed into the
+     * launcher's binder budget. flipInterval is XML-only, hence one layout per
+     * supported rate.
+     */
+    private fun streamingLayout(fps: Int): Int = when (fps) {
+        1 -> R.layout.living_frames_widget_stream_f1
+        2 -> R.layout.living_frames_widget_stream_f2
+        4 -> R.layout.living_frames_widget_stream_f4
+        5 -> R.layout.living_frames_widget_stream_f5
+        6 -> R.layout.living_frames_widget_stream_f6
+        8 -> R.layout.living_frames_widget_stream_f8
+        10 -> R.layout.living_frames_widget_stream_f10
+        15 -> R.layout.living_frames_widget_stream_f15
+        20 -> R.layout.living_frames_widget_stream_f20
+        24 -> R.layout.living_frames_widget_stream_f24
+        30 -> R.layout.living_frames_widget_stream_f30
+        40 -> R.layout.living_frames_widget_stream_f40
+        48 -> R.layout.living_frames_widget_stream_f48
+        60 -> R.layout.living_frames_widget_stream_f60
+        else -> R.layout.living_frames_widget_stream_f12
+    }
+
+    /**
+     * AUTO stays on the single-RemoteViews path only while every frame fits
+     * at the widget's native resolution; the moment the planner would shrink
+     * or drop frames, streaming is both sharper and smoother.
+     */
+    private fun shouldStream(frame: LivingFrame, plan: LivingFrameEngine.RenderPlan): Boolean =
+        when (frame.playback) {
+            LivingFramePlayback.STANDARD -> false
+            LivingFramePlayback.HIGH_QUALITY -> true
+            LivingFramePlayback.AUTO -> plan.reduced
+        }
 
     // -- tap handling ---------------------------------------------------------
 
@@ -244,6 +290,45 @@ object LivingFramesWidgetHelper {
         }
         var budget = bitmapBudget(context)
         var error = "The launcher rejected the update."
+
+        val initialPlan = LivingFrameEngine.plan(
+            if (animated) frame.frameCount else 1, w, h,
+            LivingFrameRenderer.isOpaque(frame), frame.fps, budget,
+            frame.loopMode
+        )
+        if (animated && shouldStream(frame, initialPlan)) {
+            try {
+                val views = RemoteViews(
+                    context.packageName,
+                    streamingLayout(LivingFrameFps.snap(frame.fps))
+                )
+                val adapter = Intent(context, LivingFramesRemoteViewsService::class.java).apply {
+                    putExtra(EXTRA_WIDGET_ID, appWidgetId)
+                    data = livingFramesAdapterUri(appWidgetId, frame.id)
+                }
+                views.setRemoteAdapter(R.id.living_frame_flip, adapter)
+                applyChrome(context, views, appWidgetId, frame)
+                mgr.updateAppWidget(appWidgetId, views)
+                mgr.notifyAppWidgetViewDataChanged(appWidgetId, R.id.living_frame_flip)
+                writeInfo(
+                    context, appWidgetId,
+                    WidgetInfo(
+                        w, h, frame.frameCount,
+                        frame.avgFrameBytes.coerceAtLeast(0L) * frame.frameCount,
+                        100, false, 1,
+                        LivingFrameFps.snap(frame.fps),
+                        System.currentTimeMillis(), null
+                    )
+                )
+                return@withContext true
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                // Some launchers reject collection widgets. Fall through to
+                // the single-RemoteViews path instead of showing nothing.
+                val message = t.message
+                if (!message.isNullOrBlank()) error = message.take(90)
+            }
+        }
 
         for (attempt in 0 until 4) {
             val plan = LivingFrameEngine.plan(

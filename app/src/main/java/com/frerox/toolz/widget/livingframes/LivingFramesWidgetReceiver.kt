@@ -32,7 +32,7 @@ import dagger.hilt.android.EntryPointAccessors
  * not handle custom slide/pin actions; those live in the non-exported
  * [LivingFramesActionReceiver] and are reached only through PendingIntents.
  *
- * Rendering is handed to WorkManager because a cold 40-frame decode can
+ * Rendering is handed to WorkManager because a cold multi-frame decode can
  * exceed the broadcast's ~10-second goAsync window.
  */
 class LivingFramesWidgetReceiver : AppWidgetProvider() {

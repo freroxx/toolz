@@ -1848,6 +1848,14 @@
                 android:resource="@xml/living_frames_widget_info" />
         </receiver>
 
+        <!-- Streams long/high-fps clips one frame at a time. The launcher binds
+             this through the RemoteViews collection adapter, so BIND_REMOTEVIEWS
+             is required; no other app can call it directly. -->
+        <service
+            android:name=".widget.livingframes.LivingFramesRemoteViewsService"
+            android:exported="false"
+            android:permission="android.permission.BIND_REMOTEVIEWS" />
+
         <!-- Tap / slideshow / pin callbacks are PendingIntent-only. Keeping this
              receiver unexported prevents other apps from broadcasting actions. -->
         <receiver
