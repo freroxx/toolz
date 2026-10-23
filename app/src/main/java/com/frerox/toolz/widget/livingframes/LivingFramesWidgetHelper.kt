@@ -32,11 +32,13 @@ import com.frerox.toolz.R
 import com.frerox.toolz.data.livingframes.LivingFrame
 import com.frerox.toolz.data.livingframes.LivingFrameEngine
 import com.frerox.toolz.data.livingframes.LivingFrameFps
-import com.frerox.toolz.data.livingframes.LivingFramePlayback
+import com.frerox.toolz.data.livingframes.LivingFrameLoopMode
 import com.frerox.toolz.data.livingframes.LivingFrameRenderer
+import com.frerox.toolz.data.livingframes.LivingFrameResolution
 import com.frerox.toolz.data.livingframes.LivingFrameTapAction
 import com.frerox.toolz.data.livingframes.LivingFramesRepository
 import com.frerox.toolz.ui.navigation.Screen
+import com.frerox.toolz.ui.screens.livingframes.LivingFrameTools
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -126,14 +128,16 @@ object LivingFramesWidgetHelper {
     }
 
     /**
-     * RemoteViews' real binder budget is 6 × screen width × screen height
-     * bytes. The old code multiplied by 4 as well and used 40%, i.e. 160% of
-     * the actual ceiling, so large GIFs exhausted every retry. Keep 55% for
-     * serialization and ViewFlipper child overhead.
+     * RemoteViews' bitmap-memory ceiling is expressed in screen-sized
+     * allocations: 6 × width × height × 4 bytes per pixel. The old code
+     * omitted the 4-byte pixel size, so it thought the budget was four times
+     * smaller than it is and downscaled every large widget for no reason.
+     * Keep 55% for binder serialization and ViewFlipper child overhead.
      */
     fun bitmapBudget(context: Context): Long {
         val dm = context.resources.displayMetrics
-        val cap = (6.0 * dm.widthPixels.toDouble() * dm.heightPixels.toDouble()).toLong()
+        val cap = (6.0 * dm.widthPixels.toDouble() * dm.heightPixels.toDouble() * 4.0)
+            .toLong()
         return (cap * 0.55).toLong()
             .coerceAtLeast(minOf(256L * 1024, cap))
             .coerceAtMost(cap)
@@ -142,9 +146,10 @@ object LivingFramesWidgetHelper {
     // -- layouts --------------------------------------------------------------
 
     /**
-     * Single-RemoteViews fallback. Every frame is embedded in one ViewFlipper;
-     * this is only used for very short loops or when the user picks Standard
-     * playback, because the launcher's bitmap budget cannot hold a long clip.
+     * Single-RemoteViews fallback. Every frame is embedded in one ViewFlipper.
+     * Animations stream by default; this path is only used when a launcher
+     * rejects collection widgets, so it must still show a correct still or
+     * short loop instead of an empty widget.
      */
     private fun flipperLayout(fps: Int): Int = when (fps) {
         1 -> R.layout.living_frames_widget_f1
@@ -188,18 +193,6 @@ object LivingFramesWidgetHelper {
         else -> R.layout.living_frames_widget_stream_f12
     }
 
-    /**
-     * AUTO stays on the single-RemoteViews path only while every frame fits
-     * at the widget's native resolution; the moment the planner would shrink
-     * or drop frames, streaming is both sharper and smoother.
-     */
-    private fun shouldStream(frame: LivingFrame, plan: LivingFrameEngine.RenderPlan): Boolean =
-        when (frame.playback) {
-            LivingFramePlayback.STANDARD -> false
-            LivingFramePlayback.HIGH_QUALITY -> true
-            LivingFramePlayback.AUTO -> plan.reduced
-        }
-
     // -- tap handling ---------------------------------------------------------
 
     private fun tapIntent(
@@ -224,10 +217,19 @@ object LivingFramesWidgetHelper {
                     putExtra(EXTRA_WIDGET_ID, appWidgetId)
                 }, flags
             )
-            LivingFrameTapAction.OPEN_PREVIEW -> PendingIntent.getActivity(
+            LivingFrameTapAction.OPEN_PREVIEW,
+            LivingFrameTapAction.OPEN_TOOL -> PendingIntent.getActivity(
                 context, appWidgetId,
                 Intent(context, MainActivity::class.java).apply {
-                    putExtra(MainActivity.EXTRA_NAVIGATE_TO, Screen.LivingWidgets.route)
+                    val route = if (action == LivingFrameTapAction.OPEN_TOOL) {
+                        LivingFrameTools.routeOrNull(frame.tapTargetRoute)
+                    } else {
+                        null
+                    }
+                    putExtra(
+                        MainActivity.EXTRA_NAVIGATE_TO,
+                        route ?: Screen.LivingWidgets.route
+                    )
                     this.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
                 }, flags
             )
@@ -283,24 +285,43 @@ object LivingFramesWidgetHelper {
         val (w, h) = widgetSizePx(context, mgr, appWidgetId)
         val density = context.resources.displayMetrics.density
         val animated = frame.isAnimated
-        val sourceIndex = if (frame.isSlideshow) {
-            LivingFramesSlideshow.currentIndex(context, appWidgetId, frame)
+        val displayFps = LivingFrameFps.snap(frame.fps)
+        val resolution = LivingFrameResolution.snap(frame.resolutionPercent)
+        val outW = (w * resolution / 100f).roundToInt().coerceAtLeast(48)
+        val outH = (h * resolution / 100f).roundToInt().coerceAtLeast(48)
+
+        // Speed and display rate are resolved into an explicit display
+        // sequence. The launcher flipper only understands a fixed interval,
+        // so this is how ×0.5 slow motion and ×2 fast loops stay honest.
+        val sequence = if (animated) {
+            LivingFrameEngine.displaySequence(
+                frame.frameCount,
+                frame.sourceFps,
+                displayFps,
+                frame.speed,
+                frame.loopMode
+            )
         } else {
-            0
+            listOf(
+                if (frame.isSlideshow) {
+                    LivingFramesSlideshow.currentIndex(context, appWidgetId, frame)
+                } else {
+                    0
+                }
+            )
         }
+
         var budget = bitmapBudget(context)
         var error = "The launcher rejected the update."
 
-        val initialPlan = LivingFrameEngine.plan(
-            if (animated) frame.frameCount else 1, w, h,
-            LivingFrameRenderer.isOpaque(frame), frame.fps, budget,
-            frame.loopMode
-        )
-        if (animated && shouldStream(frame, initialPlan)) {
+        // Streaming is the default for every animation, not a quality tier.
+        // The adapter fetches one frame at a time, so the launcher's binder
+        // budget cannot force a long clip down to a handful of pixels.
+        if (animated) {
             try {
                 val views = RemoteViews(
                     context.packageName,
-                    streamingLayout(LivingFrameFps.snap(frame.fps))
+                    streamingLayout(displayFps)
                 )
                 val adapter = Intent(context, LivingFramesRemoteViewsService::class.java).apply {
                     putExtra(EXTRA_WIDGET_ID, appWidgetId)
@@ -313,11 +334,9 @@ object LivingFramesWidgetHelper {
                 writeInfo(
                     context, appWidgetId,
                     WidgetInfo(
-                        w, h, frame.frameCount,
-                        frame.avgFrameBytes.coerceAtLeast(0L) * frame.frameCount,
-                        100, false, 1,
-                        LivingFrameFps.snap(frame.fps),
-                        System.currentTimeMillis(), null
+                        outW, outH, sequence.size, 0L, resolution, false, 1,
+                        displayFps, System.currentTimeMillis(), null,
+                        streamed = true, speed = frame.speed
                     )
                 )
                 return@withContext true
@@ -331,15 +350,18 @@ object LivingFramesWidgetHelper {
         }
 
         for (attempt in 0 until 4) {
+            // The sequence already contains speed resampling and boomerang
+            // order, so the planner treats it as a plain loop. Dropping every
+            // Nth display frame keeps the real-time loop length.
             val plan = LivingFrameEngine.plan(
-                if (animated) frame.frameCount else 1, w, h,
-                LivingFrameRenderer.isOpaque(frame), frame.fps, budget,
-                frame.loopMode
+                if (animated) sequence.size else 1, outW, outH,
+                LivingFrameRenderer.isOpaque(frame), displayFps, budget,
+                LivingFrameLoopMode.LOOP
             )
             val indices = if (animated) {
-                (0 until frame.frameCount step plan.step).toList()
+                sequence.filterIndexed { index, _ -> index % plan.step == 0 }
             } else {
-                listOf(sourceIndex)
+                sequence
             }
             val need = maxOf(plan.outW, plan.outH)
             val bitmaps = ArrayList<Bitmap>(indices.size)
@@ -371,12 +393,12 @@ object LivingFramesWidgetHelper {
                         flipperLayout(plan.effectiveFps)
                     )
                     v.removeAllViews(R.id.living_frame_flip)
-                    LivingFrameEngine.playbackOrder(bitmaps.size, frame.loopMode).forEach { idx ->
+                    bitmaps.forEach { bitmap ->
                         val child = RemoteViews(
                             context.packageName,
                             R.layout.living_frames_frame
                         )
-                        child.setImageViewBitmap(R.id.living_frame_item, bitmaps[idx])
+                        child.setImageViewBitmap(R.id.living_frame_item, bitmap)
                         v.addView(R.id.living_frame_flip, child)
                     }
                     v
@@ -395,10 +417,12 @@ object LivingFramesWidgetHelper {
                 writeInfo(
                     context, appWidgetId,
                     WidgetInfo(
-                        w, h, bitmaps.size,
+                        plan.outW, plan.outH, bitmaps.size,
                         plan.bytes,
-                        (plan.scale * 100).roundToInt(), plan.rgb565, plan.step,
-                        plan.effectiveFps, System.currentTimeMillis(), null
+                        (plan.outW * 100f / w).roundToInt().coerceIn(1, 100),
+                        plan.rgb565, plan.step, plan.effectiveFps,
+                        System.currentTimeMillis(), null,
+                        streamed = false, speed = frame.speed
                     )
                 )
                 return@withContext true
@@ -414,8 +438,8 @@ object LivingFramesWidgetHelper {
         writeInfo(
             context, appWidgetId,
             WidgetInfo(
-                w, h, 0, 0, 0, false, 1, frame.fps,
-                System.currentTimeMillis(), error
+                outW, outH, 0, 0, resolution, false, 1, displayFps,
+                System.currentTimeMillis(), error, streamed = false, speed = frame.speed
             )
         )
         pushPlaceholder(
@@ -545,9 +569,13 @@ object LivingFramesWidgetHelper {
         val step: Int,
         val fps: Int,
         val atMs: Long,
-        val error: String?
+        val error: String?,
+        /** True when the launcher renders frames through the adapter service. */
+        val streamed: Boolean = false,
+        val speed: Float = 1f
     ) {
-        val reduced: Boolean get() = scalePct in 1..99 || step > 1 || rgb565
+        val reduced: Boolean
+            get() = !streamed && (scalePct in 1..99 || step > 1 || rgb565)
     }
 
     private fun infoPrefs(context: Context) =
@@ -559,22 +587,26 @@ object LivingFramesWidgetHelper {
                 "i_$id",
                 listOf(
                     i.widthPx, i.heightPx, i.frames, i.bytes, i.scalePct,
-                    if (i.rgb565) 1 else 0, i.step, i.fps, i.atMs
-                ).joinToString("|") + "|" + (i.error ?: "")
+                    if (i.rgb565) 1 else 0, i.step, i.fps, i.atMs,
+                    (i.error ?: "").replace('|', '/'),
+                    if (i.streamed) 1 else 0, i.speed
+                ).joinToString("|")
             ).apply()
         } catch (_: Exception) {
         }
     }
 
     fun readInfo(context: Context, id: Int): WidgetInfo? = try {
-        val p = infoPrefs(context).getString("i_$id", null)?.split("|", limit = 10)
+        val p = infoPrefs(context).getString("i_$id", null)?.split("|")
         if (p == null || p.size < 10) {
             null
         } else {
             WidgetInfo(
                 p[0].toInt(), p[1].toInt(), p[2].toInt(), p[3].toLong(),
                 p[4].toInt(), p[5] == "1", p[6].toInt(), p[7].toInt(),
-                p[8].toLong(), p[9].ifBlank { null }
+                p[8].toLong(), p[9].ifBlank { null },
+                streamed = p.getOrNull(10) == "1",
+                speed = p.getOrNull(11)?.toFloatOrNull() ?: 1f
             )
         }
     } catch (_: Exception) {

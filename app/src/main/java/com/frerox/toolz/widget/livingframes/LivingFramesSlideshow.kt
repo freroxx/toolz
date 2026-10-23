@@ -36,13 +36,17 @@ import com.frerox.toolz.data.livingframes.LivingFrameEngine
  */
 object LivingFramesSlideshow {
 
-    val INTERVALS_MIN = listOf(5, 15, 60, 360, 1440)
+    val INTERVALS_MIN = listOf(1, 5, 15, 30, 60, 180, 360, 720, 1440)
 
     fun intervalLabel(mins: Int): String = when (mins) {
+        1 -> "1 min"
         5 -> "5 min"
         15 -> "15 min"
+        30 -> "30 min"
         60 -> "1 hour"
+        180 -> "3 hours"
         360 -> "6 hours"
+        720 -> "12 hours"
         1440 -> "Daily"
         else -> if (mins % 60 == 0) "${mins / 60} h" else "$mins min"
     }
