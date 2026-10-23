@@ -328,7 +328,7 @@ Toolz is an independent project, made substantially better by early adopters and
 
 | Contributor | Contribution                                                                                             | Profile |
 |---|----------------------------------------------------------------------------------------------------------|---|
-| **Briz** (`clickfun`) | Designed the official Toolz glass icon logo                                                              | [Discord Profile](https://discord.com/users/1525210658529083432) |
+| **Briz** (`clickfun`) | Designed all of the official Toolz icon logos                                                              | [Discord Profile](https://discord.com/users/1525210658529083432) |
 | **ARedstonePerson** (`aredstoneperson`) | Deep testing & feature proposals since the earliest beta/alpha releases (OG member)                      | [Discord Profile](https://discord.com/users/1368349335070179329) |
 | **Luciano** (`luciano2996`) | Conceived and suggested the Living Widgets tool                                                          | [Discord Profile](https://discord.com/users/327494558294343680) |
 | **Kreisler** (`itskreisler`) | Diagnosed a critical MIUI crash loop caused by hardware `createBlurEffect` failure (`nativePtr is null`) | [Discord Profile](https://discord.com/users/455456141330219009) |
