@@ -64,6 +64,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -3863,6 +3865,27 @@ private fun FullExpressiveEditor(
     var showPdfPicker by remember { mutableStateOf(false) }
     var isBrowsingPdf by remember { mutableStateOf(false) }
     val editorScope = rememberCoroutineScope()
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    // Overlays and the rendered preview need the screen, not the IME. The
+    // color list in particular used to open underneath the keyboard, pushing
+    // the whole bottom bar up over the editor title.
+    LaunchedEffect(
+        showColorGrid,
+        showAttachmentMenu,
+        showCustomColorDialog,
+        showAudioPicker,
+        showPdfPicker,
+        isPreviewMode,
+    ) {
+        if (showColorGrid || showAttachmentMenu || showCustomColorDialog ||
+            showAudioPicker || showPdfPicker || isPreviewMode
+        ) {
+            focusManager.clearFocus(force = true)
+            keyboardController?.hide()
+        }
+    }
 
     // SAF fallback: pick any PDF from the system picker (works without
     // All-files access). Persisted + copied to app-private so the note
