@@ -575,8 +575,10 @@ retained as a **read-only secondary session** under
 demoted the same way. The receive path looks up the frame's `sid` in the
 primary first and in these secondaries second, so a message the peer sent under
 the losing session still opens — including the message that was already sent
-before convergence. Secondaries are never used for sending, never cross
-accounts, and are cleared on sign-out, account deletion and peer reset.
+before convergence. Secondaries are never used for sending and never cross
+accounts. Sign-out drops them from RAM only — their per-account files stay on
+disk so history still opens when that account signs back in — while account
+deletion and a peer reset delete them.
 
 If a frame arrives on a session the device cannot derive at all (a pure frame
 on a session whose handshake never reached it), the store marks a per-account
@@ -1655,7 +1657,8 @@ A few design constraints documented as *decisions*, not surprises:
    already-sent messages still open, and a frame whose session cannot be
    derived at all flags a desync that makes the next send start a fresh
    session. Sign-out clears those in-memory chains, the superseded-session
-   cache, the desync flags and the sent-plaintext memo. The key trust store
+   memory (files stay per account), the desync flags and the sent-plaintext
+   memo. The key trust store
    intentionally remains install-wide, because peer identity keys are not
    account state. Residuals are stated honestly rather than hidden: rows sent
    before this build have no self-read copy and cannot be recovered if their
