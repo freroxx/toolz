@@ -97,6 +97,14 @@ class MarkdownRendererTest {
     }
 
     @Test
+    fun containsMarkdown_detectsStructuralBlocks() {
+        assertTrue(containsMarkdown("```\ncode\n```"))
+        assertTrue(containsMarkdown("| A | B |\n| --- | --- |\n| 1 | 2 |"))
+        assertTrue(containsMarkdown("---"))
+        assertTrue(containsMarkdown("***"))
+    }
+
+    @Test
     fun containsMarkdown_ignoresPlainText() {
         assertFalse(containsMarkdown(""))
         assertFalse(containsMarkdown("just a normal note\nwith two lines"))
