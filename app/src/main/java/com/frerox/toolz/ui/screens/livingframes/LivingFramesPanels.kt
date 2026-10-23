@@ -29,6 +29,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Delete
@@ -37,7 +39,8 @@ import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material.icons.rounded.Widgets
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -50,21 +53,23 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.frerox.toolz.data.livingframes.LivingFrame
 import com.frerox.toolz.data.livingframes.LivingFrameEngine
+import com.frerox.toolz.data.livingframes.LivingFrameEstimate
 import com.frerox.toolz.data.livingframes.LivingFrameFit
 import com.frerox.toolz.data.livingframes.LivingFrameFps
 import com.frerox.toolz.data.livingframes.LivingFrameLoopMode
-import com.frerox.toolz.data.livingframes.LivingFramePlayback
+import com.frerox.toolz.data.livingframes.LivingFrameResolution
+import com.frerox.toolz.data.livingframes.LivingFrameSpeed
 import com.frerox.toolz.data.livingframes.LivingFrameTapAction
 import com.frerox.toolz.data.livingframes.LivingFramesRepository
 import com.frerox.toolz.data.livingframes.LivingFramesStorage
 import com.frerox.toolz.ui.components.ExpressiveCard
 import com.frerox.toolz.ui.components.SquircleShape
-import com.frerox.toolz.ui.components.ToolzConnectedButtonGroup
 import com.frerox.toolz.ui.components.ToolzOutlinedExpressiveButton
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.theme.LocalVibrationManager
@@ -137,21 +142,78 @@ private fun StyledSlider(
     )
 }
 
+@Composable
+private fun <T> ChoiceChips(
+    options: List<T>,
+    selected: T?,
+    label: (T) -> String,
+    onSelect: (T) -> Unit
+) {
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(options) { option ->
+            FilterChip(
+                selected = option == selected,
+                onClick = { onSelect(option) },
+                label = { Text(label(option)) },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+            )
+        }
+    }
+}
+
 // ── Motion (GIF / video) ─────────────────────────────────────────────────────
 
 @Composable
 internal fun MotionPanel(frame: LivingFrame, vm: LivingFramesViewModel) {
     val vib = LocalVibrationManager.current
-    val last = LivingFrameFps.STEPS.lastIndex
-    val loopMs = LivingFrameEngine.loopDurationMs(frame.frameCount, frame.fps, frame.loopMode)
+    val fpsLast = LivingFrameFps.STEPS.lastIndex
+    val speedLast = LivingFrameSpeed.STEPS.lastIndex
+    val resolutionLast = LivingFrameResolution.STEPS.lastIndex
+    val displayFps = LivingFrameFps.snap(frame.fps)
+    val sourceFps = frame.sourceFps.coerceAtLeast(1)
+    val displayFrames = LivingFrameEngine.displaySequence(
+        frame.frameCount, sourceFps, displayFps, frame.speed, frame.loopMode
+    ).size
+    val loopMs = LivingFrameEngine.loopDurationMs(
+        frame.frameCount, sourceFps, frame.loopMode, frame.speed
+    )
+    val stored = LivingFrameEstimate.storedSize(frame.width, frame.height, frame.quality)
+    val renderW = (stored.first * frame.resolutionPercent / 100f).roundToInt()
+    val renderH = (stored.second * frame.resolutionPercent / 100f).roundToInt()
     PanelCard {
-        SettingBlock("Playback rate", "${LivingFrameFps.snap(frame.fps)} fps · ${LivingFrameFps.label(frame.fps)}") {
+        SettingBlock("Speed", LivingFrameSpeed.label(frame.speed)) {
+            StyledSlider(
+                value = LivingFrameSpeed.index(frame.speed).toFloat(),
+                range = 0f..speedLast.toFloat(),
+                steps = (speedLast - 1).coerceAtLeast(0),
+                onChange = {
+                    val idx = it.roundToInt().coerceIn(0, speedLast)
+                    if (idx != LivingFrameSpeed.index(frame.speed)) {
+                        vib?.vibrateTick()
+                        vm.setSpeed(frame.id, LivingFrameSpeed.STEPS[idx])
+                    }
+                }
+            )
+            Text(
+                "×1 is the original timing. Speed resamples the loop when it renders, " +
+                    "so stored frames are never re-encoded and you can change it instantly.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        SettingBlock(
+            "Frames per second",
+            "$displayFps fps · ${LivingFrameFps.label(frame.fps)}"
+        ) {
             StyledSlider(
                 value = LivingFrameFps.stepIndex(frame.fps).toFloat(),
-                range = 0f..last.toFloat(),
-                steps = last - 1,
+                range = 0f..fpsLast.toFloat(),
+                steps = (fpsLast - 1).coerceAtLeast(0),
                 onChange = {
-                    val idx = it.roundToInt().coerceIn(0, last)
+                    val idx = it.roundToInt().coerceIn(0, fpsLast)
                     if (idx != LivingFrameFps.stepIndex(frame.fps)) {
                         vib?.vibrateTick()
                         vm.setFps(frame.id, LivingFrameFps.STEPS[idx])
@@ -159,55 +221,60 @@ internal fun MotionPanel(frame: LivingFrame, vm: LivingFramesViewModel) {
                 }
             )
             Text(
-                "One loop lasts %.1f s across %d frames.".format(loopMs / 1000f, frame.frameCount),
+                "One loop lasts %.2f s · %d display frames.".format(
+                    loopMs / 1000f,
+                    displayFrames
+                ),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            if (frame.fps > frame.sourceFps) {
+            if (displayFps > sourceFps) {
                 Text(
-                    "These frames were captured at ${frame.sourceFps} fps. Playing them at " +
-                        "${LivingFrameFps.snap(frame.fps)} fps runs the clip faster; it can't add " +
-                        "detail that wasn't captured. Re-import at a higher capture rate for real extra frames.",
+                    "This set was captured at $sourceFps fps. Running it at $displayFps fps " +
+                        "repeats captured frames; it cannot add detail that was never captured. " +
+                        "Re-import at a higher capture rate for genuinely new frames.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             Text(
-                "Stored copy: ${frame.width}×${frame.height} px · ${frame.quality.label} quality · " +
-                    "${frame.sourceFps} fps capture.",
+                "Stored copy: ${frame.width}×${frame.height} px · ${frame.quality.label} " +
+                    "quality · $sourceFps fps capture.",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        SettingBlock("Playback engine") {
-            ToolzConnectedButtonGroup(
-                selectedIndex = frame.playback.ordinal,
-                options = listOf("Auto", "Standard", "High quality"),
-                onOptionSelected = {
-                    vib?.vibrateTick()
-                    vm.setPlayback(frame.id, LivingFramePlayback.entries[it])
-                },
-                modifier = Modifier.fillMaxWidth()
+        SettingBlock("Resolution", "${frame.resolutionPercent}%") {
+            StyledSlider(
+                value = LivingFrameResolution.STEPS
+                    .indexOf(LivingFrameResolution.snap(frame.resolutionPercent))
+                    .coerceAtLeast(0)
+                    .toFloat(),
+                range = 0f..resolutionLast.toFloat(),
+                steps = (resolutionLast - 1).coerceAtLeast(0),
+                onChange = {
+                    val idx = it.roundToInt().coerceIn(0, resolutionLast)
+                    val percent = LivingFrameResolution.STEPS[idx]
+                    if (percent != LivingFrameResolution.snap(frame.resolutionPercent)) {
+                        vib?.vibrateTick()
+                        vm.setResolution(frame.id, percent)
+                    }
+                }
             )
             Text(
-                when (frame.playback) {
-                    LivingFramePlayback.AUTO ->
-                        "Picks the sharpest path per widget: short loops stay in one update, longer or higher-rate clips stream frame by frame."
-                    LivingFramePlayback.STANDARD ->
-                        "Sends every frame in one update for maximum launcher compatibility, but long clips are downscaled or thinned to fit."
-                    LivingFramePlayback.HIGH_QUALITY ->
-                        "Always streams frame by frame at the widget's native resolution. Uses a little more battery, never reduces quality."
-                },
+                "Renders at ${renderW}×${renderH} px. Lowering this is instant and cuts " +
+                    "battery and memory use; 100% is the full stored detail, and going " +
+                    "higher would only upscale a copy that is already stored.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
         SettingBlock("Direction") {
-            ToolzConnectedButtonGroup(
-                selectedIndex = frame.loopMode.ordinal,
-                options = listOf("Loop", "Boomerang"),
-                onOptionSelected = { vib?.vibrateTick(); vm.setLoopMode(frame.id, LivingFrameLoopMode.entries[it]) },
-                modifier = Modifier.fillMaxWidth()
+            ChoiceChips(
+                options = LivingFrameLoopMode.entries,
+                selected = frame.loopMode,
+                label = { if (it == LivingFrameLoopMode.BOOMERANG) "Boomerang" else "Loop" },
+                onSelect = { vib?.vibrateTick(); vm.setLoopMode(frame.id, it) }
             )
             Text(
                 if (frame.loopMode == LivingFrameLoopMode.BOOMERANG) "Plays forward, then backward, with no hitch at the seam."
@@ -227,11 +294,19 @@ internal fun TimingPanel(frame: LivingFrame, nextIn: String?, vm: LivingFramesVi
     val intervals = LivingFramesSlideshow.INTERVALS_MIN
     PanelCard {
         SettingBlock("Change photo every") {
-            ToolzConnectedButtonGroup(
-                selectedIndex = intervals.indexOf(frame.slideshowIntervalMin).takeIf { it >= 0 } ?: 2,
-                options = intervals.map { LivingFramesSlideshow.intervalLabel(it) },
-                onOptionSelected = { vib?.vibrateTick(); vm.setSlideshowInterval(frame.id, intervals[it]) },
-                modifier = Modifier.fillMaxWidth()
+            ChoiceChips(
+                options = intervals,
+                selected = intervals.indexOf(frame.slideshowIntervalMin)
+                    .takeIf { it >= 0 }
+                    ?.let { intervals[it] },
+                label = { LivingFramesSlideshow.intervalLabel(it) },
+                onSelect = { vib?.vibrateTick(); vm.setSlideshowInterval(frame.id, it) }
+            )
+            Text(
+                "Slide timing is scheduled by the launcher. Battery saver can delay a change; " +
+                    "opening the widget always shows the current photo immediately.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
         SwitchRow(
@@ -261,19 +336,50 @@ internal fun TimingPanel(frame: LivingFrame, nextIn: String?, vm: LivingFramesVi
 // ── Look ──────────────────────────────────────────────────────────────────────────────
 
 @Composable
+private fun ToolChips(selectedRoute: String?, onSelect: (String) -> Unit) {
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(LivingFrameTools.ALL, key = { it.route }) { tool ->
+            FilterChip(
+                selected = tool.route == selectedRoute,
+                onClick = { onSelect(tool.route) },
+                label = {
+                    Text(
+                        stringResource(tool.titleRes),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                },
+                leadingIcon = {
+                    Icon(tool.icon, null, Modifier.size(18.dp))
+                },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    selectedLeadingIconColor = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+            )
+        }
+    }
+}
+
+@Composable
 internal fun LookPanel(frame: LivingFrame, vm: LivingFramesViewModel) {
     val vib = LocalVibrationManager.current
-    val taps = if (frame.isSlideshow)
-        listOf("Open app" to LivingFrameTapAction.OPEN_PREVIEW, "Next photo" to LivingFrameTapAction.NEXT_FRAME, "Nothing" to LivingFrameTapAction.NOTHING)
-    else
-        listOf("Open app" to LivingFrameTapAction.OPEN_PREVIEW, "Nothing" to LivingFrameTapAction.NOTHING)
+    val tapActions = buildList {
+        add("Living Widgets" to LivingFrameTapAction.OPEN_PREVIEW)
+        add("Open a tool" to LivingFrameTapAction.OPEN_TOOL)
+        if (frame.isSlideshow) add("Next photo" to LivingFrameTapAction.NEXT_FRAME)
+        add("Nothing" to LivingFrameTapAction.NOTHING)
+    }
+    val selectedTool = LivingFrameTools.byRoute(frame.tapTargetRoute)
+    val selectedToolLabel = selectedTool?.let { stringResource(it.titleRes) } ?: "a Toolz tool"
     PanelCard {
         SettingBlock("Framing") {
-            ToolzConnectedButtonGroup(
-                selectedIndex = if (frame.fit == LivingFrameFit.FILL) 0 else 1,
-                options = listOf("Fill", "Fit"),
-                onOptionSelected = { vib?.vibrateTick(); vm.setFit(frame.id, if (it == 0) LivingFrameFit.FILL else LivingFrameFit.FIT) },
-                modifier = Modifier.fillMaxWidth()
+            ChoiceChips(
+                options = listOf(LivingFrameFit.FILL, LivingFrameFit.FIT),
+                selected = frame.fit,
+                label = { if (it == LivingFrameFit.FILL) "Fill" else "Fit" },
+                onSelect = { vib?.vibrateTick(); vm.setFit(frame.id, it) }
             )
             Text(
                 if (frame.fit == LivingFrameFit.FILL) "Crops from the centre so the widget is always full."
@@ -301,12 +407,34 @@ internal fun LookPanel(frame: LivingFrame, vm: LivingFramesViewModel) {
             onChange = { vib?.vibrateTick(); vm.setShowCaption(frame.id, it) }
         )
         SettingBlock("When tapped") {
-            ToolzConnectedButtonGroup(
-                selectedIndex = taps.indexOfFirst { it.second == frame.tapAction }.coerceAtLeast(0),
-                options = taps.map { it.first },
-                onOptionSelected = { vib?.vibrateTick(); vm.setTapAction(frame.id, taps[it].second) },
-                modifier = Modifier.fillMaxWidth()
+            ChoiceChips(
+                options = tapActions,
+                selected = tapActions.firstOrNull { it.second == frame.tapAction },
+                label = { it.first },
+                onSelect = { vib?.vibrateTick(); vm.setTapAction(frame.id, it.second) }
             )
+            if (frame.tapAction == LivingFrameTapAction.OPEN_TOOL) {
+                Text(
+                    "Opens $selectedToolLabel directly. The widget stays on your home screen.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                ToolChips(
+                    selectedRoute = frame.tapTargetRoute,
+                    onSelect = { vib?.vibrateTick(); vm.setTapTarget(frame.id, it) }
+                )
+                Text(
+                    "Scroll the row to see every tool.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else if (frame.tapAction == LivingFrameTapAction.OPEN_PREVIEW) {
+                Text(
+                    "Opens Living Widgets, where you can edit this set or add another copy.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }
@@ -340,17 +468,15 @@ internal fun WidgetPanel(
                 Text(if (placed.isEmpty()) "Add to home screen" else "Add another", fontWeight = FontWeight.SemiBold)
             }
             Text(
-                "Each copy can show a different set; the launcher's configuration screen asks which one. Some launchers pause widget animations in battery saver, and a few don't animate ViewFlipper widgets at all.",
+                "Each copy can show a different set; the launcher's configuration screen asks which one. Some launchers pause widget animations in battery saver, and a few don't animate collection widgets at all.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            if (frame.playback != LivingFramePlayback.STANDARD) {
-                Text(
-                    "Long clips and high frame rates stream frame by frame. If a widget stays blank on your launcher, set Playback engine → Standard in Motion; that sends everything in one update, though it may thin frames to fit.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+            Text(
+                "Animations stream one frame at a time at the resolution you chose, so long clips stay sharp. If a widget stays blank, lower Resolution in Motion or remove and re-add it.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
         ToolzOutlinedExpressiveButton(
             onClick = onDelete,
@@ -497,8 +623,19 @@ private fun renderSummary(w: PlacedWidget): String {
     i.error?.let { return it }
     val mb = i.bytes / 1_048_576f
     val frames = if (i.frames == 1) "1 image" else "${i.frames} frames"
+    val delivery = when {
+        i.streamed -> "streamed"
+        i.frames == 1 -> "still"
+        else -> "single update"
+    }
+    val speed = if (kotlin.math.abs(i.speed - 1f) > 0.001f) {
+        " · ${LivingFrameSpeed.label(i.speed)}"
+    } else {
+        ""
+    }
+    val bytes = if (!i.streamed && i.bytes > 0) " · %.1f MB".format(mb) else ""
     val next = w.nextSlideIn?.let { " · next in $it" } ?: ""
-    return "$frames · %.1f MB · ${i.widthPx}×${i.heightPx} px · ${i.fps} fps$next".format(mb)
+    return "$frames · $delivery · ${i.widthPx}×${i.heightPx} px · ${i.fps} fps$speed$bytes$next"
 }
 
 private fun reductionNote(i: com.frerox.toolz.widget.livingframes.LivingFramesWidgetHelper.WidgetInfo?): String? {

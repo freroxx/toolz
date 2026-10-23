@@ -43,9 +43,11 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -54,8 +56,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
@@ -117,9 +121,11 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import coil3.compose.AsyncImage
 import com.frerox.toolz.data.livingframes.LivingFrame
 import com.frerox.toolz.data.livingframes.LivingFrameEngine
+import com.frerox.toolz.data.livingframes.LivingFrameEstimate
 import com.frerox.toolz.data.livingframes.LivingFrameFit
 import com.frerox.toolz.data.livingframes.LivingFrameFps
 import com.frerox.toolz.data.livingframes.LivingFrameQuality
+import com.frerox.toolz.data.livingframes.LivingFrameSpeed
 import com.frerox.toolz.data.livingframes.LivingFrameType
 import com.frerox.toolz.data.livingframes.LivingFramesRepository
 import com.frerox.toolz.ui.components.ExpressiveCard
@@ -156,10 +162,6 @@ private enum class Aspect(val label: String, val ratio: Float, val nominalWidthD
 }
 
 private val CAPTURE_FPS_CHOICES = listOf(12, 24, 30, 60)
-
-/** Rough WebP size for one stored frame; only used for the import estimate. */
-private fun estimateFrameBytes(quality: LivingFrameQuality): Long =
-    quality.storedSide.toLong() * quality.storedSide * quality.webpQuality / 1000
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -213,25 +215,40 @@ fun LivingWidgetsScreen(
     // ── Dialogs & sheets ─────────────────────────────────────────────────
 
     ui.import?.let { imp ->
-        AlertDialog(
-            onDismissRequest = {},
-            title = { Text(imp.label) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        ExpressiveLoadingIndicator()
-                        Spacer(Modifier.width(12.dp))
+        if (!ui.importHidden) {
+            AlertDialog(
+                onDismissRequest = {},
+                title = { Text(imp.label) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            ExpressiveLoadingIndicator()
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                "${((imp.progress ?: 0f) * 100).roundToInt()}%",
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                        }
+                        LinearProgressIndicator(
+                            progress = { imp.progress ?: 0f },
+                            modifier = Modifier.fillMaxWidth()
+                        )
                         Text(
-                            "${((imp.progress ?: 0f) * 100).roundToInt()}%",
-                            style = MaterialTheme.typography.titleMedium
+                            "You can hide this and keep editing. Progress stays in the library " +
+                                "and in a notification, and you can cancel from either.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    LinearProgressIndicator(progress = { imp.progress ?: 0f }, modifier = Modifier.fillMaxWidth())
+                },
+                confirmButton = {
+                    TextButton(onClick = viewModel::hideImport) { Text("Hide") }
+                },
+                dismissButton = {
+                    TextButton(onClick = viewModel::cancelImport) { Text("Cancel") }
                 }
-            },
-            confirmButton = {},
-            dismissButton = { TextButton(onClick = viewModel::cancelImport) { Text("Cancel") } }
-        )
+            )
+        }
     }
 
     if (confirmDelete && selected != null) {
@@ -290,7 +307,9 @@ fun LivingWidgetsScreen(
             quality = ui.importQuality,
             onQuality = viewModel::setImportQuality,
             onCancel = viewModel::cancelVideo,
-            onConfirm = { start, length, fps -> viewModel.confirmVideo(start, length, fps) }
+            onConfirm = { start, length, fps, chosenQuality ->
+                viewModel.confirmVideo(start, length, fps, chosenQuality)
+            }
         )
     }
 
@@ -337,6 +356,15 @@ fun LivingWidgetsScreen(
             contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 140.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
+            if (ui.import != null && ui.importHidden) {
+                item(key = "importProgress") {
+                    ImportProgressCard(
+                        state = ui.import!!,
+                        onShow = viewModel::showImport,
+                        onCancel = viewModel::cancelImport
+                    )
+                }
+            }
             when {
                 !ui.loaded -> item {
                     Box(Modifier.fillMaxWidth().height(240.dp), contentAlignment = Alignment.Center) {
@@ -432,6 +460,55 @@ fun LivingWidgetsScreen(
 // ── Stage (live preview) ────────────────────────────────────────────────────────────
 
 @Composable
+private fun ImportProgressCard(
+    state: ImportState,
+    onShow: () -> Unit,
+    onCancel: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ExpressiveLoadingIndicator()
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        state.label,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        "You can keep editing while this finishes.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f)
+                    )
+                }
+                Text(
+                    "${((state.progress ?: 0f) * 100).roundToInt()}%",
+                    style = MaterialTheme.typography.titleSmall
+                )
+            }
+            LinearProgressIndicator(
+                progress = { state.progress ?: 0f },
+                modifier = Modifier.fillMaxWidth()
+            )
+            Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                TextButton(onClick = onCancel) { Text("Cancel") }
+                Spacer(Modifier.width(8.dp))
+                TextButton(onClick = onShow) { Text("Show progress") }
+            }
+        }
+    }
+}
+
+@Composable
 private fun StageSection(
     frame: LivingFrame,
     viewModel: LivingFramesViewModel,
@@ -490,9 +567,17 @@ private fun StageSection(
                 ) {
                     Text(
                         if (frame.isAnimated && frames.isNotEmpty() && frames.size < frame.frameCount) {
-                            "Preview · first %.1f s of %d frames".format(
-                                frames.size.toFloat() / LivingFrameFps.snap(frame.fps),
-                                frame.frameCount
+                            val displayFps = LivingFrameFps.snap(frame.fps)
+                            val sourceFps = frame.sourceFps.coerceAtLeast(1)
+                            val shown = LivingFrameEngine.displayDurationMs(
+                                frames.size, sourceFps, displayFps, frame.speed, frame.loopMode
+                            )
+                            val total = LivingFrameEngine.displayDurationMs(
+                                frame.frameCount, sourceFps, displayFps, frame.speed, frame.loopMode
+                            )
+                            "Preview · first %.1f s of %.1f s".format(
+                                shown / 1000f,
+                                total / 1000f
                             )
                         } else {
                             "Preview as a ${aspect.label} widget"
@@ -517,15 +602,23 @@ private fun StageSection(
 private fun describe(frame: LivingFrame): String = when {
     frame.isSlideshow -> "Slideshow · ${frame.frameCount} photos · ${frame.quality.label}"
     frame.isAnimated -> {
-        val s = LivingFrameEngine.loopDurationMs(frame.frameCount, frame.fps, frame.loopMode) / 1000f
-        val captured = frame.sourceFps
-        val rate = if (frame.fps > captured) {
-            "${frame.fps} fps (captured at $captured)"
+        val sourceFps = frame.sourceFps.coerceAtLeast(1)
+        val seconds = LivingFrameEngine.loopDurationMs(
+            frame.frameCount, sourceFps, frame.loopMode, frame.speed
+        ) / 1000f
+        val displayFps = LivingFrameFps.snap(frame.fps)
+        val rate = if (displayFps > sourceFps) {
+            "$displayFps fps (captured at $sourceFps)"
         } else {
-            "${frame.fps} fps"
+            "$displayFps fps"
         }
-        "${if (frame.type == LivingFrameType.GIF) "GIF" else "Video"} · %.1f s · %d frames · %s · %d×%d".format(
-            s, frame.frameCount, rate, frame.width, frame.height
+        val speed = if (LivingFrameSpeed.snap(frame.speed) != 1f) {
+            " · ${LivingFrameSpeed.label(frame.speed)}"
+        } else {
+            ""
+        }
+        "${if (frame.type == LivingFrameType.GIF) "GIF" else "Video"} · %.1f s · %d frames · %s%s · %d×%d".format(
+            seconds, frame.frameCount, rate, speed, frame.width, frame.height
         )
     }
     else -> "Photo · ${frame.width}×${frame.height} · ${frame.quality.label}"
@@ -562,14 +655,25 @@ private fun LivePreview(
     modifier: Modifier = Modifier
 ) {
     var tick by remember(frames) { mutableIntStateOf(0) }
-    LaunchedEffect(frames, frame.fps, frame.loopMode, frame.type, playing) {
+    val displayFps = LivingFrameFps.snap(frame.fps)
+    LaunchedEffect(frames, frame.fps, frame.speed, frame.loopMode, frame.type, playing) {
         if (!playing || frames.size < 2) return@LaunchedEffect
-        val slides = frame.isSlideshow
-        val order = if (slides) frames.indices.toList() else LivingFrameEngine.playbackOrder(frames.size, frame.loopMode)
-        val intervalNs = if (slides) {
+        val order = if (frame.isSlideshow) {
+            frames.indices.toList()
+        } else {
+            LivingFrameEngine.displaySequence(
+                frames.size,
+                frame.sourceFps.coerceAtLeast(1),
+                displayFps,
+                frame.speed,
+                frame.loopMode
+            )
+        }
+        if (order.size < 2) return@LaunchedEffect
+        val intervalNs = if (frame.isSlideshow) {
             2_400_000_000L
         } else {
-            1_000_000_000L / LivingFrameFps.snap(frame.fps)
+            1_000_000_000L / displayFps.coerceAtLeast(1)
         }
         var pos = order.indexOf(tick).coerceAtLeast(0)
         var acc = 0L
@@ -785,11 +889,16 @@ private fun ClipSheet(
     quality: LivingFrameQuality,
     onQuality: (LivingFrameQuality) -> Unit,
     onCancel: () -> Unit,
-    onConfirm: (startMs: Long, lengthMs: Long, fps: Int) -> Unit
+    onConfirm: (
+        startMs: Long,
+        lengthMs: Long,
+        fps: Int,
+        quality: LivingFrameQuality
+    ) -> Unit
 ) {
     val maxLenMs = minOf(pending.durationMs, LivingFramesRepository.MAX_CLIP_MS).coerceAtLeast(500L)
     var length by remember(pending.uri) {
-        mutableFloatStateOf(minOf(6_000L, maxLenMs).toFloat())
+        mutableFloatStateOf(minOf(12_000L, maxLenMs).toFloat())
     }
     var start by remember(pending.uri) { mutableFloatStateOf(0f) }
     val lengthMs = length.roundToLong().coerceIn(500L, maxLenMs)
@@ -808,7 +917,13 @@ private fun ClipSheet(
     )
     val frameCount = (lengthMs / 1000f * effectiveFps).roundToInt()
         .coerceIn(2, LivingFramesRepository.MAX_FRAMES)
-    val estimate = frameCount * estimateFrameBytes(quality)
+    val stored = LivingFrameEstimate.storedSize(pending.width, pending.height, quality)
+    val estimate = LivingFrameEstimate.bytes(
+        pending.width,
+        pending.height,
+        quality,
+        frameCount
+    )
 
     val thumb by produceState<ImageBitmap?>(null, pending.uri, startMs / 250L) {
         delay(120L)
@@ -820,74 +935,97 @@ private fun ClipSheet(
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ) {
         Column(
-            Modifier.padding(horizontal = 20.dp).padding(bottom = 24.dp).navigationBarsPadding(),
-            verticalArrangement = Arrangement.spacedBy(18.dp)
+            Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.92f)
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp)
+                .navigationBarsPadding()
         ) {
-            Text("Choose your loop", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-            Box(
+            Text(
+                "Choose your loop",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold
+            )
+            Column(
                 Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(16f / 9f)
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest),
-                contentAlignment = Alignment.Center
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+                    .padding(top = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(18.dp)
             ) {
-                val t = thumb
-                if (t == null) ExpressiveLoadingIndicator()
-                else Image(t, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                SettingHeader("Starts at", clock(startMs))
-                Slider(
-                    value = start.coerceIn(0f, maxStart),
-                    onValueChange = { start = it },
-                    valueRange = 0f..maxStart.coerceAtLeast(1f),
-                    enabled = maxStart > 0f,
-                    colors = SliderDefaults.colors(
-                        thumbColor = MaterialTheme.colorScheme.primary,
-                        activeTrackColor = MaterialTheme.colorScheme.primary
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(16f / 9f)
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                    contentAlignment = Alignment.Center
+                ) {
+                    val t = thumb
+                    if (t == null) ExpressiveLoadingIndicator()
+                    else Image(t, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    SettingHeader("Starts at", clock(startMs))
+                    Slider(
+                        value = start.coerceIn(0f, maxStart),
+                        onValueChange = { start = it },
+                        valueRange = 0f..maxStart.coerceAtLeast(1f),
+                        enabled = maxStart > 0f,
+                        colors = SliderDefaults.colors(
+                            thumbColor = MaterialTheme.colorScheme.primary,
+                            activeTrackColor = MaterialTheme.colorScheme.primary
+                        )
                     )
-                )
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                SettingHeader("Length", "%.1f s".format(lengthMs / 1000f))
-                Slider(
-                    value = lengthMs.toFloat(),
-                    onValueChange = { length = it },
-                    valueRange = 500f..maxLenMs.toFloat().coerceAtLeast(501f),
-                    colors = SliderDefaults.colors(
-                        thumbColor = MaterialTheme.colorScheme.primary,
-                        activeTrackColor = MaterialTheme.colorScheme.primary
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    SettingHeader("Length", "%.1f s".format(lengthMs / 1000f))
+                    Slider(
+                        value = lengthMs.toFloat(),
+                        onValueChange = { length = it },
+                        valueRange = 500f..maxLenMs.toFloat().coerceAtLeast(501f),
+                        colors = SliderDefaults.colors(
+                            thumbColor = MaterialTheme.colorScheme.primary,
+                            activeTrackColor = MaterialTheme.colorScheme.primary
+                        )
                     )
-                )
-                Text(
-                    "$frameCount frames · $effectiveFps fps · about " +
-                        LivingFramesRepository.formatBytes(estimate),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                if (effectiveFps < chosenFps) {
                     Text(
-                        "Limited to $effectiveFps fps by ${quality.label} quality or the " +
-                            "${LivingFramesRepository.MAX_FRAMES}-frame limit for this length.",
+                        "$frameCount frames · $effectiveFps fps · about " +
+                            LivingFramesRepository.formatBytes(estimate),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        "Stored at ${stored.first}×${stored.second} px. The real size is shown " +
+                            "after import.",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    if (effectiveFps < chosenFps) {
+                        Text(
+                            "Limited to $effectiveFps fps by ${quality.label} quality or the " +
+                                "${LivingFramesRepository.MAX_FRAMES}-frame limit for this length.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SettingHeader("Frames per second")
+                    ToolzConnectedButtonGroup(
+                        selectedIndex = CAPTURE_FPS_CHOICES.indexOf(chosenFps).coerceAtLeast(0),
+                        options = CAPTURE_FPS_CHOICES.map { "$it" },
+                        onOptionSelected = { chosenFps = CAPTURE_FPS_CHOICES[it] },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                ImportQualityPicker(quality = quality, onChange = onQuality)
             }
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                SettingHeader("Capture rate")
-                ToolzConnectedButtonGroup(
-                    selectedIndex = CAPTURE_FPS_CHOICES.indexOf(chosenFps).coerceAtLeast(0),
-                    options = CAPTURE_FPS_CHOICES.map { "$it" },
-                    onOptionSelected = { chosenFps = CAPTURE_FPS_CHOICES[it] },
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-            ImportQualityPicker(quality = quality, onChange = onQuality)
+            Spacer(Modifier.height(12.dp))
             ToolzExpressiveButton(
-                onClick = { onConfirm(startMs, lengthMs, effectiveFps) },
-                modifier = Modifier.fillMaxWidth().height(56.dp)
+                onClick = { onConfirm(startMs, lengthMs, effectiveFps, quality) },
+                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)
             ) { Text("Create loop", fontWeight = FontWeight.SemiBold) }
         }
     }
