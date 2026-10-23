@@ -38,7 +38,6 @@ import dagger.hilt.android.EntryPointAccessors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import java.util.concurrent.Executors
-import kotlin.math.max
 import kotlin.math.roundToInt
 
 /**
@@ -184,7 +183,9 @@ private class LivingFramesFactory(
     ): Bitmap? {
         synchronized(recent) { recent[frameIndex] }?.let { return it }
         val repository = repo ?: return null
-        val required = max(outW, outH)
+        val required = LivingFrameEngine.requiredSourceSide(
+            outW, outH, current.width, current.height, current.fit
+        )
         val src = runBlocking(Dispatchers.IO) {
             repository.decodeAtLeast(current.id, frameIndex, required)
         } ?: return null

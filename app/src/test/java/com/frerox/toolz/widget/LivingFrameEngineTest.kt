@@ -3,6 +3,7 @@ package com.frerox.toolz.widget
 import com.frerox.toolz.data.livingframes.LivingFrame
 import com.frerox.toolz.data.livingframes.LivingFrameEngine
 import com.frerox.toolz.data.livingframes.LivingFrameEstimate
+import com.frerox.toolz.data.livingframes.LivingFrameFit
 import com.frerox.toolz.data.livingframes.LivingFrameFps
 import com.frerox.toolz.data.livingframes.LivingFrameLoopMode
 import com.frerox.toolz.data.livingframes.LivingFrameQuality
@@ -118,6 +119,62 @@ class LivingFrameEngineTest {
         assertEquals(
             listOf(0, 1, 2, 3, 2, 1),
             LivingFrameEngine.displaySequence(4, 12, 12, 1f, LivingFrameLoopMode.BOOMERANG)
+        )
+    }
+
+    @Test
+    fun requiredSourceSide_coversTheCroppedAxisForFill() {
+        // A 466×473 widget showing a 16:9 clip keeps only the middle 466 px
+        // of a 841×473 scaled source, so 473 alone would decode at 480×270
+        // and upscale. The crop requires the source's long side.
+        assertEquals(
+            841,
+            LivingFrameEngine.requiredSourceSide(
+                466, 473, 1920, 1080, LivingFrameFit.FILL
+            )
+        )
+        assertEquals(
+            829,
+            LivingFrameEngine.requiredSourceSide(
+                466, 473, 1080, 1920, LivingFrameFit.FILL
+            )
+        )
+        assertEquals(
+            800,
+            LivingFrameEngine.requiredSourceSide(
+                800, 400, 1080, 1080, LivingFrameFit.FILL
+            )
+        )
+    }
+
+    @Test
+    fun requiredSourceSide_fitOnlyNeedsTheWidgetBounds() {
+        assertEquals(
+            473,
+            LivingFrameEngine.requiredSourceSide(
+                466, 473, 1920, 1080, LivingFrameFit.FIT
+            )
+        )
+        assertEquals(
+            1600,
+            LivingFrameEngine.requiredSourceSide(
+                1600, 900, 1080, 1920, LivingFrameFit.FIT
+            )
+        )
+    }
+
+    @Test
+    fun requiredSourceSide_isNeverZeroForTinyGeometry() {
+        assertTrue(
+            LivingFrameEngine.requiredSourceSide(
+                1, 1, 1, 1, LivingFrameFit.FILL
+            ) >= 1
+        )
+        assertEquals(
+            2,
+            LivingFrameEngine.requiredSourceSide(
+                0, 0, 0, 0, LivingFrameFit.FIT
+            )
         )
     }
 

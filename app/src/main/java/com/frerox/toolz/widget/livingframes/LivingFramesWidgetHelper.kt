@@ -363,7 +363,9 @@ object LivingFramesWidgetHelper {
             } else {
                 sequence
             }
-            val need = maxOf(plan.outW, plan.outH)
+            val need = LivingFrameEngine.requiredSourceSide(
+                plan.outW, plan.outH, frame.width, frame.height, frame.fit
+            )
             val bitmaps = ArrayList<Bitmap>(indices.size)
             try {
                 for (i in indices) {

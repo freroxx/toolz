@@ -86,6 +86,38 @@ object LivingFrameEngine {
         }
     }
 
+    /**
+     * Source bitmap size needed to draw [sourceWidth]×[sourceHeight] into an
+     * [outW]×[outH] widget without upscaling.
+     *
+     * A widget is not a square. Asking the decoder for `max(outW, outH)` is
+     * enough for FIT, but wrong for FILL on a portrait widget showing a
+     * landscape clip: the crop keeps only the middle of the source, so the
+     * source's *longest* side must be larger than the widget's short side.
+     * For a 466×473 widget and a 16:9 clip that is 841 px, not 473 px.
+     */
+    fun requiredSourceSide(
+        outW: Int,
+        outH: Int,
+        sourceWidth: Int,
+        sourceHeight: Int,
+        fit: LivingFrameFit
+    ): Int {
+        val w = outW.coerceAtLeast(2)
+        val h = outH.coerceAtLeast(2)
+        val sw = sourceWidth.coerceAtLeast(1)
+        val sh = sourceHeight.coerceAtLeast(1)
+        if (fit == LivingFrameFit.FIT) return maxOf(w, h)
+        val sourceAspect = sw / sh.toFloat()
+        val destAspect = w / h.toFloat()
+        val required = if (sourceAspect > destAspect) {
+            h * sourceAspect
+        } else {
+            w / sourceAspect
+        }
+        return ceil(required).toInt().coerceAtLeast(1)
+    }
+
     /** Real-time length of a display sequence; used by previews and summaries. */
     fun displayDurationMs(
         frameCount: Int,
