@@ -308,7 +308,9 @@ class WhisperSessionStore @Inject constructor(
         // what makes a same-install convergence non-destructive.
         memory[key]?.let { previous ->
             if (previous !== live && previous.sessionId != live.sessionId) {
-                saveSecondary(peerId, previous)
+                // Best-effort: failing to persist the superseded copy must never
+                // block adopting the new primary (it is already in altMemory).
+                runCatching { saveSecondary(peerId, previous) }
             }
         }
         memory[key] = live

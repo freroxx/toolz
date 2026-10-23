@@ -1085,7 +1085,9 @@ class WhisperRepository @Inject constructor(
                     val alreadyRetained =
                         sessionStore.loadSecondary(partnerId, frame.sessionId) != null
                     val retained = alreadyRetained || buildResponderLive()?.also {
-                        sessionStore.saveSecondary(partnerId, it)
+                        // Best-effort persist; altMemory already holds it, so a disk
+                        // failure must not stop us opening this very frame below.
+                        runCatching { sessionStore.saveSecondary(partnerId, it) }
                     } != null
                     if (retained) {
                         ProtocolDiagnostics.increment("v3.handshakeRetained")
@@ -1161,7 +1163,7 @@ class WhisperRepository @Inject constructor(
             bySid.sessionProven = true
             bySid.dirty = true
             if (bySid === live) sessionStore.save(partnerId, bySid)
-            else sessionStore.saveSecondary(partnerId, bySid)
+            else runCatching { sessionStore.saveSecondary(partnerId, bySid) }
             ProtocolDiagnostics.increment("v3.opened")
             plain.decodeToString()
         }
