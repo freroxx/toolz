@@ -1,161 +1,209 @@
-# 🛠️ Toolz
+<p align="center">
+  <img src="https://i.ibb.co/jvt7B2Cy/toolz-glass-icon-dark-bg.png" alt="Toolz" width="160" />
+</p>
+
+<h1 align="center">Toolz</h1>
 
 <p align="center">
-  <strong>Your device, fully orchestrated.</strong>
+  <strong>Your device, fully orchestrated.</strong><br/>
+  <em>50+ precision tools. One polished app. Zero bloat.</em>
 </p>
 
 <p align="center">
-  Toolz is a modern Android toolkit that brings productivity, media, PDF, sensor, privacy, and system utilities into one polished app. It is built for people who want one fast home for the tools they actually use, not a folder full of single-purpose apps.
-  Check out Toolz Website here : https://toolz-app.vercel.app
+  <a href="https://github.com/freroxx/toolz/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/freroxx/toolz?display_name=tag&style=flat-square&color=6750A4" /></a>
+  <img alt="Android 12+" src="https://img.shields.io/badge/Android-12%2B-3DDC84?logo=android&logoColor=white&style=flat-square" />
+  <img alt="Kotlin 2.4.20" src="https://img.shields.io/badge/Kotlin-2.4.20-7F52FF?logo=kotlin&logoColor=white&style=flat-square" />
+  <img alt="Jetpack Compose" src="https://img.shields.io/badge/Jetpack%20Compose-UI-4285F4?logo=jetpackcompose&logoColor=white&style=flat-square" />
+  <img alt="Material 3 Expressive" src="https://img.shields.io/badge/Material%203-Expressive-E8DEF8?style=flat-square" />
+  <a href="LICENSE"><img alt="License: GPL-3.0" src="https://img.shields.io/badge/License-GPL%20v3-blue?style=flat-square" /></a>
 </p>
 
 <p align="center">
-  <img alt="Latest release" src="https://img.shields.io/github/v/release/freroxx/toolz?display_name=tag" />
-  <img alt="Android 12+" src="https://img.shields.io/badge/Android-12%2B-3DDC84?logo=android&logoColor=white" />
-  <img alt="Kotlin 2.4.20" src="https://img.shields.io/badge/Kotlin-2.4.20-7F52FF?logo=kotlin&logoColor=white" />
-  <img alt="Jetpack Compose" src="https://img.shields.io/badge/Jetpack%20Compose-UI-4285F4?logo=jetpackcompose&logoColor=white" />
+  <a href="https://toolz-app.vercel.app">🌐 Website</a> &nbsp;·&nbsp;
+  <a href="https://github.com/freroxx/toolz/releases">📥 Download</a> &nbsp;·&nbsp;
+  <a href="https://discord.gg/aAswRUerwh">💬 Discord</a>
 </p>
 
 ---
 
 ## ✨ Why Toolz?
 
-Toolz provides productivity, media, PDF, sensor, privacy, and system utilities in one app:
+Toolz replaces a folder full of single-purpose apps with one fast, private, and deeply integrated utility library for Android.
 
-- **One Home** — A unified library of 45+ utilities in one APK.
-- **Privacy as a Standard** — Core tools work 100% offline. Passwords, notes, and notifications are stored locally using SQLCipher encryption.
-- **Deep System Integration** — Quick Settings tiles, Homescreen Widgets, and Autofill support.
-- **Polished tools** — FFmpeg for media, ZXing + Tesseract for vision (on-device, no ML Kit), and system sensors for navigation, in a Material 3 expressive interface.
-- **Unified Dashboard** — A dashboard with pinned favorites and a floating "status pill" for active timers, music, or recordings.
+| | |
+|---|---|
+| 🏠 **One Home** | 50+ utilities in a single APK with a unified dashboard, pinned favorites, and a floating status pill |
+| 🔒 **Privacy by Default** | Core tools run 100% offline. Passwords, notes, and notifications encrypted locally with SQLCipher |
+| ⚡ **Deep Integration** | Quick Settings tiles, homescreen widgets, system Autofill — not just another app in the drawer |
+| 🎨 **Material 3 Expressive** | Physics-based animations, adaptive layouts, and dynamic containers that feel native on every device |
+| 🧰 **No ML Kit** | On-device OCR (Tesseract), QR/barcode (ZXing), FFmpeg — zero dependency on Google ML Kit |
 
 ---
 
-## 📦 Complete Tool Catalog
+## 📦 Tool Catalog
 
-Toolz includes **45+ precision instruments** organized across 9 categories:
+Toolz includes **50+ precision instruments** across 9 categories:
 
-### ⏱️ Time & Productivity
-- **Timer** — Precise countdown engine with background persistence and physics-based alarms
-- **Stopwatch** — High-resolution performance timing with lap tracking and millisecond accuracy
-- **Pomodoro** — Deep focus cycles (25/5/15) with session tracking and non-intrusive notifications
-- **World Clock** — Global time synchronization and timezone management for international teams
-- **Calendar** — Native scheduling and event management with Material 3 expressive design
-- **Todo List** — Priority-driven task management with physics-based interactions and due date filters
-- **Caffeinate** — System-level screen-awake utility with quick settings tile integration
-- **Focus Flow** — Productivity analyzer that tracks app usage and provides actionable flow scores
+<details>
+<summary><strong>⏱️ Time &amp; Productivity</strong> (8 tools)</summary>
 
-### 🚀 AI & Utilities
-- **AI Assistant** — Optional conversational agent for document summaries and contextual guidance
-- **Smart Search** — Intent-matching dashboard search that routes queries directly to the correct tool
-- **Web Search** — Privacy-focused browser with ad-blocking, custom DNS controls, and tab management
-- **Notepad** — Multimedia capture tool for notes, reminders, and audio-linked memos
+| Tool | Description |
+|---|---|
+| **Timer** | Precise countdown engine with background persistence and physics-based alarms |
+| **Stopwatch** | High-resolution performance timing with lap tracking and millisecond accuracy |
+| **Pomodoro** | Deep focus cycles (25/5/15) with session tracking and non-intrusive notifications |
+| **World Clock** | Global time synchronization and timezone management for international teams |
+| **Calendar** | Native scheduling and event management with Material 3 expressive design |
+| **Todo List** | Priority-driven task management with physics-based interactions and due date filters |
+| **Caffeinate** | System-level screen-awake utility with quick settings tile integration |
+| **Focus Flow** | Productivity analyzer that tracks app usage and provides actionable flow scores |
 
-### 💾 Media & PDF
-- **Music Player** — Local audio hub with lyrics, playlist management, and Media3 background playback
-- **Media Downloader** — Save YouTube, TikTok, and Instagram Reels with quality picker, audio-only mode, and background downloads
-- **Voice Recorder** — Studio-quality audio capture with pause/resume and searchable library
-- **File Converter** — FFmpeg-powered media transformation for video, audio, and image formats
-- **PDF Reader** — Native document viewer with text extraction and document summary support
-- **Background Remover** — Offline AI-powered utility to automatically remove backgrounds from images (runs locally)
-- **File Cleaner** — Storage management utility to reclaim space and remove redundant cache
-- **Sound Meter** — Real-time decibel analysis for monitoring environmental noise levels
+</details>
 
-### 🔦 Light & Optics
-- **Flashlight** — Dynamic LED control with steady, strobe, SOS, and disco modes
-- **Screen Light** — High-brightness display utility with adjustable color temperature for soft lighting
-- **Magnifier** — Digital zoom tool for reading micro-text and inspecting hardware components
-- **Scanner** — High-speed recognition engine for QR codes and industrial barcodes
-- **QR Generator** — Create shareable codes from text, credentials, or network configurations
-- **Light Meter** — Photometric sensor utility for measuring ambient Lux levels
+<details>
+<summary><strong>🚀 AI &amp; Utilities</strong> (4 tools)</summary>
 
-### 📐 Sensors & Navigation
-- **Compass** — Magnetic orientation tool with bearing tracking and heading visualization
-- **Bubble Level** — Dual-axis spirit level for high-precision alignment and leveling
-- **Speedometer** — GPS-based velocity tracking with peak speed and distance metrics
-- **Altimeter** — Elevation tracking utilizing barometric pressure and GPS data
-- **Step Counter** — Fitness pedometer with daily goals, trends, and distance analysis
-- **Ruler** — Calibrated on-screen measurement for physical objects
-- **Color Picker** — Visual color extraction tool that identifies HEX/RGB values via the camera
+| Tool | Description |
+|---|---|
+| **AI Assistant** | Optional conversational agent for document summaries and contextual guidance |
+| **Smart Search** | Intent-matching dashboard search that routes queries directly to the correct tool |
+| **Web Search** | Privacy-focused browser with ad-blocking, custom DNS controls, and tab management |
+| **Notepad** | Multimedia capture tool for notes, reminders, and audio-linked memos |
 
-### 🧮 Math & Conversion
-- **Calculator** — Scientific math engine with expression history and modular layouts
-- **Unit Converter** — Universal conversion for hundreds of units across distance, weight, and energy
-- **Tip Calculator** — Rapid bill splitting and tip calculation for group dining
-- **BMI Calculator** — Health metric analyzer with TDEE and nutrition guidance
-- **Equation Solver** — Advanced solver for linear, quadratic, and complex mathematical equations
+</details>
 
-### 🔐 Security & Privacy
-- **Password Vault** — SQLCipher-encrypted storage for credentials with biometric unlock and autofill integration
-- **Password Generator** — High-entropy random key generator with customizable complexity rules
-- **Clipboard History** — Local archive for managing and retrieving past clipboard segments
-- **Notification Vault** — Searchable local log of system notifications for privacy auditing
-- **Smart Encrypter** — AES-256 text and file encryption utility for secure data transfer
-- **Purge Shot** — Auto-expiring screenshot manager with 30 sec to 1 month presets, system-level detection via Accessibility/Shizuku/observer, triple-redundant queue, and one-tap undo
+<details>
+<summary><strong>💾 Media &amp; PDF</strong> (8 tools)</summary>
 
-### 📊 Device & System
-- **Device Info** — Deep hardware diagnostics and system property inspection
-- **Battery Info** — Comprehensive statistics on health, cycles, and charging temperature
-- **Periodic Table** — Interactive scientific reference for element properties and data
-- **Flip Coin** — Physics-simulated decision maker for random selection
-- **Network Tweaks** — Wi-Fi diagnostics and advanced connectivity optimization tools
-- **Network Power Suite** — System-level DNS configuration, ad-blocking, and network monitoring
+| Tool | Description |
+|---|---|
+| **Music Player** | Local audio hub with lyrics, playlist management, and Media3 background playback |
+| **Media Downloader** | Save YouTube, TikTok, and Instagram Reels with quality picker and background downloads |
+| **Voice Recorder** | Studio-quality audio capture with pause/resume and searchable library |
+| **File Converter** | FFmpeg-powered media transformation for video, audio, and image formats |
+| **PDF Reader** | Native document viewer with text extraction and document summary support |
+| **Background Remover** | Offline AI-powered background removal — runs fully on-device (ONNX Runtime) |
+| **File Cleaner** | Storage management utility to reclaim space and remove redundant cache |
+| **Sound Meter** | Real-time decibel analysis for monitoring environmental noise levels |
 
-### 💬 Communication & Messaging
-- **Whisper** — End-to-end encrypted, friends-only messenger with email-free sign-in, offline outbox delivery, and realtime chat (beta)
+</details>
 
-### 🏠 Widgets & Quick Settings (Experimental)
-- **Homescreen Widgets** — Flashlight, notes, steps, compass, flip coin, music player
-- **Quick Settings Tiles** — Clipboard and Caffeinate fast access
+<details>
+<summary><strong>🔦 Light &amp; Optics</strong> (6 tools)</summary>
+
+| Tool | Description |
+|---|---|
+| **Flashlight** | Dynamic LED control with steady, strobe, SOS, and disco modes |
+| **Screen Light** | High-brightness display utility with adjustable color temperature |
+| **Magnifier** | Digital zoom tool for reading micro-text and inspecting hardware |
+| **Scanner** | High-speed recognition engine for QR codes and industrial barcodes |
+| **QR Generator** | Create shareable codes from text, credentials, or network configs |
+| **Light Meter** | Photometric sensor utility for measuring ambient Lux levels |
+
+</details>
+
+<details>
+<summary><strong>📐 Sensors &amp; Navigation</strong> (7 tools)</summary>
+
+| Tool | Description |
+|---|---|
+| **Compass** | Magnetic orientation with bearing tracking and heading visualization |
+| **Bubble Level** | Dual-axis spirit level for high-precision alignment and leveling |
+| **Speedometer** | GPS-based velocity tracking with peak speed and distance metrics |
+| **Altimeter** | Elevation tracking via barometric pressure and GPS data |
+| **Step Counter** | Fitness pedometer with daily goals, trends, and distance analysis |
+| **Ruler** | Calibrated on-screen measurement for physical objects |
+| **Color Picker** | Visual color extraction — identifies HEX/RGB values via the camera |
+
+</details>
+
+<details>
+<summary><strong>🧮 Math &amp; Conversion</strong> (5 tools)</summary>
+
+| Tool | Description |
+|---|---|
+| **Calculator** | Scientific math engine with expression history and modular layouts |
+| **Unit Converter** | Universal conversion for hundreds of units across distance, weight, and energy |
+| **Tip Calculator** | Rapid bill splitting and tip calculation for group dining |
+| **BMI Calculator** | Health metric analyzer with TDEE and nutrition guidance |
+| **Equation Solver** | Advanced solver for linear, quadratic, and complex equations |
+
+</details>
+
+<details>
+<summary><strong>🔐 Security &amp; Privacy</strong> (6 tools)</summary>
+
+| Tool | Description |
+|---|---|
+| **Password Vault** | SQLCipher-encrypted credential storage with biometric unlock and Autofill |
+| **Password Generator** | High-entropy random key generator with customizable complexity rules |
+| **Clipboard History** | Local archive for managing and retrieving past clipboard segments |
+| **Notification Vault** | Searchable local log of system notifications for privacy auditing |
+| **Smart Encrypter** | AES-256 text and file encryption for secure data transfer |
+| **Purge Shot** | Auto-expiring screenshots (30 sec → 1 month) with triple-redundant detection and undo |
+
+</details>
+
+<details>
+<summary><strong>📊 Device &amp; System</strong> (6 tools)</summary>
+
+| Tool | Description |
+|---|---|
+| **Device Info** | Deep hardware diagnostics and system property inspection |
+| **Battery Info** | Comprehensive stats on health, cycles, and charging temperature |
+| **Periodic Table** | Interactive scientific reference for element properties |
+| **Flip Coin** | Physics-simulated decision maker for random selection |
+| **Network Tweaks** | Wi-Fi diagnostics and advanced connectivity optimization |
+| **Network Power Suite** | System-level DNS configuration, ad-blocking, and network monitoring |
+
+</details>
+
+<details>
+<summary><strong>💬 Communication &amp; Messaging</strong> (1 tool)</summary>
+
+| Tool | Description |
+|---|---|
+| **Whisper** | End-to-end encrypted, friends-only messenger with email-free sign-in and offline delivery (beta) |
+
+</details>
 
 ---
 
 ## 💬 Whisper — Encrypted Messaging (Beta)
 
-Whisper is Toolz's built-in messenger: an end-to-end encrypted, friends-only chat layer with its own Supabase backend, so Whisper accounts and messages live apart from the rest of the app. Full architecture: [`WHISPER.md`](WHISPER.md).
+Whisper is Toolz's built-in messenger: a friend-gated, end-to-end encrypted chat layer with its own Supabase backend.
 
-The short version: you sign in with a username + password or a random 64-character token — no email for you to type (the app uses virtual emails under the hood for Supabase Auth). Add people as friends, and only then can you message them. Every message is encrypted on your phone before it's sent — the server stores ciphertext, not readable text.
+- **E2EE** — P-256 identity keys in AndroidKeyStore → X3DH key agreement → Double Ratchet sessions (AES-256-GCM). The server stores ciphertext only.
+- **No-email sign-in** — username + password, or a random 64-char token (hashed on-device before transmission).
+- **Friend-gated** — no messaging until a friend request is accepted. Blocks enforced client + DB-level.
+- **Realtime delivery** — broadcast channels + postgres-change polling + UnifiedPush wake pings for killed apps.
+- **Offline-first** — messages sealed and queued (Room outbox, FIFO ≤100) while offline, auto-flushed by WorkManager when back online.
+- **Rich features** — read receipts, typing indicators, replies, reactions, image sharing, delete for everyone, hide chats, mute & block.
 
-### Key features
-
-- **End-to-end encryption** — P-256 identity + signing keys in AndroidKeyStore, X25519 sessions via X3DH → Double Ratchet, all sealed with AES-256-GCM (direction-bound AAD). New chats try the ratchet first (per-message forward secrecy); proven-v3 peers block insecure fallback with visible warning; new contacts try v3 first, fall back to envelope only while unproven (static ECDH, no FS). Uses custom E2EE, not independently audited. Only v3 ratchet messages have forward secrecy. Keys rotate every 30 days; verify fingerprints in person via QR
-- **No-email sign-in** — two ways in: username + password (≥10 chars, auto-saved to the Toolz Vault), or a random 64-char hex token (`SHA-256(token)@whisper.toolz.app`, hashed on-device before it leaves the phone — the server only ever sees the hash). Save your token — lose it, lose the account
-- **Friend-gated chats** — no messaging until the friend request is accepted; blocks are enforced client + DB-level, both sides know when they're blocked
-- **Realtime delivery** — messages, reactions, typing (8 s fresh), and presence arrive over broadcast channels, with postgres-change polling as the reliable fallback; UnifiedPush wake pings (senderId/messageId, no content) cover killed apps
-- **Read receipts & presence** — pending/sent/read states, unread badges, online (≤2 min) / recent / last-seen
-- **Offline-first messaging** — messages sent offline are sealed, stored ciphertext-only in a Room outbox (FIFO ≤100), and auto-flushed by WorkManager when online; chat history stays readable from a ciphertext-only local cache
-- **Replies & reactions** — quote-to-reply with snippets and per-message emoji reactions (optimistic + snapshot reconcile)
-- **Images** — sealed on-device, PNG-wrapped (`WZ1`+CRC32, ≤5 MiB), hosted via edge function (ImgBB) or Supabase Storage for avatars; allowlisted downloads, expiry labels
-- **Delete tools** — delete for everyone (leaves a "Message deleted" tombstone + remote image delete), delete for you (device-only), and clear-chat by time range (24h / 7d / 30d / all / custom) with a 30-second undo
-- **Hide chats** — remove a conversation from the chats tab; it comes back automatically when a new message arrives
-- **Mute & block** — silence a conversation or block a user entirely
-- **In-app notifications** — grouped per conversation, deduplicated across realtime+push, suppressed while you're inside that chat or when muted/hidden
-
-Whisper is early-access software (beta): expect rough edges. It is centralized — the server can see *who* talks to *whom* (usernames/IDs, timestamps, ciphertext blobs) but never plaintext. Uses custom E2EE, not independently audited. Only v3 ratchet messages have forward secrecy; proven-v3 peers block insecure fallback with visible warning. See [`WHISPER.md`](WHISPER.md) + [`PRIVACY.md`](PRIVACY.md) for the full info.
+> **Beta notice:** Uses custom E2EE, not independently audited. Only v3 ratchet messages have forward secrecy. See [`WHISPER.md`](WHISPER.md) and [`PRIVACY.md`](PRIVACY.md) for the full architecture.
 
 ---
 
-## 📥 Install Toolz
+## 📥 Install
 
-Toolz is distributed through **GitHub Releases**:
+Toolz ships as a **sideloaded APK** via GitHub Releases. No Play Store account required.
 
-- **Releases page:** [github.com/freroxx/toolz/releases](https://github.com/freroxx/toolz/releases)
-- **Current version:** `1.1.7` (in development — latest published release is `1.1.6`)
+**[→ Download the latest release](https://github.com/freroxx/toolz/releases)**
 
-> **Whisper push requires Google Play Services (or microG) on-device** for the
-> embedded FCM fallback distributor. De-Googled devices can instead run any
-> external UnifiedPush distributor (e.g. [ntfy](https://ntfy.sh) or NextPush) —
-> everything else in Toolz works without either.
+### Architecture guide
 
-### Choose your architecture:
+| APK | Devices |
+|---|---|
+| `arm64-v8a` | ✅ Most modern Android phones (recommended) |
+| `armeabi-v7a` | Older 32-bit ARM devices |
+| `x86_64` | Most emulators and x86_64 environments |
+| `x86` | Older x86 emulator/device setups |
 
-- **arm64-v8a** — Most modern Android phones (recommended)
-- **armeabi-v7a** — Older 32-bit ARM devices
-- **x86_64** — Many emulators and x86_64 environments
-- **x86** — Older x86 emulator/device setups
+> **Note:** Whisper push notifications require Google Play Services (or microG) for the embedded FCM distributor. De-Googled devices can use any external UnifiedPush distributor (e.g. [ntfy](https://ntfy.sh) or NextPush). All other tools work without either.
 
 ### In-App Updates
 
-Toolz includes a built-in updater that checks GitHub releases and update manifests for compatible builds, so you can update directly from the app.
+Toolz includes a built-in updater — it checks GitHub releases automatically so you can update directly from the app.
 
 ---
 
@@ -163,135 +211,105 @@ Toolz includes a built-in updater that checks GitHub releases and update manifes
 
 ### Requirements
 
-- **Android Studio** (latest)
+- **Android Studio** (latest stable)
 - **Android SDK** — compileSdk 37, targetSdk 36
 - **JDK 17**
-- **Device/Emulator** — Android 12+ (minSdk 31)
+- **Device or Emulator** — Android 12+ (minSdk 31)
 
-### Build Steps
+### Build
 
-**macOS/Linux:**
 ```bash
+# macOS / Linux
 ./gradlew assembleDebug
-```
 
-**Windows:**
-```powershell
+# Windows
 .\gradlew.bat assembleDebug
 ```
 
-Import the project into Android Studio, let Gradle sync, and the debug APK will be generated through the standard Android build pipeline.
+Import the project into Android Studio, let Gradle sync, then build or run directly on a device.
 
 ---
 
 ## 🛠️ Tech Stack
 
-Verified from `gradle/libs.versions.toml` + `app/build.gradle.kts`
-(compileSdk 37, targetSdk 36, minSdk 31, JDK 17, AGP 9.4.1).
+> Verified from `gradle/libs.versions.toml` + `app/build.gradle.kts` (AGP 9.4.1, compileSdk 37, targetSdk 36, minSdk 31, JDK 17)
 
-- **Language / Build** — Kotlin 2.4.20, KSP 2.3.10, Hilt 2.60.1 (DI + WorkManager),
-  kotlinx-coroutines 1.11.0, kotlinx-serialization 1.11.0, desugar JDK libs
-- **UI** — Jetpack Compose BOM 2026.09.00, Material 3 Expressive
-  (`1.5.0-alpha29`) + adaptive/navigation-suite, Navigation Compose 2.9.8,
-  Coil 3.5.0 (compose/okhttp/video), Glance 1.3.0-alpha02 (widgets),
-  graphics-shapes, Accompanist permissions, Material 1.14.0
-- **Data (encrypted local-first)** — Room 2.8.4 (schemas exported in
-  `app/schemas/`), SQLCipher 4.18.0 + sqlite 2.7.0, DataStore preferences,
-  Security Crypto 1.1.0 (`EncryptedSharedPreferences` AES256-SIV/GCM),
-  WorkManager 2.11.2
-- **Network** — Retrofit 3.0.0 + Moshi 1.15.2 (codegen) + kotlinx-serialization
-  converter, OkHttp 5.5.0 + logging + DnsOverHttps, Ktor 3.5.2 (Supabase edge calls)
-- **Media / Camera** — Media3 1.11.0 (exoplayer/ui/session/DASH), CameraX
-  1.7.0-alpha03 (camera2/lifecycle/view/core), ExifInterface 1.4.2, Palette,
-  FFmpeg `ffmpeg-kit-lts-16kb` 6.1.7 + `youtubedl-android` 0.18.1 (yt-dlp binary),
-  NewPipeExtractor 0.26.5 + InnerTube (public web key, fallback chain intact)
-- **Vision / Docs (on-device, no ML Kit)** — ZXing core 3.5.4 (QR/barcode —
-  replaces ML Kit barcode), Tesseract4Android 4.8.0 (OCR Latin — replaces ML Kit
-  text), `android.graphics.pdf.PdfRenderer` + pdfbox-android 2.0.27.0 (text/TOC —
-  `androidx.pdf` viewer removed), AndroidSVG 1.4, CommonMark 0.30.0, Jsoup 1.23.1,
-  Exp4j 0.4.8, AndroidX WebKit 1.14.0
-- **Background Remover** — ONNX Runtime Mobile 1.30.0 (`onnxruntime-android`, MIT),
-  per-ABI `.so` via splits (~+32 MB arm64-v8a). Models download on demand,
-  SHA-256 pinned (see `BR-MODELS.md`)
-- **Backend (Whisper only)** — Supabase BOM 3.7.0
-  (auth-kt/postgrest-kt/realtime-kt/storage-kt), UnifiedPush connector 3.3.5 +
-  embedded-fcm-distributor 3.1.0 (wake pings, no content — the embedded FCM
-  fallback requires Google Play Services (or microG) on-device; de-Googled
-  devices can run any external UnifiedPush distributor, e.g. ntfy/NextPush)
-- **System integration** — Shizuku 13.1.5 (optional privileged ops), Biometric
-  1.4.0-alpha07 + Autofill, google GenerativeAI 0.9.0 (optional assistant providers)
+| Layer | Libraries |
+|---|---|
+| **Language / Build** | Kotlin 2.4.20, KSP 2.3.10, Hilt 2.60.1 (DI + WorkManager), kotlinx-coroutines 1.11.0, kotlinx-serialization 1.11.0 |
+| **UI** | Jetpack Compose BOM 2026.09.00, Material 3 Expressive `1.5.0-alpha29`, Navigation Compose 2.9.8, Coil 3.5.0, Glance 1.3.0-alpha02 (widgets) |
+| **Data** | Room 2.8.4, SQLCipher 4.18.0, DataStore, Security Crypto 1.1.0, WorkManager 2.11.2 |
+| **Network** | Retrofit 3.0.0 + Moshi 1.15.2, OkHttp 5.5.0 + DnsOverHttps, Ktor 3.5.2 |
+| **Media / Camera** | Media3 1.11.0, CameraX 1.7.0-alpha03, FFmpeg Kit LTS 6.1.7, youtubedl-android 0.18.1, NewPipeExtractor 0.26.5 |
+| **Vision / Docs** | ZXing 3.5.4 (QR/barcode), Tesseract4Android 4.8.0 (OCR), PdfBox-Android 2.0.27.0, AndroidSVG 1.4 |
+| **Background Remover** | ONNX Runtime Mobile 1.30.0 — SHA-256 pinned models, download on demand |
+| **Whisper Backend** | Supabase BOM 3.7.0 (auth/postgrest/realtime/storage), UnifiedPush 3.3.5 + embedded-fcm-distributor 3.1.0 |
+| **System** | Shizuku 13.1.5 (optional), Biometric 1.4.0-alpha07, google GenerativeAI 0.9.0 (optional AI providers) |
 
 ---
 
 ## 📱 Permissions & Privacy
 
-Source of truth: `app/src/main/AndroidManifest.xml`. Toolz declares powerful access
-because some tools are deeply integrated with the system — each is requested with an
-in-app explanation and features degrade gracefully without optional grants.
-See `PRIVACY.md` for what actually leaves the device.
+All permissions are requested with in-app explanations and degrade gracefully if denied.
 
-| Feature Area | Manifest permissions | Why it's needed |
+<details>
+<summary>View full permissions table</summary>
+
+| Feature Area | Permissions | Purpose |
 |---|---|---|
-| **Core / Network** | `INTERNET`, `ACCESS_NETWORK_STATE`, `ACCESS_WIFI_STATE`, `CHANGE_WIFI_STATE`, `NEARBY_WIFI_DEVICES` (neverForLocation), `WAKE_LOCK` | Web Search, AI providers, catalog, updates, model downloads, Wi-Fi diagnostics |
-| **Camera / Light** | `CAMERA`, `FLASHLIGHT` | Scanner, magnifier, color picker, flashlight + QS tile; foregroundServiceType `camera` for flashlight service |
-| **Audio / Music** | `RECORD_AUDIO`, `MODIFY_AUDIO_SETTINGS` | Voice recorder (FGS `microphone`), sound meter; `mediaPlayback` FGS for Media3 player |
-| **Location / Motion** | `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION`, `ACTIVITY_RECOGNITION`, `HIGH_SAMPLING_RATE_SENSORS` | Speedometer, altimeter, compass, step counter (FGS `health`), bubble/light meters |
-| **Files / Media** | `READ_MEDIA_AUDIO/IMAGES/VIDEO`, `READ/WRITE_EXTERNAL_STORAGE` (maxSdk 32), `MANAGE_EXTERNAL_STORAGE` | Music indexing, PDF open, converter, cleaner leftovers/junk; FileProvider `com.frerox.toolz.fileprovider` for share |
-| **Productivity / Alarms** | `SCHEDULE_EXACT_ALARM` (maxSdk 32), `USE_EXACT_ALARM`, `RECEIVE_BOOT_COMPLETED`, `VIBRATE`, `USE_FULL_SCREEN_INTENT`, `SYSTEM_ALERT_WINDOW` | Timer/Pomodoro/calendar/task alarms + boot restore, overlay controls |
-| **Background work** | `FOREGROUND_SERVICE` + `HEALTH/MICROPHONE/SPECIAL_USE/MEDIA_PLAYBACK/DATA_SYNC/CAMERA` | Tool/step/voice/music/clipboard/caffeinate/conversion/purgeshot services; WorkManager `SystemForegroundService` (dataSync) |
-| **Focus Flow** | `PACKAGE_USAGE_STATS`, `BIND_ACCESSIBILITY_SERVICE` (`FocusFlowAccessibilityService`), `SYSTEM_ALERT_WINDOW` | App-usage analysis, limits, focus controls |
-| **Notification Vault** | `BIND_NOTIFICATION_LISTENER_SERVICE` (`NotificationVaultService`) | Local notification log/auditing, stays on-device |
-| **Cleaner Auto-clear** | `BIND_ACCESSIBILITY_SERVICE` (`CleanerAccessibilityService`), `QUERY_ALL_PACKAGES`, `KILL_BACKGROUND_PROCESSES`, Shizuku `rikka.shizuku.permission.API_V23` | Opens app Settings → taps Clear cache per run; read-only `Android/obb` listing + `pm trim-caches`; deletes via trash pipeline only |
-| **Purge Shot** | `BIND_ACCESSIBILITY_SERVICE` (`PurgeShotAccessibilityService`), screenshot observer JobService | Auto-expiring screenshots, triple-redundant queue, undo |
-| **Password Vault** | `USE_BIOMETRIC`, Autofill service (`BIND_AUTOFILL_SERVICE`, `ToolzAutofillService`) | Biometric unlock + credential filling, SQLCipher-backed |
-| **Updates / Sharing** | `REQUEST_INSTALL_PACKAGES`, `QUERY_ALL_PACKAGES` | In-app GitHub Release updates; browser/share intents (`http/https`, `SEND text/plain`, audio/PDF/image/tzbk/enc handlers, `whisper-auth://login`) |
-| **Whisper push** | UnifiedPush service (`WhisperPushService`, `org.unifiedpush.android.connector.PUSH_EVENT`) | Wake pings (senderId/messageId, no content); RFC 8291-encrypted via the embedded FCM distributor (needs Play Services/microG) or an external distributor (ntfy/NextPush) |
-| **System extras** | `WRITE_SETTINGS` (Caffeinate screen timeout, manual grant), `BLUETOOTH`/`BLUETOOTH_CONNECT` | Keep-screen-on, device/sensor accessories |
+| **Core / Network** | `INTERNET`, `ACCESS_NETWORK_STATE`, `ACCESS_WIFI_STATE`, `CHANGE_WIFI_STATE`, `NEARBY_WIFI_DEVICES`, `WAKE_LOCK` | Web Search, AI providers, updates, Wi-Fi diagnostics |
+| **Camera / Light** | `CAMERA`, `FLASHLIGHT` | Scanner, magnifier, color picker, flashlight + QS tile |
+| **Audio / Music** | `RECORD_AUDIO`, `MODIFY_AUDIO_SETTINGS` | Voice recorder, sound meter, Media3 player |
+| **Location / Motion** | `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION`, `ACTIVITY_RECOGNITION`, `HIGH_SAMPLING_RATE_SENSORS` | Speedometer, altimeter, compass, step counter |
+| **Files / Media** | `READ_MEDIA_AUDIO/IMAGES/VIDEO`, `READ/WRITE_EXTERNAL_STORAGE` (≤SDK 32), `MANAGE_EXTERNAL_STORAGE` | Music indexing, PDF, converter, cleaner |
+| **Alarms / Productivity** | `SCHEDULE_EXACT_ALARM`, `USE_EXACT_ALARM`, `RECEIVE_BOOT_COMPLETED`, `VIBRATE`, `USE_FULL_SCREEN_INTENT`, `SYSTEM_ALERT_WINDOW` | Timer, Pomodoro, calendar alarms, boot restore |
+| **Background Services** | `FOREGROUND_SERVICE` + service types | Tool services, step counter, voice recorder, music, clipboard, caffeinate, conversions |
+| **Focus Flow** | `PACKAGE_USAGE_STATS`, `BIND_ACCESSIBILITY_SERVICE`, `SYSTEM_ALERT_WINDOW` | App-usage analysis, focus limits |
+| **Notification Vault** | `BIND_NOTIFICATION_LISTENER_SERVICE` | Local notification log — stays on-device |
+| **Cleaner** | `BIND_ACCESSIBILITY_SERVICE`, `QUERY_ALL_PACKAGES`, `KILL_BACKGROUND_PROCESSES`, Shizuku API | Clear cache automation, read-only obb listing |
+| **Purge Shot** | `BIND_ACCESSIBILITY_SERVICE`, screenshot observer | Auto-expiring screenshot queue |
+| **Password Vault** | `USE_BIOMETRIC`, `BIND_AUTOFILL_SERVICE` | Biometric unlock, credential filling (SQLCipher) |
+| **Updates / Sharing** | `REQUEST_INSTALL_PACKAGES`, `QUERY_ALL_PACKAGES` | In-app updates, share/intent handlers |
+| **Whisper Push** | UnifiedPush service | Wake pings only (senderId/messageId, no content) |
+| **System Extras** | `WRITE_SETTINGS`, `BLUETOOTH`/`BLUETOOTH_CONNECT` | Caffeinate screen timeout, accessories |
 
-### Important Notes
+</details>
 
-- **Local-first, not offline-only.** Background remover inference, OCR, QR, FFmpeg,
-  calculator, PDF render, vault/notifications/clipboard storage are fully on-device;
-  connected features (Assistant with your keys, web search, catalog, model downloads,
-  updates, Whisper) require network — plus an offline mode that disables them.
-- **Assistant is optional.** All core utilities work without provider keys.
-- **No tracking, no ads.** No analytics SDKs. See `PRIVACY.md` for endpoint-by-endpoint truth.
+> **Privacy principles:** Background Remover, OCR, QR, FFmpeg, calculator, PDF, vault, clipboard, and notifications are fully on-device. Connected features (AI Assistant, web search, updates, Whisper) require network access. No analytics SDKs. No ads. See [`PRIVACY.md`](PRIVACY.md) for endpoint-by-endpoint details.
 
 ---
 
-## ✨ Quick Start Tips
+## ✨ Quick Start
 
-1. **Pin Your Favorites** — Long-press tools on the dashboard to keep your most-used items front and center
-2. **Use Smart Search** — The dashboard search is optimized for intent matching; describe what you want in plain language
-3. **Enable Widgets** — Add homescreen widgets for quick access to flashlight, notes, music, and more
-4. **Set Up Your Vault** — Configure your password vault with biometric unlock for seamless Autofill
-5. **Explore Focus Flow** — Track your app usage and set meaningful productivity goals
-6. **Backup Your Data** — Regularly export your data to protect notes, passwords, and settings
+1. **Pin Your Favorites** — Long-press any tool on the dashboard to keep it front and center
+2. **Use Smart Search** — Type what you want to do in plain language; the search routes you directly
+3. **Enable Widgets** — Add homescreen widgets for flashlight, notes, music, and more
+4. **Set Up Your Vault** — Configure biometric unlock for seamless Password Vault Autofill
+5. **Explore Focus Flow** — Track your app usage and set meaningful daily productivity goals
+6. **Back Up Your Data** — Export notes, passwords, and settings regularly
 
 ---
 
 ## 🐛 Support & Contribution
 
-- **Repository:** [github.com/freroxx/toolz](https://github.com/freroxx/toolz)
-- **Releases:** [github.com/freroxx/toolz/releases](https://github.com/freroxx/toolz/releases)
-- **Discord Community:** [discord.gg/aAswRUerwh](https://discord.gg/aAswRUerwh)
+| | |
+|---|---|
+| 📦 **Releases** | [github.com/freroxx/toolz/releases](https://github.com/freroxx/toolz/releases) |
+| 💬 **Discord** | [discord.gg/aAswRUerwh](https://discord.gg/aAswRUerwh) |
+| 🌐 **Website** | [toolz-app.vercel.app](https://toolz-app.vercel.app) |
+| 🧪 **Early Access** | Alpha APKs posted in the Discord server |
 
-### Report Issues or Contribute
-
-Have a bug report, feature suggestion, or want to contribute? Open an issue or pull request in this repository, or join the Discord server for fast fixes and suggestions.
+Found a bug or have a feature suggestion? Open an issue or pull request, or join the Discord for fast responses.
 
 ---
 
 ## 📄 License
 
-This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
+Licensed under the **GNU General Public License v3.0** — see the [LICENSE](LICENSE) file for details.
 
 ---
 
-## Early access 
-
-Want to test bleeding-edge features? Early Access APKs are posted on the Discord Server (Alpha versions).
-
-
-
-**Made with ❤️ by freroxx**
+<p align="center">
+  <img src="https://i.ibb.co/jvt7B2Cy/toolz-glass-icon-dark-bg.png" alt="Toolz" width="64" /><br/>
+  <strong>Made with ❤️ by <a href="https://github.com/freroxx">freroxx</a></strong>
+</p>
