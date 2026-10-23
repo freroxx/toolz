@@ -4568,8 +4568,8 @@
     <string name="st_FastReport_crash_title">Toolz se encontró con un problema</string>
     <string name="st_FastReport_crash_body">La app se cerró inesperadamente la última vez. Un informe breve y privado puede ayudar a encontrar y corregir el problema.</string>
     <string name="st_FastReport_crash_time">Se cerró a las %1$s</string>
-    <string name="st_FastReport_privacy_note">El informe incluye avisos y errores recientes, los detalles del cierre e información básica del dispositivo. Nunca incluye tus mensajes, archivos, fotos, contraseñas ni datos de la cuenta.</string>
-    <string name="st_FastReport_discord_note">Únete al Discord de Toolz y deja el archivo generado en el canal de reportes de errores.</string>
+    <string name="st_FastReport_privacy_note">El informe incluye avisos y errores recientes, los detalles del cierre e información básica del dispositivo. Toolz no lee tus mensajes, archivos, fotos, contraseñas ni datos de la cuenta para crearlo.</string>
+    <string name="st_FastReport_discord_note">Únete al Discord de Toolz y deja el archivo generado en el canal de reportes de errores. La invitación también está en Ajustes → Acerca de.</string>
     <string name="st_FastReport_action">Informe rápido</string>
     <string name="st_FastReport_preparing">Preparando…</string>
     <string name="st_FastReport_failed">No se pudo crear el informe. Inténtalo de nuevo.</string>
@@ -4581,9 +4581,9 @@
     <string name="st_FastReport_info_title">¿Qué es un informe rápido?</string>
     <string name="st_FastReport_info_intro">Crea un pequeño archivo Markdown (.md) que explica qué salió mal. Puedes enviarlo al equipo de Toolz para que corrija el problema más rápido.</string>
     <string name="st_FastReport_info_point_file">El archivo incluye avisos y errores recientes, los detalles del cierre e información básica como la versión de la app, el modelo del teléfono y la versión de Android.</string>
-    <string name="st_FastReport_info_point_private">Nunca incluye tus mensajes, archivos, fotos, contraseñas ni datos de la cuenta.</string>
+    <string name="st_FastReport_info_point_private">Toolz no lee tus mensajes, archivos, fotos, contraseñas ni datos de la cuenta para crearlo.</string>
     <string name="st_FastReport_info_point_choice">No se sube nada automáticamente. Toolz solo abre el menú de compartir de tu teléfono y tú eliges dónde va el archivo.</string>
-    <string name="st_FastReport_info_point_discord">Únete al Discord de Toolz y deja el archivo en el canal de reportes de errores para que pueda revisarse.</string>
+    <string name="st_FastReport_info_point_discord">Únete al Discord de Toolz y deja el archivo en el canal de reportes de errores para que pueda revisarse. La invitación también está en Ajustes → Acerca de.</string>
     <string name="st_FastReport_info_got_it">Entendido</string>
     <string name="st_FastReport_info_open_discord">Abrir Discord</string>
 

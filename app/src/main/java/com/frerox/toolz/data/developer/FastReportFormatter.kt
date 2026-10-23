@@ -161,7 +161,7 @@ fun buildFastReportMarkdown(
         }
         appendLine("## How to send this report")
         appendLine()
-        appendLine("1. Join the Toolz Discord server: $discordUrl")
+        appendLine("1. Join the Toolz Discord server (also linked in Settings → About): $discordUrl")
         appendLine("2. Open the **bug-reports** channel.")
         appendLine("3. Drop this `.md` file into the channel with a short description of what you were doing.")
         appendLine()
@@ -169,14 +169,47 @@ fun buildFastReportMarkdown(
         appendLine()
         appendLine(
             "This report contains technical diagnostics only: app and device versions, active sandbox " +
-                "names, warning/error logs, and the crash stack trace. It does not contain messages, " +
-                "files, photos, passwords, or account details. You choose where the file is sent.",
+                "names, warning/error logs, and the crash stack trace. Toolz does not read your messages, " +
+                "files, photos, passwords, or account details to build it. You choose where the file is sent.",
         )
     }.trimEnd()
 }
 
-private const val MAX_REPORT_LOG_LINES = 300
+internal const val MAX_REPORT_LOG_LINES = 300
 private const val MAX_REPORT_STACK_CHARS = 24_000
+
+/**
+ * Keeps crash-time evidence even when the current session has already logged
+ * enough warnings to fill the report on its own. Crash lines come first, but
+ * up to a third of the budget is reserved for the newest live lines so the
+ * report still describes what happened after the restart.
+ */
+internal fun mergeFastReportLogs(
+    liveLogs: List<String>,
+    crashLogs: List<String>,
+    maxLines: Int = MAX_REPORT_LOG_LINES,
+): List<String> {
+    if (maxLines <= 0) return emptyList()
+    val crash = stableDistinctLogs(crashLogs)
+    val live = stableDistinctLogs(liveLogs)
+    if (crash.isEmpty()) return live.takeLast(maxLines)
+    if (live.isEmpty()) return crash.takeLast(maxLines)
+
+    val liveBudget = minOf(live.size, maxLines / 3)
+    val crashBudget = maxLines - liveBudget
+    val crashPart = crash.takeLast(crashBudget)
+    return stableDistinctLogs(crashPart + live.takeLast(maxLines - crashPart.size))
+}
+
+internal fun stableDistinctLogs(lines: List<String>): List<String> {
+    if (lines.isEmpty()) return emptyList()
+    val seen = LinkedHashSet<String>(lines.size)
+    lines.forEach { line ->
+        val trimmed = line.trimEnd()
+        if (trimmed.isNotBlank()) seen += trimmed
+    }
+    return seen.toList()
+}
 
 /** Four-tilde fence; logs and traces may contain any number of backticks. */
 private fun fenced(block: String): String {

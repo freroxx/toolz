@@ -17,12 +17,15 @@
 
 package com.frerox.toolz.ui.components
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CheckBoxOutlineBlank
@@ -37,6 +40,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
@@ -50,6 +54,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.frerox.toolz.R
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -756,26 +761,81 @@ private fun TableCellText(
 @Composable
 fun MarkdownCodeBlock(language: String, code: String, modifier: Modifier = Modifier) {
     val clipboardManager = LocalClipboardManager.current
+    val haptic = rememberToolzHapticFeedback()
     var copied by remember { mutableStateOf(false) }
     val scope  = rememberCoroutineScope()
+    val scroll = rememberScrollState()
+    val langLabel = language.trim().lowercase().ifBlank { "code" }
 
     Surface(
-        color    = Color(0xFF1E1E1E),
-        shape    = RoundedCornerShape(12.dp),
+        color    = Color(0xFF16181D),
+        shape    = RoundedCornerShape(14.dp),
+        border   = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
         modifier = modifier.fillMaxWidth()
     ) {
         Column {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text(language.uppercase(), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color.Gray)
-                IconButton(onClick = {
-                    clipboardManager.setText(AnnotatedString(code))
-                    copied = true
-                    scope.launch { delay(2000); copied = false }
-                }, modifier = Modifier.size(24.dp)) {
-                    Icon(if (copied) Icons.Rounded.Check else Icons.Rounded.ContentCopy, null, modifier = Modifier.size(14.dp), tint = if (copied) Color.Green else Color.Gray)
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(Color.White.copy(alpha = 0.04f))
+                    .padding(start = 12.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color.White.copy(alpha = 0.07f))
+                        .padding(horizontal = 7.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        langLabel.uppercase(),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.6.sp,
+                        color = Color(0xFFB8C0CC),
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    AnimatedContent(copied, label = "codeCopyLabel") { done ->
+                        Text(
+                            stringResource(if (done) R.string.st_AiChat_copied else R.string.st_AiChat_copy),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = if (done) Color(0xFF7CD992) else Color(0xFFB8C0CC),
+                        )
+                    }
+                    IconButton(
+                        onClick = {
+                            haptic.click()
+                            clipboardManager.setText(AnnotatedString(code))
+                            copied = true
+                            scope.launch { delay(2000); copied = false }
+                        },
+                        modifier = Modifier.size(34.dp),
+                    ) {
+                        Icon(
+                            if (copied) Icons.Rounded.Check else Icons.Rounded.ContentCopy,
+                            contentDescription = stringResource(if (copied) R.string.st_AiChat_copied else R.string.st_AiChat_copy),
+                            modifier = Modifier.size(15.dp),
+                            tint = if (copied) Color(0xFF7CD992) else Color(0xFFB8C0CC),
+                        )
+                    }
                 }
             }
-            Text(code, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = Color.White, modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(12.dp))
+            SelectionContainer {
+                Text(
+                    code,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.5.sp,
+                    lineHeight = 19.sp,
+                    color = Color(0xFFE6EAF0),
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(scroll).padding(12.dp),
+                    softWrap = false,
+                )
+            }
         }
     }
 }

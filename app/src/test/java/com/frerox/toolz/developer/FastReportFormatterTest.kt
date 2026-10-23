@@ -7,6 +7,7 @@ package com.frerox.toolz.developer
 import com.frerox.toolz.data.developer.CapturedCrash
 import com.frerox.toolz.data.developer.DevAppInfo
 import com.frerox.toolz.data.developer.buildFastReportMarkdown
+import com.frerox.toolz.data.developer.mergeFastReportLogs
 import com.frerox.toolz.data.developer.parseCapturedCrash
 import com.frerox.toolz.data.developer.toJson
 import org.junit.Assert.assertEquals
@@ -163,6 +164,46 @@ class FastReportFormatterTest {
 
         assertTrue(markdown.contains("Toolz 1.2.3-beta1 (43)"))
         assertFalse(markdown.contains("Toolz 1.2.3 (42)"))
+    }
+
+    @Test
+    fun `crash-time logs survive a noisy live session`() {
+        val crashLogs = listOf("E/Toolz: crash-a", "E/Toolz: crash-b")
+        val liveLogs = (0 until 500).map { index -> "E/Toolz: live-$index" }
+
+        val merged = mergeFastReportLogs(liveLogs = liveLogs, crashLogs = crashLogs)
+
+        assertEquals(300, merged.size)
+        assertEquals(crashLogs, merged.take(2))
+        assertTrue(merged.contains("E/Toolz: live-499"))
+        assertFalse(merged.contains("E/Toolz: live-0"))
+    }
+
+    @Test
+    fun `large crash log and live log sets both keep their newest lines`() {
+        val crashLogs = (0 until 400).map { index -> "E/Toolz: crash-$index" }
+        val liveLogs = (0 until 400).map { index -> "E/Toolz: live-$index" }
+
+        val merged = mergeFastReportLogs(liveLogs = liveLogs, crashLogs = crashLogs)
+
+        assertEquals(300, merged.size)
+        assertTrue(merged.contains("E/Toolz: crash-399"))
+        assertTrue(merged.contains("E/Toolz: live-399"))
+        assertFalse(merged.contains("E/Toolz: crash-0"))
+        assertFalse(merged.contains("E/Toolz: live-0"))
+    }
+
+    @Test
+    fun `logs are deduplicated without reordering`() {
+        val merged = mergeFastReportLogs(
+            liveLogs = listOf("E/Toolz: shared", "W/Toolz: live"),
+            crashLogs = listOf("E/Toolz: crash", "E/Toolz: shared"),
+        )
+
+        assertEquals(
+            listOf("E/Toolz: crash", "E/Toolz: shared", "W/Toolz: live"),
+            merged,
+        )
     }
 
     @Test

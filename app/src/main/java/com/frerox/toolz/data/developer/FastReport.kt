@@ -223,9 +223,10 @@ object FastReportExporter {
         extraWarnErrorLogs: List<String> = emptyList(),
     ): File? {
         val info = DevAppInfoCollector.collect(context)
-        val logs = stableDistinct(
-            extraWarnErrorLogs + (crash?.logs ?: emptyList()) + FastReportLogs.readWarnErrorLogs(),
-        ).takeLast(300)
+        val logs = mergeFastReportLogs(
+            liveLogs = extraWarnErrorLogs + FastReportLogs.readWarnErrorLogs(),
+            crashLogs = crash?.logs.orEmpty(),
+        )
         val markdown = buildFastReportMarkdown(
             info = info,
             crash = crash,
@@ -280,16 +281,6 @@ object FastReportExporter {
                 DevUiOverrider.shareText(context, "Send Toolz fast report", markdown)
             }.getOrDefault(false)
         }
-    }
-
-    private fun stableDistinct(lines: List<String>): List<String> {
-        if (lines.isEmpty()) return emptyList()
-        val seen = LinkedHashSet<String>(lines.size)
-        lines.forEach { line ->
-            val trimmed = line.trimEnd()
-            if (trimmed.isNotBlank()) seen += trimmed
-        }
-        return seen.toList()
     }
 
     private fun prune(dir: File) {
