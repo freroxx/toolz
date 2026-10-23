@@ -83,6 +83,58 @@ private fun isTableSeparator(line: String): Boolean {
     return cells.all { it.matches(Regex("^:?-{3,}:?$")) }
 }
 
+private val RULE_LINE = Regex("^[-*_]{3,}$")
+private val LOOSE_BULLET = Regex("^(\\s*)\\*(?!\\*)(\\S.*)$")
+
+/**
+ * Mobile keyboards make it easy to type "*item" instead of the strict
+ * "* item". Treat a leading bare asterisk as a bullet too, while leaving
+ * "**bold**", "***", "---" and emphasis lines alone.
+ */
+private fun looseBulletContent(line: String): Pair<String, String>? {
+    if (line.trim().matches(RULE_LINE)) return null
+    val match = LOOSE_BULLET.find(line) ?: return null
+    val indent = match.groupValues[1]
+    val content = match.groupValues[2]
+
+    // A line wrapped in a single pair of asterisks is emphasis, not a bullet
+    // ("*italic text*").
+    if (content.endsWith('*') && !content.dropLast(1).contains('*')) return null
+
+    // A closing asterisk inside the first word means the leading asterisk
+    // opened emphasis ("*Note*: ..."), not a bullet. Spaced items such as
+    // "*item with *emphasis*" stay bullets.
+    val closing = content.indexOf('*')
+    if (closing >= 0) {
+        val firstSpace = content.indexOfFirst { it.isWhitespace() }
+        if (firstSpace == -1 || closing < firstSpace) return null
+    }
+    return indent to content
+}
+
+/** Strips an optional task-list checkbox from bullet text. */
+private fun parseCheckbox(content: String): Pair<String, Boolean?> = when {
+    content.startsWith("[ ] ") -> content.drop(4) to false
+    content.startsWith("[x] ") || content.startsWith("[X] ") -> content.drop(4) to true
+    else -> content to null
+}
+
+/**
+ * Heuristic: content that clearly carries markdown should be rendered richly;
+ * plain notes keep their exact line breaks instead of being re-flowed.
+ */
+private val MARKDOWN_HINT = Regex(
+    """(^|\n) {0,3}(#{1,6}\s|[-*+]\s|>\s?|[0-9]+[.)]\s|-\s*\[[ xX]\s*])""" +
+        """|(^|\n) {0,3}\*(?![*\s])\S""" +
+        """|\*\*[^*\n]+\*\*""" +
+        """|__[^_\n]+__""" +
+        """|~~[^~\n]+~~""" +
+        """|`[^`\n]+`""" +
+        """|\[[^\]]*]\([^)]*\)"""
+)
+
+fun containsMarkdown(content: String): Boolean = MARKDOWN_HINT.containsMatchIn(content)
+
 private fun parseTableAlignments(separatorLine: String): List<androidx.compose.ui.text.style.TextAlign> {
     return splitTableRow(separatorLine).map { cell ->
         val left = cell.startsWith(":")
@@ -118,7 +170,7 @@ fun parseMarkdownToSegments(raw: String): List<MdSegment> {
         }
 
         // Horizontal rule
-        if (line.trim().matches(Regex("^[-*_]{3,}$"))) {
+        if (line.trim().matches(RULE_LINE)) {
             segments += MdSegment.Divider
             i++
             continue
@@ -136,19 +188,26 @@ fun parseMarkdownToSegments(raw: String): List<MdSegment> {
         val bulletMatch = Regex("^(\\s*)[\\-\\*\\+] (.*)").find(line)
         if (bulletMatch != null) {
             val indent = bulletMatch.groupValues[1]
-            val depth = indent.length / 2
-            var content = bulletMatch.groupValues[2]
-            
-            var isChecked: Boolean? = null
-            if (content.startsWith("[ ] ")) {
-                isChecked = false
-                content = content.drop(4)
-            } else if (content.startsWith("[x] ") || content.startsWith("[X] ")) {
-                isChecked = true
-                content = content.drop(4)
-            }
-            
-            segments += MdSegment.BulletItem(inlineMarkdownNoCompose(content), depth, isChecked)
+            val (content, isChecked) = parseCheckbox(bulletMatch.groupValues[2])
+            segments += MdSegment.BulletItem(
+                inlineMarkdownNoCompose(content),
+                depth = indent.length / 2,
+                isChecked = isChecked,
+            )
+            i++
+            continue
+        }
+
+        // Lenient bullet for "*item" typed on a phone keyboard.
+        val looseBullet = looseBulletContent(line)
+        if (looseBullet != null) {
+            val (indent, rawContent) = looseBullet
+            val (content, isChecked) = parseCheckbox(rawContent)
+            segments += MdSegment.BulletItem(
+                inlineMarkdownNoCompose(content),
+                depth = indent.length / 2,
+                isChecked = isChecked,
+            )
             i++
             continue
         }
@@ -216,8 +275,9 @@ fun parseMarkdownToSegments(raw: String): List<MdSegment> {
                 curr.trimStart().startsWith("```") ||
                 startsTable ||
                 curr.matches(Regex("^(\\s*)[\\-\\*\\+] .+")) ||
+                looseBulletContent(curr) != null ||
                 curr.matches(Regex("^(\\d+)[\\.\\)] .+")) ||
-                curr.trim().matches(Regex("^[-*_]{3,}$"))
+                curr.trim().matches(RULE_LINE)
             ) break
             paragraphLines.add(curr)
             i++
@@ -518,9 +578,12 @@ fun stripMarkdown(markdown: String): String {
     text = text.replace(Regex("(?<!_)_([^_\n]+)_(?!_)"), "$1")
     // 8. Strikethrough: ~~text~~ -> text
     text = text.replace(Regex("~~([^~]+)~~"), "$1")
-    // 9. Horizontal rules: --- or *** or ___ -> empty line
+    // 9. Loose bullets without a space: *item -> item. Runs after emphasis so
+    //    "*Note*: ..." has already lost its pair instead of leaving a stray *.
+    text = text.replace(Regex("(?m)^([ \\t]*)\\*(?![*\\s])"), "$1")
+    // 10. Horizontal rules: --- or *** or ___ -> empty line
     text = text.replace(Regex("(?m)^[-*_]{3,}\\s*$"), "")
-    // 10. Table formatting: remove table delimiter rows |---|---|
+    // 11. Table formatting: remove table delimiter rows |---|---|
     text = text.replace(Regex("(?m)^\\|?\\s*:?-{3,}:?\\s*(\\|\\s*:?-{3,}:?\\s*)*\\|?$"), "")
     // Table rows: | cell | cell | -> cell | cell
     text = text.lines().joinToString("\n") { line ->
@@ -530,7 +593,7 @@ fun stripMarkdown(markdown: String): String {
             line
         }
     }
-    // 11. Normalize excess blank lines
+    // 12. Normalize excess blank lines
     text = text.replace(Regex("\\n{3,}"), "\n\n")
     return text.trim()
 }
