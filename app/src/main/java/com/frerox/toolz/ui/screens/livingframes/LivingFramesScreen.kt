@@ -217,7 +217,7 @@ fun LivingWidgetsScreen(
     ui.import?.let { imp ->
         if (!ui.importHidden) {
             AlertDialog(
-                onDismissRequest = {},
+                onDismissRequest = viewModel::hideImport,
                 title = { Text(imp.label) },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {

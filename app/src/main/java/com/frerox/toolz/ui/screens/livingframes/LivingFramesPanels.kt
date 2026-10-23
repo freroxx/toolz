@@ -373,6 +373,16 @@ internal fun LookPanel(frame: LivingFrame, vm: LivingFramesViewModel) {
     }
     val selectedTool = LivingFrameTools.byRoute(frame.tapTargetRoute)
     val selectedToolLabel = selectedTool?.let { stringResource(it.titleRes) } ?: "a Toolz tool"
+    // A slideshow can become a still/photo through old metadata. The widget
+    // already falls back to opening Living Widgets for that stale action, so
+    // show the same effective choice here instead of no selected chip.
+    val effectiveTap = if (
+        frame.tapAction == LivingFrameTapAction.NEXT_FRAME && !frame.isSlideshow
+    ) {
+        LivingFrameTapAction.OPEN_PREVIEW
+    } else {
+        frame.tapAction
+    }
     PanelCard {
         SettingBlock("Framing") {
             ChoiceChips(
@@ -409,7 +419,7 @@ internal fun LookPanel(frame: LivingFrame, vm: LivingFramesViewModel) {
         SettingBlock("When tapped") {
             ChoiceChips(
                 options = tapActions,
-                selected = tapActions.firstOrNull { it.second == frame.tapAction },
+                selected = tapActions.firstOrNull { it.second == effectiveTap },
                 label = { it.first },
                 onSelect = { vib?.vibrateTick(); vm.setTapAction(frame.id, it.second) }
             )
