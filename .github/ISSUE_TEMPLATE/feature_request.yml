@@ -1,0 +1,68 @@
+name: "Feature Proposal"
+description: "Suggest an improvement, new capability, or refinement for Toolz"
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        We love thoughtful ideas! Note that Toolz already includes 50+ tools with a strong emphasis on staying lightweight and zero-bloat.
+        Refinements, performance boosts, and polish for existing tools have the highest priority.
+
+  - type: dropdown
+    id: feature-type
+    attributes:
+      label: "Proposal Category"
+      description: "What type of enhancement are you suggesting?"
+      options:
+        - "Refinement / Polish of an existing tool"
+        - "Performance or battery efficiency optimization"
+        - "Accessibility or localization improvement"
+        - "System integration (Homescreen Widget, Quick Settings Tile, Autofill)"
+        - "New tool instrument proposal"
+        - "Other"
+    validations:
+      required: true
+
+  - type: input
+    id: target-tool
+    attributes:
+      label: "Target Instrument / Component"
+      description: "Which part of the app does this proposal touch?"
+      placeholder: "e.g. Password Vault / Music Player / Compass / Homescreen Widgets"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem-statement
+    attributes:
+      label: "Problem or User Need"
+      description: "What pain point or workflow limitation does this solve?"
+      placeholder: "When managing many passwords, it is currently difficult to filter items by specific tags..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: "Proposed Solution"
+      description: "How do you envision this working from a user experience and technical perspective?"
+      placeholder: "Add a tag filter row above the search bar in the vault..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives-considered
+    attributes:
+      label: "Alternatives Considered"
+      description: "Have you explored alternative solutions or existing Android tools?"
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: "Checklist"
+      options:
+        - label: "I have searched open and closed issues and verified this is not a duplicate suggestion."
+          required: true
+        - label: "This proposal respects the privacy-first and local-first architecture of Toolz."
+          required: true

@@ -1,0 +1,99 @@
+name: "Bug Report"
+description: "File an unexpected behavior, crash, or bug in Toolz"
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting an issue! Please search existing issues to avoid duplicates.
+        
+        💡 **Have a Fast Report?** If you generated a `toolz-fast-report-*.md` from **Developer Mode** (Settings → Developer Mode → Fast report) or after an unexpected crash, you can use our dedicated [Fast Report Template](fast_report.yml) or paste it in the log field below.
+        
+        For security vulnerabilities, please refer to our [Security Policy](../../SECURITY.md) instead.
+
+  - type: input
+    id: app-version
+    attributes:
+      label: "Toolz Version"
+      description: "What version of Toolz are you running?"
+      placeholder: "e.g. 1.1.6 (arm64-v8a)"
+    validations:
+      required: true
+
+  - type: input
+    id: device-os
+    attributes:
+      label: "Device & Android Version"
+      description: "Specify your device manufacturer, model, and OS version."
+      placeholder: "e.g. Google Pixel 8, Android 14 (Stock) / Samsung Galaxy S23, OneUI 6"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: affected-module
+    attributes:
+      label: "Affected Tool / Component"
+      description: "Which instrument or system module is encountering the issue?"
+      options:
+        - "Time & Productivity (Timer, Stopwatch, Pomodoro, Calendar, Todo, Caffeinate, Focus Flow)"
+        - "AI & Utilities (AI Assistant, Smart Search, Web Search, Notepad)"
+        - "Media & PDF (Music Player, Media Downloader, Voice Recorder, File Converter, PDF Reader, BG Remover, Cleaner, Sound Meter)"
+        - "Light & Optics (Flashlight, Screen Light, Magnifier, Scanner, QR Generator, Light Meter)"
+        - "Sensors & Navigation (Compass, Bubble Level, Speedometer, Altimeter, Step Counter, Ruler, Color Picker)"
+        - "Math & Conversion (Calculator, Unit Converter, Tip/BMI Calculator, Equation Solver)"
+        - "Security & Privacy (Password Vault, Password Generator, Clipboard, Notification Vault, Smart Encrypter, Purge Shot)"
+        - "Device & System (Device Info, Battery Info, Periodic Table, Network Tweaks)"
+        - "Whisper Messenger (E2EE, realtime chat, outbox, keys)"
+        - "Widgets & Quick Settings Tiles"
+        - "Other / App General (Dashboard, Settings, In-App Updater)"
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction-steps
+    attributes:
+      label: "Steps to Reproduce"
+      description: "Detail the exact steps to trigger this behavior."
+      placeholder: |
+        1. Open 'Compass' tool from dashboard.
+        2. Rotate device by 90 degrees.
+        3. Bearing indicator freezes or stutters.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: "Expected Behavior"
+      description: "A clear description of what you expected to happen."
+      placeholder: "The compass needle should rotate smoothly in sync with hardware orientation sensor."
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual-behavior
+    attributes:
+      label: "Actual Behavior"
+      description: "What actually occurred."
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs-screenshots
+    attributes:
+      label: "Fast Report (.md) / Logcat / Screenshots"
+      description: "Paste your Fast Report content, relevant logcat traces, or drag and drop screenshots/recordings here."
+      render: markdown
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: "Checklist"
+      options:
+        - label: "I have searched open and closed issues and verified this is not a duplicate."
+          required: true
+        - label: "I am running an official build of Toolz from GitHub Releases or built from main."
+          required: true
+        - label: "This is a bug report and does not contain private or sensitive data (passwords, tokens, personal media)."
+          required: true

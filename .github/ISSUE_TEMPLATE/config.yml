@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: "🔒 Security Vulnerability Report"
+    url: "https://github.com/freroxx/toolz/blob/main/SECURITY.md"
+    about: "Please report security and privacy vulnerabilities privately via email."
+  - name: "💬 Community & Questions (Discord)"
+    url: "https://discord.gg/aAswRUerwh"
+    about: "Join our Discord for general questions, setup support, and alpha build testing."

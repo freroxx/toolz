@@ -21,6 +21,9 @@
 <p align="center">
   <a href="https://toolz-app.vercel.app">🌐 Website</a> &nbsp;·&nbsp;
   <a href="https://github.com/freroxx/toolz/releases">📥 Download</a> &nbsp;·&nbsp;
+  <a href="CONTRIBUTING.md">🤝 Contributing</a> &nbsp;·&nbsp;
+  <a href="SECURITY.md">🔒 Security</a> &nbsp;·&nbsp;
+  <a href="ACCESSIBILITY.md">♿ Accessibility</a> &nbsp;·&nbsp;
   <a href="https://discord.gg/aAswRUerwh">💬 Discord</a>
 </p>
 
@@ -237,14 +240,14 @@ Import the project into Android Studio, let Gradle sync, then build or run direc
 | Layer | Libraries |
 |---|---|
 | **Language / Build** | Kotlin 2.4.20, KSP 2.3.10, Hilt 2.60.1 (DI + WorkManager), kotlinx-coroutines 1.11.0, kotlinx-serialization 1.11.0 |
-| **UI** | Jetpack Compose BOM 2026.09.00, Material 3 Expressive `1.5.0-alpha29`, Navigation Compose 2.9.8, Coil 3.5.0, Glance 1.3.0-alpha02 (widgets) |
-| **Data** | Room 2.8.4, SQLCipher 4.18.0, DataStore, Security Crypto 1.1.0, WorkManager 2.11.2 |
-| **Network** | Retrofit 3.0.0 + Moshi 1.15.2, OkHttp 5.5.0 + DnsOverHttps, Ktor 3.5.2 |
-| **Media / Camera** | Media3 1.11.0, CameraX 1.7.0-alpha03, FFmpeg Kit LTS 6.1.7, youtubedl-android 0.18.1, NewPipeExtractor 0.26.5 |
-| **Vision / Docs** | ZXing 3.5.4 (QR/barcode), Tesseract4Android 4.8.0 (OCR), PdfBox-Android 2.0.27.0, AndroidSVG 1.4 |
+| **UI** | Jetpack Compose BOM 2026.09.00, Material 3 Expressive `1.5.0-alpha29`, Navigation Compose 2.9.8, Coil 3.6.3, Glance 1.3.0-alpha02 (widgets) |
+| **Data** | Room 2.8.5, SQLCipher 4.19.1, DataStore, Security Crypto 1.1.0, WorkManager 2.12.0 |
+| **Network** | Retrofit 3.0.0 + Moshi 1.15.2, OkHttp 5.5.0 + DnsOverHttps, Ktor 3.6.0 |
+| **Media / Camera** | Media3 1.11.1, CameraX 1.7.0-alpha03, FFmpeg Kit LTS 6.1.7, youtubedl-android 0.18.1, NewPipeExtractor 0.26.5 |
+| **Vision / Docs** | ZXing 4.3.0 (QR/barcode), Tesseract4Android 4.8.0 (OCR), PdfBox-Android 2.0.27.0, AndroidSVG 1.4 |
 | **Background Remover** | ONNX Runtime Mobile 1.30.0 — SHA-256 pinned models, download on demand |
-| **Whisper Backend** | Supabase BOM 3.7.0 (auth/postgrest/realtime/storage), UnifiedPush 3.3.5 + embedded-fcm-distributor 3.1.0 |
-| **System** | Shizuku 13.1.5 (optional), Biometric 1.4.0-alpha07, google GenerativeAI 0.9.0 (optional AI providers) |
+| **Whisper Backend** | Supabase BOM 3.8.0 (auth/postgrest/realtime/storage), UnifiedPush 3.3.5 + embedded-fcm-distributor 3.1.0 |
+| **System** | Shizuku 13.1.5 (optional), Biometric 1.4.0-alpha07, Google GenerativeAI 0.9.0 (optional AI provider) |
 
 ---
 
@@ -303,9 +306,46 @@ Found a bug or have a feature suggestion? Open an issue or pull request, or join
 
 ---
 
+## ⚖️ Legal & Disclaimers
+
+### 1. General "As-Is" Disclaimer & Limitation of Liability
+Toolz is provided free of charge under the **GNU General Public License v3.0**, "as is" and without warranty of any kind, express or implied. Under no circumstances shall the author, developers, or contributors be held liable for any direct, indirect, incidental, special, exemplary, or consequential damages (including, but not limited to, loss of data, device malfunction, or business interruption) arising in any way out of the use or inability to use this software.
+
+### 2. Sensor & Diagnostic Instruments
+Utilities such as the Compass, Altimeter, Speedometer, Bubble Level, Sound Meter, and Hardware Diagnostics rely upon underlying device hardware sensors and OEM driver calibration. They are provided strictly for **informational, educational, and recreational purposes**. They must **never** be relied upon for life-safety, aviation, maritime navigation, professional surveying, or emergency operations.
+
+### 3. Media Extraction & Third-Party Platforms
+The Media Downloader utility is engineered strictly for **personal, non-commercial archiving** of user-owned media or publicly unencumbered content where the user has explicit permission or legal rights under applicable fair-use and private copying exceptions. Toolz does **not** bypass or circumvent Digital Rights Management (DRM) technologies (such as Widevine, FairPlay, or PlayReady). Users bear sole responsibility for ensuring their use conforms to applicable local laws, copyright statutes, and third-party terms of service.
+
+### 4. Trademarks & Brand Ownership
+All product names, logos, brands, and registered trademarks cited within this project (including *Android*, *Google*, *YouTube*, *TikTok*, *Instagram*, *FFmpeg*, *SQLCipher*, and others) belong entirely to their respective trademark holders. Reference to these brands does not constitute or imply any endorsement, sponsorship, or affiliation with the Toolz project.
+
+---
+
+## 🙏 Credits & Community
+
+Toolz is an independent project, made substantially better by early adopters and contributors from the community:
+
+| Contributor | Contribution                                                                                             | Profile |
+|---|----------------------------------------------------------------------------------------------------------|---|
+| **Briz** (`clickfun`) | Designed the official Toolz glass icon logo                                                              | [Discord Profile](https://discord.com/users/1525210658529083432) |
+| **ARedstonePerson** (`aredstoneperson`) | Deep testing & feature proposals since the earliest beta/alpha releases (OG member)                      | [Discord Profile](https://discord.com/users/1368349335070179329) |
+| **Luciano** (`luciano2996`) | Conceived and suggested the Living Widgets tool                                                          | [Discord Profile](https://discord.com/users/327494558294343680) |
+| **Kreisler** (`itskreisler`) | Diagnosed a critical MIUI crash loop caused by hardware `createBlurEffect` failure (`nativePtr is null`) | [Discord Profile](https://discord.com/users/455456141330219009) |
+
+*Want to contribute? Report bugs via Developer Mode Fast Reports, submit pull requests, or share ideas in our [Discord Server](https://discord.gg/aAswRUerwh).*
+
+---
+
 ## 📄 License
 
 Licensed under the **GNU General Public License v3.0** — see the [LICENSE](LICENSE) file for details.
+
+Community health guidelines:
+- [Code of Conduct](CODE_OF_CONDUCT.md)
+- [Contributing Guidelines](CONTRIBUTING.md)
+- [Security Policy](SECURITY.md)
+- [Accessibility Statement](ACCESSIBILITY.md)
 
 ---
 
