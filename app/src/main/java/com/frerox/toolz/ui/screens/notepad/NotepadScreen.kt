@@ -69,7 +69,6 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -1602,128 +1601,6 @@ private fun CurrentTrackProgress(
     val live by flow.collectAsStateWithLifecycle(initialValue = 0L)
     val progress = if (durationMs > 0L) (live.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) else 0f
     content(progress, live)
-}
-
-// ─────────────────────────────────────────────────────────────
-//  Markdown-aware note body
-// ─────────────────────────────────────────────────────────────
-
-/**
- * Rich note body: renders markdown through the app's shared parser while
- * keeping the note's own typography (chosen font, bold/italic, size) as the
- * base style — a styled note still looks like itself. Inline emphasis from
- * the markdown spans composes on top of the base weight.
- */
-@Composable
-private fun NoteMarkdownBody(
-    content: String,
-    baseStyle: TextStyle,
-    baseColor: Color,
-    strongColor: Color,
-    modifier: Modifier = Modifier,
-) {
-    val segments = remember(content) { parseMarkdownToSegments(content) }
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        segments.forEach { seg ->
-            when (seg) {
-                is MdSegment.Header -> {
-                    val scale = when (seg.level) {
-                        1 -> 1.35f
-                        2 -> 1.2f
-                        else -> 1.08f
-                    }
-                    Text(
-                        inlineMarkdownNoCompose(seg.text),
-                        style = baseStyle.copy(
-                            fontSize   = (baseStyle.fontSize.value * scale).sp,
-                            lineHeight = (baseStyle.fontSize.value * scale * 1.3f).sp,
-                            fontWeight = FontWeight.ExtraBold,
-                        ),
-                        color = strongColor,
-                    )
-                }
-                is MdSegment.Paragraph -> Text(seg.content, style = baseStyle, color = baseColor)
-                is MdSegment.BulletItem -> Row(
-                    Modifier.padding(start = (seg.depth * 12).dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    if (seg.isChecked != null) {
-                        Icon(
-                            if (seg.isChecked) Icons.Rounded.Check else Icons.Rounded.CheckBoxOutlineBlank,
-                            null,
-                            Modifier.size(15.dp).offset(y = 2.dp),
-                            tint = baseColor.copy(if (seg.isChecked) 1f else 0.45f),
-                        )
-                    } else {
-                        Box(
-                            Modifier
-                                .offset(y = 7.dp)
-                                .size(5.dp)
-                                .background(baseColor.copy(0.75f), CircleShape)
-                        )
-                    }
-                    Text(
-                        seg.content,
-                        style = baseStyle,
-                        color = baseColor,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                is MdSegment.NumberedItem -> Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        "${seg.index}.",
-                        style = baseStyle,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = strongColor,
-                    )
-                    Text(
-                        seg.content,
-                        style = baseStyle,
-                        color = baseColor,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                is MdSegment.Blockquote -> Row(Modifier.height(IntrinsicSize.Min)) {
-                    Box(
-                        Modifier
-                            .width(3.dp)
-                            .fillMaxHeight()
-                            .background(baseColor.copy(0.3f), RoundedCornerShape(2.dp))
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        seg.content,
-                        style = baseStyle.copy(fontStyle = FontStyle.Italic),
-                        color = baseColor.copy(0.85f),
-                    )
-                }
-                is MdSegment.Code -> Text(
-                    seg.code.trimEnd('\n'),
-                    style = baseStyle.copy(
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = (baseStyle.fontSize.value * 0.85f).sp,
-                        lineHeight = (baseStyle.fontSize.value * 0.85f * 1.4f).sp,
-                    ),
-                    color = baseColor.copy(0.9f),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(baseColor.copy(0.07f))
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                )
-                is MdSegment.Table -> MarkdownSegment(
-                    seg = seg,
-                    baseFontSize = (baseStyle.fontSize.value * 0.9f).sp,
-                    textColor = baseColor,
-                )
-                MdSegment.Divider -> HorizontalDivider(
-                    Modifier.padding(vertical = 2.dp),
-                    thickness = 0.5.dp,
-                    color = baseColor.copy(0.2f),
-                )
-            }
-        }
-    }
 }
 
 @Composable
@@ -3374,13 +3251,6 @@ private fun typingFadeVisualTransformation(
             TransformedText(transformed, OffsetMapping.Identity)
         }
     }
-}
-
-private fun noteFontFamily(style: String): FontFamily = when (style) {
-    "SERIF"     -> FontFamily.Serif
-    "MONOSPACE" -> FontFamily.Monospace
-    "CASUAL"    -> FontFamily.Cursive
-    else        -> FontFamily.Default
 }
 
 @Composable

@@ -50,6 +50,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
@@ -69,6 +70,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -1847,16 +1849,45 @@ private fun QuickNoteCard(
                             contentScale = ContentScale.Crop,
                         )
                     }
-                    Text(
-                        note.content.ifBlank { "No text" },
-                        style      = MaterialTheme.typography.bodySmall,
-                        color      = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                        maxLines   = 3,
-                        overflow   = TextOverflow.Ellipsis,
-                        fontWeight = FontWeight.Medium,
-                        lineHeight = 17.sp,
-                        modifier   = Modifier.weight(1f, fill = false),
+                    val previewColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                    val previewStyle = MaterialTheme.typography.bodySmall.copy(
+                        fontFamily    = noteFontFamily(note.fontStyle),
+                        fontWeight    = if (note.isBold) FontWeight.Bold else FontWeight.Medium,
+                        fontStyle     = if (note.isItalic) FontStyle.Italic else FontStyle.Normal,
+                        lineHeight    = 17.sp,
+                        letterSpacing = 0.1.sp,
                     )
+                    when {
+                        note.content.isBlank() -> Text(
+                            "No text",
+                            style      = previewStyle,
+                            color      = previewColor,
+                            maxLines   = 3,
+                            overflow   = TextOverflow.Ellipsis,
+                            modifier   = Modifier.weight(1f, fill = false),
+                        )
+                        containsMarkdown(note.content) -> Box(
+                            Modifier
+                                .weight(1f, fill = false)
+                                .clipToBounds()
+                                .fadingEdges(bottom = 6.dp)
+                        ) {
+                            NoteMarkdownBody(
+                                content     = note.content,
+                                baseStyle   = previewStyle,
+                                baseColor   = previewColor,
+                                strongColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f),
+                            )
+                        }
+                        else -> Text(
+                            note.content,
+                            style      = previewStyle,
+                            color      = previewColor,
+                            maxLines   = 3,
+                            overflow   = TextOverflow.Ellipsis,
+                            modifier   = Modifier.weight(1f, fill = false),
+                        )
+                    }
                 }
             }
 
