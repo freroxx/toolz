@@ -16,8 +16,8 @@ into private app storage, and never uploaded.
   a legacy route alias).
 - **Background work** — WorkManager renders widgets after updates/resizes and
   an hourly watchdog repairs lost slideshow alarms and stale bindings.
-- **Limits** — 40 frames per animation, 30 photos per slideshow, 96 MB per
-  set, 256 MB total Living Widgets quota, and at least 200 MB free device
+- **Limits** — 900 frames per animation, 30 photos per slideshow, 640 MB per
+  set, 1 GB total Living Widgets quota, and at least 256 MB free device
   storage before an import.
 
 ## Adding a widget
@@ -59,8 +59,14 @@ files that were not saved.
 
 ### Video
 
-- Video imports decode a selected window (up to 6 seconds) at up to 15 fps and
-  cap the result at 40 frames.
+- Video imports decode a selected window of up to 30 seconds. The capture
+  rate is chosen in the clip sheet (12/24/30/60 fps) and clamped to the
+  import-quality preset and the 900-frame ceiling. A 30-second window
+  therefore captures up to 30 fps; a 15-second window can capture 60 fps.
+- Import quality presets store video frames at up to 1280 px (Compact),
+  1920 px (High) or 2560 px (Ultra) on the longest edge, with matching WebP
+  quality. That keeps a 1080p clip at 1920×1080 instead of shrinking it to a
+  soft 1080×608.
 - Codec-based extraction falls back to `MediaMetadataRetriever` when a decoder
   cannot handle the file.
 - A window with no detectable motion is rejected with a suggestion to choose
@@ -113,15 +119,28 @@ reclaimable orphan folders.
 ## Rendering and launcher limits
 
 - The widget renders at the size the launcher reports, including orientation.
-- Bitmap memory is budgeted below 55% of the platform's RemoteViews ceiling
+- Short loops can use the single-`RemoteViews` `ViewFlipper` path. Bitmap
+  memory there is budgeted below 55% of the platform's RemoteViews ceiling
   (`6 × display width × display height`). If needed, Toolz reduces resolution,
   switches to 16-bit colour, samples frames, or eventually keeps one frame.
   The UI reports when a render was reduced.
-- Animated playback uses `ViewFlipper` with a per-rate layout. The launcher
-  animates the prepared frames; no app process is needed per frame.
+- Longer or higher-rate clips stream one frame at a time through
+  `LivingFramesRemoteViewsService` and an `AdapterViewFlipper`. Each frame is
+  its own binder transaction, so the single-`RemoteViews` bitmap budget no
+  longer forces downscaling. This is what lets a 900-frame clip play at the
+  widget's native resolution.
+- Playback engine choices: **Auto** streams only when the single-update path
+  would reduce quality, **Standard** always uses the single-update path for
+  launcher compatibility, and **High quality** always streams.
+- Animated playback layouts are generated per supported rate
+  (1/2/4/5/6/8/10/12/15/20/24/30/40/48/60 fps) because `flipInterval` is an
+  XML-only attribute. The launcher animates the prepared frames; no
+  foreground service runs per frame.
 - Some launchers pause widget animations in battery saver, and a few do not
-  animate `ViewFlipper` widgets at all. The widget still shows its first
-  frame; this is a launcher limitation, not a lost import.
+  animate `ViewFlipper` widgets or ignore collection widgets entirely. If a
+  streamed widget stays blank, switch **Playback engine** to **Standard**;
+  Toolz then sends every frame in one update (at reduced resolution for long
+  clips). This is a launcher limitation, not a lost import.
 - Resizes are debounced before re-rendering. A widget that cannot be rendered
   shows a short explanatory placeholder instead of a blank frame.
 

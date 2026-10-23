@@ -18,10 +18,22 @@ class LivingFrameEngineTest {
     fun fps_snapsToFlipperSteps() {
         assertEquals(12, LivingFrameFps.snap(12))
         assertEquals(30, LivingFrameFps.snap(30))
-        assertEquals(30, LivingFrameFps.snap(100))
+        assertEquals(60, LivingFrameFps.snap(100))
         assertEquals(1, LivingFrameFps.snap(-5))
-        assertEquals(30, LivingFrameFps.MAX)
+        assertEquals(60, LivingFrameFps.MAX)
         assertEquals(12, LivingFrameFps.DEFAULT)
+        assertEquals(48, LivingFrameFps.snap(48))
+        assertEquals(40, LivingFrameFps.snap(40))
+    }
+
+    @Test
+    fun fps_atMostNeverExceedsTheCap() {
+        // 900 frames over 20 s is 45 fps. Rounding up to 48 would need 960
+        // frames and shorten the loop, so hard caps must round down.
+        assertEquals(40, LivingFrameFps.atMost(45f))
+        assertEquals(48, LivingFrameFps.atMost(48f))
+        assertEquals(60, LivingFrameFps.atMost(100f))
+        assertEquals(1, LivingFrameFps.atMost(0.5f))
     }
 
     @Test
@@ -29,7 +41,11 @@ class LivingFrameEngineTest {
         assertEquals(1000, LivingFrameFps.intervalMs(1))
         assertEquals(83, LivingFrameFps.intervalMs(12))
         assertEquals(33, LivingFrameFps.intervalMs(30))
+        assertEquals(25, LivingFrameFps.intervalMs(40))
+        assertEquals(21, LivingFrameFps.intervalMs(48))
+        assertEquals(17, LivingFrameFps.intervalMs(60))
         assertEquals(11, LivingFrameFps.stepIndex(30))
+        assertEquals(14, LivingFrameFps.stepIndex(60))
     }
 
     @Test
@@ -124,7 +140,7 @@ class LivingFrameEngineTest {
         assertEquals(30, fixed.frameCount)
         assertEquals(8_192, fixed.width)
         assertEquals(1, fixed.height)
-        assertEquals(30, fixed.fps)
+        assertEquals(60, fixed.fps)
         assertEquals(1f, fixed.opacity)
         assertEquals(48, fixed.cornerRadiusDp)
         assertEquals(1_440, fixed.slideshowIntervalMin)
@@ -147,7 +163,7 @@ class LivingFrameEngineTest {
             id = "typed", name = "x", type = LivingFrameType.GIF,
             frameCount = 999, width = 100, height = 100
         )
-        assertEquals(40, LivingFrameValidation.normalize(base)!!.frameCount)
+        assertEquals(900, LivingFrameValidation.normalize(base)!!.frameCount)
         assertEquals(
             30,
             LivingFrameValidation.normalize(base.copy(type = LivingFrameType.SLIDESHOW))!!.frameCount
