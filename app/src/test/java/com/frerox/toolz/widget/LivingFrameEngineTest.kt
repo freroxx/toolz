@@ -2,8 +2,11 @@ package com.frerox.toolz.widget
 
 import com.frerox.toolz.data.livingframes.LivingFrame
 import com.frerox.toolz.data.livingframes.LivingFrameEngine
+import com.frerox.toolz.data.livingframes.LivingFrameEstimate
 import com.frerox.toolz.data.livingframes.LivingFrameFps
 import com.frerox.toolz.data.livingframes.LivingFrameLoopMode
+import com.frerox.toolz.data.livingframes.LivingFrameQuality
+import com.frerox.toolz.data.livingframes.LivingFrameTapAction
 import com.frerox.toolz.data.livingframes.LivingFrameType
 import com.frerox.toolz.data.livingframes.LivingFrameValidation
 import com.frerox.toolz.widget.livingframes.LivingFramesSlideshow
@@ -69,6 +72,127 @@ class LivingFrameEngineTest {
     @Test
     fun loopDuration_keepsRealTimeLength() {
         assertEquals(4 * 1000L / 12, LivingFrameEngine.loopDurationMs(4, 12, LivingFrameLoopMode.LOOP))
+    }
+
+    @Test
+    fun loopDuration_appliesSpeed() {
+        assertEquals(1_000L, LivingFrameEngine.loopDurationMs(12, 12, LivingFrameLoopMode.LOOP))
+        assertEquals(500L, LivingFrameEngine.loopDurationMs(12, 12, LivingFrameLoopMode.LOOP, 2f))
+        assertEquals(2_000L, LivingFrameEngine.loopDurationMs(12, 12, LivingFrameLoopMode.LOOP, 0.5f))
+    }
+
+    @Test
+    fun displaySequence_identityAtSourceRate() {
+        assertEquals(
+            listOf(0, 1, 2, 3),
+            LivingFrameEngine.displaySequence(4, 12, 12, 1f, LivingFrameLoopMode.LOOP)
+        )
+    }
+
+    @Test
+    fun displaySequence_speedResamplesWithoutReencoding() {
+        // 2× drops every other source frame; 0.5× repeats each one.
+        assertEquals(
+            listOf(0, 2),
+            LivingFrameEngine.displaySequence(4, 12, 12, 2f, LivingFrameLoopMode.LOOP)
+        )
+        assertEquals(
+            listOf(0, 0, 1, 1, 2, 2, 3, 3),
+            LivingFrameEngine.displaySequence(4, 12, 12, 0.5f, LivingFrameLoopMode.LOOP)
+        )
+    }
+
+    @Test
+    fun displaySequence_higherDisplayFpsRepeatsFrames() {
+        // 24 fps from a 12 fps capture repeats each frame. It cannot add detail,
+        // but it keeps the real-time length and gives the launcher a smoother
+        // flip cadence.
+        assertEquals(
+            listOf(0, 0, 1, 1, 2, 2, 3, 3),
+            LivingFrameEngine.displaySequence(4, 12, 24, 1f, LivingFrameLoopMode.LOOP)
+        )
+    }
+
+    @Test
+    fun displaySequence_includesBoomerangReturnPath() {
+        assertEquals(
+            listOf(0, 1, 2, 3, 2, 1),
+            LivingFrameEngine.displaySequence(4, 12, 12, 1f, LivingFrameLoopMode.BOOMERANG)
+        )
+    }
+
+    @Test
+    fun displayDuration_keepsRealTimeLengthAcrossDisplayRates() {
+        assertEquals(
+            1_000L,
+            LivingFrameEngine.displayDurationMs(12, 12, 12, 1f, LivingFrameLoopMode.LOOP)
+        )
+        assertEquals(
+            1_000L,
+            LivingFrameEngine.displayDurationMs(12, 12, 60, 1f, LivingFrameLoopMode.LOOP)
+        )
+        assertEquals(
+            500L,
+            LivingFrameEngine.displayDurationMs(12, 12, 60, 2f, LivingFrameLoopMode.LOOP)
+        )
+    }
+
+    @Test
+    fun estimate_preservesAspectAndCapsLongestEdge() {
+        assertEquals(
+            1920 to 1080,
+            LivingFrameEstimate.storedSize(1920, 1080, LivingFrameQuality.HIGH)
+        )
+        assertEquals(
+            1920 to 1080,
+            LivingFrameEstimate.storedSize(3840, 2160, LivingFrameQuality.HIGH)
+        )
+        assertEquals(
+            1080 to 1920,
+            LivingFrameEstimate.storedSize(1080, 1920, LivingFrameQuality.HIGH)
+        )
+        // Never upscale a source that is already smaller than the preset.
+        assertEquals(
+            100 to 100,
+            LivingFrameEstimate.storedSize(100, 100, LivingFrameQuality.COMPACT)
+        )
+        assertEquals(
+            2 to 2,
+            LivingFrameEstimate.storedSize(0, 0, LivingFrameQuality.COMPACT)
+        )
+    }
+
+    @Test
+    fun estimate_matchesMeasured1080pHighSet() {
+        val bytes = LivingFrameEstimate.bytes(1920, 1080, LivingFrameQuality.HIGH, 900)
+        // The real 900-frame High set the user measured was 62.5 MB. The old
+        // estimate showed ~250 MB because it squared the preset side and
+        // treated the WebP quality value as bytes.
+        assertTrue("bytes=$bytes", bytes in 58_000_000L..68_000_000L)
+        assertTrue(
+            bytes < LivingFrameEstimate.bytes(1920, 1080, LivingFrameQuality.ULTRA, 900)
+        )
+        assertTrue(
+            bytes > LivingFrameEstimate.bytes(1920, 1080, LivingFrameQuality.COMPACT, 900)
+        )
+    }
+
+    @Test
+    fun estimate_effectiveFpsHonoursPresetCap() {
+        assertEquals(30, LivingFrameEstimate.effectiveFps(60, LivingFrameQuality.HIGH))
+        assertEquals(15, LivingFrameEstimate.effectiveFps(60, LivingFrameQuality.COMPACT))
+        assertEquals(12, LivingFrameEstimate.effectiveFps(12, LivingFrameQuality.COMPACT))
+        assertEquals(1, LivingFrameEstimate.effectiveFps(0, LivingFrameQuality.ULTRA))
+    }
+
+    @Test
+    fun sourceFps_fallsBackToFifteenForOldMetadata() {
+        val base = LivingFrame(
+            id = "old", name = "x", type = LivingFrameType.VIDEO,
+            frameCount = 10, width = 100, height = 100, fps = 60
+        )
+        assertEquals(15, base.sourceFps)
+        assertEquals(24, base.copy(capturedFps = 24).sourceFps)
     }
 
     @Test
@@ -144,6 +268,51 @@ class LivingFrameEngineTest {
         assertEquals(1f, fixed.opacity)
         assertEquals(48, fixed.cornerRadiusDp)
         assertEquals(1_440, fixed.slideshowIntervalMin)
+    }
+
+    @Test
+    fun validation_clampsSpeedResolutionAndCaptureRate() {
+        val base = LivingFrame(
+            id = "clamps", name = "x", type = LivingFrameType.VIDEO,
+            frameCount = 10, width = 100, height = 100
+        )
+        assertEquals(4f, LivingFrameValidation.normalize(base.copy(speed = 99f))!!.speed)
+        assertEquals(0.25f, LivingFrameValidation.normalize(base.copy(speed = -1f))!!.speed)
+        assertEquals(1f, LivingFrameValidation.normalize(base.copy(speed = 1.1f))!!.speed)
+        assertEquals(
+            100,
+            LivingFrameValidation.normalize(base.copy(resolutionPercent = 999))!!.resolutionPercent
+        )
+        assertEquals(
+            40,
+            LivingFrameValidation.normalize(base.copy(resolutionPercent = 0))!!.resolutionPercent
+        )
+        assertEquals(
+            45,
+            LivingFrameValidation.normalize(base.copy(resolutionPercent = 47))!!.resolutionPercent
+        )
+        assertEquals(
+            60,
+            LivingFrameValidation.normalize(base.copy(capturedFps = 999))!!.capturedFps
+        )
+        assertEquals(
+            0,
+            LivingFrameValidation.normalize(base.copy(capturedFps = -5))!!.capturedFps
+        )
+    }
+
+    @Test
+    fun validation_trimsTapTargetRoute() {
+        val base = LivingFrame(
+            id = "tap", name = "x", type = LivingFrameType.PHOTO,
+            frameCount = 1, width = 100, height = 100,
+            tapAction = LivingFrameTapAction.OPEN_TOOL,
+            tapTargetRoute = "  notes/editor  "
+        )
+        assertEquals(
+            "notes/editor",
+            LivingFrameValidation.normalize(base)!!.tapTargetRoute
+        )
     }
 
     @Test

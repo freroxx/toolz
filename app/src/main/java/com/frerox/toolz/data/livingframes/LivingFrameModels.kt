@@ -37,9 +37,12 @@ enum class LivingFrameLoopMode { LOOP, BOOMERANG }
 @Serializable
 enum class LivingFrameFit { FIT, FILL }
 
-/** Tap behaviour. NEXT_FRAME means "next photo" and only applies to slideshows. */
+/**
+ * Tap behaviour. NEXT_FRAME means "next photo" and only applies to slideshows.
+ * OPEN_TOOL opens any Toolz tool via [LivingFrame.tapTargetRoute].
+ */
 @Serializable
-enum class LivingFrameTapAction { OPEN_PREVIEW, NEXT_FRAME, NOTHING }
+enum class LivingFrameTapAction { OPEN_PREVIEW, OPEN_TOOL, NEXT_FRAME, NOTHING }
 
 /**
  * Import/export quality. This is chosen when a set is imported: it decides how
@@ -73,16 +76,42 @@ enum class LivingFrameQuality(
 }
 
 /**
- * How the launcher renders an animation.
- *
- * AUTO picks the best path per set: short loops stay in one RemoteViews
- * (ViewFlipper), while longer/higher-rate clips stream frames through a
- * RemoteViewsService so the launcher's bitmap budget never forces the image
- * to be downscaled. STANDARD forces the old single-RemoteViews path for
- * launchers that don't support collection widgets. HIGH_QUALITY always streams.
+ * Playback speed multipliers. Speed is applied by resampling the display
+ * sequence, never by changing the stored frames, so it is instant and
+ * reversible. 0.25× is slow motion; 4× is a fast loop.
  */
-@Serializable
-enum class LivingFramePlayback { AUTO, STANDARD, HIGH_QUALITY }
+object LivingFrameSpeed {
+    val STEPS = listOf(0.25f, 0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f, 3f, 4f)
+    const val DEFAULT = 1f
+    const val MIN = 0.25f
+    const val MAX = 4f
+
+    fun snap(speed: Float): Float =
+        STEPS.minByOrNull { abs(it - speed) } ?: DEFAULT
+
+    fun index(speed: Float): Int = STEPS.indexOf(snap(speed)).coerceAtLeast(0)
+
+    fun label(speed: Float): String {
+        val v = snap(speed)
+        return if (abs(v - v.toInt()) < 0.001f) "×${v.toInt()}.0" else "×$v"
+    }
+}
+
+/**
+ * Widget render resolution. 100% uses the stored frame's native size; lower
+ * values decode and render smaller, which is the honest way to trade detail
+ * for battery and memory. Values above 100% would only upscale a stored copy.
+ */
+object LivingFrameResolution {
+    const val MIN = 40
+    const val MAX = 100
+    const val STEP = 5
+    val STEPS = (MIN..MAX step STEP).toList()
+    const val DEFAULT = 100
+
+    fun snap(percent: Int): Int =
+        ((percent / STEP.toFloat()).roundToInt() * STEP).coerceIn(MIN, MAX)
+}
 
 /**
  * Persisted set. Pixels live as files under files/living_frames/<id>/ —
@@ -102,6 +131,8 @@ data class LivingFrame(
     val opacity: Float = 1f,
     val cornerRadiusDp: Int = 24,
     val tapAction: LivingFrameTapAction = LivingFrameTapAction.OPEN_PREVIEW,
+    /** Route opened when [tapAction] is OPEN_TOOL. */
+    val tapTargetRoute: String = "",
     val slideshowIntervalMin: Int = 60,
     val shuffle: Boolean = false,
     val showCaption: Boolean = false,
@@ -111,12 +142,19 @@ data class LivingFrame(
     /** Frames actually extracted per second. 0 on old metadata means "same as fps". */
     val capturedFps: Int = 0,
     val quality: LivingFrameQuality = LivingFrameQuality.DEFAULT,
-    val playback: LivingFramePlayback = LivingFramePlayback.AUTO
+    /** Playback multiplier. Applied by resampling, not by re-encoding frames. */
+    val speed: Float = LivingFrameSpeed.DEFAULT,
+    /** Render resolution as a percentage of the stored frame size. */
+    val resolutionPercent: Int = LivingFrameResolution.DEFAULT
 ) {
     val isAnimated: Boolean
         get() = (type == LivingFrameType.GIF || type == LivingFrameType.VIDEO) && frameCount > 1
 
     val isSlideshow: Boolean get() = type == LivingFrameType.SLIDESHOW
+
+    /** Bytes the stored frames occupy on disk (approximate for old metadata). */
+    val storedBytes: Long get() = (avgFrameBytes.coerceAtLeast(0L) * frameCount)
+        .coerceAtLeast(0L)
 
     /**
      * Rate the frames were captured at. Old metadata has no capturedFps, and
@@ -202,7 +240,10 @@ object LivingFrameValidation {
             slideshowIntervalMin = frame.slideshowIntervalMin.coerceIn(1, 1_440),
             avgFrameBytes = frame.avgFrameBytes.coerceAtLeast(0L),
             sourceLabel = frame.sourceLabel.take(160),
-            capturedFps = frame.capturedFps.coerceIn(0, LivingFrameFps.MAX)
+            capturedFps = frame.capturedFps.coerceIn(0, LivingFrameFps.MAX),
+            speed = LivingFrameSpeed.snap(frame.speed),
+            resolutionPercent = LivingFrameResolution.snap(frame.resolutionPercent),
+            tapTargetRoute = frame.tapTargetRoute.trim().take(160)
         )
     }
 }

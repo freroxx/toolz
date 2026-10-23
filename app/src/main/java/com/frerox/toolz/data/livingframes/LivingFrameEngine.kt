@@ -18,7 +18,9 @@
 package com.frerox.toolz.data.livingframes
 
 import kotlin.math.ceil
+import kotlin.math.floor
 import kotlin.math.roundToInt
+import kotlin.math.roundToLong
 import kotlin.math.sqrt
 
 /** Pure math: playback order, render budgeting, shuffle. No Android dependencies. */
@@ -38,9 +40,62 @@ object LivingFrameEngine {
         }
     }
 
-    fun loopDurationMs(frameCount: Int, fps: Int, mode: LivingFrameLoopMode): Long {
+    fun loopDurationMs(
+        frameCount: Int,
+        fps: Int,
+        mode: LivingFrameLoopMode,
+        speed: Float = LivingFrameSpeed.DEFAULT
+    ): Long {
         val steps = playbackOrder(frameCount, mode).size
-        return steps * 1000L / LivingFrameFps.snap(fps).coerceAtLeast(1)
+        val source = LivingFrameFps.snap(fps).coerceAtLeast(1)
+        val multiplier = LivingFrameSpeed.snap(speed)
+        return (steps * 1000.0 / (source * multiplier)).roundToLong()
+    }
+
+    /**
+     * Frames the widget should actually display for [displayFps] and [speed].
+     *
+     * Speed is a resampling multiplier, not a stored-frame edit. At 2× a
+     * 10-frame / 30 fps loop becomes 5 display frames; at 0.5× it becomes 20.
+     * When [displayFps] is above the captured rate the same source frame is
+     * repeated, which is honest: it cannot invent detail that was never
+     * captured. The returned list contains source frame indices in order and
+     * already includes the boomerang return path.
+     */
+    fun displaySequence(
+        frameCount: Int,
+        sourceFps: Int,
+        displayFps: Int,
+        speed: Float,
+        mode: LivingFrameLoopMode
+    ): List<Int> {
+        val base = playbackOrder(frameCount, mode)
+        if (base.size <= 1) return base
+        val source = LivingFrameFps.snap(sourceFps).coerceAtLeast(1)
+        val display = LivingFrameFps.snap(displayFps).coerceAtLeast(1)
+        val multiplier = LivingFrameSpeed.snap(speed)
+        val count = (base.size * display / (source * multiplier))
+            .roundToInt()
+            .coerceAtLeast(1)
+        val last = base.lastIndex
+        return List(count) { i ->
+            val sourcePosition = floor(i * source * multiplier / display)
+                .toInt()
+                .coerceIn(0, last)
+            base[sourcePosition]
+        }
+    }
+
+    /** Real-time length of a display sequence; used by previews and summaries. */
+    fun displayDurationMs(
+        frameCount: Int,
+        sourceFps: Int,
+        displayFps: Int,
+        speed: Float,
+        mode: LivingFrameLoopMode
+    ): Long {
+        val frames = displaySequence(frameCount, sourceFps, displayFps, speed, mode).size
+        return frames * 1000L / LivingFrameFps.snap(displayFps).coerceAtLeast(1)
     }
 
     /**
