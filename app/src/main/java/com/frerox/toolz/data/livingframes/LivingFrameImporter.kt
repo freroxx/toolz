@@ -92,7 +92,17 @@ class LivingFrameImporter @Inject constructor(
                 ?.toIntOrNull() ?: 0
             val h = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
                 ?.toIntOrNull() ?: 0
-            VideoProbe(dur, w, h)
+            val rotation = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+                ?.toIntOrNull() ?: 0
+            // Container dimensions are the coded frame; a 90°/270° matrix
+            // swaps the displayed axes. Without this the clip sheet reports
+            // a portrait clip as landscape and sizes the stored copy wrong.
+            val swap = rotation % 180 != 0
+            VideoProbe(
+                dur,
+                if (swap) h else w,
+                if (swap) w else h
+            )
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
@@ -107,10 +117,20 @@ class LivingFrameImporter @Inject constructor(
             val r = MediaMetadataRetriever()
             try {
                 r.setDataSource(context, uri)
+                val rotation = r.extractMetadata(
+                    MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION
+                )?.toIntOrNull() ?: 0
+                val rawW = r.extractMetadata(
+                    MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH
+                )?.toIntOrNull() ?: 0
+                val rawH = r.extractMetadata(
+                    MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT
+                )?.toIntOrNull() ?: 0
+                val portrait = displayPortrait(rawW, rawH, rotation)
                 r.getFrameAtTime(
                     atMs.coerceAtLeast(0L) * 1000L,
                     MediaMetadataRetriever.OPTION_CLOSEST_SYNC
-                )?.let { downscale(it, maxSide) }
+                )?.let { downscale(oriented(it, rotation, portrait), maxSide) }
             } catch (e: OutOfMemoryError) {
                 Log.w(TAG, "Out of memory reading a video thumbnail", e)
                 null
@@ -547,6 +567,16 @@ class LivingFrameImporter @Inject constructor(
         val r = MediaMetadataRetriever()
         try {
             r.setDataSource(context, uri)
+            val rotation = r.extractMetadata(
+                MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION
+            )?.toIntOrNull() ?: 0
+            val rawW = r.extractMetadata(
+                MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH
+            )?.toIntOrNull() ?: 0
+            val rawH = r.extractMetadata(
+                MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT
+            )?.toIntOrNull() ?: 0
+            val portrait = displayPortrait(rawW, rawH, rotation)
             for (i in 0 until count) {
                 currentCoroutineContext().ensureActive()
                 val bmp = try {
@@ -557,13 +587,48 @@ class LivingFrameImporter @Inject constructor(
                     throw e
                 }
                 if (bmp != null) {
-                    writer.add(downscale(bmp, quality.storedSide))
+                    writer.add(
+                        downscale(
+                            oriented(bmp, rotation, portrait),
+                            quality.storedSide
+                        )
+                    )
                 }
                 onProgress((i + 1) / count.toFloat())
             }
         } finally {
             runCatching { r.release() }
         }
+    }
+
+    /**
+     * Whether the *displayed* video is portrait. Coded dimensions are swapped
+     * for 90°/270° matrix rotations.
+     */
+    private fun displayPortrait(width: Int, height: Int, rotation: Int): Boolean {
+        if (width <= 0 || height <= 0) return false
+        return if (rotation % 180 != 0) width > height else height > width
+    }
+
+    /**
+     * Applies the container rotation to a retriever frame. Some platform
+     * versions already return display-oriented frames; for 90°/270° the
+     * bitmap's aspect tells us whether another rotation would double it.
+     * 180° cannot be detected from the aspect, so it is always applied.
+     */
+    private fun oriented(bitmap: Bitmap, rotation: Int, displayPortrait: Boolean): Bitmap {
+        val normalized = ((rotation % 360) + 360) % 360
+        if (normalized == 0) return bitmap
+        if (normalized % 180 != 0) {
+            val bitmapPortrait = bitmap.height > bitmap.width
+            if (bitmapPortrait == displayPortrait) return bitmap
+        }
+        val rotated = Bitmap.createBitmap(
+            bitmap, 0, 0, bitmap.width, bitmap.height,
+            Matrix().apply { postRotate(normalized.toFloat()) }, true
+        )
+        if (rotated !== bitmap) bitmap.recycle()
+        return rotated
     }
 
     // -- writer ------------------------------------------------------------
