@@ -700,17 +700,23 @@ class LivingFramesRepository @Inject constructor(
         /** Sentinel binding kept while an orphaned home-screen widget waits to be removed. */
         const val DELETED_WIDGET_BINDING = "!"
 
-        /** Animated clips are short loops; the launcher holds every frame in memory. */
-        const val MAX_FRAMES = 40
+        /**
+         * Upper bound for stored animation frames. The old 40-frame cap was
+         * the reason long clips could not exist. 900 frames is 30 s at 30 fps
+         * (or 15 s at 60 fps); the importer lowers the capture rate when a
+         * longer window would exceed this, and the launcher still only ever
+         * holds a handful of frames at once thanks to streaming playback.
+         */
+        const val MAX_FRAMES = 900
         const val MAX_SLIDES = 30
-        const val STORE_SIDE_GIF = 540
-        const val STORE_SIDE_VIDEO = 720
-        const val STORE_SIDE_PHOTO = 1280
+        const val MAX_CLIP_MS = 30_000L
+
+        /** Longest edge of the thumbnail kept per set; capture sizes live in [LivingFrameQuality]. */
         const val COVER_SIDE = 400
 
-        const val MAX_STORE_BYTES = 256L * 1024 * 1024
-        const val MIN_FREE_BYTES = 200L * 1024 * 1024
-        const val MAX_SET_BYTES = 96L * 1024 * 1024
+        const val MAX_STORE_BYTES = 1024L * 1024 * 1024
+        const val MIN_FREE_BYTES = 256L * 1024 * 1024
+        const val MAX_SET_BYTES = 640L * 1024 * 1024
         private const val ORPHAN_AGE_MS = 60L * 60 * 1000
 
         fun formatBytes(bytes: Long): String = when {

@@ -113,7 +113,7 @@ class LivingFrameCodecExtractor @Inject constructor(
             while (next < count) {
                 currentCoroutineContext().ensureActive()
                 val now = SystemClock.elapsedRealtime()
-                if (now - startedAt > 45_000L) break // never decode forever
+                if (now - startedAt > 180_000L) break // never decode forever
                 if (!inputEos) {
                     val inIdx = codec.dequeueInputBuffer(10_000L)
                     if (inIdx >= 0) {
@@ -150,7 +150,7 @@ class LivingFrameCodecExtractor @Inject constructor(
                                     try {
                                         // One decoded picture can fill several
                                         // slots. Reuse it rather than allocating
-                                        // up to 40 copies of a 720p bitmap.
+                                        // hundreds of full-resolution copies.
                                         repeat(covered) {
                                             onFrame(bmp)
                                             emitted++
@@ -196,7 +196,7 @@ class LivingFrameCodecExtractor @Inject constructor(
                 val nv21 = yuv420ToNv21(image, crop.left, crop.top, w, h) ?: return null
                 val stream = ByteArrayOutputStream(w * h)
                 val ok = YuvImage(nv21, ImageFormat.NV21, w, h, null)
-                    .compressToJpeg(Rect(0, 0, w, h), 90, stream)
+                    .compressToJpeg(Rect(0, 0, w, h), 95, stream)
                 if (!ok) return null
                 val bytes = stream.toByteArray()
                 val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }

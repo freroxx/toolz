@@ -42,6 +42,49 @@ enum class LivingFrameFit { FIT, FILL }
 enum class LivingFrameTapAction { OPEN_PREVIEW, NEXT_FRAME, NOTHING }
 
 /**
+ * Import/export quality. This is chosen when a set is imported: it decides how
+ * large each stored WebP frame is and how aggressively it is compressed.
+ * Raising it later cannot invent pixels that were never decoded, so the widget
+ * tool shows the stored resolution instead of pretending the setting is live.
+ *
+ * [maxCaptureFps] is the most frames per second the importer will extract for
+ * this preset. A 30-second clip at 60 fps is 1,800 frames, so the importer
+ * still clamps to [LivingFramesRepository.MAX_FRAMES].
+ *
+ * [storedSide] and [photoSide] are the longest stored edge. That keeps a
+ * landscape 1080p clip at 1920×1080 on High instead of shrinking it to
+ * 1080×608, which is what made wide widgets look soft.
+ */
+@Serializable
+enum class LivingFrameQuality(
+    val label: String,
+    val storedSide: Int,
+    val photoSide: Int,
+    val webpQuality: Int,
+    val maxCaptureFps: Int
+) {
+    COMPACT("Compact", 1280, 1280, 86, 15),
+    HIGH("High", 1920, 1920, 92, 30),
+    ULTRA("Ultra", 2560, 2560, 96, 60);
+
+    companion object {
+        val DEFAULT = HIGH
+    }
+}
+
+/**
+ * How the launcher renders an animation.
+ *
+ * AUTO picks the best path per set: short loops stay in one RemoteViews
+ * (ViewFlipper), while longer/higher-rate clips stream frames through a
+ * RemoteViewsService so the launcher's bitmap budget never forces the image
+ * to be downscaled. STANDARD forces the old single-RemoteViews path for
+ * launchers that don't support collection widgets. HIGH_QUALITY always streams.
+ */
+@Serializable
+enum class LivingFramePlayback { AUTO, STANDARD, HIGH_QUALITY }
+
+/**
  * Persisted set. Pixels live as files under files/living_frames/<id>/ —
  * never in this JSON.
  */
@@ -64,28 +107,54 @@ data class LivingFrame(
     val showCaption: Boolean = false,
     val avgFrameBytes: Long = 0L,
     val createdAt: Long = System.currentTimeMillis(),
-    val sourceLabel: String = ""
+    val sourceLabel: String = "",
+    /** Frames actually extracted per second. 0 on old metadata means "same as fps". */
+    val capturedFps: Int = 0,
+    val quality: LivingFrameQuality = LivingFrameQuality.DEFAULT,
+    val playback: LivingFramePlayback = LivingFramePlayback.AUTO
 ) {
     val isAnimated: Boolean
         get() = (type == LivingFrameType.GIF || type == LivingFrameType.VIDEO) && frameCount > 1
 
     val isSlideshow: Boolean get() = type == LivingFrameType.SLIDESHOW
+
+    /**
+     * Rate the frames were captured at. Old metadata has no capturedFps, and
+     * the importer used to cap video capture at 15 fps, so cap the fallback
+     * there instead of claiming an old set was captured at a rate the user
+     * later raised the playback slider to.
+     */
+    val sourceFps: Int get() =
+        if (capturedFps > 0) capturedFps else minOf(LivingFrameFps.snap(fps), 15)
 }
 
 /**
  * Playback rates the home-screen flipper can run at. Each step has its own
- * ViewFlipper in the widget layout (flipInterval is an XML attribute and is
- * not remotely settable), so this list and living_frames_widget.xml must
- * stay in sync — see [intervalMs].
+ * widget layout (flipInterval is an XML attribute and is not remotely
+ * settable), so this list and the living_frames_widget_f* layouts must stay
+ * in sync — see [intervalMs].
+ *
+ * 40/48/60 are for high-refresh launchers. They still need the same number of
+ * stored frames to look smooth; setting 60 fps on a 15 fps capture simply
+ * plays the loop faster.
  */
 object LivingFrameFps {
-    val STEPS = listOf(1, 2, 4, 5, 6, 8, 10, 12, 15, 20, 24, 30)
+    val STEPS = listOf(1, 2, 4, 5, 6, 8, 10, 12, 15, 20, 24, 30, 40, 48, 60)
     const val DEFAULT = 12
     const val MIN = 1
-    const val MAX = 30
+    const val MAX = 60
 
     fun snap(fps: Float): Int = STEPS.minByOrNull { abs(it - fps) } ?: DEFAULT
     fun snap(fps: Int): Int = snap(fps.toFloat())
+
+    /**
+     * Largest supported rate that does not exceed [fps]. Use this when a hard
+     * cap (storage, frame count, preset) must be honoured: rounding 45 fps up
+     * to 48 would store more frames than the cap allows and make the loop
+     * shorter than the selected window.
+     */
+    fun atMost(fps: Float): Int = STEPS.lastOrNull { it <= fps } ?: MIN
+    fun atMost(fps: Int): Int = atMost(fps.toFloat())
     fun intervalMs(fps: Int): Int = (1000f / snap(fps)).roundToInt()
     fun stepIndex(fps: Int): Int = STEPS.indexOf(snap(fps)).coerceAtLeast(0)
 
@@ -96,7 +165,8 @@ object LivingFrameFps {
         8, 10 -> "Natural"
         12, 15 -> "Smooth"
         20, 24 -> "Cinematic"
-        else -> "Fast"
+        30, 40 -> "High frame rate"
+        else -> "Ultra smooth"
     }
 }
 
@@ -131,7 +201,8 @@ object LivingFrameValidation {
             cornerRadiusDp = frame.cornerRadiusDp.coerceIn(0, 48),
             slideshowIntervalMin = frame.slideshowIntervalMin.coerceIn(1, 1_440),
             avgFrameBytes = frame.avgFrameBytes.coerceAtLeast(0L),
-            sourceLabel = frame.sourceLabel.take(160)
+            sourceLabel = frame.sourceLabel.take(160),
+            capturedFps = frame.capturedFps.coerceIn(0, LivingFrameFps.MAX)
         )
     }
 }

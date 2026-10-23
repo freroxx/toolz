@@ -62,11 +62,11 @@ private class LivingFrameStorageException(message: String) : IOException(message
 /**
  * Turns GIFs, video windows, photos and photo sets into stored WebP frames.
  *
- * Memory rule: frames are encoded and written one at a time. The previous
- * implementation held every source bitmap until the whole set was stored,
- * which could need >100 MB for a 40-frame 720p clip and crash on low-end
- * devices. The import is staged in <id>.tmp and atomically published only
- * after the last frame is durable.
+ * Memory rule: frames are encoded and written one at a time. Holding every
+ * source bitmap until the whole set was stored would need hundreds of
+ * megabytes for a 30 s high-resolution clip and crash on low-end devices.
+ * The import is staged in <id>.tmp and atomically published only after the
+ * last frame is durable.
  *
  * Timing rule: the playback fps is always derived from (frames captured ÷
  * real duration covered), never assumed.
@@ -125,20 +125,21 @@ class LivingFrameImporter @Inject constructor(
 
     suspend fun importGif(
         uri: Uri,
+        quality: LivingFrameQuality = LivingFrameQuality.DEFAULT,
         onProgress: (Float) -> Unit = {}
     ): LivingFrameImportResult = withContext(Dispatchers.IO) {
         importLock.withLock {
-            val movie = decodeMovieToWriter(uri, onProgress)
+            val movie = decodeMovieToWriter(uri, quality, onProgress)
             if (movie != null) return@withLock finishAnimated(movie, onProgress, uri)
 
-            val animated = decodeAnimatedImageToWriter(uri, onProgress)
+            val animated = decodeAnimatedImageToWriter(uri, quality, onProgress)
             if (animated != null) return@withLock finishAnimated(animated, onProgress, uri)
 
-            val still = loadDownscaled(uri, LivingFramesRepository.STORE_SIDE_GIF)
+            val still = loadDownscaled(uri, quality.storedSide)
                 ?: throw IllegalArgumentException("Couldn't read that GIF.")
             val writer = newWriter(
                 maxFrames = LivingFramesRepository.MAX_FRAMES,
-                quality = 84
+                quality = quality
             )
             try {
                 writer.add(still)
@@ -161,6 +162,8 @@ class LivingFrameImporter @Inject constructor(
         uri: Uri,
         startMs: Long,
         lengthMs: Long,
+        quality: LivingFrameQuality = LivingFrameQuality.DEFAULT,
+        targetFps: Int = 0,
         onProgress: (Float) -> Unit = {}
     ): LivingFrameImportResult {
         // Probe outside the lock: it is cheap metadata-only work and lets us
@@ -170,23 +173,36 @@ class LivingFrameImporter @Inject constructor(
             importLock.withLock {
                 val duration = probe?.durationMs?.takeIf { it > 0L }
                 val minLen = minOf(500L, duration ?: 500L).coerceAtLeast(150L)
-                val len = lengthMs.coerceIn(minLen, 6_000L)
-                    .coerceAtMost(duration ?: 6_000L)
+                val len = lengthMs.coerceIn(minLen, LivingFramesRepository.MAX_CLIP_MS)
+                    .coerceAtMost(duration ?: LivingFramesRepository.MAX_CLIP_MS)
                     .coerceAtLeast(150L)
                 val start = if (duration != null) {
                     startMs.coerceIn(0L, (duration - len).coerceAtLeast(0L))
                 } else {
                     startMs.coerceAtLeast(0L)
                 }
-                val targetFps = LivingFrameFps.snap(
-                    minOf(15f, LivingFramesRepository.MAX_FRAMES * 1000f / len)
+                // Respect the user's rate, but never capture more frames than
+                // the library can store, and never more than the preset allows.
+                val wanted = if (targetFps > 0) targetFps.toFloat() else quality.maxCaptureFps.toFloat()
+                val fps = LivingFrameFps.atMost(
+                    minOf(
+                        wanted,
+                        quality.maxCaptureFps.toFloat(),
+                        LivingFramesRepository.MAX_FRAMES * 1000f / len
+                    )
                 )
-                val count = (len / 1000f * targetFps).roundToInt()
+                val count = (len / 1000f * fps).roundToInt()
                     .coerceIn(2, LivingFramesRepository.MAX_FRAMES)
 
-                val fromCodec = videoAttempt(uri, start, len, count, useCodec = true, onProgress)
+                val fromCodec = videoAttempt(
+                    uri, start, len, count, quality,
+                    useCodec = true, onProgress
+                )
                 if (fromCodec != null) return@withLock fromCodec
-                val fallback = videoAttempt(uri, start, len, count, useCodec = false, onProgress)
+                val fallback = videoAttempt(
+                    uri, start, len, count, quality,
+                    useCodec = false, onProgress
+                )
                 if (fallback != null) return@withLock fallback
 
                 throw IllegalArgumentException(
@@ -198,12 +214,13 @@ class LivingFrameImporter @Inject constructor(
 
     suspend fun importPhoto(
         uri: Uri,
+        quality: LivingFrameQuality = LivingFrameQuality.DEFAULT,
         onProgress: (Float) -> Unit = {}
     ): LivingFrameImportResult = withContext(Dispatchers.IO) {
         importLock.withLock {
-            val bmp = loadDownscaled(uri, LivingFramesRepository.STORE_SIDE_PHOTO)
+            val bmp = loadDownscaled(uri, quality.photoSide)
                 ?: throw IllegalArgumentException("Couldn't read that image.")
-            val writer = newWriter(maxFrames = 1, quality = 88)
+            val writer = newWriter(maxFrames = 1, quality = quality)
             try {
                 writer.add(bmp)
                 onProgress(1f)
@@ -222,6 +239,7 @@ class LivingFrameImporter @Inject constructor(
 
     suspend fun importSlideshow(
         uris: List<Uri>,
+        quality: LivingFrameQuality = LivingFrameQuality.DEFAULT,
         onProgress: (Float) -> Unit = {}
     ): LivingFrameImportResult = withContext(Dispatchers.IO) {
         importLock.withLock {
@@ -229,13 +247,13 @@ class LivingFrameImporter @Inject constructor(
             require(picked.isNotEmpty()) { "None of those photos could be read." }
             val writer = newWriter(
                 maxFrames = LivingFramesRepository.MAX_SLIDES,
-                quality = 88
+                quality = quality
             )
             var skipped = 0
             try {
                 picked.forEachIndexed { i, uri ->
                     currentCoroutineContext().ensureActive()
-                    val bmp = loadDownscaled(uri, LivingFramesRepository.STORE_SIDE_PHOTO)
+                    val bmp = loadDownscaled(uri, quality.photoSide)
                     if (bmp == null) {
                         skipped++
                     } else {
@@ -270,11 +288,12 @@ class LivingFrameImporter @Inject constructor(
 
     private suspend fun decodeMovieToWriter(
         uri: Uri,
+        quality: LivingFrameQuality,
         onProgress: (Float) -> Unit
     ): Writer? {
         val writer = newWriter(
             maxFrames = LivingFramesRepository.MAX_FRAMES,
-            quality = 84,
+            quality = quality,
             trackMotion = true
         )
         try {
@@ -293,11 +312,23 @@ class LivingFrameImporter @Inject constructor(
                 val h = movie.height()
                 val dur = movie.duration()
                 writer.setDuration(dur.toLong())
-                val side = LivingFramesRepository.STORE_SIDE_GIF
+                val side = quality.storedSide
                 val scale = minOf(1f, side / maxOf(w, h).toFloat())
                 val tw = (w * scale).roundToInt().coerceAtLeast(1)
                 val th = (h * scale).roundToInt().coerceAtLeast(1)
-                val count = (dur / 1000f * 15f).roundToInt()
+                // GIF movies have unreliable per-frame timing, so 30 fps is
+                // the practical ceiling; MAX_FRAMES still clamps long clips.
+                // Pick down (not up) so a 40 s GIF stores 800 frames at 20 fps
+                // and keeps its real duration instead of 960 frames clamped to
+                // 900 and played back slightly fast.
+                val fps = LivingFrameFps.atMost(
+                    minOf(
+                        30f,
+                        quality.maxCaptureFps.toFloat(),
+                        LivingFramesRepository.MAX_FRAMES * 1000f / dur
+                    )
+                )
+                val count = (dur / 1000f * fps).roundToInt()
                     .coerceIn(2, LivingFramesRepository.MAX_FRAMES)
                 for (i in 0 until count) {
                     currentCoroutineContext().ensureActive()
@@ -337,12 +368,13 @@ class LivingFrameImporter @Inject constructor(
 
     private suspend fun decodeAnimatedImageToWriter(
         uri: Uri,
+        quality: LivingFrameQuality,
         onProgress: (Float) -> Unit
     ): Writer? {
         if (Build.VERSION.SDK_INT < 28) return null
         val writer = newWriter(
             maxFrames = LivingFramesRepository.MAX_FRAMES,
-            quality = 84,
+            quality = quality,
             trackMotion = true
         )
         var drawable: AnimatedImageDrawable? = null
@@ -357,12 +389,15 @@ class LivingFrameImporter @Inject constructor(
             val w = decoded.intrinsicWidth.coerceAtLeast(1)
             val h = decoded.intrinsicHeight.coerceAtLeast(1)
             decoded.setBounds(0, 0, w, h)
-            val side = LivingFramesRepository.STORE_SIDE_GIF
+            val side = quality.storedSide
             val scale = minOf(1f, side / maxOf(w, h).toFloat())
             val tw = (w * scale).roundToInt().coerceAtLeast(1)
             val th = (h * scale).roundToInt().coerceAtLeast(1)
-            val fps = 12
-            val count = 36
+            // AnimatedImageDrawable does not expose the clip duration. Sample
+            // three seconds at up to 15 fps instead of the old fixed 12 fps /
+            // 36 frames; slower GIFs would only duplicate frames anyway.
+            val fps = minOf(15, quality.maxCaptureFps)
+            val count = (fps * 3).coerceIn(2, LivingFramesRepository.MAX_FRAMES)
             writer.setDuration(count * 1000L / fps)
             decoded.start()
             for (i in 0 until count) {
@@ -430,6 +465,7 @@ class LivingFrameImporter @Inject constructor(
                     name = "GIF Loop",
                     type = LivingFrameType.GIF,
                     fps = fps,
+                    capturedFps = fps,
                     sourceLabel = uri.toString()
                 )
             }
@@ -446,12 +482,13 @@ class LivingFrameImporter @Inject constructor(
         start: Long,
         len: Long,
         count: Int,
+        quality: LivingFrameQuality,
         useCodec: Boolean,
         onProgress: (Float) -> Unit
     ): LivingFrameImportResult? {
         val writer = newWriter(
             maxFrames = LivingFramesRepository.MAX_FRAMES,
-            quality = 82,
+            quality = quality,
             trackMotion = true
         )
         try {
@@ -461,14 +498,14 @@ class LivingFrameImporter @Inject constructor(
                     startMs = start,
                     lengthMs = len,
                     count = count,
-                    targetSide = LivingFramesRepository.STORE_SIDE_VIDEO,
+                    targetSide = quality.storedSide,
                     // The extractor may reuse one decoded frame for several
                     // playback slots; it owns the bitmap until all are encoded.
                     onFrame = { writer.add(it, takeOwnership = false) },
                     onProgress = { onProgress(it * 0.6f) }
                 )
             } else {
-                retrieverToWriter(uri, start, len, count, writer) {
+                retrieverToWriter(uri, start, len, count, quality, writer) {
                     onProgress(it * 0.6f)
                 }
             }
@@ -476,12 +513,16 @@ class LivingFrameImporter @Inject constructor(
                 writer.abort()
                 return null
             }
-            val fps = LivingFrameFps.snap(writer.count * 1000f / len)
             onProgress(1f)
+            // Base the stored rate on what actually landed on disk. A codec
+            // timeout or a missing retriever frame must not claim a higher
+            // capture rate than the files contain, or playback would run fast.
+            val actualFps = LivingFrameFps.snap(writer.count * 1000f / len.coerceAtLeast(1L))
             return writer.finish(
                 name = "Video Loop",
                 type = LivingFrameType.VIDEO,
-                fps = fps,
+                fps = actualFps,
+                capturedFps = actualFps,
                 sourceLabel = uri.toString()
             )
         } catch (t: Throwable) {
@@ -499,6 +540,7 @@ class LivingFrameImporter @Inject constructor(
         startMs: Long,
         lengthMs: Long,
         count: Int,
+        quality: LivingFrameQuality,
         writer: Writer,
         onProgress: (Float) -> Unit
     ) {
@@ -515,7 +557,7 @@ class LivingFrameImporter @Inject constructor(
                     throw e
                 }
                 if (bmp != null) {
-                    writer.add(downscale(bmp, LivingFramesRepository.STORE_SIDE_VIDEO))
+                    writer.add(downscale(bmp, quality.storedSide))
                 }
                 onProgress((i + 1) / count.toFloat())
             }
@@ -528,13 +570,13 @@ class LivingFrameImporter @Inject constructor(
 
     private fun newWriter(
         maxFrames: Int,
-        quality: Int,
+        quality: LivingFrameQuality,
         trackMotion: Boolean = false
     ): Writer = Writer(maxFrames, quality, trackMotion)
 
     private inner class Writer(
         private val maxFrames: Int,
-        private val quality: Int,
+        private val quality: LivingFrameQuality,
         private val trackMotion: Boolean
     ) {
         private val id = repo.newId()
@@ -575,7 +617,7 @@ class LivingFrameImporter @Inject constructor(
                 }
                 val file = File(dir, String.format(Locale.US, "frame_%04d.webp", count))
                 FileOutputStream(file).use { out ->
-                    if (!bitmap.compress(webp(), quality, out)) {
+                    if (!bitmap.compress(webp(), quality.webpQuality, out)) {
                         throw IOException("Couldn't encode a frame.")
                     }
                     out.fd.sync()
@@ -624,6 +666,7 @@ class LivingFrameImporter @Inject constructor(
             type: LivingFrameType,
             fps: Int,
             sourceLabel: String,
+            capturedFps: Int = 0,
             note: String? = null
         ): LivingFrameImportResult {
             if (count <= 0) throw IOException("Nothing to import")
@@ -649,7 +692,9 @@ class LivingFrameImporter @Inject constructor(
                 height = height.coerceAtLeast(1),
                 fps = LivingFrameFps.snap(fps),
                 avgFrameBytes = totalBytes / count.coerceAtLeast(1),
-                sourceLabel = sourceLabel.take(160)
+                sourceLabel = sourceLabel.take(160),
+                capturedFps = capturedFps.coerceIn(0, LivingFrameFps.MAX),
+                quality = quality
             )
             // Once the files are in place, finish the metadata swap even if the
             // caller is being cancelled. Otherwise a cancellation at exactly
