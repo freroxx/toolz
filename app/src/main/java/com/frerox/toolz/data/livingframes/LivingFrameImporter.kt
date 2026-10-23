@@ -660,7 +660,8 @@ class LivingFrameImporter @Inject constructor(
             durationMs = duration.coerceAtLeast(0L)
         }
         private var totalBytes = 0L
-        private var firstHash: Long? = null
+        private var previousHash: Long? = null
+        private var startUsedBytes = -1L
         var hasMotion: Boolean = false
             private set
 
@@ -670,11 +671,28 @@ class LivingFrameImporter @Inject constructor(
                 if (count >= maxFrames) {
                     throw LivingFrameStorageException("That set has too many frames.")
                 }
-                val estimate = (bitmap.byteCount.toLong() / 2).coerceIn(64L * 1024, 8L * 1024 * 1024)
-                if (count == 0 || count % 4 == 0) {
-                    val check = repo.checkStorage(estimate)
-                    if (!check.ok) {
-                        throw LivingFrameStorageException(check.message ?: "Not enough storage.")
+                if (startUsedBytes < 0L) startUsedBytes = repo.usageBytes()
+                val estimate = (bitmap.byteCount.toLong() / 2)
+                    .coerceIn(64L * 1024, 8L * 1024 * 1024)
+                // One snapshot plus the bytes we wrote. The old code called
+                // checkStorage() every four frames, which walked every stored
+                // set (and built orphan lists) dozens of times per import.
+                val projected = startUsedBytes + totalBytes + estimate
+                if (projected > LivingFramesRepository.MAX_STORE_BYTES) {
+                    throw LivingFrameStorageException(
+                        "Living Widgets storage is full. Delete a widget set first."
+                    )
+                }
+                if (count == 0 || count % 8 == 0) {
+                    // statfs is cheap; this catches other apps filling the
+                    // device without rescanning our own directory tree.
+                    val free = context.filesDir.usableSpace.coerceAtLeast(0L)
+                    if (free - estimate < LivingFramesRepository.MIN_FREE_BYTES) {
+                        throw LivingFrameStorageException(
+                            "Not enough free space. Keep at least " +
+                                "${LivingFramesRepository.formatBytes(LivingFramesRepository.MIN_FREE_BYTES)} " +
+                                "free before importing."
+                        )
                     }
                 }
                 if (totalBytes + estimate > LivingFramesRepository.MAX_SET_BYTES) {
@@ -685,7 +703,9 @@ class LivingFrameImporter @Inject constructor(
                     if (!bitmap.compress(webp(), quality.webpQuality, out)) {
                         throw IOException("Couldn't encode a frame.")
                     }
-                    out.fd.sync()
+                    // No per-frame fsync: these files are staging data until
+                    // finish() publishes the directory. A crash leaves an
+                    // orphan for cleanup, never a half-published set.
                 }
                 if (file.length() <= 0L) throw IOException("Couldn't encode a frame.")
                 totalBytes += file.length()
@@ -696,14 +716,18 @@ class LivingFrameImporter @Inject constructor(
                     width = bitmap.width
                     height = bitmap.height
                     writeCover(bitmap)
+                    startUsedBytes += File(dir, "cover.webp").length()
                 }
+                // Compare consecutive frames, not every frame with frame 0.
+                // A slow pan that returns near its start still moves, and a
+                // one-bit dHash change is enough to prove it is not a still.
                 val h = hash(bitmap)
-                if (count == 0) firstHash = h
-                if (trackMotion && h != null && firstHash != null &&
-                    java.lang.Long.bitCount(h xor firstHash!!) > 2
+                if (trackMotion && h != null && previousHash != null &&
+                    java.lang.Long.bitCount(h xor previousHash!!) > 1
                 ) {
                     hasMotion = true
                 }
+                previousHash = h
                 count++
             } finally {
                 if (takeOwnership) {
@@ -735,10 +759,6 @@ class LivingFrameImporter @Inject constructor(
             note: String? = null
         ): LivingFrameImportResult {
             if (count <= 0) throw IOException("Nothing to import")
-            val check = repo.checkStorage(0L)
-            if (!check.ok) {
-                throw LivingFrameStorageException(check.message ?: "Not enough storage.")
-            }
             // A still GIF can arrive as several identical frames from Movie.
             // Keep only frame 0 so PHOTO metadata and storage stay truthful.
             if (type == LivingFrameType.PHOTO && count > 1) {
@@ -747,6 +767,21 @@ class LivingFrameImporter @Inject constructor(
                 }
                 count = 1
                 totalBytes = File(dir, String.format(Locale.US, "frame_%04d.webp", 0)).length()
+            }
+            // The writer has tracked every byte it wrote; do not walk the
+            // whole library again here. Free space is a single statfs call.
+            if (startUsedBytes < 0L) startUsedBytes = repo.usageBytes()
+            if (startUsedBytes + totalBytes > LivingFramesRepository.MAX_STORE_BYTES) {
+                throw LivingFrameStorageException(
+                    "Living Widgets storage is full. Delete a widget set first."
+                )
+            }
+            if (context.filesDir.usableSpace < LivingFramesRepository.MIN_FREE_BYTES) {
+                throw LivingFrameStorageException(
+                    "Not enough free space. Keep at least " +
+                        "${LivingFramesRepository.formatBytes(LivingFramesRepository.MIN_FREE_BYTES)} " +
+                        "free before importing."
+                )
             }
             val frame = LivingFrame(
                 id = id,

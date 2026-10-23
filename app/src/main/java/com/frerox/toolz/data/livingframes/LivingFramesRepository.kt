@@ -524,6 +524,13 @@ class LivingFramesRepository @Inject constructor(
         )
     }
 
+    /**
+     * Cheap used-bytes snapshot for an import. [storage] also builds orphan
+     * lists; calling it every few frames made a 360-frame import walk the
+     * whole library dozens of times.
+     */
+    fun usageBytes(): Long = directorySize(root)
+
     fun checkStorage(extraBytes: Long = 0L): StorageCheck {
         val stats = storage()
         val projected = stats.usedBytes + extraBytes.coerceAtLeast(0L)
