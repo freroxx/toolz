@@ -4025,7 +4025,7 @@ private fun FullExpressiveEditor(
                         Surface(
                             shape = CircleShape,
                             color = onColor.copy(0.1f),
-                            modifier = Modifier.height(32.dp)
+                            modifier = Modifier.height(32.dp).weight(1f, fill = false)
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 12.dp),
@@ -4040,11 +4040,40 @@ private fun FullExpressiveEditor(
                             }
                         }
                         
-                        IconButton(
-                            onClick = { showAttachmentMenu = true },
-                            modifier = Modifier.size(32.dp).background(onColor.copy(0.1f), CircleShape)
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Icon(Icons.Rounded.AttachFile, stringResource(R.string.st_NotepadScreen_att37), modifier = Modifier.size(18.dp), tint = onColor)
+                            ToolzExpressiveIconToggleButton(
+                                checked = isPreviewMode,
+                                onCheckedChange = {
+                                    haptic.click()
+                                    if (it) showColorGrid = false
+                                    isPreviewMode = it
+                                },
+                                modifier = Modifier.size(32.dp),
+                                colors = IconButtonDefaults.iconToggleButtonColors(
+                                    containerColor = onColor.copy(0.1f),
+                                    contentColor = onColor,
+                                    checkedContainerColor = onColor,
+                                    checkedContentColor = noteColor,
+                                ),
+                            ) {
+                                Icon(
+                                    if (isPreviewMode) Icons.Rounded.Edit else Icons.Rounded.Visibility,
+                                    stringResource(
+                                        if (isPreviewMode) R.string.st_NotepadScreen_cdeditmode168
+                                        else R.string.st_NotepadScreen_cdprevnote167
+                                    ),
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                            IconButton(
+                                onClick = { showAttachmentMenu = true },
+                                modifier = Modifier.size(32.dp).background(onColor.copy(0.1f), CircleShape)
+                            ) {
+                                Icon(Icons.Rounded.AttachFile, stringResource(R.string.st_NotepadScreen_att37), modifier = Modifier.size(18.dp), tint = onColor)
+                            }
                         }
                     }
 
@@ -4063,32 +4092,13 @@ private fun FullExpressiveEditor(
                         )
                     }
 
-                    // Toolbar: preview toggle stays put, formatting controls
-                    // only make sense while editing.
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        ToolzExpressiveIconToggleButton(
-                            checked = isPreviewMode,
-                            onCheckedChange = {
-                                haptic.click()
-                                if (it) showColorGrid = false
-                                isPreviewMode = it
-                            },
-                            colors = IconButtonDefaults.iconToggleButtonColors(contentColor = onColor, checkedContentColor = noteColor, checkedContainerColor = onColor)
+                    // Formatting controls only make sense while editing.
+                    if (!isPreviewMode) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                if (isPreviewMode) Icons.Rounded.Edit else Icons.Rounded.Visibility,
-                                stringResource(
-                                    if (isPreviewMode) R.string.st_NotepadScreen_cdeditmode168
-                                    else R.string.st_NotepadScreen_cdprevnote167
-                                )
-                            )
-                        }
-
-                        if (!isPreviewMode) {
                             ToolzExpressiveIconToggleButton(
                                 checked = currentNote.isBold,
                                 onCheckedChange = { currentNote = currentNote.copy(isBold = it) },
@@ -4110,8 +4120,6 @@ private fun FullExpressiveEditor(
                             Spacer(Modifier.weight(1f))
 
                             FontSizeControl(currentNote.fontSize, onColor) { currentNote = currentNote.copy(fontSize = it) }
-                        } else {
-                            Spacer(Modifier.weight(1f))
                         }
                     }
                 }
