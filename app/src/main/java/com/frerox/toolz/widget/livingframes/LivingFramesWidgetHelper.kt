@@ -33,6 +33,7 @@ import com.frerox.toolz.data.livingframes.LivingFrame
 import com.frerox.toolz.data.livingframes.LivingFrameEngine
 import com.frerox.toolz.data.livingframes.LivingFrameFps
 import com.frerox.toolz.data.livingframes.LivingFrameLoopMode
+import com.frerox.toolz.data.livingframes.LivingFrameQuality
 import com.frerox.toolz.data.livingframes.LivingFrameRenderer
 import com.frerox.toolz.data.livingframes.LivingFrameResolution
 import com.frerox.toolz.data.livingframes.LivingFrameTapAction
@@ -289,6 +290,8 @@ object LivingFramesWidgetHelper {
         val resolution = LivingFrameResolution.snap(frame.resolutionPercent)
         val outW = (w * resolution / 100f).roundToInt().coerceAtLeast(48)
         val outH = (h * resolution / 100f).roundToInt().coerceAtLeast(48)
+        val rgb565 = frame.quality == LivingFrameQuality.COMPACT &&
+            LivingFrameRenderer.isOpaque(frame)
 
         // Speed and display rate are resolved into an explicit display
         // sequence. The launcher flipper only understands a fixed interval,
@@ -318,6 +321,7 @@ object LivingFramesWidgetHelper {
         // The adapter fetches one frame at a time, so the launcher's binder
         // budget cannot force a long clip down to a handful of pixels.
         if (animated) {
+            var base: Bitmap? = null
             try {
                 val views = RemoteViews(
                     context.packageName,
@@ -328,6 +332,27 @@ object LivingFramesWidgetHelper {
                     data = livingFramesAdapterUri(appWidgetId, frame.id)
                 }
                 views.setRemoteAdapter(R.id.living_frame_flip, adapter)
+                // Some launchers draw a collection widget before the adapter's
+                // first child arrives. Put the first rendered frame behind the
+                // flipper so that gap is the animation's own first frame, not
+                // a blank/loading flash. Translucent sets are skipped: stacking
+                // the same frame behind itself would silently raise opacity.
+                if (frame.opacity >= 0.999f) {
+                    base = try {
+                        renderStill(
+                            repo, frame, sequence.firstOrNull() ?: 0,
+                            outW, outH, density, rgb565
+                        )
+                    } catch (t: Throwable) {
+                        if (t is CancellationException) throw t
+                        // Streaming can still work without the static base.
+                        null
+                    }
+                    if (base != null) {
+                        views.setImageViewBitmap(R.id.living_frame_static, base)
+                        views.setViewVisibility(R.id.living_frame_static, View.VISIBLE)
+                    }
+                }
                 applyChrome(context, views, appWidgetId, frame)
                 mgr.updateAppWidget(appWidgetId, views)
                 mgr.notifyAppWidgetViewDataChanged(appWidgetId, R.id.living_frame_flip)
@@ -346,6 +371,8 @@ object LivingFramesWidgetHelper {
                 // the single-RemoteViews path instead of showing nothing.
                 val message = t.message
                 if (!message.isNullOrBlank()) error = message.take(90)
+            } finally {
+                base?.let { runCatching { if (!it.isRecycled) it.recycle() } }
             }
         }
 
@@ -449,6 +476,29 @@ object LivingFramesWidgetHelper {
             "Couldn't render this Living Widget. Try resizing it or re-adding it."
         )
         false
+    }
+
+    /** Renders one frame at the widget's output size for the static base. */
+    private suspend fun renderStill(
+        repo: LivingFramesRepository,
+        frame: LivingFrame,
+        index: Int,
+        outW: Int,
+        outH: Int,
+        density: Float,
+        rgb565: Boolean
+    ): Bitmap? {
+        val need = LivingFrameEngine.requiredSourceSide(
+            outW, outH, frame.width, frame.height, frame.fit
+        )
+        val src = repo.decodeAtLeast(frame.id, index, need) ?: return null
+        return try {
+            LivingFrameRenderer.render(
+                src, frame, outW, outH, density, rgb565
+            )
+        } finally {
+            runCatching { if (!src.isRecycled) src.recycle() }
+        }
     }
 
     /** Binds (if needed) and pushes one widget. The single entry point for every refresh path. */

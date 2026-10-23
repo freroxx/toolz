@@ -38,6 +38,9 @@ import dagger.hilt.android.EntryPointAccessors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.roundToInt
 
 /**
@@ -94,6 +97,12 @@ private class LivingFramesFactory(
 
     /** Last frame handed to the launcher; used instead of a blank on a miss. */
     @Volatile private var last: Bitmap? = null
+
+    /** Coalesced prefetch request; only the newest target is worth decoding. */
+    private val prefetchTarget = AtomicInteger(-1)
+    private val prefetchScheduled = AtomicBoolean(false)
+    @Volatile private var prefetchGeneration = -1
+    @Volatile private var prefetchFrame: LivingFrame? = null
 
     private val executor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "living-frames-prefetch").apply {
@@ -155,7 +164,11 @@ private class LivingFramesFactory(
         // Render frame zero before the host asks. This is the frame the
         // loading view and the first flipper child both use.
         if (order.isNotEmpty()) {
-            rendered(current, order[0], currentGeneration)
+            last = runCatching {
+                rendered(current, order[0], currentGeneration)
+            }.onFailure {
+                Log.w(TAG, "Couldn't render the first Living Widget frame", it)
+            }.getOrNull()
             prefetch(current, 0, currentGeneration)
         }
     }
@@ -168,11 +181,17 @@ private class LivingFramesFactory(
         }
         val currentGeneration = generation
         val frameIndex = ord[position % ord.size]
-        val bitmap = rendered(current, frameIndex, currentGeneration)
-            ?: last
-        // Keep the next few frames ready while the launcher is drawing this
-        // one. The single worker also prevents a burst of binder decodes.
-        prefetch(current, position, currentGeneration)
+        // Never decode on the host's binder thread. A miss returns the last
+        // frame the launcher actually drew (or a deliberate dark tile) and
+        // asks the worker to fetch this frame plus the next window. The old
+        // synchronous decode made the flipper stutter whenever it ran ahead.
+        val bitmap = synchronized(recent) { recent[frameIndex] } ?: last
+        if (bitmap != null) last = bitmap
+        prefetch(
+            current,
+            (position - 1 + ord.size) % ord.size,
+            currentGeneration
+        )
         return frameViews(bitmap)
     }
 
@@ -210,7 +229,6 @@ private class LivingFramesFactory(
     private fun remember(frameIndex: Int, bitmap: Bitmap) {
         synchronized(recent) {
             recent[frameIndex] = bitmap
-            last = bitmap
             var total = 0L
             recent.values.forEach { total += it.byteCount }
             val oldest = recent.entries.iterator()
@@ -226,9 +244,10 @@ private class LivingFramesFactory(
     }
 
     /**
-     * Decode [PREFETCH_AHEAD] positions ahead on a single background thread.
-     * If the launcher jumps, the worker simply continues from the new
-     * position; the generation check stops work for an obsolete data set.
+     * Ask the single worker to decode [PREFETCH_AHEAD] positions ahead. Calls
+     * are coalesced: the launcher can request a view every 16 ms, but only the
+     * newest target is useful. Without this the executor queued a 12-frame
+     * task per flip, so work fell further behind the animation.
      */
     private fun prefetch(
         current: LivingFrame,
@@ -237,25 +256,65 @@ private class LivingFramesFactory(
     ) {
         val ord = order
         if (ord.isEmpty()) return
-        executor.execute {
-            for (offset in 1..PREFETCH_AHEAD) {
-                if (requestedGeneration != generation) return@execute
-                val position = (startPosition + offset) % ord.size
-                val frameIndex = ord[position]
-                val alreadyQueued = synchronized(recent) {
-                    if (recent.containsKey(frameIndex) || pending.contains(frameIndex)) {
-                        true
-                    } else {
-                        pending.add(frameIndex)
-                        false
+        prefetchFrame = current
+        prefetchGeneration = requestedGeneration
+        prefetchTarget.set(((startPosition % ord.size) + ord.size) % ord.size)
+        schedulePrefetch()
+    }
+
+    private fun schedulePrefetch() {
+        if (!prefetchScheduled.compareAndSet(false, true)) return
+        try {
+            executor.execute { drainPrefetch() }
+        } catch (_: RejectedExecutionException) {
+            prefetchScheduled.set(false)
+        }
+    }
+
+    private fun drainPrefetch() {
+        try {
+            while (true) {
+                val requestedGeneration = prefetchGeneration
+                val startPosition = prefetchTarget.getAndSet(-1)
+                val current = prefetchFrame
+                val ord = order
+                if (current == null || ord.isEmpty() ||
+                    requestedGeneration != generation || startPosition < 0
+                ) {
+                    return
+                }
+                for (offset in 1..PREFETCH_AHEAD) {
+                    if (requestedGeneration != generation) return
+                    // A newer position arrived: handle it before spending more
+                    // time on frames the launcher has already passed.
+                    if (prefetchTarget.get() >= 0) break
+                    val position = (startPosition + offset) % ord.size
+                    val frameIndex = ord[position]
+                    val alreadyQueued = synchronized(recent) {
+                        if (recent.containsKey(frameIndex) || pending.contains(frameIndex)) {
+                            true
+                        } else {
+                            pending.add(frameIndex)
+                            false
+                        }
+                    }
+                    if (alreadyQueued) continue
+                    try {
+                        runCatching {
+                            rendered(current, frameIndex, requestedGeneration)
+                        }.onFailure {
+                            Log.w(TAG, "Couldn't prefetch a Living Widget frame", it)
+                        }
+                    } finally {
+                        synchronized(recent) { pending.remove(frameIndex) }
                     }
                 }
-                if (alreadyQueued) continue
-                try {
-                    rendered(current, frameIndex, requestedGeneration)
-                } finally {
-                    synchronized(recent) { pending.remove(frameIndex) }
-                }
+                if (prefetchTarget.get() < 0) return
+            }
+        } finally {
+            prefetchScheduled.set(false)
+            if (prefetchTarget.get() >= 0 && prefetchGeneration == generation) {
+                schedulePrefetch()
             }
         }
     }
@@ -297,11 +356,20 @@ private class LivingFramesFactory(
     override fun hasStableIds(): Boolean = true
 
     override fun onDestroy() {
+        // Invalidate before stopping the worker. A decode already in flight
+        // must not repopulate the cache after the service is gone.
+        generation++
+        prefetchTarget.set(-1)
+        prefetchFrame = null
         executor.shutdownNow()
         clearFrames()
     }
 
     private fun clearFrames() {
+        frame = null
+        order = IntArray(0)
+        prefetchTarget.set(-1)
+        prefetchFrame = null
         synchronized(recent) {
             recent.clear()
             pending.clear()
