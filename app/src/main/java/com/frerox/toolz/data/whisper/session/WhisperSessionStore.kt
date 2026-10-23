@@ -73,6 +73,9 @@ class WhisperSessionStore @Inject constructor(
          * there (`WireProtocol.shouldBlockDowngradeAfterFails`).
          */
         const val MAX_FAILED_ESTABLISH_BEFORE_DOWNGRADE_BLOCK = 3
+
+        /** Superseded sessions retained per peer for decrypting in-flight frames. */
+        private const val MAX_ALT_SESSIONS = 3
     }
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -126,6 +129,36 @@ class WhisperSessionStore @Inject constructor(
                 currentPeerIkB64 == null ||
                 currentPeerIkB64 != incomingIkB64 ||
                 incomingSid < currentSid
+
+        /**
+         * TWO ACCOUNTS, ONE INSTALL acceptance rule (October 2026 defect).
+         *
+         * Both accounts share this device's software X25519 identity, so the
+         * `peer identity changed` signal can never fire between them and the
+         * racing-initiator tie-break is actively harmful: applied independently
+         * on each side it can leave account A holding session S_B while account B
+         * holds session S_A — each side reads its own messages and locks the
+         * other's, forever (exactly the reported symptom).
+         *
+         * Accounts on one install are sequential (only one is signed in), so
+         * there is no real race. The session CREATED LATER on this device is
+         * authoritative and both sides converge on it:
+         *  - newer header → accept (the older side adopts responder role);
+         *  - older header → reject;
+         *  - identical timestamp → lower sid wins (deterministic);
+         *  - legacy header without a timestamp → tie-break only.
+         *
+         * Timestamps are trustworthy here precisely because it is one clock.
+         */
+        fun acceptSameInstall(
+            currentSid: String,
+            currentCreatedAtMs: Long,
+            incomingSid: String,
+            incomingCreatedAtMs: Long,
+        ): Boolean =
+            incomingCreatedAtMs > currentCreatedAtMs ||
+                (incomingCreatedAtMs == currentCreatedAtMs && incomingSid < currentSid) ||
+                (incomingCreatedAtMs <= 0L && incomingSid < currentSid)
     }
     }
 
@@ -152,10 +185,22 @@ class WhisperSessionStore @Inject constructor(
         /** Acceptance gate for an incoming handshake against THIS live session. */
         fun canAcceptHandshake(incomingIkB64: String, incomingSid: String): Boolean =
             StoredSession.canAcceptHandshake(sessionId, peerIkB64, incomingIkB64, incomingSid)
+
+        /** Same-install ("newer session wins") gate — see [StoredSession.acceptSameInstall]. */
+        fun acceptSameInstall(incomingSid: String, incomingCreatedMs: Long): Boolean =
+            StoredSession.acceptSameInstall(sessionId, createdAtMs, incomingSid, incomingCreatedMs)
     }
 
     private val memory = ConcurrentHashMap<String, Live>()
     private val lastWrittenJson = ConcurrentHashMap<String, String>()
+
+    /**
+     * Superseded sessions, keyed `scope \0 peer \0 sessionId`. They are NEVER
+     * used for sending; they exist only so frames from the losing session of a
+     * same-install convergence (or a stale session we displaced) still open.
+     * Bounded by [MAX_ALT_SESSIONS], both in memory and on disk.
+     */
+    private val altMemory = ConcurrentHashMap<String, Live>()
 
     /**
      * Residual-downgrade bookkeeping: consecutive X3DH establish failures per
@@ -191,6 +236,24 @@ class WhisperSessionStore @Inject constructor(
         if (failedEstablishCounts.remove(scoped(peerId)) != null) {
             ProtocolDiagnostics.increment("v3.establishRecovered")
         }
+    }
+
+    /**
+     * Desync flags: set when an incoming frame proves the peer is using a
+     * session we do not hold (or one older than ours), cleared when we adopt a
+     * peer handshake or start a fresh outbound session. Scoped per account so a
+     * flag from one signed-in account can never trigger a reset in the next.
+     */
+    private val desyncPeers = ConcurrentHashMap<String, Boolean>()
+
+    fun markSessionDesync(peerId: String) {
+        desyncPeers[scoped(peerId)] = true
+    }
+
+    fun sessionDesyncDetected(peerId: String): Boolean = desyncPeers.containsKey(scoped(peerId))
+
+    fun clearSessionDesync(peerId: String) {
+        desyncPeers.remove(scoped(peerId))
     }
 
     // One writer at a time per peer; encrypt/decrypt callers ALSO hold this mutex so
@@ -240,6 +303,14 @@ class WhisperSessionStore @Inject constructor(
             accountScope().also { live.accountScope = it }
         }
         val key = "$scope\u0000$peerId"
+        // A session with a DIFFERENT id replaces the primary. Keep the displaced
+        // one readable (bounded) so frames already sent on it still open — this is
+        // what makes a same-install convergence non-destructive.
+        memory[key]?.let { previous ->
+            if (previous !== live && previous.sessionId != live.sessionId) {
+                saveSecondary(peerId, previous)
+            }
+        }
         memory[key] = live
         kotlinx.coroutines.withContext(Dispatchers.IO) {
             adoptLegacySession(peerId, scope)
@@ -256,14 +327,87 @@ class WhisperSessionStore @Inject constructor(
         }
     }
 
+    /**
+     * Reads a superseded (non-primary) session by [sessionId]. Used ONLY to open
+     * frames still arriving on the session that lost the same-install "newer
+     * wins" convergence; never used for sending.
+     */
+    suspend fun loadSecondary(peerId: String, sessionId: String): Live? {
+        val scope = accountScope()
+        val key = "$scope\u0000$peerId\u0000$sessionId"
+        altMemory[key]?.let { return it }
+        return kotlinx.coroutines.withContext(Dispatchers.IO) {
+            val file = WhisperSessionFiles.altFileFor(baseDir, peerId, scope, sessionId)
+            if (!file.isFile) return@withContext null
+            val stored = runCatching {
+                json.decodeFromString(StoredSession.serializer(), file.readText())
+            }.getOrNull()
+            if (stored == null || stored.sessionId != sessionId) {
+                file.delete()
+                return@withContext null
+            }
+            val live = hydrate(stored) ?: run {
+                file.delete()
+                return@withContext null
+            }
+            live.accountScope = scope
+            altMemory[key] = live
+            live
+        }
+    }
+
+    /** Persists [live] as a superseded, decrypt-only session. */
+    suspend fun saveSecondary(peerId: String, live: Live) {
+        val scope = live.accountScope.ifBlank {
+            accountScope().also { live.accountScope = it }
+        }
+        val key = "$scope\u0000$peerId\u0000${live.sessionId}"
+        altMemory[key] = live
+        kotlinx.coroutines.withContext(Dispatchers.IO) {
+            val stored = serialize(live) ?: return@withContext
+            val text = json.encodeToString(StoredSession.serializer(), stored)
+            writeFileAtomic(
+                WhisperSessionFiles.altFileFor(baseDir, peerId, scope, live.sessionId),
+                text,
+            )
+            pruneSecondaries(peerId, scope)
+            live.dirty = false
+        }
+    }
+
+    private fun pruneSecondaries(peerId: String, scope: String) {
+        val files = WhisperSessionFiles.altFilesFor(baseDir, peerId, scope)
+        if (files.size > MAX_ALT_SESSIONS) {
+            files.map { file ->
+                val created = runCatching {
+                    json.decodeFromString(StoredSession.serializer(), file.readText()).createdAtMs
+                }.getOrDefault(0L)
+                created to file
+            }.sortedBy { it.first }
+                .dropLast(MAX_ALT_SESSIONS)
+                .forEach { it.second.delete() }
+        }
+        val memPrefix = "$scope\u0000$peerId\u0000"
+        val entries = altMemory.entries.filter { it.key.startsWith(memPrefix) }
+        if (entries.size > MAX_ALT_SESSIONS) {
+            entries.sortedBy { it.value.createdAtMs }
+                .dropLast(MAX_ALT_SESSIONS)
+                .forEach { altMemory.remove(it.key) }
+        }
+    }
+
     suspend fun delete(peerId: String) {
         val scope = accountScope()
         val key = "$scope\u0000$peerId"
         memory.remove(key)
         lastWrittenJson.remove(key)
+        desyncPeers.remove(key)
+        val altPrefix = "$scope\u0000$peerId\u0000"
+        altMemory.keys.filter { it.startsWith(altPrefix) }.forEach { altMemory.remove(it) }
         kotlinx.coroutines.withContext(Dispatchers.IO) {
             adoptLegacySession(peerId, scope)
             fileFor(peerId, scope).delete()
+            WhisperSessionFiles.altFilesFor(baseDir, peerId, scope).forEach { it.delete() }
         }
     }
 
@@ -275,15 +419,19 @@ class WhisperSessionStore @Inject constructor(
      */
     fun clearMemory() {
         memory.clear()
+        altMemory.clear()
         lastWrittenJson.clear()
         failedEstablishCounts.clear()
+        desyncPeers.clear()
     }
 
     /** Sign-out / account-deletion wipe (planwhisper.md §3.1). */
     suspend fun deleteAll() {
         memory.clear()
+        altMemory.clear()
         lastWrittenJson.clear()
         failedEstablishCounts.clear()
+        desyncPeers.clear()
         kotlinx.coroutines.withContext(Dispatchers.IO) {
             baseDir.deleteRecursively()
         }
@@ -361,9 +509,30 @@ class WhisperSessionStore @Inject constructor(
  */
 internal object WhisperSessionFiles {
     private const val FILE_EXT = ".json"
+    private const val ALT_DIR = "alt"
 
     fun fileFor(baseDir: File, peerId: String, scope: String): File =
         File(File(baseDir, sha256Hex(scope)), sha256Hex(peerId) + FILE_EXT)
+
+    /**
+     * Superseded session snapshot, kept read-only so frames still in flight on a
+     * session that lost the same-install "newer wins" race remain decryptable:
+     * `whisper_sessions/<sha256(owner)>/alt/<sha256(peer)>_<sha256(sessionId)>.json`.
+     */
+    fun altFileFor(baseDir: File, peerId: String, scope: String, sessionId: String): File =
+        File(
+            File(File(baseDir, sha256Hex(scope)), ALT_DIR),
+            sha256Hex(peerId) + "_" + sha256Hex(sessionId) + FILE_EXT,
+        )
+
+    /** Every superseded snapshot for one (account, peer) pair. */
+    fun altFilesFor(baseDir: File, peerId: String, scope: String): List<File> {
+        val dir = File(File(baseDir, sha256Hex(scope)), ALT_DIR)
+        val prefix = sha256Hex(peerId) + "_"
+        return dir.listFiles()
+            ?.filter { it.isFile && it.name.startsWith(prefix) && it.name.endsWith(FILE_EXT) }
+            ?: emptyList()
+    }
 
     /**
      * A leftover snapshot that may be adopted for ([scope], [peerId]), or null.

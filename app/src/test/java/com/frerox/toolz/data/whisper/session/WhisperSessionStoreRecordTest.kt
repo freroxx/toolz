@@ -8,6 +8,8 @@ package com.frerox.toolz.data.whisper.session
 import com.frerox.toolz.crypto.SessionCrypto
 import com.frerox.toolz.data.whisper.WhisperSessionFactory
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -88,6 +90,94 @@ class WhisperSessionStoreRecordTest {
         )
         assertTrue(lowerWins)
         assertFalse(higherRejected)
+    }
+
+    // ------------------------------------- same-install (two accounts, one device)
+
+    @Test
+    fun `same-install - later session wins on both sides`() {
+        // Account A created sOLD at t=1000; account B created sNEW at t=2000.
+        // The older holder adopts, the newer holder keeps → both end on sNEW.
+        assertTrue(
+            WhisperSessionStore.StoredSession.acceptSameInstall(
+                currentSid = "sOLD", currentCreatedAtMs = 1_000L,
+                incomingSid = "sNEW", incomingCreatedAtMs = 2_000L,
+            ),
+        )
+        assertFalse(
+            WhisperSessionStore.StoredSession.acceptSameInstall(
+                currentSid = "sNEW", currentCreatedAtMs = 2_000L,
+                incomingSid = "sOLD", incomingCreatedAtMs = 1_000L,
+            ),
+        )
+    }
+
+    @Test
+    fun `same-install - identical timestamp falls back to lower sid`() {
+        assertTrue(
+            WhisperSessionStore.StoredSession.acceptSameInstall(
+                currentSid = "sZZZ", currentCreatedAtMs = 5_000L,
+                incomingSid = "sAAA", incomingCreatedAtMs = 5_000L,
+            ),
+        )
+        assertFalse(
+            WhisperSessionStore.StoredSession.acceptSameInstall(
+                currentSid = "sAAA", currentCreatedAtMs = 5_000L,
+                incomingSid = "sZZZ", incomingCreatedAtMs = 5_000L,
+            ),
+        )
+    }
+
+    @Test
+    fun `same-install - legacy header without timestamp uses sid tie-break`() {
+        assertTrue(
+            WhisperSessionStore.StoredSession.acceptSameInstall(
+                currentSid = "sZZZ", currentCreatedAtMs = 5_000L,
+                incomingSid = "sAAA", incomingCreatedAtMs = 0L,
+            ),
+        )
+        assertFalse(
+            WhisperSessionStore.StoredSession.acceptSameInstall(
+                currentSid = "sAAA", currentCreatedAtMs = 5_000L,
+                incomingSid = "sZZZ", incomingCreatedAtMs = 0L,
+            ),
+        )
+    }
+
+    @Test
+    fun `same-install - cross-adopted deadlock converges on the newer session`() {
+        // Regression for the October 2026 account-switch report: unconditional
+        // same-install acceptance left A holding S_B and B holding S_A, so each
+        // read only its own outgoing messages. Newer-wins picks exactly one
+        // survivor: S_NEW (t=2000). S_OLD's holder (t=1000) yields.
+        val aHoldsOld = WhisperSessionStore.StoredSession.acceptSameInstall(
+            currentSid = "sOLD", currentCreatedAtMs = 1_000L,
+            incomingSid = "sNEW", incomingCreatedAtMs = 2_000L,
+        )
+        val bHoldsNew = WhisperSessionStore.StoredSession.acceptSameInstall(
+            currentSid = "sNEW", currentCreatedAtMs = 2_000L,
+            incomingSid = "sOLD", incomingCreatedAtMs = 1_000L,
+        )
+        assertTrue("older session must adopt the newer one", aHoldsOld)
+        assertFalse("newer session must stay authoritative", bHoldsNew)
+    }
+
+    @Test
+    fun `codec - x3dh creation timestamp round-trips and legacy defaults to zero`() {
+        val header = WhisperSessionFactory.X3dhHeader(
+            ikPubB64 = "ik", ekPubB64 = "ek", spkKid = "spk", opkKid = "opk",
+            createdMs = 1_700_000_000_000L,
+        )
+        assertEquals(header, WhisperV3Codec.x3dhFromJson(WhisperV3Codec.x3dhJson(header)))
+
+        val legacyObj = buildJsonObject {
+            put("ik", "ik")
+            put("ek", "ek")
+            put("spk", "spk")
+        }
+        val legacy = WhisperV3Codec.x3dhFromJson(legacyObj)
+        assertNotNull(legacy)
+        assertEquals(0L, legacy!!.createdMs)
     }
 
     // ------------------------------------------------- serialization pipeline

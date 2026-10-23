@@ -332,6 +332,30 @@ class WhisperPrekeyManager @Inject constructor(
     @Synchronized
     fun identityPrivateKey(): ByteArray = getOrCreateIdentitySeed()
 
+    @Volatile
+    private var cachedIdentityPublicB64: String? = null
+
+    /**
+     * True when [publicKeyB64] is THIS install's software X25519 identity public
+     * key — i.e. the peer's X3DH identity is the same install as ours.
+     *
+     * This is deliberately NOT [WhisperCrypto.isCurrentPublicKey]: that helper
+     * compares the hardware-bound P-256 envelope key, a different key entirely.
+     * Using it here made every same-install handshake look like a peer reinstall,
+     * so two accounts on one device never recognised each other (October 2026
+     * account-switch defect).
+     */
+    @Synchronized
+    fun isOwnIdentityPublicKey(publicKeyB64: String?): Boolean {
+        if (publicKeyB64.isNullOrBlank()) return false
+        val mine = cachedIdentityPublicB64 ?: run {
+            val pub = SessionCrypto.publicFromPrivate(identityPrivateKey())
+            android.util.Base64.encodeToString(pub, android.util.Base64.NO_WRAP)
+                .also { cachedIdentityPublicB64 = it }
+        }
+        return mine == publicKeyB64
+    }
+
     companion object {
         private const val PREFS = "whisper_protocol_state"
         private const val KEY_IK_SEED = "identity_seed_wrapped"

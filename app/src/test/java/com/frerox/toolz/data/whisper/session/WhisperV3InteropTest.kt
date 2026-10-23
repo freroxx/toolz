@@ -94,6 +94,9 @@ class WhisperV3InteropTest {
         val sid: String,
         val bundleA: Bundle,
         val bundleB: Bundle,
+        /** Raw X3DH secret, so a test can bootstrap a *fresh* responder exactly
+         *  like `WhisperSessionFactory.respondToHeader` does. */
+        val sk: ByteArray,
     )
 
     private fun established(withOpk: Boolean = true): Session {
@@ -106,6 +109,7 @@ class WhisperV3InteropTest {
             sid = sessionIdOf(skI),
             bundleA = a,
             bundleB = b,
+            sk = skI,
         )
     }
 
@@ -359,5 +363,68 @@ class WhisperV3InteropTest {
         // Chains still advance normally afterwards.
         val f = seal(true, s.alice, "still-alive")
         assertArrayEquals(f.plain, s.bob.decrypt(f.h, f.ct))
+    }
+
+    // ------------------------------- 4. same install, two accounts (Oct 2026 bug)
+
+    /**
+     * Exact reported workflow: account A messages B; B answers under its OWN
+     * session created later on the same device. Reproduces the old failure
+     * (A holds S_A, B holds S_B → both directions locked) and proves the fix:
+     *  - the older session is rejected as primary but RETAINED read-only, so the
+     *    message A already sent on it opens at B (the "just-sent message" bug);
+     *  - both sides converge on the newer session (newest-wins);
+     *  - normal two-way traffic then flows on it.
+     */
+    @Test
+    fun `same-install - newer session wins and the older one stays readable`() {
+        // Two independent sessions between the same two accounts (what a stale
+        // device state produced before the fix): S_A created at t=1000 by A,
+        // S_B created at t=2000 by B.
+        val aSession = established() // alice = A (initiator), bob = B (responder)
+        val bSession = established() // alice = B (initiator), bob = A (responder)
+        val tA = 1_000L
+        val tB = 2_000L
+
+        // Convergence rule applied on each side.
+        val aAcceptsB = WhisperSessionStore.StoredSession.acceptSameInstall(
+            currentSid = aSession.sid, currentCreatedAtMs = tA,
+            incomingSid = bSession.sid, incomingCreatedAtMs = tB,
+        )
+        val bAcceptsA = WhisperSessionStore.StoredSession.acceptSameInstall(
+            currentSid = bSession.sid, currentCreatedAtMs = tB,
+            incomingSid = aSession.sid, incomingCreatedAtMs = tA,
+        )
+        assertTrue("older holder must adopt the newer session", aAcceptsB)
+        assertFalse("newer holder must keep its session", bAcceptsA)
+
+        // A's already-sent message on S_A. B rejects S_A as primary but retains a
+        // fresh responder derived from the handshake — exactly openV3Frame's
+        // `handshakeRetained` path — so the message still opens.
+        val m1FromA = seal(true, aSession.alice, "hello from A")
+        val retainedForB = WhisperRatchet.responder(
+            aSession.sk, aSession.bundleB.spkPriv, aSession.bundleB.spkPubB64,
+        )
+        assertArrayEquals(
+            "the message sent before convergence must remain readable",
+            m1FromA.plain,
+            retainedForB.decrypt(m1FromA.h, m1FromA.ct),
+        )
+
+        // A adopts S_B as responder (newer wins); B keeps S_B as initiator.
+        val aOnNew = bSession.bob
+        val m2FromB = seal(true, bSession.alice, "hello from B")
+        assertArrayEquals(m2FromB.plain, aOnNew.decrypt(m2FromB.h, m2FromB.ct))
+
+        // Once A received the first frame it can send on S_B too: two-way flow.
+        val m3FromA = seal(false, aOnNew, "reply from A")
+        assertArrayEquals(m3FromA.plain, bSession.alice.decrypt(m3FromA.h, m3FromA.ct))
+        val m4FromB = seal(true, bSession.alice, "more from B")
+        assertArrayEquals(m4FromB.plain, aOnNew.decrypt(m4FromB.h, m4FromB.ct))
+
+        // And the retained older session did NOT get destroyed by convergence:
+        // a second message A sent on S_A before it adopted S_B still opens.
+        val lateOnOld = seal(true, aSession.alice, "second on old session")
+        assertArrayEquals(lateOnOld.plain, retainedForB.decrypt(lateOnOld.h, lateOnOld.ct))
     }
 }

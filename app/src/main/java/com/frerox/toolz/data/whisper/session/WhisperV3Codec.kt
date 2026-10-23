@@ -12,6 +12,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import java.util.Base64
 
@@ -87,6 +88,8 @@ object WhisperV3Codec {
         @SerialName("ek") val ekPubB64: String,
         @SerialName("spk") val spkKid: String,
         @SerialName("opk") val opkKid: String? = null,
+        /** Session creation time (epoch ms); 0 for headers written before it existed. */
+        @SerialName("ts") val createdMs: Long = 0L,
     )
 
     fun encode(
@@ -125,6 +128,7 @@ object WhisperV3Codec {
         put("ek", h.ekPubB64)
         put("spk", h.spkKid)
         if (h.opkKid != null) put("opk", h.opkKid)
+        if (h.createdMs > 0) put("ts", h.createdMs)
     }
 
     fun x3dhFromJson(obj: JsonObject): WhisperSessionFactory.X3dhHeader? = runCatching {
@@ -133,12 +137,13 @@ object WhisperV3Codec {
             ekPubB64 = obj["ek"]!!.jsonPrimitive.content,
             spkKid = obj["spk"]!!.jsonPrimitive.content,
             opkKid = obj["opk"]?.jsonPrimitive?.content,
+            createdMs = obj["ts"]?.jsonPrimitive?.longOrNull ?: 0L,
         )
     }.getOrNull()
 
     fun encodeX3dhWire(h: WhisperSessionFactory.X3dhHeader): X3dhWire =
-        X3dhWire(h.ikPubB64, h.ekPubB64, h.spkKid, h.opkKid)
+        X3dhWire(h.ikPubB64, h.ekPubB64, h.spkKid, h.opkKid, h.createdMs)
 
     fun toFactoryHeader(w: X3dhWire): WhisperSessionFactory.X3dhHeader =
-        WhisperSessionFactory.X3dhHeader(w.ikPubB64, w.ekPubB64, w.spkKid, w.opkKid)
+        WhisperSessionFactory.X3dhHeader(w.ikPubB64, w.ekPubB64, w.spkKid, w.opkKid, w.createdMs)
 }

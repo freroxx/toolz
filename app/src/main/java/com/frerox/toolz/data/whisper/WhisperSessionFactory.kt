@@ -45,6 +45,13 @@ class WhisperSessionFactory @Inject constructor(
         @SerialName("ek") val ekPubB64: String,
         @SerialName("spk") val spkKid: String,
         @SerialName("opk") val opkKid: String? = null,
+        /**
+         * Session creation time (epoch ms), set by the initiator. Same-install
+         * peers share one clock, so it gives a total order over the sessions two
+         * accounts on one device can independently create ("newer wins").
+         * 0 = legacy header written before the field existed.
+         */
+        @SerialName("ts") val createdMs: Long = 0L,
     )
 
     data class InitiatedSession(
@@ -121,6 +128,7 @@ class WhisperSessionFactory @Inject constructor(
             ekPubB64 = Base64.encodeToString(ekPub, Base64.NO_WRAP),
             spkKid = bundle.spkKid,
             opkKid = bundle.opkKid,
+            createdMs = System.currentTimeMillis(),
         )
         ProtocolDiagnostics.log("x3dh: initiated $sessionId with ${peerId.take(6)}…")
         InitiatedSession(sk, header, bundle.spkPubB64, bundle.identityIkB64)

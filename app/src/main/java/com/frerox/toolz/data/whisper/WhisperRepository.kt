@@ -322,7 +322,20 @@ class WhisperRepository @Inject constructor(
         insuranceEnvelope: String? = null,
     ): Pair<String, String>? = try {
         sessionStore.mutexFor(receiverId).withLock {
-            val live = sessionStore.load(receiverId) ?: establishOutboundLocked(receiverId)
+            val live = if (sessionStore.sessionDesyncDetected(receiverId)) {
+                // openV3Frame proved the peer is actively using a different session
+                // (same-install account switch, stale/mis-swept state, or one side
+                // lost its file). Start a NEWER session here: this very frame carries
+                // its handshake and the peer's acceptSameInstall rule takes it,
+                // converging both sides instead of both talking past each other.
+                establishOutboundLocked(receiverId)?.also {
+                    sessionStore.clearSessionDesync(receiverId)
+                    ProtocolDiagnostics.increment("v3.desyncReset")
+                    ProtocolDiagnostics.log("v3: peer desync — started fresh session ${it.sessionId}")
+                } ?: sessionStore.load(receiverId)
+            } else {
+                sessionStore.load(receiverId) ?: establishOutboundLocked(receiverId)
+            }
             val ratchet = live?.ratchet ?: return@withLock null
             val sealed = ratchet.encrypt(plaintext.toByteArray(Charsets.UTF_8), adBytes(senderId, receiverId))
             // The handshake header rides exactly ONE frame: once sealed into this
@@ -422,7 +435,10 @@ class WhisperRepository @Inject constructor(
             sessionId = sessionFactory.sessionIdFor(initiated.sessionKey),
             x3dhKeyWrapped = skWrapped,
             peerIkB64 = initiated.remoteIdentityIkB64,
-            createdAtMs = System.currentTimeMillis(),
+            // The initiator's own creation stamp; also carried in the header so a
+            // same-install responder stores the SAME ordering value.
+            createdAtMs = initiated.header.createdMs.takeIf { it > 0 }
+                ?: System.currentTimeMillis(),
             pendingHeader = initiated.header,
             ratchet = ratchet,
         )
@@ -457,7 +473,11 @@ class WhisperRepository @Inject constructor(
         _ratchetGapNotice.tryEmit(peerId)
         appScope.launch {
             runCatching {
-                sessionStore.mutexFor(peerId).withLock { establishOutboundLocked(peerId) }
+                sessionStore.mutexFor(peerId).withLock {
+                    if (establishOutboundLocked(peerId) != null) {
+                        sessionStore.clearSessionDesync(peerId)
+                    }
+                }
             }
         }
     }
@@ -980,79 +1000,140 @@ class WhisperRepository @Inject constructor(
             val wire = frame.x3dh
             if (wire != null) {
                 val existing = sessionStore.load(partnerId)
-                // SAME-INSTALL RULE (two accounts, one device): both accounts share this
-                // device's crypto identity, so the `peer identity changed` reinstall
-                // signal can never fire between them and the deterministic session-id
-                // tie-break would randomly reject a legitimate fresh session. The
-                // losing side then keeps sending pure frames on a session the other
-                // side never adopted — a permanent, silent locked conversation (the
-                // October 2026 account-switch report). Accounts on one install are
-                // sequential (only one is signed in at a time), so the racing-initiator
-                // ping-pong the tie-break protects against cannot happen here: accept.
-                val sameInstallIdentity = crypto.isCurrentPublicKey(wire.ikPubB64)
-                when {
+                // SAME-INSTALL RULE (two accounts, one device): both accounts share
+                // this install's *software X25519* identity, so the `peer identity
+                // changed` reinstall signal can never fire between them. The check
+                // must be [WhisperPrekeyManager.isOwnIdentityPublicKey] — the old
+                // `crypto.isCurrentPublicKey` compares the hardware P-256 envelope
+                // key and was therefore always false, leaving the bug unfixed.
+                //
+                // Accounts on one install are sequential (only one is signed in at
+                // a time), so the session created LATER on this device is
+                // authoritative and both sides converge on it (see
+                // [acceptSameInstall]). This replaces the old unconditional accept,
+                // which let each side adopt the other's session — A on S_B, B on
+                // S_A — so each could read only its own outgoing messages.
+                val sameInstall = prekeyManager.isOwnIdentityPublicKey(wire.ikPubB64)
+                val replay = existing != null &&
+                    existing.sessionId == frame.sessionId && existing.ratchet != null
+                val accept = when {
                     // Idempotent redelivery of a handshake we already bootstrapped:
                     // re-running X3DH here would reset the advanced ratchet chains.
-                    existing != null && existing.sessionId == frame.sessionId && existing.ratchet != null ->
-                        ProtocolDiagnostics.increment("v3.handshakeReplay")
-                    // Racing initiator lost the deterministic tie-break (or a stale
-                    // post-reinstall header): one locked frame, then convergence.
-                    existing != null && !sameInstallIdentity &&
-                        !existing.canAcceptHandshake(wire.ikPubB64, frame.sessionId) -> {
-                        ProtocolDiagnostics.increment("v3.handshakeRejected")
+                    replay -> false
+                    existing == null -> true
+                    sameInstall -> existing.acceptSameInstall(frame.sessionId, wire.createdMs)
+                    else -> existing.canAcceptHandshake(wire.ikPubB64, frame.sessionId)
+                }
+                // A frame still ACTIVE (row newer than our session) that is not on
+                // our session proves the peer is using another session right now.
+                // Flag it so the next outbound send starts a newer session the peer
+                // will accept. Stale history rows (older than our session) never
+                // trigger a reset, so re-rendering old history cannot churn sessions.
+                fun markActiveDesync() {
+                    val live = existing ?: return
+                    // Only PEER frames prove peer session state. Our own undecryptable
+                    // history (no self-read copy) must never trigger a reset.
+                    if (msgSenderId == myId) return
+                    val same = sameInstall || prekeyManager.isOwnIdentityPublicKey(live.peerIkB64)
+                    if (same && rowCreatedAtEpochMs >= live.createdAtMs) {
+                        sessionStore.markSessionDesync(partnerId)
+                        ProtocolDiagnostics.increment("v3.desyncMarked")
+                    }
+                }
+                // Build responder state for the incoming X3DH header. Null when the
+                // SPK/OPK private halves are gone (rotation raced us).
+                fun buildResponderLive(): com.frerox.toolz.data.whisper.session.WhisperSessionStore.Live? {
+                    val hdr = codec.toFactoryHeader(wire)
+                    if (!sessionFactory.respondToHeader(partnerId, hdr)) return null
+                    val sk = sessionFactory.sessionKeyFor(partnerId) ?: return null
+                    val spkPriv = prekeyManager.privateKeyForKid(hdr.spkKid) ?: return null
+                    val skWrapped = crypto.wrapWithKeystoreAes(sk) ?: return null
+                    // createdAtMs is the INITIATOR's session creation time (same
+                    // clock for a same-install peer), not "accepted now" — that is
+                    // what makes the newer-session-wins rule total.
+                    return com.frerox.toolz.data.whisper.session.WhisperSessionStore.Live(
+                        sessionId = frame.sessionId,
+                        x3dhKeyWrapped = skWrapped,
+                        peerIkB64 = wire.ikPubB64,
+                        createdAtMs = wire.createdMs.takeIf { it > 0 }
+                            ?: System.currentTimeMillis(),
+                        pendingHeader = null,
+                        ratchet = com.frerox.toolz.data.whisper.session.WhisperRatchet.responder(
+                            sk, spkPriv,
+                            java.util.Base64.getEncoder().encodeToString(
+                                com.frerox.toolz.crypto.SessionCrypto.publicFromPrivate(spkPriv),
+                            ),
+                        ),
+                    )
+                }
+                if (replay) {
+                    ProtocolDiagnostics.increment("v3.handshakeReplay")
+                    // Fall through: step 2 opens this frame on the advanced primary
+                    // (the ratchet's `consumed` memory makes replays idempotent).
+                } else if (!accept) {
+                    ProtocolDiagnostics.increment("v3.handshakeRejected")
+                    // Older same-install session, or a racing initiator that lost
+                    // the cross-device tie-break. Our session stays authoritative,
+                    // but the superseded one is retained READ-ONLY: the peer's
+                    // frames already sent on it (the user's just-sent message)
+                    // still open.
+                    //
+                    // Idempotent: history re-emissions replay this handshake row
+                    // many times. Rebuilding the responder would REWIND and destroy
+                    // the advanced superseded ratchet, so only derive it when we do
+                    // not already hold that session read-only.
+                    val alreadyRetained =
+                        sessionStore.loadSecondary(partnerId, frame.sessionId) != null
+                    val retained = alreadyRetained || buildResponderLive()?.also {
+                        sessionStore.saveSecondary(partnerId, it)
+                    } != null
+                    if (retained) {
+                        ProtocolDiagnostics.increment("v3.handshakeRetained")
+                        // Fall through: step 2 decrypts THIS frame on the retained
+                        // session — otherwise the message that carried the losing
+                        // handshake could never be read on this device.
+                    } else {
+                        markActiveDesync()
                         tryInsurance()?.let { return@withLock maybeHealFromPlaintext(it, msgSenderId, partnerId, System.currentTimeMillis()) }
                         return@withLock null
                     }
-                    else -> {
-                        val hdr = codec.toFactoryHeader(wire)
-                        if (!sessionFactory.respondToHeader(partnerId, hdr)) {
-                            // SPK/OPK privates no longer held (rotation raced us).
-                            ProtocolDiagnostics.increment("v3.respondFail")
-                            tryInsurance()?.let { return@withLock maybeHealFromPlaintext(it, msgSenderId, partnerId, System.currentTimeMillis()) }
-                            return@withLock null
-                        }
-                        val sk = sessionFactory.sessionKeyFor(partnerId)
-                        val spkPriv = prekeyManager.privateKeyForKid(hdr.spkKid)
-                        if (sk == null || spkPriv == null) {
-                            ProtocolDiagnostics.increment("v3.respondFail")
-                            tryInsurance()?.let { return@withLock maybeHealFromPlaintext(it, msgSenderId, partnerId, System.currentTimeMillis()) }
-                            return@withLock null
-                        }
-                        val skWrapped = crypto.wrapWithKeystoreAes(sk) ?: run {
-                            // Refusing to persist unprotected key material is fatal
-                            // to THIS handshake only — envelope fallback still works.
-                            ProtocolDiagnostics.increment("v3.respondFail")
-                            tryInsurance()?.let { return@withLock maybeHealFromPlaintext(it, msgSenderId, partnerId, System.currentTimeMillis()) }
-                            return@withLock null
-                        }
-                        // Bob bootstrap: his SPK private IS his first ratchet key; the
-                        // public half is derived back from it so both sides agree.
-                        sessionStore.save(
-                            partnerId,
-                            com.frerox.toolz.data.whisper.session.WhisperSessionStore.Live(
-                                sessionId = frame.sessionId,
-                                x3dhKeyWrapped = skWrapped,
-                                peerIkB64 = wire.ikPubB64,
-                                createdAtMs = System.currentTimeMillis(),
-                                pendingHeader = null,
-                                ratchet = com.frerox.toolz.data.whisper.session.WhisperRatchet.responder(
-                                    sk, spkPriv,
-                                    java.util.Base64.getEncoder().encodeToString(
-                                        com.frerox.toolz.crypto.SessionCrypto.publicFromPrivate(spkPriv),
-                                    ),
-                                ),
-                            ),
-                        )
-                        ProtocolDiagnostics.log("v3: accepted peer session ${frame.sessionId}")
+                } else {
+                    val accepted = buildResponderLive()
+                    if (accepted == null) {
+                        // SPK/OPK privates no longer held (rotation raced us).
+                        ProtocolDiagnostics.increment("v3.respondFail")
+                        markActiveDesync()
+                        tryInsurance()?.let { return@withLock maybeHealFromPlaintext(it, msgSenderId, partnerId, System.currentTimeMillis()) }
+                        return@withLock null
                     }
+                    // save() demotes a displaced primary to a read-only
+                    // secondary automatically, so old frames stay readable.
+                    sessionStore.save(partnerId, accepted)
+                    sessionStore.clearSessionDesync(partnerId)
+                    ProtocolDiagnostics.log("v3: accepted peer session ${frame.sessionId}")
                 }
             }
 
-            // 2. Locate ratchet state for THIS session id.
+            // 2. Locate ratchet state for THIS session id: the primary first, then
+            //    a superseded decrypt-only session kept by a same-install convergence.
             val live = sessionStore.load(partnerId)
-            val ratchet = live?.ratchet
-            if (live == null || ratchet == null || live.sessionId != frame.sessionId) {
+            val bySid = if (live?.sessionId == frame.sessionId) live
+                else sessionStore.loadSecondary(partnerId, frame.sessionId)
+            val ratchet = bySid?.ratchet
+            if (bySid == null || ratchet == null) {
                 ProtocolDiagnostics.increment("v3.noSession")
+                // The peer is actively sending on a session we do not hold (a pure
+                // frame, or a handshake we could not retain). Same-install peers
+                // recover deterministically: the next outbound send starts a newer
+                // session, which the peer accepts. Ignore stale history rows.
+                if (live != null &&
+                    msgSenderId != myId &&
+                    prekeyManager.isOwnIdentityPublicKey(live.peerIkB64) &&
+                    rowCreatedAtEpochMs >= live.createdAtMs
+                ) {
+                    sessionStore.markSessionDesync(partnerId)
+                    ProtocolDiagnostics.increment("v3.desyncMarked")
+                }
                 tryInsurance()?.let { return@withLock maybeHealFromPlaintext(it, msgSenderId, partnerId, System.currentTimeMillis()) }
                 return@withLock null
             }
@@ -1077,9 +1158,10 @@ class WhisperRepository @Inject constructor(
                 return@withLock null
             }
             recordPeerProtocolFloor(partnerId, WhisperProtocolConfig.RATCHET_PROTOCOL_VERSION)
-            live.sessionProven = true
-            live.dirty = true
-            sessionStore.save(partnerId, live)
+            bySid.sessionProven = true
+            bySid.dirty = true
+            if (bySid === live) sessionStore.save(partnerId, bySid)
+            else sessionStore.saveSecondary(partnerId, bySid)
             ProtocolDiagnostics.increment("v3.opened")
             plain.decodeToString()
         }

@@ -118,4 +118,39 @@ class WhisperSessionFilesTest {
         assertEquals(WhisperSessionFiles.sha256Hex(accountB) + ".json", path.name)
         assertFalse(path.parentFile!!.name.contains(accountA))
     }
+
+    @Test
+    fun `superseded sessions live under alt and are keyed by session id`() {
+        val root = root()
+        val path = WhisperSessionFiles.altFileFor(
+            root,
+            peerId = accountB,
+            scope = accountA,
+            sessionId = "s0123456789ab",
+        )
+        assertEquals(WhisperSessionFiles.sha256Hex(accountA), path.parentFile!!.parentFile!!.name)
+        assertEquals("alt", path.parentFile!!.name)
+        assertTrue(path.name.startsWith(WhisperSessionFiles.sha256Hex(accountB) + "_"))
+        assertTrue(path.name.endsWith(".json"))
+        // Different session id → different file (never overwrites the other one).
+        val other = WhisperSessionFiles.altFileFor(root, accountB, accountA, "s999999999999")
+        assertFalse(path.absolutePath == other.absolutePath)
+    }
+
+    @Test
+    fun `alt enumeration is scoped to one account and one peer`() {
+        val root = root()
+        val mine = WhisperSessionFiles.altFileFor(root, accountB, accountA, "sMINE")
+        mine.parentFile!!.mkdirs()
+        mine.writeText("keep")
+        val otherPeer = WhisperSessionFiles.altFileFor(root, "peer3", accountA, "sOTHERPEER")
+        otherPeer.writeText("other-peer")
+        val otherAccount = WhisperSessionFiles.altFileFor(root, accountB, accountB, "sOTHERACCOUNT")
+        otherAccount.parentFile!!.mkdirs()
+        otherAccount.writeText("other-account")
+
+        val found = WhisperSessionFiles.altFilesFor(root, accountB, accountA)
+
+        assertEquals(listOf(mine.absolutePath), found.map { it.absolutePath })
+    }
 }

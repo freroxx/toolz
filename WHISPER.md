@@ -523,9 +523,9 @@ other account.
 maps and the per-peer mutex are keyed by `(accountId, peerId)`; and each loaded
 `Live` pins the account it came from, so a save that spans a sign-out can never
 land in the next account's file. Sign-out calls
-`WhisperSessionStore.clearMemory()`, which drops live ratchets, the last-written
-cache and establish-failure counters while leaving the per-account files on
-disk.
+`WhisperSessionStore.clearMemory()`, which drops live ratchets, read-only
+superseded sessions, the last-written cache, establish-failure counters and
+desync markers while leaving the per-account files on disk.
 
 Upgrading cannot lose existing sessions, and it cannot hand them to the wrong
 account either. Pre-scoping builds wrote `<sha256(peerId)>.json` directly under
@@ -550,16 +550,41 @@ owner) — it is not introduced by the fix, and unlike the same-install pair it
 cannot be resolved from the layout alone.
 
 The other half of the same-install case is handshake acceptance. Two accounts
-on one install share the device identity key, so the usual "peer identity
-changed ⇒ reinstall ⇒ accept the fresh session" signal never fires between
-them, and the deterministic session-id tie-break (which makes two *racing*
-initiators converge, §13) would reject a legitimate new session roughly half
-the time. The losing side then keeps sending pure frames on a session the other
-side never adopted — permanently locked, with no handshake left to retry.
-Because only one account can be signed in at a time, two accounts on one
-install cannot race, so a handshake whose identity is this device's own
-identity is always accepted when its session id differs. Cross-device traffic
-keeps the tie-break unchanged.
+on one install share the device's **software X25519 identity** (the X3DH IK),
+so the usual "peer identity changed ⇒ reinstall ⇒ accept the fresh session"
+signal never fires between them. The first attempt at this fix compared the
+wrong key — `WhisperCrypto.isCurrentPublicKey`, which is the hardware P-256
+envelope identity, not the software X3DH key — so that branch was dead code and
+the defect survived. The check is now
+`WhisperPrekeyManager.isOwnIdentityPublicKey(header.ikPubB64)`.
+
+Acceptance is **newest-session-wins**, not unconditional acceptance. The X3DH
+header carries `ts`, the initiator's session-creation time. Accounts on one
+install are sequential (only one is signed in) and share one clock, so there is
+no genuine race: the session created later is authoritative on both sides. The
+side holding the older session adopts the newer one; the newer side keeps it.
+Equal timestamps fall back to the deterministic lower-session-id rule, and a
+legacy header without `ts` uses that tie-break only. Unconditional acceptance
+was wrong: each side ended up holding the *other's* session (A on S_B, B on
+S_A), so both could read only their own outgoing messages.
+
+Convergence must not destroy history. A rejected handshake is therefore
+retained as a **read-only secondary session** under
+`whisper_sessions/<sha256(accountId)>/alt/<sha256(peerId)>_<sha256(sessionId)>.json`
+(at most three superseded sessions per peer), and every displaced primary is
+demoted the same way. The receive path looks up the frame's `sid` in the
+primary first and in these secondaries second, so a message the peer sent under
+the losing session still opens — including the message that was already sent
+before convergence. Secondaries are never used for sending, never cross
+accounts, and are cleared on sign-out, account deletion and peer reset.
+
+If a frame arrives on a session the device cannot derive at all (a pure frame
+on a session whose handshake never reached it), the store marks a per-account
+**desync** for that peer. The next outbound send starts a fresh (strictly
+newer) session, clears the marker, and the peer accepts it as above. The
+marker is only set for rows at least as new as the live session, so
+re-rendering old history can never churn sessions. Cross-device traffic keeps
+the identity/tie-break rule unchanged.
 
 The key trust store stays install-wide on purpose: a peer's identity key is a
 property of the peer, not of the local account, so a TOFU pin recorded while
@@ -574,7 +599,11 @@ owner, by design. (c) The chat still does not render a separate "decrypting"
 state, so a *received* row whose session has not hydrated yet can briefly show
 the locked marker before its first successful decrypt; the merger heals it and
 the pipeline now hydrates keys before emitting history, but the tri-state
-render remains a future polish item.
+render remains a future polish item. (d) A pure frame (no handshake) on a
+session the device never derived stays locked: there is no key material to
+recover, and re-encrypting history server-side is out of scope. The desync
+reset heals *future* traffic only; the same-install retention above covers the
+case where the handshake did reach the device.
 
 ---
 
@@ -734,7 +763,7 @@ Local state is split across purpose-built stores, all read in full by the app
 | Store | Holds | Notably does NOT hold |
 |---|---|---|
 | Room (messages, local tombstones, outbox) | ciphertext-only messages (latest 500), delete-for-me tombstones, FIFO outbox (cap 100, 200-entry drop ledger) | plaintext before render; no key material |
-| `whisper_sessions/` | one wrapped session snapshot per peer, under `<sha256(accountId)>/` | anything that cannot be Keystore-wrapped |
+| `whisper_sessions/` | one wrapped session snapshot per peer under `<sha256(accountId)>/`, plus read-only superseded sessions under `<sha256(accountId)>/alt/` | anything that cannot be Keystore-wrapped |
 | Self-read store (`whisper_self_read`, Room v66) | the user's OWN sent plaintext, sealed with the Keystore AES key as `SR1\|messageId\|plaintext`, keyed by `(ownerId, messageId)`, with a SHA-256 hash of the wire ciphertext for previews; capped at 1,500 rows per owner | peer-facing ciphertext; incoming messages; anything readable by another account |
 | Key trust store | pinned/verified fingerprints + rotation counters | private halves |
 | Mute/hidden-chats/delete-for-me/undo/preferences stores | UX state with expiries (24h eviction for delete-for-me, 30s undo window, hidden chat auto-return) | — |
@@ -1619,15 +1648,21 @@ A few design constraints documented as *decisions*, not surprises:
    account-scoped session files and in-memory ratchets with a pinned scope on
    every live session, lazy per-peer adoption of the pre-scoping files (a
    whole-directory sweep is what handed one account the other's sessions), and
-   same-install handshake acceptance so the account-switch pair survives a
-   session restart, plus a sign-out that clears those in-memory chains and
-   the sent-plaintext memo. The key trust store intentionally remains
-   install-wide, because peer identity keys are not account state. Residuals
-   are stated honestly rather than hidden: rows sent before this build have no
-   self-read copy and cannot be recovered if their ratchet state is already
-   gone, and the chat still has no explicit "decrypting" state, so a received
-   row can briefly show the locked marker before its first successful decrypt
-   (the merger heals it).
+   same-install handshake convergence that keeps the account-switch pair in
+   step: the software X3DH identity (not the hardware envelope key) marks the
+   peer as the same install, the session with the newer initiator timestamp
+   wins on both sides, the losing session is retained read-only so the
+   already-sent messages still open, and a frame whose session cannot be
+   derived at all flags a desync that makes the next send start a fresh
+   session. Sign-out clears those in-memory chains, the superseded-session
+   cache, the desync flags and the sent-plaintext memo. The key trust store
+   intentionally remains install-wide, because peer identity keys are not
+   account state. Residuals are stated honestly rather than hidden: rows sent
+   before this build have no self-read copy and cannot be recovered if their
+   ratchet state is already gone; a pure frame on a session whose handshake
+   never reached the device has no key material to recover; and the chat still
+   has no explicit "decrypting" state, so a received row can briefly show the
+   locked marker before its first successful decrypt (the merger heals it).
 
 Deployment/operational runbooks (rollout, smoke tests, edge redeploys) live
 outside this document, on purpose: `supabase/POST_DEPLOY_SMOKE.md` and the
@@ -1646,7 +1681,8 @@ Paths relative to `app/src/main/java/com/frerox/toolz/`.
 `WhisperRepositoryProfile.kt` · `WhisperCrypto.kt` (hardware identity),
 `WhisperSelfLegCrypto.kt` (self-leg anchor), `session/` (`WhisperRatchet`,
 `WhisperSessionFactory`, `WhisperSessionStore`, `WhisperSessionFiles`
-(account-scoped on-disk layout + legacy adoption),
+(account-scoped on-disk layout + legacy adoption + read-only `alt/`
+superseded-session layout),
 `WhisperSessionSecretProtector`, `WhisperV3Codec` in `data/whisper/session/`),
 `WhisperEnvelope.kt` (wire codecs), `WireProtocol.kt` (pure decisions),
 `WhisperPrekeyManager.kt`, `WhisperKeyTrustStore.kt`,
