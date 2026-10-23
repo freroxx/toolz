@@ -1380,7 +1380,7 @@ fun NotepadScreen(
                                 )
 
                                 androidx.compose.foundation.text.selection.SelectionContainer {
-                                    if (looksLikeMarkdown(note.content)) {
+                                    if (containsMarkdown(note.content)) {
                                         NoteMarkdownBody(
                                             content   = note.content,
                                             baseStyle = MaterialTheme.typography.bodyLarge.copy(
@@ -1605,20 +1605,6 @@ private fun CurrentTrackProgress(
 // ─────────────────────────────────────────────────────────────
 //  Markdown-aware note body
 // ─────────────────────────────────────────────────────────────
-
-/** Content that clearly carries markdown gets the rich renderer; plain notes
- *  keep their exact line breaks instead of being re-flowed into paragraphs. */
-private val MARKDOWN_HINT = Regex(
-    "(^|\\n) {0,3}(#{1,6}\\s|[-*+]\\s|>\\s?|[0-9]+[.)]\\s|-\\s*\\[[ xX]\\s*])" +
-        "|\\*\\*[^*\\n]+\\*\\*" +
-        "|__[^_\\n]+__" +
-        "|~~[^~\\n]+~~" +
-        "|`[^`\\n]+`" +
-        "|\\[[^\\]]*\\]\\([^)]*\\)"
-)
-
-private fun looksLikeMarkdown(content: String): Boolean =
-    MARKDOWN_HINT.containsMatchIn(content)
 
 /**
  * Rich note body: renders markdown through the app's shared parser while
@@ -1916,7 +1902,7 @@ private fun NoteCard(
                                 .clipToBounds()
                                 .fadingEdges(bottom = 6.dp)
                         ) {
-                            if (looksLikeMarkdown(note.content)) {
+                            if (containsMarkdown(note.content)) {
                                 NoteMarkdownBody(
                                     content   = note.content,
                                     baseStyle = MaterialTheme.typography.bodySmall.copy(
@@ -3869,6 +3855,7 @@ private fun FullExpressiveEditor(
     // Editor State — keyed on note id so switching notes never shows stale content.
     var currentNote by remember(note.id) { mutableStateOf(note) }
     var showColorGrid by remember { mutableStateOf(false) }
+    var isPreviewMode by rememberSaveable(note.id) { mutableStateOf(false) }
     var showAiStyleBanner by remember { mutableStateOf(false) }
     var showCustomColorDialog by remember { mutableStateOf(false) }
     var showAttachmentMenu by remember { mutableStateOf(false) }
@@ -3988,14 +3975,23 @@ private fun FullExpressiveEditor(
             ExpressiveTopAppBar(
                 title = {
                     AnimatedContent(
-                        targetState = isFocusMode,
+                        targetState = isFocusMode to isPreviewMode,
                         transitionSpec = { fadeIn(tween(400)) togetherWith fadeOut(tween(300)) },
                         label = "titleAnim"
-                    ) { focused ->
+                    ) { (focused, previewing) ->
                         Text(
-                            stringResource(if (focused) R.string.st_NotepadScreen_edfocus81 else R.string.st_NotepadScreen_ededtr82),
+                            stringResource(
+                                when {
+                                    previewing -> R.string.st_NotepadScreen_preview166
+                                    focused -> R.string.st_NotepadScreen_edfocus81
+                                    else -> R.string.st_NotepadScreen_ededtr82
+                                }
+                            ),
                             fontWeight = FontWeight.Black,
                             color = onColor,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                 },
@@ -4009,7 +4005,7 @@ private fun FullExpressiveEditor(
                 },
                 actions = {
                     AnimatedVisibility(
-                        visible = !isFocusMode,
+                        visible = !isFocusMode && !isPreviewMode,
                         enter = fadeIn() + expandHorizontally(),
                         exit = fadeOut() + shrinkHorizontally()
                     ) {
@@ -4159,9 +4155,9 @@ private fun FullExpressiveEditor(
                         }
                     }
 
-                    // Animated Color Grid
+                    // Animated Color Grid — only relevant while editing.
                     AnimatedVisibility(
-                        visible = showColorGrid,
+                        visible = showColorGrid && !isPreviewMode,
                         enter = expandVertically(animationSpec = spring(stiffness = Spring.StiffnessLow)) + fadeIn(),
                         exit = shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessLow)) + fadeOut()
                     ) {
@@ -4174,33 +4170,56 @@ private fun FullExpressiveEditor(
                         )
                     }
 
-                    // Toolbar with Color Toggle
+                    // Toolbar: preview toggle stays put, formatting controls
+                    // only make sense while editing.
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         ToolzExpressiveIconToggleButton(
-                            checked = currentNote.isBold,
-                            onCheckedChange = { currentNote = currentNote.copy(isBold = it) },
+                            checked = isPreviewMode,
+                            onCheckedChange = {
+                                haptic.click()
+                                if (it) showColorGrid = false
+                                isPreviewMode = it
+                            },
                             colors = IconButtonDefaults.iconToggleButtonColors(contentColor = onColor, checkedContentColor = noteColor, checkedContainerColor = onColor)
-                        ) { Icon(Icons.Rounded.FormatBold, stringResource(R.string.st_NotepadScreen_cdbold84)) }
-                        
-                        ToolzExpressiveIconToggleButton(
-                            checked = currentNote.isItalic,
-                            onCheckedChange = { currentNote = currentNote.copy(isItalic = it) },
-                            colors = IconButtonDefaults.iconToggleButtonColors(contentColor = onColor, checkedContentColor = noteColor, checkedContainerColor = onColor)
-                        ) { Icon(Icons.Rounded.FormatItalic, stringResource(R.string.st_NotepadScreen_cdital85)) }
-                        
-                        ToolzExpressiveIconToggleButton(
-                            checked = showColorGrid,
-                            onCheckedChange = { showColorGrid = it },
-                            colors = IconButtonDefaults.iconToggleButtonColors(contentColor = onColor, checkedContentColor = noteColor, checkedContainerColor = onColor)
-                        ) { Icon(Icons.Rounded.Palette, stringResource(R.string.st_NotepadScreen_cdcol86)) }
-                        
-                        Spacer(Modifier.weight(1f))
-                        
-                        FontSizeControl(currentNote.fontSize, onColor) { currentNote = currentNote.copy(fontSize = it) }
+                        ) {
+                            Icon(
+                                if (isPreviewMode) Icons.Rounded.Edit else Icons.Rounded.Visibility,
+                                stringResource(
+                                    if (isPreviewMode) R.string.st_NotepadScreen_cdeditmode168
+                                    else R.string.st_NotepadScreen_cdprevnote167
+                                )
+                            )
+                        }
+
+                        if (!isPreviewMode) {
+                            ToolzExpressiveIconToggleButton(
+                                checked = currentNote.isBold,
+                                onCheckedChange = { currentNote = currentNote.copy(isBold = it) },
+                                colors = IconButtonDefaults.iconToggleButtonColors(contentColor = onColor, checkedContentColor = noteColor, checkedContainerColor = onColor)
+                            ) { Icon(Icons.Rounded.FormatBold, stringResource(R.string.st_NotepadScreen_cdbold84)) }
+
+                            ToolzExpressiveIconToggleButton(
+                                checked = currentNote.isItalic,
+                                onCheckedChange = { currentNote = currentNote.copy(isItalic = it) },
+                                colors = IconButtonDefaults.iconToggleButtonColors(contentColor = onColor, checkedContentColor = noteColor, checkedContainerColor = onColor)
+                            ) { Icon(Icons.Rounded.FormatItalic, stringResource(R.string.st_NotepadScreen_cdital85)) }
+
+                            ToolzExpressiveIconToggleButton(
+                                checked = showColorGrid,
+                                onCheckedChange = { showColorGrid = it },
+                                colors = IconButtonDefaults.iconToggleButtonColors(contentColor = onColor, checkedContentColor = noteColor, checkedContainerColor = onColor)
+                            ) { Icon(Icons.Rounded.Palette, stringResource(R.string.st_NotepadScreen_cdcol86)) }
+
+                            Spacer(Modifier.weight(1f))
+
+                            FontSizeControl(currentNote.fontSize, onColor) { currentNote = currentNote.copy(fontSize = it) }
+                        } else {
+                            Spacer(Modifier.weight(1f))
+                        }
                     }
                 }
             }
@@ -4213,33 +4232,76 @@ private fun FullExpressiveEditor(
                 .padding(horizontal = 24.dp)
                 .verticalScroll(rememberScrollState())
         ) {
-            StaggeredEntrance(index = 0) {
-                TextField(
-                    value = currentNote.title,
-                    onValueChange = { currentNote = currentNote.copy(title = it) },
-                    placeholder = { Text(stringResource(R.string.st_NotepadScreen_phtitle87), style = MaterialTheme.typography.headlineMedium, color = onColor.copy(0.5f)) },
-                    modifier = Modifier.fillMaxWidth(),
-                    textStyle = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Black, color = onColor),
-                    colors = transparentTextFieldColors(cursorColor = onColor, textColor = onColor)
-                )
-            }
-            
-            Spacer(Modifier.height(8.dp))
-            
-            StaggeredEntrance(index = 1) {
-                TextField(
-                    value = currentNote.content,
-                    onValueChange = { currentNote = currentNote.copy(content = it) },
-                    placeholder = { Text(stringResource(R.string.st_NotepadScreen_phbody88), style = MaterialTheme.typography.bodyLarge, color = onColor.copy(0.5f)) },
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 300.dp),
-                    textStyle = MaterialTheme.typography.bodyLarge.copy(
-                        fontSize = currentNote.fontSize.sp,
-                        fontWeight = if (currentNote.isBold) FontWeight.Bold else FontWeight.Normal,
-                        fontStyle = if (currentNote.isItalic) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal,
-                        color = onColor
-                    ),
-                    colors = transparentTextFieldColors(cursorColor = onColor, textColor = onColor)
-                )
+            if (isPreviewMode) {
+                StaggeredEntrance(index = 0) {
+                    Text(
+                        currentNote.title.ifBlank { stringResource(R.string.st_NotepadScreen_u28) },
+                        modifier   = Modifier.fillMaxWidth(),
+                        style      = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Black),
+                        color      = if (currentNote.title.isBlank()) onColor.copy(0.5f) else onColor,
+                        maxLines   = 2,
+                        overflow   = TextOverflow.Ellipsis,
+                    )
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                StaggeredEntrance(index = 1) {
+                    val previewStyle = MaterialTheme.typography.bodyLarge.copy(
+                        fontFamily    = noteFontFamily(currentNote.fontStyle),
+                        fontSize      = currentNote.fontSize.coerceIn(12f, 28f).sp,
+                        fontWeight    = if (currentNote.isBold) FontWeight.Bold else FontWeight.Normal,
+                        fontStyle     = if (currentNote.isItalic) FontStyle.Italic else FontStyle.Normal,
+                        lineHeight    = (currentNote.fontSize.coerceIn(12f, 28f) * 1.4f).sp,
+                    )
+                    when {
+                        currentNote.content.isBlank() -> Text(
+                            stringResource(R.string.st_NotepadScreen_phbody88),
+                            style = previewStyle,
+                            color = onColor.copy(0.5f),
+                        )
+                        containsMarkdown(currentNote.content) -> NoteMarkdownBody(
+                            content     = currentNote.content,
+                            baseStyle   = previewStyle,
+                            baseColor   = onColor.copy(0.88f),
+                            strongColor = onColor,
+                        )
+                        else -> Text(
+                            currentNote.content,
+                            style = previewStyle,
+                            color = onColor.copy(0.88f),
+                        )
+                    }
+                }
+            } else {
+                StaggeredEntrance(index = 0) {
+                    TextField(
+                        value = currentNote.title,
+                        onValueChange = { currentNote = currentNote.copy(title = it) },
+                        placeholder = { Text(stringResource(R.string.st_NotepadScreen_phtitle87), style = MaterialTheme.typography.headlineMedium, color = onColor.copy(0.5f)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        textStyle = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Black, color = onColor),
+                        colors = transparentTextFieldColors(cursorColor = onColor, textColor = onColor)
+                    )
+                }
+
+                Spacer(Modifier.height(8.dp))
+
+                StaggeredEntrance(index = 1) {
+                    TextField(
+                        value = currentNote.content,
+                        onValueChange = { currentNote = currentNote.copy(content = it) },
+                        placeholder = { Text(stringResource(R.string.st_NotepadScreen_phbody88), style = MaterialTheme.typography.bodyLarge, color = onColor.copy(0.5f)) },
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 300.dp),
+                        textStyle = MaterialTheme.typography.bodyLarge.copy(
+                            fontSize = currentNote.fontSize.sp,
+                            fontWeight = if (currentNote.isBold) FontWeight.Bold else FontWeight.Normal,
+                            fontStyle = if (currentNote.isItalic) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal,
+                            color = onColor
+                        ),
+                        colors = transparentTextFieldColors(cursorColor = onColor, textColor = onColor)
+                    )
+                }
             }
             
             // Attachments preview

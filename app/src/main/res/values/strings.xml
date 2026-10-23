@@ -4429,6 +4429,10 @@
     <string name="st_NotepadScreen_nokeychk164">Check again</string>
     <!-- Card-size sheet: reasons for locked options -->
     <string name="st_NotepadScreen_attlock165">Attached content always keeps the card at full size.</string>
+    <!-- Editor markdown preview -->
+    <string name="st_NotepadScreen_preview166">Preview</string>
+    <string name="st_NotepadScreen_cdprevnote167">Preview note</string>
+    <string name="st_NotepadScreen_cdeditmode168">Back to editor</string>
 
     <!-- Updater -->
     <string name="st_Update_Title">Updater</string>
