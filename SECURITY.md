@@ -13,7 +13,7 @@ Only the current active release line receives updates:
 
 ## Reporting a Security Issue
 
-**Do not open a public GitHub issue or discuss vulnerabilities on Discord.**
+**Do not open a public GitHub issue or discuss vulnerabilities on Discord. (Especially for Whisper).**
 
 Send an email to:
 - **Email**: `frerox.toolz@gmail.com`
