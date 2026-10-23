@@ -4435,6 +4435,11 @@
     <string name="st_NotepadScreen_preview166">Preview</string>
     <string name="st_NotepadScreen_cdprevnote167">Preview note</string>
     <string name="st_NotepadScreen_cdeditmode168">Back to editor</string>
+    <!-- Attachment picker search -->
+    <string name="st_NotepadScreen_srchmusic169">Search music</string>
+    <string name="st_NotepadScreen_srchpdf170">Search PDFs</string>
+    <string name="st_NotepadScreen_nomatch171">No matches</string>
+    <string name="st_NotepadScreen_clearsearch172">Clear search</string>
 
     <!-- Updater -->
     <string name="st_Update_Title">Updater</string>

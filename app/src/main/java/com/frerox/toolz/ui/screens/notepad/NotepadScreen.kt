@@ -2357,13 +2357,19 @@ fun AttachmentPickerDialog(
 ) {
     val musicState by musicViewModel.uiState.collectAsStateWithLifecycle()
     val haptic     = rememberToolzHapticFeedback()
+    var searchQuery by remember { mutableStateOf("") }
+    val filteredItems = remember(items, searchQuery) {
+        val query = searchQuery.trim()
+        if (query.isEmpty()) items
+        else items.filter { (name, _) -> name.contains(query, ignoreCase = true) }
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
         properties       = DialogProperties(usePlatformDefaultWidth = false),
     ) {
         Surface(
-            modifier  = Modifier.padding(28.dp).fillMaxWidth().heightIn(max = 500.dp),
+            modifier  = Modifier.padding(28.dp).fillMaxWidth().heightIn(max = 620.dp),
             shape     = BouncyShape,
             color     = MaterialTheme.colorScheme.surfaceContainerHigh,
             tonalElevation = 8.dp,
@@ -2397,6 +2403,42 @@ fun AttachmentPickerDialog(
                         Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
                     }
                 }
+                if (items.isNotEmpty()) {
+                    ExpressiveSearchField(
+                        query      = searchQuery,
+                        onQueryChange = { searchQuery = it },
+                        modifier   = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                        placeholder = {
+                            Text(
+                                stringResource(
+                                    if (isAudio) R.string.st_NotepadScreen_srchmusic169
+                                    else R.string.st_NotepadScreen_srchpdf170
+                                )
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Rounded.Search,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        },
+                        trailingIcon = if (searchQuery.isNotEmpty()) {
+                            {
+                                IconButton(
+                                    onClick = { searchQuery = "" },
+                                    modifier = Modifier.size(32.dp),
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.Clear,
+                                        contentDescription = stringResource(R.string.st_NotepadScreen_clearsearch172),
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                }
+                            }
+                        } else null,
+                    )
+                }
                 LazyColumn(
                     modifier            = Modifier.weight(1f).fadingEdges(top = 8.dp, bottom = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -2411,8 +2453,18 @@ fun AttachmentPickerDialog(
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
                             )
                         }
+                    } else if (filteredItems.isEmpty()) {
+                        item {
+                            Text(
+                                stringResource(R.string.st_NotepadScreen_nomatch171),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.7f),
+                                modifier = Modifier.padding(vertical = 24.dp).fillMaxWidth(),
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                        }
                     }
-                    lazyItems(items) { (name, uri) ->
+                    lazyItems(filteredItems) { (name, uri) ->
                         val isMusic  = isAudio
                         val track    = if (isMusic) musicState.tracks.find { it.uri == uri } else null
                         val isPlaying = isMusic && musicState.isPlaying && isCurrentNoteTrack(musicState.currentTrack, uri)
