@@ -58,6 +58,7 @@ import com.frerox.toolz.data.livingframes.LivingFrameEngine
 import com.frerox.toolz.data.livingframes.LivingFrameFit
 import com.frerox.toolz.data.livingframes.LivingFrameFps
 import com.frerox.toolz.data.livingframes.LivingFrameLoopMode
+import com.frerox.toolz.data.livingframes.LivingFramePlayback
 import com.frerox.toolz.data.livingframes.LivingFrameTapAction
 import com.frerox.toolz.data.livingframes.LivingFramesRepository
 import com.frerox.toolz.data.livingframes.LivingFramesStorage
@@ -144,7 +145,7 @@ internal fun MotionPanel(frame: LivingFrame, vm: LivingFramesViewModel) {
     val last = LivingFrameFps.STEPS.lastIndex
     val loopMs = LivingFrameEngine.loopDurationMs(frame.frameCount, frame.fps, frame.loopMode)
     PanelCard {
-        SettingBlock("Speed", "${LivingFrameFps.snap(frame.fps)} fps · ${LivingFrameFps.label(frame.fps)}") {
+        SettingBlock("Playback rate", "${LivingFrameFps.snap(frame.fps)} fps · ${LivingFrameFps.label(frame.fps)}") {
             StyledSlider(
                 value = LivingFrameFps.stepIndex(frame.fps).toFloat(),
                 range = 0f..last.toFloat(),
@@ -159,6 +160,44 @@ internal fun MotionPanel(frame: LivingFrame, vm: LivingFramesViewModel) {
             )
             Text(
                 "One loop lasts %.1f s across %d frames.".format(loopMs / 1000f, frame.frameCount),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (frame.fps > frame.sourceFps) {
+                Text(
+                    "These frames were captured at ${frame.sourceFps} fps. Playing them at " +
+                        "${LivingFrameFps.snap(frame.fps)} fps runs the clip faster; it can't add " +
+                        "detail that wasn't captured. Re-import at a higher capture rate for real extra frames.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Text(
+                "Stored copy: ${frame.width}×${frame.height} px · ${frame.quality.label} quality · " +
+                    "${frame.sourceFps} fps capture.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        SettingBlock("Playback engine") {
+            ToolzConnectedButtonGroup(
+                selectedIndex = frame.playback.ordinal,
+                options = listOf("Auto", "Standard", "High quality"),
+                onOptionSelected = {
+                    vib?.vibrateTick()
+                    vm.setPlayback(frame.id, LivingFramePlayback.entries[it])
+                },
+                modifier = Modifier.fillMaxWidth()
+            )
+            Text(
+                when (frame.playback) {
+                    LivingFramePlayback.AUTO ->
+                        "Picks the sharpest path per widget: short loops stay in one update, longer or higher-rate clips stream frame by frame."
+                    LivingFramePlayback.STANDARD ->
+                        "Sends every frame in one update for maximum launcher compatibility, but long clips are downscaled or thinned to fit."
+                    LivingFramePlayback.HIGH_QUALITY ->
+                        "Always streams frame by frame at the widget's native resolution. Uses a little more battery, never reduces quality."
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -305,6 +344,13 @@ internal fun WidgetPanel(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            if (frame.playback != LivingFramePlayback.STANDARD) {
+                Text(
+                    "Long clips and high frame rates stream frame by frame. If a widget stays blank on your launcher, set Playback engine → Standard in Motion; that sends everything in one update, though it may thin frames to fit.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
         ToolzOutlinedExpressiveButton(
             onClick = onDelete,
@@ -389,8 +435,12 @@ internal fun StoragePanel(
             }
         }
         Text(
-            "Frames are downscaled for the home screen (40-frame animation / 30-photo slideshow limit). " +
-                "Imports keep at least ${LivingFramesRepository.formatBytes(LivingFramesRepository.MIN_FREE_BYTES)} free.",
+            "Long clips are streamed one frame at a time, so the launcher's memory limit " +
+                "doesn't shrink them. Animations can hold up to " +
+                "${LivingFramesRepository.MAX_CLIP_MS / 1000} s (capped at " +
+                "${LivingFramesRepository.MAX_FRAMES} frames) and slideshows up to " +
+                "${LivingFramesRepository.MAX_SLIDES} photos. Imports keep at least " +
+                "${LivingFramesRepository.formatBytes(LivingFramesRepository.MIN_FREE_BYTES)} free.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -448,7 +498,7 @@ private fun renderSummary(w: PlacedWidget): String {
     val mb = i.bytes / 1_048_576f
     val frames = if (i.frames == 1) "1 image" else "${i.frames} frames"
     val next = w.nextSlideIn?.let { " · next in $it" } ?: ""
-    return "$frames · %.1f MB · ${i.widthPx}×${i.heightPx} px$next".format(mb)
+    return "$frames · %.1f MB · ${i.widthPx}×${i.heightPx} px · ${i.fps} fps$next".format(mb)
 }
 
 private fun reductionNote(i: com.frerox.toolz.widget.livingframes.LivingFramesWidgetHelper.WidgetInfo?): String? {

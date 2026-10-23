@@ -30,6 +30,8 @@ import com.frerox.toolz.data.livingframes.LivingFrameFps
 import com.frerox.toolz.data.livingframes.LivingFrameImportResult
 import com.frerox.toolz.data.livingframes.LivingFrameImporter
 import com.frerox.toolz.data.livingframes.LivingFrameLoopMode
+import com.frerox.toolz.data.livingframes.LivingFramePlayback
+import com.frerox.toolz.data.livingframes.LivingFrameQuality
 import com.frerox.toolz.data.livingframes.LivingFrameTapAction
 import com.frerox.toolz.data.livingframes.LivingFramesRepository
 import com.frerox.toolz.data.livingframes.LivingFramesStorage
@@ -82,7 +84,9 @@ data class LivingFramesUiState(
     val import: ImportState? = null,
     val pendingVideo: PendingVideo? = null,
     val storage: LivingFramesStorage? = null,
-    val loadFailed: Boolean = false
+    val loadFailed: Boolean = false,
+    /** Applies to the next import; stored pixels can't be upgraded later. */
+    val importQuality: LivingFrameQuality = LivingFrameQuality.DEFAULT
 ) {
     val selected: LivingFrame? get() = frames.firstOrNull { it.id == selectedId } ?: frames.firstOrNull()
 }
@@ -239,9 +243,24 @@ class LivingFramesViewModel @Inject constructor(
 
     fun cancelImport() { importJob?.cancel() }
 
-    fun importGif(uri: Uri) = runImport("Reading GIF") { p -> importer.importGif(uri, p) }
-    fun importPhoto(uri: Uri) = runImport("Adding photo") { p -> importer.importPhoto(uri, p) }
-    fun importSlideshow(uris: List<Uri>) = runImport("Adding photos") { p -> importer.importSlideshow(uris, p) }
+    fun setImportQuality(quality: LivingFrameQuality) {
+        _ui.update { it.copy(importQuality = quality) }
+    }
+
+    fun importGif(uri: Uri) {
+        val quality = _ui.value.importQuality
+        runImport("Reading GIF") { p -> importer.importGif(uri, quality, p) }
+    }
+
+    fun importPhoto(uri: Uri) {
+        val quality = _ui.value.importQuality
+        runImport("Adding photo") { p -> importer.importPhoto(uri, quality, p) }
+    }
+
+    fun importSlideshow(uris: List<Uri>) {
+        val quality = _ui.value.importQuality
+        runImport("Adding photos") { p -> importer.importSlideshow(uris, quality, p) }
+    }
 
     fun onVideoPicked(uri: Uri) {
         viewModelScope.launch {
@@ -256,10 +275,13 @@ class LivingFramesViewModel @Inject constructor(
 
     fun cancelVideo() = _ui.update { it.copy(pendingVideo = null) }
 
-    fun confirmVideo(startMs: Long, lengthMs: Long) {
+    fun confirmVideo(startMs: Long, lengthMs: Long, fps: Int) {
         val pv = _ui.value.pendingVideo ?: return
+        val quality = _ui.value.importQuality
         _ui.update { it.copy(pendingVideo = null) }
-        runImport("Decoding video") { p -> importer.importVideo(pv.uri, startMs, lengthMs, p) }
+        runImport("Decoding video") { p ->
+            importer.importVideo(pv.uri, startMs, lengthMs, quality, fps, p)
+        }
     }
 
     suspend fun videoThumb(uri: Uri, atMs: Long): ImageBitmap? =
@@ -281,6 +303,7 @@ class LivingFramesViewModel @Inject constructor(
     }
 
     fun setFps(id: String, fps: Int) = edit(id) { it.copy(fps = LivingFrameFps.snap(fps)) }
+    fun setPlayback(id: String, playback: LivingFramePlayback) = edit(id) { it.copy(playback = playback) }
     fun setLoopMode(id: String, mode: LivingFrameLoopMode) = edit(id) { it.copy(loopMode = mode) }
     fun setFit(id: String, fit: LivingFrameFit) = edit(id) { it.copy(fit = fit) }
     fun setTapAction(id: String, action: LivingFrameTapAction) = edit(id) { it.copy(tapAction = action) }
@@ -363,9 +386,21 @@ class LivingFramesViewModel @Inject constructor(
         synchronized(previewCache) { previewCache[key] }?.let { return it }
         val list = withContext(Dispatchers.IO) {
             val count = if (frame.isSlideshow) minOf(frame.frameCount, 8) else frame.frameCount
-            (0 until count).mapNotNull { i ->
-                repo.decodeAtLeast(frame.id, i, PREVIEW_SIDE)?.let { bmp -> capSide(bmp, PREVIEW_SIDE + 40).asImageBitmap() }
+            // Decoding all 900 frames at preview size would exhaust memory.
+            // Preview the opening seconds at the real rate; LivePreview notes
+            // when it is showing an excerpt, and the widget still plays all
+            // stored frames. The byte budget adapts to wide/tall widgets.
+            val previewCount = if (frame.isSlideshow) count else minOf(count, MAX_PREVIEW_FRAMES)
+            val out = ArrayList<ImageBitmap>(previewCount.coerceAtMost(MAX_PREVIEW_FRAMES))
+            var usedBytes = 0L
+            for (i in 0 until previewCount) {
+                if (out.isNotEmpty() && usedBytes >= PREVIEW_BUDGET_BYTES) break
+                val src = repo.decodeAtLeast(frame.id, i, PREVIEW_SIDE) ?: continue
+                val bmp = capSide(src, PREVIEW_SIDE + 40)
+                usedBytes += bmp.byteCount
+                out.add(bmp.asImageBitmap())
             }
+            out
         }
         if (list.isNotEmpty()) synchronized(previewCache) { previewCache[key] = list }
         return list
@@ -384,5 +419,9 @@ class LivingFramesViewModel @Inject constructor(
 
     private companion object {
         const val PREVIEW_SIDE = 480
+        const val MAX_PREVIEW_FRAMES = 120
+
+        /** Keep the whole preview under ~48 MB, even for tall 2×4 widgets. */
+        const val PREVIEW_BUDGET_BYTES = 48L * 1024 * 1024
     }
 }

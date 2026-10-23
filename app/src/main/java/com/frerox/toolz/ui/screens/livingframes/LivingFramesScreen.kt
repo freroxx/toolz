@@ -119,6 +119,7 @@ import com.frerox.toolz.data.livingframes.LivingFrame
 import com.frerox.toolz.data.livingframes.LivingFrameEngine
 import com.frerox.toolz.data.livingframes.LivingFrameFit
 import com.frerox.toolz.data.livingframes.LivingFrameFps
+import com.frerox.toolz.data.livingframes.LivingFrameQuality
 import com.frerox.toolz.data.livingframes.LivingFrameType
 import com.frerox.toolz.data.livingframes.LivingFramesRepository
 import com.frerox.toolz.ui.components.ExpressiveCard
@@ -138,10 +139,11 @@ import com.frerox.toolz.ui.theme.toolzBackground
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
+import kotlin.math.roundToLong
 
 private enum class Source(val type: LivingFrameType, val title: String, val hint: String, val icon: ImageVector) {
     GIF(LivingFrameType.GIF, "GIF", "Loop any animated image", Icons.Rounded.Gif),
-    VIDEO(LivingFrameType.VIDEO, "Video", "Pick a moment, up to 4 s", Icons.Rounded.Videocam),
+    VIDEO(LivingFrameType.VIDEO, "Video", "Pick any moment, up to 30 s", Icons.Rounded.Videocam),
     PHOTO(LivingFrameType.PHOTO, "Photo", "A still with your corners", Icons.Rounded.Photo),
     SLIDESHOW(LivingFrameType.SLIDESHOW, "Slideshow", "Rotates up to 30 photos", Icons.Rounded.Slideshow)
 }
@@ -153,7 +155,11 @@ private enum class Aspect(val label: String, val ratio: Float, val nominalWidthD
     TALL("2×4", 0.5f, 156f)
 }
 
-private val CLIP_LENGTHS_MS = listOf(2_000L, 3_000L, 4_000L)
+private val CAPTURE_FPS_CHOICES = listOf(12, 24, 30, 60)
+
+/** Rough WebP size for one stored frame; only used for the import estimate. */
+private fun estimateFrameBytes(quality: LivingFrameQuality): Long =
+    quality.storedSide.toLong() * quality.storedSide * quality.webpQuality / 1000
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -268,13 +274,24 @@ fun LivingWidgetsScreen(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Text("New widget", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                ImportQualityPicker(
+                    quality = ui.importQuality,
+                    onChange = viewModel::setImportQuality
+                )
                 SourceGrid(onPick = ::pick)
             }
         }
     }
 
     ui.pendingVideo?.let { pv ->
-        ClipSheet(pv, viewModel, onCancel = viewModel::cancelVideo, onConfirm = viewModel::confirmVideo)
+        ClipSheet(
+            pending = pv,
+            viewModel = viewModel,
+            quality = ui.importQuality,
+            onQuality = viewModel::setImportQuality,
+            onCancel = viewModel::cancelVideo,
+            onConfirm = { start, length, fps -> viewModel.confirmVideo(start, length, fps) }
+        )
     }
 
     // ── Screen ─────────────────────────────────────────────────────────────
@@ -472,7 +489,14 @@ private fun StageSection(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        "Preview as a ${aspect.label} widget",
+                        if (frame.isAnimated && frames.isNotEmpty() && frames.size < frame.frameCount) {
+                            "Preview · first %.1f s of %d frames".format(
+                                frames.size.toFloat() / LivingFrameFps.snap(frame.fps),
+                                frame.frameCount
+                            )
+                        } else {
+                            "Preview as a ${aspect.label} widget"
+                        },
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f)
@@ -491,12 +515,20 @@ private fun StageSection(
 }
 
 private fun describe(frame: LivingFrame): String = when {
-    frame.isSlideshow -> "Slideshow · ${frame.frameCount} photos"
+    frame.isSlideshow -> "Slideshow · ${frame.frameCount} photos · ${frame.quality.label}"
     frame.isAnimated -> {
         val s = LivingFrameEngine.loopDurationMs(frame.frameCount, frame.fps, frame.loopMode) / 1000f
-        "${if (frame.type == LivingFrameType.GIF) "GIF" else "Video"} · %.1f s loop · ${frame.frameCount} frames".format(s)
+        val captured = frame.sourceFps
+        val rate = if (frame.fps > captured) {
+            "${frame.fps} fps (captured at $captured)"
+        } else {
+            "${frame.fps} fps"
+        }
+        "${if (frame.type == LivingFrameType.GIF) "GIF" else "Video"} · %.1f s · %d frames · %s · %d×%d".format(
+            s, frame.frameCount, rate, frame.width, frame.height
+        )
     }
-    else -> "Photo · ${frame.width}×${frame.height}"
+    else -> "Photo · ${frame.width}×${frame.height} · ${frame.quality.label}"
 }
 
 /** Circle when paused, squircle when playing — the shape change is the state change. */
@@ -534,7 +566,11 @@ private fun LivePreview(
         if (!playing || frames.size < 2) return@LaunchedEffect
         val slides = frame.isSlideshow
         val order = if (slides) frames.indices.toList() else LivingFrameEngine.playbackOrder(frames.size, frame.loopMode)
-        val intervalNs = if (slides) 2_400_000_000L else 1_000_000_000L / LivingFrameFps.snap(frame.fps)
+        val intervalNs = if (slides) {
+            2_400_000_000L
+        } else {
+            1_000_000_000L / LivingFrameFps.snap(frame.fps)
+        }
         var pos = order.indexOf(tick).coerceAtLeast(0)
         var acc = 0L
         var last = withFrameNanos { it }
@@ -721,21 +757,58 @@ private fun SourceGrid(onPick: (Source) -> Unit) {
 
 // ── Video clip picker ──────────────────────────────────────────────────────────────────────
 
+@Composable
+private fun ImportQualityPicker(quality: LivingFrameQuality, onChange: (LivingFrameQuality) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        SettingHeader("Import quality", quality.label)
+        ToolzConnectedButtonGroup(
+            selectedIndex = quality.ordinal,
+            options = LivingFrameQuality.entries.map { it.label },
+            onOptionSelected = { onChange(LivingFrameQuality.entries[it]) },
+            modifier = Modifier.fillMaxWidth()
+        )
+        Text(
+            "Stores video frames up to ${quality.storedSide} px and photos up to " +
+                "${quality.photoSide} px, and captures at most ${quality.maxCaptureFps} fps. " +
+                "Higher quality uses more storage; it can't be raised after importing.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ClipSheet(
     pending: PendingVideo,
     viewModel: LivingFramesViewModel,
+    quality: LivingFrameQuality,
+    onQuality: (LivingFrameQuality) -> Unit,
     onCancel: () -> Unit,
-    onConfirm: (startMs: Long, lengthMs: Long) -> Unit
+    onConfirm: (startMs: Long, lengthMs: Long, fps: Int) -> Unit
 ) {
-    var lengthIdx by remember { mutableIntStateOf(1) }
-    var start by remember { mutableFloatStateOf(0f) }
-    val lengthMs = CLIP_LENGTHS_MS[lengthIdx]
+    val maxLenMs = minOf(pending.durationMs, LivingFramesRepository.MAX_CLIP_MS).coerceAtLeast(500L)
+    var length by remember(pending.uri) {
+        mutableFloatStateOf(minOf(6_000L, maxLenMs).toFloat())
+    }
+    var start by remember(pending.uri) { mutableFloatStateOf(0f) }
+    val lengthMs = length.roundToLong().coerceIn(500L, maxLenMs)
     val maxStart = (pending.durationMs - lengthMs).coerceAtLeast(0L).toFloat()
     val startMs = start.coerceIn(0f, maxStart).toLong()
-    val fps = LivingFrameFps.snap(minOf(15f, LivingFramesRepository.MAX_FRAMES * 1000f / lengthMs))
-    val frameCount = (lengthMs / 1000f * fps).roundToInt().coerceIn(2, LivingFramesRepository.MAX_FRAMES)
+
+    var chosenFps by remember(pending.uri) { mutableIntStateOf(30) }
+    // The preset and the 900-frame ceiling both cap what can be captured;
+    // show the real rate instead of pretending 60 fps was stored.
+    val effectiveFps = LivingFrameFps.atMost(
+        minOf(
+            chosenFps.toFloat(),
+            quality.maxCaptureFps.toFloat(),
+            LivingFramesRepository.MAX_FRAMES * 1000f / lengthMs
+        )
+    )
+    val frameCount = (lengthMs / 1000f * effectiveFps).roundToInt()
+        .coerceIn(2, LivingFramesRepository.MAX_FRAMES)
+    val estimate = frameCount * estimateFrameBytes(quality)
 
     val thumb by produceState<ImageBitmap?>(null, pending.uri, startMs / 250L) {
         delay(120L)
@@ -776,17 +849,44 @@ private fun ClipSheet(
                     )
                 )
             }
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                SettingHeader("Length", "%.1f s".format(lengthMs / 1000f))
+                Slider(
+                    value = lengthMs.toFloat(),
+                    onValueChange = { length = it },
+                    valueRange = 500f..maxLenMs.toFloat().coerceAtLeast(501f),
+                    colors = SliderDefaults.colors(
+                        thumbColor = MaterialTheme.colorScheme.primary,
+                        activeTrackColor = MaterialTheme.colorScheme.primary
+                    )
+                )
+                Text(
+                    "$frameCount frames · $effectiveFps fps · about " +
+                        LivingFramesRepository.formatBytes(estimate),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (effectiveFps < chosenFps) {
+                    Text(
+                        "Limited to $effectiveFps fps by ${quality.label} quality or the " +
+                            "${LivingFramesRepository.MAX_FRAMES}-frame limit for this length.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                SettingHeader("Length", "$frameCount frames · $fps fps")
+                SettingHeader("Capture rate")
                 ToolzConnectedButtonGroup(
-                    selectedIndex = lengthIdx,
-                    options = CLIP_LENGTHS_MS.map { "${it / 1000} s" },
-                    onOptionSelected = { lengthIdx = it },
+                    selectedIndex = CAPTURE_FPS_CHOICES.indexOf(chosenFps).coerceAtLeast(0),
+                    options = CAPTURE_FPS_CHOICES.map { "$it" },
+                    onOptionSelected = { chosenFps = CAPTURE_FPS_CHOICES[it] },
                     modifier = Modifier.fillMaxWidth()
                 )
             }
+            ImportQualityPicker(quality = quality, onChange = onQuality)
             ToolzExpressiveButton(
-                onClick = { onConfirm(startMs, lengthMs) },
+                onClick = { onConfirm(startMs, lengthMs, effectiveFps) },
                 modifier = Modifier.fillMaxWidth().height(56.dp)
             ) { Text("Create loop", fontWeight = FontWeight.SemiBold) }
         }
