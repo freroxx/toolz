@@ -27,6 +27,7 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import com.frerox.toolz.data.device.DeviceSpecsRepository
 import com.frerox.toolz.data.settings.SettingsRepository
+import com.frerox.toolz.data.skin.PinResult
 import com.frerox.toolz.util.BackupWorker
 import com.frerox.toolz.util.VibrationManager
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -48,6 +49,7 @@ class SettingsViewModel @Inject constructor(
     private val skinRepository: com.frerox.toolz.data.skin.SkinRepository,
     private val launcherIconManager: com.frerox.toolz.data.skin.LauncherIconManager,
     private val customIconManager: com.frerox.toolz.data.skin.CustomIconManager,
+    private val homeShortcutPinner: com.frerox.toolz.data.skin.HomeShortcutPinner,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -366,7 +368,17 @@ class SettingsViewModel @Inject constructor(
             } else {
                 launcherIconManager.apply(preset ?: "grape-haze", shape)
             }
+            // Pinned Home-screen tiles are shape-specific snapshots.
+            homeShortcutPinner.refreshPinnedPresets(shape)
         } catch (_: Exception) { }
+    }
+    /** Pins this preset's real art to the Home screen — icon packs ignore alias tiles. */
+    fun pinPresetToHome(presetId: String, onResult: (PinResult) -> Unit = {}) = viewModelScope.launch {
+        val shape = try { repository.appIconShape.first() } catch (_: Exception) { null }
+        onResult(homeShortcutPinner.pinPreset(presetId, shape))
+    }
+    fun pinCustomPhotoToHome(onResult: (PinResult) -> Unit = {}) = viewModelScope.launch {
+        onResult(homeShortcutPinner.pinCustomPhoto())
     }
     /** Saves a device photo as the custom icon and applies it everywhere. Returns false on failure. */
     fun applyCustomPhoto(uri: android.net.Uri, onDone: (Boolean) -> Unit = {}) = viewModelScope.launch {

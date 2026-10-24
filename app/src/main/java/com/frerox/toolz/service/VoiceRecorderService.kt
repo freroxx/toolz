@@ -252,7 +252,11 @@ class VoiceRecorderService : Service() {
         val stopIntent = Intent(this, VoiceRecorderService::class.java).apply { action = ACTION_STOP }
         val stopPI = PendingIntent.getService(this, 1, stopIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
-        val builder = NotificationHelper.baseBuilder(this, NotificationHelper.CHANNEL_VOICE_RECORDER)
+        val builder = NotificationHelper.baseBuilder(
+            this,
+            NotificationHelper.CHANNEL_VOICE_RECORDER,
+            showLargeIcon = false
+        )
             .setContentTitle(if (_isPaused.value) "Recording Paused" else "Recording Audio...")
             .setSmallIcon(R.drawable.ic_stat_toolz)
             .setOngoing(true)

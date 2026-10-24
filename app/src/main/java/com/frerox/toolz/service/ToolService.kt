@@ -601,7 +601,11 @@ class ToolService : Service() {
         val intent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(this, 3000, intent, PendingIntent.FLAG_IMMUTABLE)
 
-        return NotificationHelper.baseBuilder(this, NotificationHelper.CHANNEL_TOOL_ACTIVE)
+        return NotificationHelper.baseBuilder(
+            this,
+            NotificationHelper.CHANNEL_TOOL_ACTIVE,
+            showLargeIcon = false
+        )
             .setContentTitle("Toolz is running")
             .setContentText("Active background services")
             .setSmallIcon(R.drawable.ic_stat_toolz)
@@ -2194,7 +2198,11 @@ class ToolService : Service() {
         val stopIntent = Intent(this, ToolService::class.java).apply { action = ACTION_STOPWATCH_STOP }
         val stopPI = PendingIntent.getService(this, 11, stopIntent, PendingIntent.FLAG_IMMUTABLE)
 
-        val builder = NotificationHelper.baseBuilder(this, NotificationHelper.CHANNEL_TOOL_ACTIVE)
+        val builder = NotificationHelper.baseBuilder(
+            this,
+            NotificationHelper.CHANNEL_TOOL_ACTIVE,
+            showLargeIcon = false
+        )
             .setContentTitle("Stopwatch")
             .setSmallIcon(R.drawable.ic_stat_toolz)
             .setOngoing(_isStopwatchRunning.value)
@@ -2254,7 +2262,11 @@ class ToolService : Service() {
         val stopIntent = Intent(this, ToolService::class.java).apply { action = ACTION_TIMER_STOP }
         val stopPI = PendingIntent.getService(this, 2, stopIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
-        val builder = NotificationHelper.baseBuilder(this, NotificationHelper.CHANNEL_TOOL_ACTIVE)
+        val builder = NotificationHelper.baseBuilder(
+            this,
+            NotificationHelper.CHANNEL_TOOL_ACTIVE,
+            showLargeIcon = false
+        )
             .setContentTitle("Timer")
             .setSmallIcon(R.drawable.ic_shortcut_timer)
             .setOngoing(_isTimerRunning.value || _isTimerRinging.value)
@@ -2313,7 +2325,11 @@ class ToolService : Service() {
             else -> "Pomodoro"
         }
 
-        val builder = NotificationHelper.baseBuilder(this, NotificationHelper.CHANNEL_TOOL_ACTIVE)
+        val builder = NotificationHelper.baseBuilder(
+            this,
+            NotificationHelper.CHANNEL_TOOL_ACTIVE,
+            showLargeIcon = false
+        )
             .setContentTitle(modeLabel)
             .setSmallIcon(if (_pomodoroMode.value == "WORK") R.drawable.ic_stat_toolz else R.drawable.ic_stat_toolz)
             .setOngoing(_isPomodoroRunning.value)
@@ -2380,7 +2396,11 @@ class ToolService : Service() {
         val stopIntent = Intent(this, ToolService::class.java).apply { action = ACTION_TODO_STOP }
         val stopPI = PendingIntent.getService(this, 41, stopIntent, PendingIntent.FLAG_IMMUTABLE)
 
-        return NotificationHelper.baseBuilder(this, NotificationHelper.CHANNEL_TOOL_ACTIVE)
+        return NotificationHelper.baseBuilder(
+            this,
+            NotificationHelper.CHANNEL_TOOL_ACTIVE,
+            showLargeIcon = false
+        )
             .setContentTitle("Active Task: ${_todoTaskTitle.value}")
             .setContentText("Focus session in progress")
             .setSmallIcon(R.drawable.ic_stat_toolz)

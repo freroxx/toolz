@@ -230,13 +230,22 @@ object NotificationHelper {
         manager.createNotificationChannels(channels)
     }
 
-    fun baseBuilder(context: Context, channelId: String): NotificationCompat.Builder {
-        return NotificationCompat.Builder(context, channelId)
+    fun baseBuilder(
+        context: Context,
+        channelId: String,
+        showLargeIcon: Boolean = true
+    ): NotificationCompat.Builder {
+        val builder = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(safeSmallIcon(context))
-            .setLargeIcon(toolzLargeIcon(context))
             .setColor(notificationAccent(context))
             .setOnlyAlertOnce(true)
             .setAutoCancel(true)
+        // A large icon steals horizontal/vertical room on several OEM skins and
+        // collapses custom views and progress layouts. Ongoing/status alerts that
+        // need that room pass showLargeIcon = false; regular alerts keep the
+        // picked launcher icon.
+        if (showLargeIcon) builder.setLargeIcon(toolzLargeIcon(context))
+        return builder
     }
 
     /**
@@ -337,7 +346,6 @@ object NotificationHelper {
     ): NotificationCompat.Builder {
         return NotificationCompat.Builder(context, channelId)
             .setSmallIcon(safeSmallIcon(context))
-            .setLargeIcon(toolzLargeIcon(context))
             .setColor(ACCENT_COLOR)
             .setContentTitle(title)
             .setContentText(text)

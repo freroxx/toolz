@@ -5,6 +5,7 @@
 
 package com.frerox.toolz.ui.screens.settings
 
+import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -30,12 +31,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.AddPhotoAlternate
+import androidx.compose.material.icons.rounded.AddToHomeScreen
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ColorLens
 import androidx.compose.material.icons.rounded.Crop
+import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.Image
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Style
 import androidx.compose.material3.AlertDialog
@@ -57,6 +63,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -77,8 +84,10 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import com.frerox.toolz.R
 import com.frerox.toolz.data.skin.IconCatalog
+import com.frerox.toolz.data.skin.PinResult
 import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
+import com.frerox.toolz.ui.components.ToolzMark
 import com.frerox.toolz.ui.components.ToolzMarkThemed
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdges
@@ -134,6 +143,29 @@ fun AppSkinScreen(
     }
     val scheme = MaterialTheme.colorScheme
     val current = IconCatalog.find(presetId)
+
+    // Home-screen pins: a launcher icon pack overrides the alias tile, so the
+    // only way to show the chosen art is a shortcut carrying the real bitmap.
+    val pinContext = LocalContext.current
+    val pinAddedText = stringResource(R.string.st_AppSkin_pin_added)
+    val pinUpdatedText = stringResource(R.string.st_AppSkin_pin_updated)
+    val pinUnsupportedText = stringResource(R.string.st_AppSkin_pin_unsupported)
+    val pinFailedText = stringResource(R.string.st_AppSkin_pin_failed)
+    var pinMessage by remember { mutableStateOf<String?>(null) }
+    val showPinResult: (PinResult) -> Unit = { result ->
+        pinMessage = when (result) {
+            PinResult.Pinned -> pinAddedText
+            PinResult.Updated -> pinUpdatedText
+            PinResult.Unsupported -> pinUnsupportedText
+            PinResult.Failed -> pinFailedText
+        }
+    }
+    LaunchedEffect(pinMessage) {
+        val message = pinMessage ?: return@LaunchedEffect
+        Toast.makeText(pinContext, message, Toast.LENGTH_SHORT).show()
+        pinMessage = null
+    }
+
     // Recently used skins first (max 3); fresh installs fall back to the bundled looks.
     val recentSkins = remember(skins, recentIds) {
         val byId = skins.associateBy { it.id }
@@ -247,7 +279,16 @@ fun AppSkinScreen(
                             fgOverride = fgOv,
                             strokeOverride = strokeOv,
                             iconGradient = iconGradient,
-                            modifier = Modifier.size(112.dp),
+                            modifier = Modifier.size(112.dp).bouncyClick(
+                                onLongClick = {
+                                    // "custom-photo" has no catalog art; pin the file instead.
+                                    if (presetId == IconCatalog.CUSTOM_ID) {
+                                        viewModel.pinCustomPhotoToHome(showPinResult)
+                                    } else {
+                                        viewModel.pinPresetToHome(presetId, showPinResult)
+                                    }
+                                },
+                            ),
                         )
                         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(current.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
@@ -274,6 +315,8 @@ fun AppSkinScreen(
 
                 AppSkinSectionHeader(stringResource(R.string.st_AppSkin_header_app_icon))
 
+                IconPackInfoCard()
+
                 // Icon presets strip
                 SettingsItem(
                     title = stringResource(R.string.st_AppSkin_icon_style),
@@ -289,17 +332,16 @@ fun AppSkinScreen(
                             val selected = spec.id == presetId
                             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(72.dp)) {
                                 Surface(
-                                    onClick = {
-                                        vibrationManager?.vibrateClick()
-                                        viewModel.setAppIconPresetId(spec.id)
-                                    },
                                     shape = RoundedCornerShape(20.dp),
                                     color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
                                     border = BorderStroke(
                                         if (selected) 2.dp else 1.dp,
                                         if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
                                     ),
-                                    modifier = Modifier.size(68.dp).bouncyClick {},
+                                    modifier = Modifier.size(68.dp).bouncyClick(
+                                        onClick = { viewModel.setAppIconPresetId(spec.id) },
+                                        onLongClick = { viewModel.pinPresetToHome(spec.id, showPinResult) },
+                                    ),
                                 ) {
                                     Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(9.dp)) {
                                         ToolzMarkThemed(
@@ -327,98 +369,52 @@ fun AppSkinScreen(
                     }
                 }
 
-                // Use photo from device — user image becomes the in-app icon
-                // everywhere. The launcher tile keeps the closest built-in alias
-                // (Android requires launcher icons to be predeclared).
-                SettingsItem(
-                    title = stringResource(R.string.st_AppSkin_custom_title),
-                    subtitle = stringResource(R.string.st_AppSkin_custom_subtitle),
-                    icon = Icons.Rounded.Image,
-                ) {
-                    val customContext = LocalContext.current
+                // Photo icon — developer-mode experiment. It stays behind the
+                // dev toggle because a device photo cannot become the launcher
+                // tile (Android needs the art to be predeclared in the manifest).
+                val developerModeEnabled by viewModel.developerModeEnabled.collectAsState(initial = false)
+                if (developerModeEnabled) {
                     val customPath by viewModel.appIconCustomPath.collectAsState(initial = null)
                     var customBusy by remember { mutableStateOf(false) }
                     var customFailed by remember { mutableStateOf(false) }
+                    // ToolzMark caches the decoded file by preset id; the custom
+                    // file keeps the same path on replace, so bump this key to
+                    // force a fresh decode in the preview.
+                    var customVersion by remember { mutableStateOf(0) }
                     val photoPicker = rememberLauncherForActivityResult(
                         ActivityResultContracts.PickVisualMedia()
                     ) { uri ->
                         if (uri != null) {
                             customBusy = true
                             customFailed = false
-                            vibrationManager?.vibrateClick()
                             viewModel.applyCustomPhoto(uri) { ok ->
                                 customBusy = false
                                 customFailed = !ok
+                                if (ok) customVersion++
                             }
                         }
                     }
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        Surface(
-                            shape = RoundedCornerShape(20.dp),
-                            color = if (presetId == IconCatalog.CUSTOM_ID) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-                            border = BorderStroke(
-                                if (presetId == IconCatalog.CUSTOM_ID) 2.dp else 1.dp,
-                                if (presetId == IconCatalog.CUSTOM_ID) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
-                            ),
-                            modifier = Modifier.size(68.dp),
-                        ) {
-                            Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(6.dp)) {
-                                if (presetId == IconCatalog.CUSTOM_ID) {
-                                    com.frerox.toolz.ui.components.ToolzMark(
-                                        presetId = IconCatalog.CUSTOM_ID,
-                                        shape = shape,
-                                        modifier = Modifier.fillMaxSize(),
-                                    )
-                                } else {
-                                    Icon(Icons.Rounded.Image, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(28.dp))
-                                }
-                            }
-                        }
-                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(
-                                if (presetId == IconCatalog.CUSTOM_ID) stringResource(R.string.st_AppSkin_custom_picked)
-                                else if (customPath != null) "Photo saved — tap to re-apply"
-                                else stringResource(R.string.st_AppSkin_custom_pick),
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                            )
-                            Button(
-                                onClick = {
-                                    vibrationManager?.vibrateClick()
-                                    photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                                },
-                                enabled = !customBusy,
-                                shape = RoundedCornerShape(14.dp),
-                            ) {
-                                Text(if (customBusy) "…" else stringResource(R.string.st_AppSkin_custom_pick), fontWeight = FontWeight.Black)
-                            }
-                            if (customFailed) {
-                                Text("Couldn't use that image — try another.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
-                            }
-                            if (presetId == IconCatalog.CUSTOM_ID) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    TextButton(onClick = {
-                                        vibrationManager?.vibrateClick()
-                                        pinCustomIconToHome(customContext)
-                                    }) {
-                                        Text(stringResource(R.string.st_AppSkin_custom_pin), fontWeight = FontWeight.Bold)
-                                    }
-                                    TextButton(onClick = {
-                                        vibrationManager?.vibrateClick()
-                                        viewModel.clearCustomPhoto()
-                                    }) {
-                                        Text(stringResource(R.string.st_AppSkin_custom_remove), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    PhotoIconCard(
+                        hasPhoto = customPath != null,
+                        isActive = presetId == IconCatalog.CUSTOM_ID,
+                        shape = shape,
+                        photoVersion = customVersion,
+                        busy = customBusy,
+                        failed = customFailed,
+                        onPick = {
+                            customFailed = false
+                            photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        },
+                        onUseSaved = {
+                            customFailed = false
+                            viewModel.setAppIconPresetId(IconCatalog.CUSTOM_ID)
+                        },
+                        onRemove = {
+                            customFailed = false
+                            viewModel.clearCustomPhoto()
+                        },
+                        onPin = { viewModel.pinCustomPhotoToHome(showPinResult) },
+                    )
                 }
 
                 // Icon container — in-app frames. Circle also reshapes the
@@ -922,29 +918,224 @@ private fun Color.appSkinLuminance(): Float {
 }
 
 /**
- * Pins a Home-screen shortcut with the exact custom photo bitmap. This is the
- * supported way to get the device image on the launcher: manifest aliases
- * cannot reference user files, but ShortcutManager icons can.
+ * Explains why the Home-screen tile can ignore the chosen preset: a launcher
+ * icon pack resolves the tile before the manifest alias is read. Long-pressing
+ * an icon pins the real art as a shortcut, which packs do not re-theme.
  */
-private fun pinCustomIconToHome(context: android.content.Context) {
-    try {
-        val file = com.frerox.toolz.data.skin.CustomIconManager.fileFor(context)
-        if (!file.exists()) return
-        val bitmap = try {
-            android.graphics.BitmapFactory.decodeFile(file.absolutePath)
-        } catch (_: Exception) { null } ?: return
-        val sm = try {
-            context.getSystemService(android.content.pm.ShortcutManager::class.java)
-        } catch (_: Exception) { null } ?: return
-        if (!sm.isRequestPinShortcutSupported) return
-        val launch = context.packageManager.getLaunchIntentForPackage(context.packageName)
-            ?.apply { action = android.content.Intent.ACTION_MAIN } ?: return
-        val shortcut = android.content.pm.ShortcutInfo.Builder(context, "toolz_custom_photo")
-            .setShortLabel("Toolz")
-            .setLongLabel("Toolz")
-            .setIntent(launch)
-            .setIcon(android.graphics.drawable.Icon.createWithAdaptiveBitmap(bitmap))
-            .build()
-        sm.requestPinShortcut(shortcut, null)
-    } catch (_: Exception) { }
+@Composable
+private fun IconPackInfoCard() {
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.22f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f)),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Icon(
+                Icons.Rounded.Info,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(18.dp),
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    stringResource(R.string.st_AppSkin_iconpack_title),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Black,
+                )
+                Text(
+                    stringResource(R.string.st_AppSkin_iconpack_body),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Developer-mode photo icon picker. One preview, one primary action, and the
+ * secondary actions only when they make sense — unlike the old stacked row,
+ * there is nothing to scan past.
+ *
+ * The photo is an in-app mark only. Android requires launcher art to be
+ * declared in the manifest, so the Home-screen tile cannot follow it; the pin
+ * action offers the shortcut escape hatch instead.
+ */
+@Composable
+private fun PhotoIconCard(
+    hasPhoto: Boolean,
+    isActive: Boolean,
+    shape: String,
+    photoVersion: Int,
+    busy: Boolean,
+    failed: Boolean,
+    onPick: () -> Unit,
+    onUseSaved: () -> Unit,
+    onRemove: () -> Unit,
+    onPin: () -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    val vibrationManager = LocalVibrationManager.current
+    val status = when {
+        isActive -> stringResource(R.string.st_AppSkin_custom_status_active)
+        hasPhoto -> stringResource(R.string.st_AppSkin_custom_status_saved)
+        else -> stringResource(R.string.st_AppSkin_custom_subtitle)
+    }
+    val primaryLabel = when {
+        busy -> stringResource(R.string.st_AppSkin_custom_applying)
+        isActive -> stringResource(R.string.st_AppSkin_custom_replace)
+        hasPhoto -> stringResource(R.string.st_AppSkin_custom_use_saved)
+        else -> stringResource(R.string.st_AppSkin_custom_pick)
+    }
+
+    Surface(
+        shape = RoundedCornerShape(28.dp),
+        color = scheme.surfaceVariant.copy(alpha = 0.2f),
+        border = BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = 0.12f)),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(22.dp),
+                    color = if (isActive) scheme.primary.copy(alpha = 0.14f)
+                    else scheme.surface.copy(alpha = 0.55f),
+                    border = if (isActive) BorderStroke(1.dp, scheme.primary.copy(alpha = 0.35f)) else null,
+                    modifier = Modifier.size(72.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(8.dp)) {
+                        if (hasPhoto) {
+                            key(photoVersion) {
+                                ToolzMark(
+                                    presetId = IconCatalog.CUSTOM_ID,
+                                    shape = shape,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            }
+                        } else {
+                            Icon(
+                                Icons.Rounded.Image,
+                                contentDescription = null,
+                                tint = scheme.primary.copy(alpha = 0.7f),
+                                modifier = Modifier.size(28.dp),
+                            )
+                        }
+                    }
+                }
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            stringResource(R.string.st_AppSkin_custom_title),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Black,
+                        )
+                        ExperimentalBadge()
+                    }
+                    Text(
+                        status,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = scheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                ToolzExpressiveButton(
+                    onClick = if (hasPhoto && !isActive) onUseSaved else onPick,
+                    enabled = !busy,
+                    modifier = Modifier.weight(1f).height(48.dp),
+                ) {
+                    Icon(
+                        if (isActive) Icons.Rounded.Refresh else Icons.Rounded.AddPhotoAlternate,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(primaryLabel, fontWeight = FontWeight.Black)
+                }
+                if (hasPhoto) {
+                    // Icon-only keeps the primary label from squeezing on
+                    // narrow screens; TalkBack still reads "Remove photo".
+                    IconButton(
+                        onClick = {
+                            vibrationManager?.vibrateClick()
+                            onRemove()
+                        },
+                        enabled = !busy,
+                    ) {
+                        Icon(
+                            Icons.Rounded.DeleteOutline,
+                            contentDescription = stringResource(R.string.st_AppSkin_custom_remove),
+                            tint = scheme.error,
+                        )
+                    }
+                }
+            }
+
+            if (isActive) {
+                TextButton(
+                    onClick = {
+                        vibrationManager?.vibrateClick()
+                        onPin()
+                    },
+                    modifier = Modifier.align(Alignment.Start),
+                ) {
+                    Icon(
+                        Icons.Rounded.AddToHomeScreen,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.st_AppSkin_custom_pin), fontWeight = FontWeight.Bold)
+                }
+            }
+
+            if (failed) {
+                Text(
+                    stringResource(R.string.st_AppSkin_custom_error),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Medium,
+                    color = scheme.error,
+                )
+            }
+        }
+    }
+}
+
+/** Small tonal pill that marks a developer-mode experiment. */
+@Composable
+private fun ExperimentalBadge() {
+    Surface(
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.tertiaryContainer,
+        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+    ) {
+        Text(
+            stringResource(R.string.st_AppSkin_custom_experimental).uppercase(),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Black,
+            letterSpacing = 0.8.sp,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+        )
+    }
 }

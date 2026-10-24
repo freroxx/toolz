@@ -618,7 +618,11 @@ class StepCounterService : Service(), SensorEventListener {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        val builder = NotificationHelper.baseBuilder(this, NotificationHelper.CHANNEL_STEP_COUNTER)
+        val builder = NotificationHelper.baseBuilder(
+            this,
+            NotificationHelper.CHANNEL_STEP_COUNTER,
+            showLargeIcon = false
+        )
             .setSmallIcon(R.drawable.ic_stat_toolz)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
