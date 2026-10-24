@@ -157,14 +157,17 @@ fun AiAssistantScreen(
     val uiState         by viewModel.uiState.collectAsStateWithLifecycle()
     val settingsUiState by viewModel.settingsUiState.collectAsStateWithLifecycle()
     val isOnline        by viewModel.isOnline.collectAsStateWithLifecycle()
+    val catalogNotice   by viewModel.catalogUpdateNotice.collectAsStateWithLifecycle()
     val listState       = rememberLazyListState()
     val scope           = rememberCoroutineScope()
     val context         = LocalContext.current
     val vibration       = LocalVibrationManager.current
     val performanceMode = LocalPerformanceMode.current
     val drawerState     = rememberDrawerState(DrawerValue.Closed)
+    val snackbarHostState = remember { SnackbarHostState() }
 
     var inputText                  by remember { mutableStateOf("") }
+    var snackbarNotice             by remember { mutableStateOf<CatalogUpdateNotice?>(null) }
     var showSettings               by remember { mutableStateOf(false) }
     var showSummary                by remember { mutableStateOf(false) }
     var showQuotaDialog            by remember { mutableStateOf(false) }
@@ -307,6 +310,24 @@ fun AiAssistantScreen(
         onDismiss = { viewModel.dismissNoKeyWarning() },
     )
 
+    // Live catalog refresh finished with a newer version: surface it once in
+    // the chat. Declared only on the main layout path so a notice found while
+    // Settings/Select-Text is open waits until the user is back in the chat.
+    // The notice lives in the repository, so one found by the Loading screen
+    // also waits here until the assistant is actually opened.
+    LaunchedEffect(catalogNotice) {
+        val notice = catalogNotice ?: return@LaunchedEffect
+        snackbarNotice = notice
+        snackbarHostState.showSnackbar(
+            message = "",
+            actionLabel = context.getString(R.string.st_AiAssistantScreen_u7v9),
+            withDismissAction = false,
+            duration = SnackbarDuration.Long,
+        )
+        snackbarNotice = null
+        viewModel.acknowledgeCatalogUpdate(notice)
+    }
+
     // ── Main layout ───────────────────────────────────────────────────────────
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -372,6 +393,16 @@ fun AiAssistantScreen(
                     aiSearchIconVisible = uiState.aiSearchIconVisible,
                     onToggleAiSearch = viewModel::toggleAiSearch,
                 )
+            },
+            snackbarHost = {
+                SnackbarHost(hostState = snackbarHostState) { data ->
+                    val notice = snackbarNotice
+                    if (notice != null) {
+                        CatalogUpdateSnackbar(data = data, notice = notice)
+                    } else {
+                        Snackbar(data)
+                    }
+                }
             },
             containerColor = Color.Transparent,
         ) { padding ->
@@ -454,6 +485,85 @@ fun AiAssistantScreen(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Polished, in-chat notice shown when a live refresh installed a newer server
+ * model catalog. Rendered through the Scaffold's SnackbarHost so it floats
+ * above the input bar and survives navigation within the screen.
+ */
+@Composable
+private fun CatalogUpdateSnackbar(
+    data: SnackbarData,
+    notice: CatalogUpdateNotice,
+) {
+    val body = if (notice.newModelCount > 0) {
+        stringResource(
+            R.string.st_AiSettings_catalog_update_new_models,
+            notice.version,
+            notice.newModelCount,
+        )
+    } else {
+        stringResource(R.string.st_AiSettings_catalog_update_message, notice.version)
+    }
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = LargeExpressiveShape,
+        color = AiDesign.surfaceColor().copy(alpha = 0.98f),
+        contentColor = AiDesign.textColor(),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)),
+        shadowElevation = 10.dp,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Surface(
+                modifier = Modifier.size(40.dp),
+                shape = SquircleShape,
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Rounded.AutoAwesome,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    stringResource(R.string.st_AiSettings_catalog_update_title),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    body,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AiDesign.textColor(0.6f),
+                )
+            }
+            TextButton(
+                onClick = { data.performAction() },
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+            ) {
+                Text(
+                    stringResource(R.string.st_AiAssistantScreen_u7v9),
+                    fontWeight = FontWeight.Black,
+                    fontSize = 11.sp,
+                    letterSpacing = 0.6.sp,
+                )
             }
         }
     }

@@ -119,6 +119,8 @@ fun AiSettingsScreen(
         performanceMode = performanceMode,
         onToggleDynamicPrompts = viewModel::toggleDynamicPrompts,
         onPromptFormatChange = viewModel::updatePromptFormat,
+        liveCatalogUpdates = settingsState.liveCatalogUpdates,
+        onToggleLiveCatalogUpdates = viewModel::toggleLiveCatalogUpdates,
         aiSearchIconVisible = uiState.aiSearchIconVisible,
         onSetAiSearchIconVisible = viewModel::setAiSearchIconVisible,
         catalogVersion = settingsState.catalogVersion,
@@ -167,6 +169,8 @@ fun AiSettingsContent(
     performanceMode: Boolean,
     onToggleDynamicPrompts: (Boolean) -> Unit,
     onPromptFormatChange: (String) -> Unit,
+    liveCatalogUpdates: Boolean,
+    onToggleLiveCatalogUpdates: (Boolean) -> Unit,
     aiSearchIconVisible: Boolean,
     onSetAiSearchIconVisible: (Boolean) -> Unit,
     catalogVersion: Int?,
@@ -316,6 +320,8 @@ fun AiSettingsContent(
                             SettingsAdvancedSection(
                                 aiSearchIconVisible = aiSearchIconVisible,
                                 onSetAiSearchIconVisible = onSetAiSearchIconVisible,
+                                liveCatalogUpdates = liveCatalogUpdates,
+                                onToggleLiveCatalogUpdates = onToggleLiveCatalogUpdates,
                                 catalogVersion = catalogVersion,
                                 catalogUpdatedAt = catalogUpdatedAt,
                                 isRefreshingCatalog = isRefreshingCatalog,
@@ -955,6 +961,8 @@ private fun SettingsPromptsSection(
 private fun SettingsAdvancedSection(
     aiSearchIconVisible: Boolean,
     onSetAiSearchIconVisible: (Boolean) -> Unit,
+    liveCatalogUpdates: Boolean,
+    onToggleLiveCatalogUpdates: (Boolean) -> Unit,
     catalogVersion: Int?,
     catalogUpdatedAt: String?,
     isRefreshingCatalog: Boolean,
@@ -969,6 +977,16 @@ private fun SettingsAdvancedSection(
                     Text(stringResource(R.string.st_AiAssistantScreen_c9d1), style = MaterialTheme.typography.labelSmall, color = AiDesign.textColor(0.55f))
                 }
                 ExpressiveSwitch(checked = aiSearchIconVisible, onCheckedChange = onSetAiSearchIconVisible)
+            }
+        }
+        // Live catalog updates
+        Surface(Modifier.fillMaxWidth(), MediumExpressiveShape, AiDesign.glassColor(), border = BorderStroke(1.dp, AiDesign.glassBorder())) {
+            Row(Modifier.padding(16.dp), Arrangement.SpaceBetween, Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.st_AiSettings_live_catalog_title), fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.st_AiSettings_live_catalog_desc), style = MaterialTheme.typography.labelSmall, color = AiDesign.textColor(0.55f))
+                }
+                ExpressiveSwitch(checked = liveCatalogUpdates, onCheckedChange = onToggleLiveCatalogUpdates)
             }
         }
         // Server model catalog

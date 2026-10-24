@@ -31,6 +31,19 @@ import javax.inject.Singleton
 private const val TAG = "AiCatalogRepository"
 
 /**
+ * Emitted once when a server fetch installs a genuinely newer catalog than the
+ * one currently active, so the UI can show a one-shot "models updated" notice.
+ *
+ * @param version newly installed catalog version.
+ * @param newModelCount how many model ids appeared compared with the previous
+ *   catalog (0 when the lineup changed in other ways, e.g. retirements only).
+ */
+data class CatalogUpdateNotice(
+    val version: Int,
+    val newModelCount: Int,
+)
+
+/**
  * Server-driven AI model catalog.
  *
  * Source of truth: `GET https://toolz-app.vercel.app/api/models`
@@ -57,6 +70,13 @@ class AiCatalogRepository @Inject constructor(
     companion object {
         /** Catalog TTL — models churn fast, so 24h (not the 15d specs cadence). */
         const val CACHE_TTL_MS = 24L * 60 * 60 * 1000
+
+        /**
+         * Startup/path coalescing window for live refreshes. The Application
+         * warmup and the Loading screen both run seconds apart on cold start;
+         * this prevents them from issuing two identical network requests.
+         */
+        private const val LIVE_REFRESH_COALESCE_MS = 5_000L
     }
 
     private val adapter = moshi.adapter(AiCatalogResponse::class.java)
@@ -72,7 +92,38 @@ class AiCatalogRepository @Inject constructor(
     private val _isRefreshing = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
 
+    /**
+     * One-shot "a newer catalog was installed" event. Kept as state (not a
+     * SharedFlow) so it survives the Loading screen finishing before the user
+     * opens the AI Assistant, which is where the notice is displayed.
+     */
+    private val _pendingUpdate = MutableStateFlow<CatalogUpdateNotice?>(null)
+    val pendingUpdate: StateFlow<CatalogUpdateNotice?> = _pendingUpdate.asStateFlow()
+
     private val refreshMutex = Mutex()
+
+    private var installedCatalog: AiCatalogResponse? = null
+    private var lastSuccessfulFetchAt = 0L
+
+    /** True when the user allows automatic catalog refreshes. */
+    fun isLiveUpdatesEnabled(): Boolean = settingsManager.isLiveCatalogUpdatesEnabled()
+
+    /**
+     * Refresh only when the user has "Live model catalog updates" enabled.
+     * Used by the Loading screen and AI Assistant open paths.
+     *
+     * [force] fetches even inside the 24h TTL but coalesces bursts from the
+     * startup path so app warmup + loading don't double-fetch.
+     */
+    suspend fun refreshLive(force: Boolean = true): Boolean {
+        if (!isLiveUpdatesEnabled()) return _installedVersion.value != null
+        return refresh(force = force, minIntervalMs = if (force) LIVE_REFRESH_COALESCE_MS else 0L)
+    }
+
+    /** Clear the notice after the UI has shown it (version-scoped, race-safe). */
+    fun acknowledgeUpdate(notice: CatalogUpdateNotice) {
+        _pendingUpdate.compareAndSet(notice, null)
+    }
 
     /**
      * App-start entry point: install cache synchronously, refresh when stale.
@@ -87,9 +138,16 @@ class AiCatalogRepository @Inject constructor(
 
     /**
      * Fetch the catalog unless the cache is fresh (or [force] is true).
+     * @param minIntervalMs skip a forced fetch when a successful one happened
+     *   more recently than this (burst coalescing for launch paths).
      * @return true if a catalog (fresh or cached) is now active.
      */
-    suspend fun refresh(force: Boolean = false): Boolean = refreshMutex.withLock {
+    suspend fun refresh(force: Boolean = false, minIntervalMs: Long = 0L): Boolean = refreshMutex.withLock {
+        if (minIntervalMs > 0L &&
+            System.currentTimeMillis() - lastSuccessfulFetchAt < minIntervalMs
+        ) {
+            return _installedVersion.value != null
+        }
         if (!force && !isCacheStaleLocked() && _installedVersion.value != null) return true
         if (_isRefreshing.value) return _installedVersion.value != null
         _isRefreshing.value = true
@@ -111,11 +169,13 @@ class AiCatalogRepository @Inject constructor(
                 Log.w(TAG, "Catalog rejected: untrusted chatCompletionUrl")
                 return _installedVersion.value != null
             }
+            val previous = installedCatalog
             val current = _installedVersion.value ?: 0
             if (remote.version < current) {
                 Log.w(TAG, "Ignoring catalog v${remote.version} (installed v$current — server rolled back?)")
                 return true
             }
+            val isNewer = _installedVersion.value != null && remote.version > current
             val json = try {
                 adapter.toJson(remote)
             } catch (e: Exception) {
@@ -124,10 +184,29 @@ class AiCatalogRepository @Inject constructor(
             }
             if (json != null) settingsManager.saveCachedCatalog(json, remote.version)
             install(remote)
+            lastSuccessfulFetchAt = System.currentTimeMillis()
+            if (isNewer) {
+                _pendingUpdate.value = CatalogUpdateNotice(
+                    version = remote.version,
+                    newModelCount = countNewModels(previous, remote),
+                )
+            }
             return true
         } finally {
             _isRefreshing.value = false
         }
+    }
+
+    /** Count model ids that exist in [new] but not in the previously active catalog. */
+    private fun countNewModels(old: AiCatalogResponse?, new: AiCatalogResponse): Int {
+        if (old == null) return 0
+        val oldIds = old.providers
+            .flatMap { it.models + it.freeModels }
+            .toHashSet()
+        return new.providers
+            .flatMap { it.models + it.freeModels }
+            .distinct()
+            .count { it !in oldIds }
     }
 
     private fun isCacheStale(): Boolean {
@@ -178,6 +257,7 @@ class AiCatalogRepository @Inject constructor(
 
     private fun install(catalog: AiCatalogResponse) {
         AiSettingsHelper.installCatalog(catalog)
+        installedCatalog = catalog
         _installedVersion.value = catalog.version
         _catalogUpdatedAt.value = catalog.updatedAt.takeIf { it.isNotBlank() }
     }

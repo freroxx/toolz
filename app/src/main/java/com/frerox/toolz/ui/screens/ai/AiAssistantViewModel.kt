@@ -87,6 +87,7 @@ data class AiSettingsUiState(
     val customIconUri        : String?   = null,
     val dynamicPromptsEnabled: Boolean   = true,
     val promptFormat         : String    = "medium",
+    val liveCatalogUpdates   : Boolean   = true,
     val showGroqKeyMissingDialog: Boolean = false,
     val isGroqConfigured     : Boolean   = false,
     val modelAvailability    : ModelAvailability = ModelAvailability.UNKNOWN,
@@ -149,6 +150,12 @@ class AiAssistantViewModel @Inject constructor(
     private val _settingsUiState = MutableStateFlow(AiSettingsUiState())
     val settingsUiState: StateFlow<AiSettingsUiState> = _settingsUiState.asStateFlow()
 
+    /** One-shot notice when a live refresh installed a newer model catalog. */
+    val catalogUpdateNotice: StateFlow<CatalogUpdateNotice?> = catalogRepository.pendingUpdate
+
+    fun acknowledgeCatalogUpdate(notice: CatalogUpdateNotice) =
+        catalogRepository.acknowledgeUpdate(notice)
+
     /**
      * The assistant is online-only (inference + model catalog + web search
      * are all server-side). False on airplane mode / no route / manual
@@ -167,10 +174,11 @@ class AiAssistantViewModel @Inject constructor(
         loadConfigs()
         observeSearchSettings()
         observeCatalog()
-        // Auto-update the server model catalog when stale (TTL-guarded,
-        // silent unless it fails — manual refresh lives in Settings).
+        // Auto-update the server model catalog every time the assistant opens
+        // (Advanced → Live model catalog updates controls this; manual refresh
+        // in Settings still bypasses it). Failures stay silent.
         viewModelScope.launch {
-            runCatching { catalogRepository.refresh() }
+            runCatching { catalogRepository.refreshLive(force = true) }
         }
         viewModelScope.launch {
             aiDao.getAllChats().collect { chats -> _uiState.update { it.copy(chats = chats) } }
@@ -211,6 +219,7 @@ class AiAssistantViewModel @Inject constructor(
                 customIconUri        = customIcon,
                 dynamicPromptsEnabled = settingsManager.isDynamicPromptsEnabled(),
                 promptFormat         = settingsManager.getPromptFormat(),
+                liveCatalogUpdates   = settingsManager.isLiveCatalogUpdatesEnabled(),
                 selectedIdentityId   = settingsManager.getSelectedIdentityId(),
                 customIdentities     = settingsManager.getCustomIdentities(),
             )
@@ -283,6 +292,18 @@ class AiAssistantViewModel @Inject constructor(
         settingsManager.setDynamicPromptsEnabled(enabled)
         _settingsUiState.update { it.copy(dynamicPromptsEnabled = enabled) }
         refreshPrompts()
+    }
+
+    fun toggleLiveCatalogUpdates(enabled: Boolean) {
+        settingsManager.setLiveCatalogUpdatesEnabled(enabled)
+        _settingsUiState.update { it.copy(liveCatalogUpdates = enabled) }
+        if (enabled) {
+            // Make the setting feel instant: pull the latest lineup now and
+            // let the pending-update notice surface when back in the chat.
+            viewModelScope.launch {
+                runCatching { catalogRepository.refreshLive(force = true) }
+            }
+        }
     }
 
     fun updatePromptFormat(format: String) {

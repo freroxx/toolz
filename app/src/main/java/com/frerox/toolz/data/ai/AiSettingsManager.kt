@@ -49,6 +49,7 @@ class AiSettingsManager @Inject constructor(
         private const val KEY_CATALOG_JSON = "ai_catalog_json"
         private const val KEY_CATALOG_VERSION = "ai_catalog_version"
         private const val KEY_CATALOG_TIMESTAMP = "ai_catalog_timestamp"
+        private const val KEY_LIVE_CATALOG_UPDATES = "live_catalog_updates"
         private const val KEY_IDENTITY_ID = "selected_identity_id"
         private const val KEY_CUSTOM_IDENTITIES = "custom_identities"
         private const val KEY_ACTIVE_CONFIG_NAME = "active_config_name"
@@ -78,6 +79,15 @@ class AiSettingsManager @Inject constructor(
 
     fun getPromptFormat(): String = prefs.getString(KEY_PROMPT_FORMAT, "medium") ?: "medium"
     fun setPromptFormat(format: String) = prefs.edit().putString(KEY_PROMPT_FORMAT, format).apply()
+
+    /**
+     * When enabled, the server model catalog is refreshed at app launch and
+     * every time the AI Assistant opens. Off = bundled/cached tables only
+     * until the user taps Refresh in Advanced settings.
+     */
+    fun isLiveCatalogUpdatesEnabled(): Boolean = prefs.getBoolean(KEY_LIVE_CATALOG_UPDATES, true)
+    fun setLiveCatalogUpdatesEnabled(enabled: Boolean) =
+        prefs.edit().putBoolean(KEY_LIVE_CATALOG_UPDATES, enabled).apply()
 
     fun getNeverShowPrompts(): List<String> {
         val json = prefs.getString(KEY_NEVER_SHOW_PROMPTS, null) ?: return emptyList()
