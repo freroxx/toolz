@@ -6,6 +6,7 @@ import com.frerox.toolz.data.livingframes.LivingFrameEstimate
 import com.frerox.toolz.data.livingframes.LivingFrameFit
 import com.frerox.toolz.data.livingframes.LivingFrameFps
 import com.frerox.toolz.data.livingframes.LivingFrameLoopMode
+import com.frerox.toolz.data.livingframes.LivingFrameLoopTransition
 import com.frerox.toolz.data.livingframes.LivingFrameQuality
 import com.frerox.toolz.data.livingframes.LivingFrameTapAction
 import com.frerox.toolz.data.livingframes.LivingFrameType
@@ -253,30 +254,98 @@ class LivingFrameEngineTest {
     }
 
     @Test
-    fun plan_prefersFullFramesThenDegrades() {
-        val full = LivingFrameEngine.plan(4, 100, 100, true, 12, 10_000_000L)
+    fun plan_staticPrefersSharpnessOverFps() {
+        val full = LivingFrameEngine.planStatic(
+            frameCount = 4,
+            sourceFps = 12,
+            speed = 1f,
+            requestedFps = 12,
+            widthPx = 100,
+            heightPx = 100,
+            opaque = true,
+            budgetBytes = 10_000_000L,
+            loopMode = LivingFrameLoopMode.LOOP
+        )!!
         assertEquals(1f, full.scale)
         assertEquals(1, full.step)
+        assertEquals(4, full.frames)
+        assertEquals(12, full.effectiveFps)
         assertEquals(false, full.reduced)
-        val tight = LivingFrameEngine.plan(4, 1000, 1000, true, 12, 1000L)
-        assertTrue(tight.reduced)
-        assertTrue(tight.frames >= 1)
+        assertEquals(false, full.transition)
     }
 
     @Test
-    fun plan_alwaysFitsTheProvidedBudget() {
-        for (n in listOf(1, 2, 4, 12, 40)) {
+    fun plan_staticIncludesSeamBlendsInTheBudget() {
+        val plain = LivingFrameEngine.planStatic(
+            frameCount = 4,
+            sourceFps = 12,
+            speed = 1f,
+            requestedFps = 12,
+            widthPx = 100,
+            heightPx = 100,
+            opaque = true,
+            budgetBytes = 10_000_000L,
+            loopMode = LivingFrameLoopMode.LOOP,
+            transition = LivingFrameLoopTransition.NONE
+        )!!
+        val faded = LivingFrameEngine.planStatic(
+            frameCount = 4,
+            sourceFps = 12,
+            speed = 1f,
+            requestedFps = 12,
+            widthPx = 100,
+            heightPx = 100,
+            opaque = true,
+            budgetBytes = 10_000_000L,
+            loopMode = LivingFrameLoopMode.LOOP,
+            transition = LivingFrameLoopTransition.FADE
+        )!!
+        assertEquals(4, plain.frames)
+        assertEquals(4 + LivingFrameEngine.seamStepCount(12), faded.frames)
+        assertEquals(true, faded.transition)
+        assertTrue(faded.bytes > plain.bytes)
+    }
+
+    @Test
+    fun plan_staticReturnsNullInsteadOfBlurringBelowItsFloor() {
+        val p = LivingFrameEngine.planStatic(
+            frameCount = 40,
+            sourceFps = 30,
+            speed = 1f,
+            requestedFps = 30,
+            widthPx = 1000,
+            heightPx = 1000,
+            opaque = true,
+            budgetBytes = 1_000L,
+            loopMode = LivingFrameLoopMode.LOOP
+        )
+        assertNull(p)
+    }
+
+    @Test
+    fun plan_staticAlwaysFitsTheProvidedBudgetWhenItReturns() {
+        for (n in listOf(2, 4, 12, 40)) {
             for (opaque in listOf(true, false)) {
                 for (mode in LivingFrameLoopMode.entries) {
-                    for (budget in listOf(1_000L, 100_000L, 1_000_000L, 8_500_000L)) {
-                        val p = LivingFrameEngine.plan(n, 1080, 2400, opaque, 30, budget, mode)
-                        assertTrue(
-                            "n=$n opaque=$opaque mode=$mode budget=$budget bytes=${p.bytes}",
-                            p.bytes <= budget
-                        )
-                        assertTrue(p.outW >= 2 && p.outH >= 2)
-                        assertTrue(p.frames in 1..n)
-                        assertTrue(p.step in 1..n)
+                    for (transition in LivingFrameLoopTransition.entries) {
+                        for (budget in listOf(100_000L, 1_000_000L, 8_500_000L)) {
+                            val p = LivingFrameEngine.planStatic(
+                                n, 12, 1f, 30, 1080, 2400, opaque, budget,
+                                mode, transition
+                            ) ?: continue
+                            val expected = LivingFrameEngine.displaySteps(
+                                n, 12, p.effectiveFps, 1f, mode, transition
+                            ).size
+                            assertTrue(
+                                "n=$n opaque=$opaque mode=$mode transition=$transition " +
+                                        "budget=$budget bytes=${p.bytes}",
+                                p.bytes <= budget
+                            )
+                            assertEquals(expected, p.frames)
+                            assertTrue(p.outW >= 2 && p.outH >= 2)
+                            assertTrue(p.scale >= LivingFrameEngine.MIN_STATIC_SCALE)
+                            assertTrue(p.effectiveFps >= LivingFrameEngine.MIN_STATIC_FPS)
+                        }
                     }
                 }
             }
@@ -284,11 +353,146 @@ class LivingFrameEngineTest {
     }
 
     @Test
-    fun plan_rescalesFpsWhenFramesAreSampled() {
-        val p = LivingFrameEngine.plan(40, 1080, 2400, true, 30, 1_000_000L)
-        if (p.step > 1) {
-            assertEquals(LivingFrameFps.snap(30f / p.step), p.effectiveFps)
+    fun plan_stillAlwaysFitsASaneBudget() {
+        for (pixels in listOf(100 to 100, 1080 to 2400)) {
+            for (opaque in listOf(true, false)) {
+                for (budget in listOf(100_000L, 1_000_000L, 8_500_000L)) {
+                    val p = LivingFrameEngine.planStill(
+                        pixels.first, pixels.second, opaque, budget
+                    )
+                    assertTrue(
+                        "opaque=$opaque budget=$budget bytes=${p.bytes}",
+                        p.bytes <= budget
+                    )
+                    assertEquals(1, p.frames)
+                    assertTrue(p.outW >= 2 && p.outH >= 2)
+                }
+            }
         }
+    }
+
+    @Test
+    fun plan_extremeAspectStillFitsItsBudget() {
+        for ((opaque, budget) in listOf(true to 4_096L, false to 4_096L)) {
+            val p = LivingFrameEngine.planStill(2, 8_000, opaque, budget)
+            assertTrue("opaque=$opaque bytes=${p.bytes}", p.bytes <= budget)
+            assertTrue(p.outW >= 2 && p.outH >= 2)
+            assertEquals(1, p.frames)
+        }
+    }
+
+    @Test
+    fun displaySteps_noneHasNoBlends() {
+        val steps = LivingFrameEngine.displaySteps(
+            4, 12, 12, 1f, LivingFrameLoopMode.LOOP, LivingFrameLoopTransition.NONE
+        )
+        assertEquals(4, steps.size)
+        assertTrue(steps.none { it.blended })
+    }
+
+    @Test
+    fun displaySteps_fadeAddsOrderedSeamBlends() {
+        val steps = LivingFrameEngine.displaySteps(
+            4, 12, 12, 1f, LivingFrameLoopMode.LOOP, LivingFrameLoopTransition.FADE
+        )
+        val seam = steps.takeLast(LivingFrameEngine.seamStepCount(12))
+        assertEquals(4 + seam.size, steps.size)
+        assertTrue(seam.all { it.from == 3 && it.to == 0 })
+        assertTrue(seam.all { it.blended && it.mix in 0f..1f })
+        assertTrue(seam.zipWithNext().all { (a, b) -> b.mix > a.mix })
+    }
+
+    @Test
+    fun displaySteps_boomerangIgnoresTransition() {
+        val plain = LivingFrameEngine.displaySteps(
+            4, 12, 12, 1f, LivingFrameLoopMode.BOOMERANG, LivingFrameLoopTransition.NONE
+        )
+        val faded = LivingFrameEngine.displaySteps(
+            4, 12, 12, 1f, LivingFrameLoopMode.BOOMERANG, LivingFrameLoopTransition.BLUR
+        )
+        assertEquals(plain, faded)
+        assertTrue(faded.none { it.blended })
+    }
+
+    @Test
+    fun displaySteps_singleFrameHasNothingToFade() {
+        val steps = LivingFrameEngine.displaySteps(
+            1, 12, 12, 1f, LivingFrameLoopMode.LOOP, LivingFrameLoopTransition.FADE
+        )
+        assertEquals(1, steps.size)
+        assertEquals(0, steps.single().from)
+    }
+
+    @Test
+    fun displayDuration_includesSeamSteps() {
+        assertEquals(
+            4 * 83L,
+            LivingFrameEngine.displayDurationMs(
+                4, 12, 12, 1f, LivingFrameLoopMode.LOOP,
+                LivingFrameLoopTransition.NONE
+            )
+        )
+        assertEquals(
+            5 * 83L,
+            LivingFrameEngine.displayDurationMs(
+                4, 12, 12, 1f, LivingFrameLoopMode.LOOP,
+                LivingFrameLoopTransition.FADE
+            )
+        )
+    }
+
+    @Test
+    fun rotateSteps_startsAtTheSavedPausePoint() {
+        val steps = LivingFrameEngine.displaySteps(
+            4, 12, 12, 1f, LivingFrameLoopMode.LOOP, LivingFrameLoopTransition.FADE
+        )
+        val rotated = LivingFrameEngine.rotateSteps(steps, 2)
+        assertEquals(steps.size, rotated.size)
+        assertEquals(steps[2], rotated.first())
+        assertEquals(steps[0], LivingFrameEngine.rotateSteps(steps, 0).first())
+        // A stale index from a larger previous loop clamps instead of crashing.
+        assertEquals(steps.last(), LivingFrameEngine.rotateSteps(steps, 999).first())
+    }
+
+    @Test
+    fun nearestStepIndex_findsBlendsAndSurvivesMissingFrames() {
+        val steps = LivingFrameEngine.displaySteps(
+            4, 12, 12, 1f, LivingFrameLoopMode.LOOP, LivingFrameLoopTransition.FADE
+        )
+        val seam = steps.last()
+        assertEquals(steps.lastIndex, LivingFrameEngine.nearestStepIndex(steps, 3, 0, 0.5f))
+        assertEquals(2, LivingFrameEngine.nearestStepIndex(steps, 2, 2, 0f))
+        // The loop changed and `to` no longer exists: keep the `from` frame.
+        assertEquals(2, LivingFrameEngine.nearestStepIndex(steps, 2, 9, 0f))
+        assertEquals(0, LivingFrameEngine.nearestStepIndex(emptyList(), seam.from, seam.to, 0f))
+    }
+
+    @Test
+    fun cornerRadii_compensateForRenderScale() {
+        val r = LivingFrameEngine.cornerRadii(
+            cornerDp = 24,
+            densityX = 5f,
+            densityY = 3f,
+            widthPx = 1000,
+            heightPx = 600
+        )
+        assertEquals(120f, r.rx, 0.01f)
+        assertEquals(72f, r.ry, 0.01f)
+    }
+
+    @Test
+    fun cornerRadii_clampToHalfTheOutputAndIgnoreZero() {
+        val clamped = LivingFrameEngine.cornerRadii(40, 10f, 10f, 100, 50)
+        assertEquals(50f, clamped.rx, 0.01f)
+        assertEquals(25f, clamped.ry, 0.01f)
+        assertEquals(0f, LivingFrameEngine.cornerRadii(0, 3f, 3f, 100, 100).rx, 0f)
+    }
+
+    @Test
+    fun densityScale_matchesOutputOverWidget() {
+        assertEquals(2f, LivingFrameEngine.densityScale(1f, 400, 200), 0.0001f)
+        assertEquals(1f, LivingFrameEngine.densityScale(1f, 200, 200), 0.0001f)
+        assertEquals(3f, LivingFrameEngine.densityScale(1.5f, 400, 200), 0.0001f)
     }
 
     @Test
@@ -370,17 +574,6 @@ class LivingFrameEngineTest {
             "notes/editor",
             LivingFrameValidation.normalize(base)!!.tapTargetRoute
         )
-    }
-
-    @Test
-    fun plan_extremeAspectStillFitsATwoPixelBudget() {
-        for ((opaque, budget) in listOf(true to 72L, false to 80L)) {
-            val p = LivingFrameEngine.plan(40, 2, 8_000, opaque, 30, budget)
-            assertTrue("opaque=$opaque bytes=${p.bytes}", p.bytes <= budget)
-            assertEquals(2, p.outW)
-            assertEquals(2, p.outH)
-            assertEquals(1, p.frames)
-        }
     }
 
     @Test
