@@ -5,6 +5,7 @@
 
 package com.frerox.toolz.ui.screens.settings
 
+import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -43,6 +44,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -52,6 +54,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.res.stringResource
@@ -60,6 +63,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.frerox.toolz.R
 import com.frerox.toolz.data.skin.IconCatalog
+import com.frerox.toolz.data.skin.PinResult
 import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.components.ToolzMarkThemed
 import com.frerox.toolz.ui.components.bouncyClick
@@ -89,6 +93,27 @@ fun IconCatalogScreen(
 
     var query by remember { mutableStateOf("") }
     var tag by remember { mutableStateOf("All") }
+
+    // Long-press pins the tile with real art, bypassing any launcher icon pack.
+    val pinContext = LocalContext.current
+    val pinAddedText = stringResource(R.string.st_AppSkin_pin_added)
+    val pinUpdatedText = stringResource(R.string.st_AppSkin_pin_updated)
+    val pinUnsupportedText = stringResource(R.string.st_AppSkin_pin_unsupported)
+    val pinFailedText = stringResource(R.string.st_AppSkin_pin_failed)
+    var pinMessage by remember { mutableStateOf<String?>(null) }
+    val showPinResult: (PinResult) -> Unit = { result ->
+        pinMessage = when (result) {
+            PinResult.Pinned -> pinAddedText
+            PinResult.Updated -> pinUpdatedText
+            PinResult.Unsupported -> pinUnsupportedText
+            PinResult.Failed -> pinFailedText
+        }
+    }
+    LaunchedEffect(pinMessage) {
+        val message = pinMessage ?: return@LaunchedEffect
+        Toast.makeText(pinContext, message, Toast.LENGTH_SHORT).show()
+        pinMessage = null
+    }
 
     val isDark = when (themeMode) {
         "DARK" -> true
@@ -232,17 +257,16 @@ fun IconCatalogScreen(
                     val selected = spec.id == presetId
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Surface(
-                            onClick = {
-                                vibrationManager?.vibrateClick()
-                                viewModel.setAppIconPresetId(spec.id)
-                            },
                             shape = RoundedCornerShape(24.dp),
                             color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
                             border = BorderStroke(
                                 if (selected) 2.dp else 1.dp,
                                 if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
                             ),
-                            modifier = Modifier.size(104.dp).bouncyClick {},
+                            modifier = Modifier.size(104.dp).bouncyClick(
+                                onClick = { viewModel.setAppIconPresetId(spec.id) },
+                                onLongClick = { viewModel.pinPresetToHome(spec.id, showPinResult) },
+                            ),
                             shadowElevation = if (selected) 8.dp else 0.dp,
                         ) {
                             Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(13.dp)) {
