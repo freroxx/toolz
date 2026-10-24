@@ -103,6 +103,14 @@ object LivingFrameRenderer {
     }
 
     /**
+     * The opaque picture alone: cropped/scaled to [outW]×[outH] with no
+     * corners and full opacity. This is what the proxy cache stores; corners
+     * and opacity are applied afterwards by [render].
+     */
+    fun renderBase(src: Bitmap, frame: LivingFrame, outW: Int, outH: Int, rgb565: Boolean): Bitmap =
+        render(src, frame.copy(cornerRadiusDp = 0, opacity = 1f), outW, outH, 1f, rgb565)
+
+    /**
      * Only decoded video frames are guaranteed to have no alpha channel.
      * Photos, slideshows and GIFs may carry transparent pixels, so they always
      * get an ARGB output even when their corners/letterbox are fully filled.

@@ -23,11 +23,14 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.net.Uri
+import android.os.SystemClock
 import android.util.Log
 import android.widget.RemoteViews
 import android.widget.RemoteViewsService
 import com.frerox.toolz.R
 import com.frerox.toolz.data.livingframes.LivingFrame
+import com.frerox.toolz.data.livingframes.LivingFrameFit
+import com.frerox.toolz.data.livingframes.LivingFrameType
 import com.frerox.toolz.data.livingframes.LivingFrameEngine
 import com.frerox.toolz.data.livingframes.LivingFrameQuality
 import com.frerox.toolz.data.livingframes.LivingFrameRenderer
@@ -36,11 +39,13 @@ import com.frerox.toolz.data.livingframes.LivingFramesRepository
 import dagger.hilt.android.EntryPointAccessors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 import kotlin.math.ceil
@@ -75,6 +80,19 @@ class LivingFramesRemoteViewsService : RemoteViewsService() {
  * getViewAt never sees a half-updated order/size/cache combination, and a
  * decode that finishes after a swap lands in the retired session's cache.
  */
+/** Playback counters, logged every few seconds when the log tag is DEBUG. */
+private class Stats {
+    val hit = AtomicInteger()
+    val waited = AtomicInteger()
+    val inlineMisses = AtomicInteger()
+    val stale = AtomicInteger()
+    val produced = AtomicInteger()
+    val fromProxy = AtomicInteger()
+    val produceNanos = AtomicLong()
+    val maxProduceMs = AtomicLong()
+    @Volatile var lastLogAt = 0L
+}
+
 private class Session(
     val id: Int,
     val frame: LivingFrame,
@@ -85,8 +103,12 @@ private class Session(
     val rgb565: Boolean,
     val resident: Boolean,
     val capacity: Int,
-    val ahead: Int
+    val ahead: Int,
+    /** Widget-size proxy folder, or null when this set cannot be proxied. */
+    val proxyDir: File?,
+    val proxyWritable: Boolean
 ) {
+    val stats = Stats()
     val lock = ReentrantLock()
     val changed = lock.newCondition()
     val cache = HashMap<Int, Bitmap>()
@@ -154,6 +176,7 @@ private class LivingFramesFactory(
     @Volatile private var last: Bitmap? = null
 
     private val sessionIds = AtomicInteger(0)
+    private val proxies = LivingFrameProxyCache(context)
     private val registered = AtomicBoolean(false)
 
     // Two workers: WebP decode is the bottleneck, and the host's loader
@@ -242,6 +265,12 @@ private class LivingFramesFactory(
                 .coerceAtMost((capacity - 3).coerceAtLeast(2))
         }
 
+        val proxyDir = if (current.type == LivingFrameType.VIDEO && current.fit == LivingFrameFit.FILL) {
+            proxies.dirFor(current.id, outW, outH)
+        } else {
+            null
+        }
+
         val s = Session(
             id = sessionIds.incrementAndGet(),
             frame = current,
@@ -252,7 +281,9 @@ private class LivingFramesFactory(
             rgb565 = rgb565,
             resident = resident,
             capacity = capacity,
-            ahead = ahead
+            ahead = ahead,
+            proxyDir = proxyDir,
+            proxyWritable = proxyDir != null && proxies.hasSpace()
         )
         val old = session
         session = s
@@ -262,6 +293,14 @@ private class LivingFramesFactory(
         // before the host asks, then let the workers run ahead of it.
         obtain(s, order[0], FIRST_FRAME_WAIT_MS)?.let { last = it }
         schedule(s)
+        if (proxyDir != null) {
+            try {
+                executor.execute {
+                    proxies.prune(current.id, proxyDir) { id -> repository.get(id) != null }
+                }
+            } catch (_: RejectedExecutionException) {
+            }
+        }
     }
 
     override fun getViewAt(position: Int): RemoteViews {
@@ -272,8 +311,11 @@ private class LivingFramesFactory(
         s.cursor.set(pos)
         // Start the workers before we spend time on an inline decode.
         schedule(s)
-        val bitmap = obtain(s, s.order[pos], MISS_WAIT_MS) ?: last
+        val fresh = obtain(s, s.order[pos], MISS_WAIT_MS)
+        if (fresh == null) s.stats.stale.incrementAndGet()
+        val bitmap = fresh ?: last
         if (bitmap != null) last = bitmap
+        logStats(s)
         return frameViews(bitmap)
     }
 
@@ -283,8 +325,12 @@ private class LivingFramesFactory(
      */
     private fun obtain(s: Session, frameIndex: Int, waitMs: Long): Bitmap? {
         s.lock.withLock {
-            s.cache[frameIndex]?.let { return it }
+            s.cache[frameIndex]?.let {
+                s.stats.hit.incrementAndGet()
+                return it
+            }
             if (!s.pending.add(frameIndex)) {
+                s.stats.waited.incrementAndGet()
                 var nanos = TimeUnit.MILLISECONDS.toNanos(waitMs)
                 try {
                     while (frameIndex in s.pending && nanos > 0L) {
@@ -296,14 +342,20 @@ private class LivingFramesFactory(
                 return s.cache[frameIndex]
             }
         }
+        s.stats.inlineMisses.incrementAndGet()
         return complete(s, frameIndex)
     }
 
     /** Decode + render + store. The caller must own `pending[frameIndex]`. */
     private fun complete(s: Session, frameIndex: Int): Bitmap? {
         var bitmap: Bitmap? = null
+        val startedAt = SystemClock.elapsedRealtimeNanos()
         try {
             bitmap = produce(s, frameIndex)
+            val nanos = SystemClock.elapsedRealtimeNanos() - startedAt
+            s.stats.produced.incrementAndGet()
+            s.stats.produceNanos.addAndGet(nanos)
+            s.stats.maxProduceMs.accumulateAndGet(nanos / 1_000_000L) { a, b -> maxOf(a, b) }
         } catch (e: OutOfMemoryError) {
             Log.w(TAG, "Out of memory rendering a Living Widget frame", e)
             s.lock.withLock { s.cache.clear() }
@@ -320,6 +372,14 @@ private class LivingFramesFactory(
     }
 
     private fun produce(s: Session, frameIndex: Int): Bitmap? {
+        val proxyDir = s.proxyDir
+        if (proxyDir != null) {
+            // Fast path: the frame already exists at widget size.
+            proxies.read(proxyDir, frameIndex, s.rgb565)?.let {
+                s.stats.fromProxy.incrementAndGet()
+                return finish(s, it)
+            }
+        }
         val repository = repo ?: return null
         val required = LivingFrameEngine.requiredSourceSide(
             s.outW, s.outH, s.frame.width, s.frame.height, s.frame.fit
@@ -328,8 +388,32 @@ private class LivingFramesFactory(
             repository.decodeAtLeast(s.frame.id, frameIndex, required)
         } ?: return null
         return try {
+            if (proxyDir != null) {
+                val base = LivingFrameRenderer.renderBase(src, s.frame, s.outW, s.outH, s.rgb565)
+                // Next pass (and the next process start) skips the big decode.
+                if (s.proxyWritable) proxies.write(proxyDir, frameIndex, base)
+                finish(s, base)
+            } else {
+                LivingFrameRenderer.render(
+                    src = src,
+                    frame = s.frame,
+                    outW = s.outW,
+                    outH = s.outH,
+                    density = s.density,
+                    rgb565 = s.rgb565
+                )
+            }
+        } finally {
+            runCatching { src.recycle() }
+        }
+    }
+
+    /** Corners and opacity on top of a widget-size base picture. */
+    private fun finish(s: Session, base: Bitmap): Bitmap {
+        if (s.frame.cornerRadiusDp == 0 && s.frame.opacity >= 0.999f) return base
+        return try {
             LivingFrameRenderer.render(
-                src = src,
+                src = base,
                 frame = s.frame,
                 outW = s.outW,
                 outH = s.outH,
@@ -337,8 +421,28 @@ private class LivingFramesFactory(
                 rgb565 = s.rgb565
             )
         } finally {
-            runCatching { src.recycle() }
+            runCatching { base.recycle() }
         }
+    }
+
+    private fun logStats(s: Session) {
+        if (!Log.isLoggable(TAG, Log.DEBUG)) return
+        val now = SystemClock.elapsedRealtime()
+        val st = s.stats
+        if (now - st.lastLogAt < 5_000L) return
+        st.lastLogAt = now
+        val produced = st.produced.get()
+        val avgMs = if (produced > 0) st.produceNanos.get() / produced / 1_000_000.0 else 0.0
+        Log.d(
+            TAG,
+            "widget=$appWidgetId hit=${st.hit.get()} waited=${st.waited.get()} " +
+                    "inline=${st.inlineMisses.get()} stale=${st.stale.get()} " +
+                    "produced=$produced fromProxy=${st.fromProxy.get()} " +
+                    "avg=${"%.1f".format(avgMs)}ms max=${st.maxProduceMs.get()}ms " +
+                    "resident=${s.resident} proxy=${s.proxyDir != null} " +
+                    "out=${s.outW}x${s.outH} rgb565=${s.rgb565} " +
+                    "positions=${s.order.size} unique=${s.unique} cache=${s.cache.size}/${s.capacity}"
+        )
     }
 
     /** Lock held. Evicted bitmaps are left to the GC: the host may still draw them. */
