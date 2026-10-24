@@ -22,6 +22,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import com.frerox.toolz.data.livingframes.LivingFrameTapAction
 import com.frerox.toolz.data.livingframes.LivingFramesRepository
 import com.frerox.toolz.worker.LivingFramesRenderWorker
 import dagger.hilt.android.EntryPointAccessors
@@ -53,6 +54,66 @@ class LivingFramesActionReceiver : BroadcastReceiver() {
             LivingFramesWidgetReceiver.ACTION_PINNED -> handlePin(context, intent)
             LivingFramesWidgetHelper.ACTION_NEXT,
             LivingFramesWidgetHelper.ACTION_SLIDE_ADVANCE -> handleAdvance(context, intent)
+            LivingFramesWidgetHelper.ACTION_PAUSE_PLAY -> handlePausePlay(context, intent)
+        }
+    }
+
+    /**
+     * Exact pause/resume. The tapped display step arrives in the intent, so
+     * the frozen frame is the one the user saw, not the animation's first
+     * frame. Resuming keeps that step as the new loop start.
+     */
+    private fun handlePausePlay(context: Context, intent: Intent) {
+        val id = intent.getIntExtra(LivingFramesWidgetHelper.EXTRA_WIDGET_ID, -1)
+        if (id <= 0) return
+        val result = goAsync()
+        scope.launch {
+            try {
+                val r = repo(context) ?: return@launch
+                r.ensureLoaded()
+                val frame = r.boundFrame(id)?.let { r.get(it) } ?: return@launch
+                // A stale tap from an old RemoteViews must not freeze a widget
+                // that no longer offers a way to resume.
+                if (!frame.isAnimated ||
+                    frame.tapAction != LivingFrameTapAction.PAUSE_PLAY
+                ) {
+                    LivingFramesPause.clear(context, id)
+                    return@launch
+                }
+                if (LivingFramesPause.point(context, id) != null) {
+                    LivingFramesPause.resume(context, id)
+                } else {
+                    val from = intent.getIntExtra(
+                        LivingFramesWidgetHelper.EXTRA_STEP_FROM, -1
+                    )
+                    val to = intent.getIntExtra(
+                        LivingFramesWidgetHelper.EXTRA_STEP_TO, -1
+                    )
+                    if (from !in 0 until frame.frameCount ||
+                        to !in 0 until frame.frameCount
+                    ) {
+                        return@launch
+                    }
+                    val milli = intent.getIntExtra(
+                        LivingFramesWidgetHelper.EXTRA_STEP_MIX, 0
+                    )
+                    LivingFramesPause.pause(
+                        context, id,
+                        LivingFramesPause.Point(
+                            from = from,
+                            to = to,
+                            mix = milli.coerceIn(0, 1000) / 1000f
+                        )
+                    )
+                }
+                LivingFramesRenderWorker.enqueue(context, id)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "Pause toggle failed", e)
+            } finally {
+                runCatching { result.finish() }
+            }
         }
     }
 

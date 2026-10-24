@@ -30,6 +30,7 @@ import android.widget.RemoteViewsService
 import com.frerox.toolz.R
 import com.frerox.toolz.data.livingframes.LivingFrame
 import com.frerox.toolz.data.livingframes.LivingFrameFit
+import com.frerox.toolz.data.livingframes.LivingFrameLoopTransition
 import com.frerox.toolz.data.livingframes.LivingFrameType
 import com.frerox.toolz.data.livingframes.LivingFrameEngine
 import com.frerox.toolz.data.livingframes.LivingFrameQuality
@@ -55,32 +56,27 @@ import kotlin.math.sqrt
 /**
  * Supplies one frame at a time to an `AdapterViewFlipper` in the launcher.
  *
+ * This is the fallback path for loops too long to embed in one RemoteViews.
+ * The static path (see [LivingFramesWidgetHelper]) is preferred because it
+ * cannot miss a frame; when streaming is unavoidable, the frames are kept
+ * small enough for the host's ~2 MB loaded-view cache and a miss reuses the
+ * last displayed frame instead of flashing back to frame zero.
+ *
  * Playback contract:
  *  - The flipper runs at [LivingFrameEngine.playbackFps]; the order handed
  *    out here is resampled for exactly that interval, so loop length follows
  *    fps and speed.
- *  - Rendered frames are cached. When the whole loop fits the memory budget
- *    it stays resident and, after the first pass, playback never decodes.
- *    Otherwise a sliding window is kept and frames are evicted by how far
- *    ahead of the playhead they are (the frame just shown is the first to
- *    go). Plain LRU is the worst policy for a cyclic scan: it evicts the
- *    frame needed soonest and misses on every frame.
- *  - A miss never returns a stale frame if it can be avoided. The host
- *    caches whatever it is handed for that position until its window
- *    moves, so a stale frame would repeat for a full pass. A miss waits
- *    briefly for an in-flight decode, or decodes inline on the host's
- *    loader thread, before falling back to the last frame.
+ *  - Seam blends are ordinary [LivingFrameEngine.DisplayStep] values. Normal
+ *    steps share a cached bitmap; blend steps are keyed by their from/to/mix
+ *    pair, so the cache still deduplicates repeated normal frames.
+ *  - Cache eviction follows the playhead rather than LRU: the frame needed
+ *    soonest must survive.
  */
 class LivingFramesRemoteViewsService : RemoteViewsService() {
     override fun onGetViewFactory(intent: Intent): RemoteViewsFactory =
         LivingFramesFactory(applicationContext, intent)
 }
 
-/**
- * Everything one data-set generation needs. Swapped atomically so
- * getViewAt never sees a half-updated order/size/cache combination, and a
- * decode that finishes after a swap lands in the retired session's cache.
- */
 /** Playback counters, logged every few seconds when the log tag is DEBUG. */
 private class Stats {
     val hit = AtomicInteger()
@@ -97,10 +93,11 @@ private class Stats {
 private class Session(
     val id: Int,
     val frame: LivingFrame,
-    val order: IntArray,
+    val steps: Array<LivingFrameEngine.DisplayStep>,
     val outW: Int,
     val outH: Int,
-    val density: Float,
+    val densityX: Float,
+    val densityY: Float,
     val rgb565: Boolean,
     val resident: Boolean,
     val capacity: Int,
@@ -112,40 +109,35 @@ private class Session(
     val stats = Stats()
     val lock = ReentrantLock()
     val changed = lock.newCondition()
-    val cache = HashMap<Int, Bitmap>()
-    val pending = HashSet<Int>()
+    val cache = HashMap<LivingFrameEngine.DisplayStep, Bitmap>()
+    val pending = HashSet<LivingFrameEngine.DisplayStep>()
     val cursor = AtomicInteger(0)
     val active = AtomicInteger(0)
 
-    /** Resident session with every unique frame rendered: nothing left to do. */
+    /** Resident session with every unique step rendered: nothing left to do. */
     @Volatile var warm = false
 
-    /** Display positions at which each source frame appears. */
-    private val positions: Array<IntArray?> = run {
-        val size = maxOf(frame.frameCount, (order.maxOrNull() ?: 0) + 1)
-        val counts = IntArray(size)
-        order.forEach { counts[it]++ }
-        val result = arrayOfNulls<IntArray>(size)
-        val fill = IntArray(size)
-        order.forEachIndexed { position, index ->
-            val slots = result[index] ?: IntArray(counts[index]).also { result[index] = it }
-            slots[fill[index]++] = position
+    /** Display positions at which each step appears. */
+    private val positions: Map<LivingFrameEngine.DisplayStep, IntArray> = run {
+        val map = HashMap<LivingFrameEngine.DisplayStep, MutableList<Int>>()
+        steps.forEachIndexed { position, step ->
+            map.getOrPut(step) { ArrayList(1) }.add(position)
         }
-        result
+        map.mapValues { it.value.toIntArray() }
     }
 
-    val unique: Int = positions.count { it != null }
+    val unique: Int = positions.size
 
-    /** Display ticks until [frameIndex] is next needed, from the playhead. */
-    fun distance(frameIndex: Int): Int {
-        val n = order.size
+    /** Display ticks until [step] is next needed, from the playhead. */
+    fun distance(step: LivingFrameEngine.DisplayStep): Int {
+        val n = steps.size
         val c = cursor.get()
         var best = Int.MAX_VALUE
-        positions.getOrNull(frameIndex)?.forEach { p ->
+        positions[step]?.forEach { p ->
             val d = (p - c + n) % n
             if (d < best) best = d
         }
-        return best
+        return if (best == Int.MAX_VALUE) n else best
     }
 
     fun release() = lock.withLock {
@@ -173,7 +165,7 @@ private class LivingFramesFactory(
 
     @Volatile private var session: Session? = null
 
-    /** Last frame handed to the launcher; used instead of a blank on a miss. */
+    /** Last frame handed to the launcher; used instead of frame zero on a miss. */
     @Volatile private var last: Bitmap? = null
 
     private val sessionIds = AtomicInteger(0)
@@ -202,6 +194,14 @@ private class LivingFramesFactory(
         }
     }
 
+    private val startIndex: Int = run {
+        val fromExtra = intent.getIntExtra(
+            LivingFramesWidgetHelper.EXTRA_START_INDEX, -1
+        )
+        val fromUri = intent.data?.pathSegments?.getOrNull(2)?.toIntOrNull() ?: 0
+        (if (fromExtra >= 0) fromExtra else fromUri).coerceAtLeast(0)
+    }
+
     override fun onCreate() {
         if (registered.compareAndSet(false, true)) ACTIVE_FACTORIES.incrementAndGet()
     }
@@ -222,31 +222,26 @@ private class LivingFramesFactory(
         }
 
         val rate = LivingFrameEngine.playbackFps(current)
-        val order = LivingFrameEngine.displaySequence(
-            current.frameCount,
-            current.sourceFps,
-            rate,
-            current.speed,
-            current.loopMode
-        ).toIntArray()
-        if (order.isEmpty()) {
+        val baseSteps = LivingFrameEngine.displaySteps(current, rate)
+        val rotated = LivingFrameEngine.rotateSteps(baseSteps, startIndex)
+        if (rotated.isEmpty()) {
             retire()
             return
         }
+        val steps = rotated.toTypedArray()
 
         val mgr = AppWidgetManager.getInstance(context)
         val (w, h) = LivingFramesWidgetHelper.widgetSizePx(context, mgr, appWidgetId)
         val resolution = LivingFrameResolution.snap(current.resolutionPercent)
         var outW = (w * resolution / 100f).roundToInt().coerceAtLeast(48)
         var outH = (h * resolution / 100f).roundToInt().coerceAtLeast(48)
-        // The launcher's adapter keeps only a small amount of loaded views (about
-        // 2 MB in AOSP). Frames bigger than HOST_FRAME_BYTES leave it holding one
-        // or two, so most flips find their view not loaded yet and show the
-        // loading view (frame zero): the flicker. Keep frames small enough that
-        // it can hold a few ahead.
-        val hostBpp = if (LivingFrameRenderer.isOpaque(current) &&
-            current.quality == LivingFrameQuality.COMPACT
-        ) 2L else 4L
+        // The launcher's adapter keeps only a small amount of loaded views
+        // (about 2 MB in AOSP). Keeping each frame near 2 MB / 6 means it can
+        // hold several frames ahead, so a flip almost never finds its view
+        // still loading and falls back to the loading view.
+        val opaque = LivingFrameRenderer.isOpaque(current)
+        val compact = opaque && current.quality == LivingFrameQuality.COMPACT
+        val hostBpp = if (compact) 2L else 4L
         val maxPixels = HOST_FRAME_BYTES / hostBpp
         val pixelCount = outW.toLong() * outH
         if (pixelCount > maxPixels) {
@@ -257,13 +252,12 @@ private class LivingFramesFactory(
 
         // Size the cache from real numbers, not a frame-count guess.
         val budget = budgetBytes()
-        val unique = order.toHashSet().size
+        val unique = steps.toHashSet().size
         val pixels = outW.toLong() * outH
-        val opaque = LivingFrameRenderer.isOpaque(current)
         // 16-bit for the compact preset, and also whenever it is the only
         // way an opaque loop stays fully resident.
         val rgb565 = opaque && (
-                current.quality == LivingFrameQuality.COMPACT ||
+                compact ||
                         (unique * pixels * 4L > budget && unique * pixels * 2L <= budget)
                 )
         val frameBytes = pixels * if (rgb565) 2L else 4L
@@ -274,7 +268,7 @@ private class LivingFramesFactory(
             (budget / frameBytes).toInt().coerceIn(MIN_WINDOW, MAX_WINDOW)
         }
         val ahead = if (resident) {
-            order.size
+            steps.size
         } else {
             ceil(rate * PREFETCH_SECONDS).toInt()
                 .coerceIn(MIN_AHEAD, MAX_AHEAD)
@@ -287,13 +281,15 @@ private class LivingFramesFactory(
             null
         }
 
+        val density = context.resources.displayMetrics.density
         val s = Session(
             id = sessionIds.incrementAndGet(),
             frame = current,
-            order = order,
+            steps = steps,
             outW = outW,
             outH = outH,
-            density = context.resources.displayMetrics.density,
+            densityX = LivingFrameEngine.densityScale(density, outW, w),
+            densityY = LivingFrameEngine.densityScale(density, outH, h),
             rgb565 = rgb565,
             resident = resident,
             capacity = capacity,
@@ -305,9 +301,9 @@ private class LivingFramesFactory(
         session = s
         old?.release()
 
-        // Frame zero is the loading view and the first child; have it ready
-        // before the host asks, then let the workers run ahead of it.
-        obtain(s, order[0], FIRST_FRAME_WAIT_MS)?.let { last = it }
+        // The loading view and the first child should be ready before the
+        // host asks, then the workers run ahead of the playhead.
+        obtain(s, steps[0], FIRST_FRAME_WAIT_MS)?.let { last = it }
         schedule(s)
         if (proxyDir != null) {
             try {
@@ -321,13 +317,13 @@ private class LivingFramesFactory(
 
     override fun getViewAt(position: Int): RemoteViews {
         val s = session ?: return frameViews(last)
-        val n = s.order.size
+        val n = s.steps.size
         if (n == 0) return frameViews(last)
         val pos = ((position % n) + n) % n
         s.cursor.set(pos)
         // Start the workers before we spend time on an inline decode.
         schedule(s)
-        val fresh = obtain(s, s.order[pos], MISS_WAIT_MS)
+        val fresh = obtain(s, s.steps[pos], MISS_WAIT_MS)
         if (fresh == null) s.stats.stale.incrementAndGet()
         val bitmap = fresh ?: last
         if (bitmap != null) last = bitmap
@@ -337,37 +333,41 @@ private class LivingFramesFactory(
 
     /**
      * Cached frame, the result of an in-flight decode, or a fresh decode on
-     * this thread. Exactly one thread decodes a given frame at a time.
+     * this thread. Exactly one thread decodes a given step at a time.
      */
-    private fun obtain(s: Session, frameIndex: Int, waitMs: Long): Bitmap? {
+    private fun obtain(
+        s: Session,
+        step: LivingFrameEngine.DisplayStep,
+        waitMs: Long
+    ): Bitmap? {
         s.lock.withLock {
-            s.cache[frameIndex]?.let {
+            s.cache[step]?.let {
                 s.stats.hit.incrementAndGet()
                 return it
             }
-            if (!s.pending.add(frameIndex)) {
+            if (!s.pending.add(step)) {
                 s.stats.waited.incrementAndGet()
                 var nanos = TimeUnit.MILLISECONDS.toNanos(waitMs)
                 try {
-                    while (frameIndex in s.pending && nanos > 0L) {
+                    while (step in s.pending && nanos > 0L) {
                         nanos = s.changed.awaitNanos(nanos)
                     }
                 } catch (_: InterruptedException) {
                     Thread.currentThread().interrupt()
                 }
-                return s.cache[frameIndex]
+                return s.cache[step]
             }
         }
         s.stats.inlineMisses.incrementAndGet()
-        return complete(s, frameIndex)
+        return complete(s, step)
     }
 
-    /** Decode + render + store. The caller must own `pending[frameIndex]`. */
-    private fun complete(s: Session, frameIndex: Int): Bitmap? {
+    /** Decode + render + store. The caller must own `pending[step]`. */
+    private fun complete(s: Session, step: LivingFrameEngine.DisplayStep): Bitmap? {
         var bitmap: Bitmap? = null
         val startedAt = SystemClock.elapsedRealtimeNanos()
         try {
-            bitmap = produce(s, frameIndex)
+            bitmap = produce(s, step)
             val nanos = SystemClock.elapsedRealtimeNanos() - startedAt
             s.stats.produced.incrementAndGet()
             s.stats.produceNanos.addAndGet(nanos)
@@ -379,19 +379,20 @@ private class LivingFramesFactory(
             Log.w(TAG, "Couldn't render a Living Widget frame", t)
         } finally {
             s.lock.withLock {
-                if (bitmap != null) store(s, frameIndex, bitmap)
-                s.pending.remove(frameIndex)
+                if (bitmap != null) store(s, step, bitmap)
+                s.pending.remove(step)
                 s.changed.signalAll()
             }
         }
         return bitmap
     }
 
-    private fun produce(s: Session, frameIndex: Int): Bitmap? {
+    private fun produce(s: Session, step: LivingFrameEngine.DisplayStep): Bitmap? {
+        if (step.blended) return produceBlend(s, step)
         val proxyDir = s.proxyDir
         if (proxyDir != null) {
             // Fast path: the frame already exists at widget size.
-            proxies.read(proxyDir, frameIndex, s.rgb565)?.let {
+            proxies.read(proxyDir, step.from, s.rgb565)?.let {
                 s.stats.fromProxy.incrementAndGet()
                 return finish(s, it)
             }
@@ -401,13 +402,13 @@ private class LivingFramesFactory(
             s.outW, s.outH, s.frame.width, s.frame.height, s.frame.fit
         )
         val src = runBlocking(Dispatchers.IO) {
-            repository.decodeAtLeast(s.frame.id, frameIndex, required)
+            repository.decodeAtLeast(s.frame.id, step.from, required)
         } ?: return null
         return try {
             if (proxyDir != null) {
                 val base = LivingFrameRenderer.renderBase(src, s.frame, s.outW, s.outH, s.rgb565)
                 // Next pass (and the next process start) skips the big decode.
-                if (s.proxyWritable) proxies.write(proxyDir, frameIndex, base)
+                if (s.proxyWritable) proxies.write(proxyDir, step.from, base)
                 finish(s, base)
             } else {
                 LivingFrameRenderer.render(
@@ -415,12 +416,52 @@ private class LivingFramesFactory(
                     frame = s.frame,
                     outW = s.outW,
                     outH = s.outH,
-                    density = s.density,
+                    densityX = s.densityX,
+                    densityY = s.densityY,
                     rgb565 = s.rgb565
                 )
             }
         } finally {
             runCatching { src.recycle() }
+        }
+    }
+
+    /** Seam crossfade. Only a handful of steps per loop take this path. */
+    private fun produceBlend(s: Session, step: LivingFrameEngine.DisplayStep): Bitmap? {
+        val repository = repo ?: return null
+        val required = LivingFrameEngine.requiredSourceSide(
+            s.outW, s.outH, s.frame.width, s.frame.height, s.frame.fit
+        )
+        val from = runBlocking(Dispatchers.IO) {
+            repository.decodeAtLeast(s.frame.id, step.from, required)
+        } ?: return null
+        val to = try {
+            runBlocking(Dispatchers.IO) {
+                repository.decodeAtLeast(s.frame.id, step.to, required)
+            }
+        } catch (t: Throwable) {
+            runCatching { from.recycle() }
+            throw t
+        } ?: run {
+            runCatching { from.recycle() }
+            return null
+        }
+        return try {
+            LivingFrameRenderer.renderBlend(
+                from = from,
+                to = to,
+                frame = s.frame,
+                outW = s.outW,
+                outH = s.outH,
+                densityX = s.densityX,
+                densityY = s.densityY,
+                mix = step.mix,
+                rgb565 = s.rgb565,
+                soft = s.frame.loopTransition == LivingFrameLoopTransition.BLUR
+            )
+        } finally {
+            runCatching { if (!from.isRecycled) from.recycle() }
+            runCatching { if (!to.isRecycled) to.recycle() }
         }
     }
 
@@ -433,7 +474,8 @@ private class LivingFramesFactory(
                 frame = s.frame,
                 outW = s.outW,
                 outH = s.outH,
-                density = s.density,
+                densityX = s.densityX,
+                densityY = s.densityY,
                 rgb565 = s.rgb565
             )
         } finally {
@@ -457,29 +499,29 @@ private class LivingFramesFactory(
                     "avg=${"%.1f".format(avgMs)}ms max=${st.maxProduceMs.get()}ms " +
                     "resident=${s.resident} proxy=${s.proxyDir != null} " +
                     "out=${s.outW}x${s.outH} rgb565=${s.rgb565} " +
-                    "positions=${s.order.size} unique=${s.unique} cache=${s.cache.size}/${s.capacity}"
+                    "positions=${s.steps.size} unique=${s.unique} cache=${s.cache.size}/${s.capacity}"
         )
     }
 
     /** Lock held. Evicted bitmaps are left to the GC: the host may still draw them. */
-    private fun store(s: Session, frameIndex: Int, bitmap: Bitmap) {
-        s.cache[frameIndex] = bitmap
+    private fun store(s: Session, step: LivingFrameEngine.DisplayStep, bitmap: Bitmap) {
+        s.cache[step] = bitmap
         if (s.resident) {
             if (s.cache.size >= s.unique) s.warm = true
             return
         }
         while (s.cache.size > s.capacity) {
-            var victim = -1
+            var victim: LivingFrameEngine.DisplayStep? = null
             var farthest = -1
             for (key in s.cache.keys) {
-                if (key == frameIndex) continue
+                if (key == step) continue
                 val d = s.distance(key)
                 if (d > farthest) {
                     farthest = d
                     victim = key
                 }
             }
-            if (victim < 0) break
+            if (victim == null) break
             s.cache.remove(victim)
         }
     }
@@ -512,19 +554,19 @@ private class LivingFramesFactory(
      */
     private fun drain(s: Session) {
         while (session === s && !s.warm) {
-            val frameIndex = claimNext(s) ?: return
-            complete(s, frameIndex)
+            val step = claimNext(s) ?: return
+            complete(s, step)
         }
     }
 
-    private fun claimNext(s: Session): Int? {
-        val n = s.order.size
+    private fun claimNext(s: Session): LivingFrameEngine.DisplayStep? {
+        val n = s.steps.size
         val c = s.cursor.get()
         s.lock.withLock {
             for (offset in 1..s.ahead) {
-                val frameIndex = s.order[(c + offset) % n]
-                if (!s.cache.containsKey(frameIndex) && s.pending.add(frameIndex)) {
-                    return frameIndex
+                val step = s.steps[(c + offset) % n]
+                if (!s.cache.containsKey(step) && s.pending.add(step)) {
+                    return step
                 }
             }
         }
@@ -543,15 +585,14 @@ private class LivingFramesFactory(
         return views
     }
 
-    override fun getCount(): Int = session?.order?.size ?: 0
+    override fun getCount(): Int = session?.steps?.size ?: 0
 
-    override fun getLoadingView(): RemoteViews {
-        val s = session
-        val first = s?.let { sess ->
-            sess.lock.withLock { sess.cache[sess.order[0]] }
-        }
-        return frameViews(first ?: last)
-    }
+    /**
+     * A miss must never jump back to frame zero. Reuse the last frame actually
+     * handed to the launcher; on the first pass that is the pre-rendered first
+     * child, so even the initial load shows the right picture.
+     */
+    override fun getLoadingView(): RemoteViews = frameViews(last)
 
     override fun getViewTypeCount(): Int = 1
 
@@ -586,8 +627,12 @@ private class LivingFramesFactory(
         /** Total bitmap cache across all Living Widgets, split per widget. */
         const val MAX_TOTAL_CACHE = 64L * MB
 
-        /** Largest frame sent to the launcher's adapter; see onDataSetChanged. */
-        const val HOST_FRAME_BYTES = 512L * 1024L
+        /**
+         * Largest frame sent to the launcher's adapter. The AOSP host cache
+         * is around 2 MB and holds a window of loaded views; 2 MB / 6 keeps
+         * roughly six frames resident so a flip rarely misses.
+         */
+        const val HOST_FRAME_BYTES = 2L * MB / 6L
 
         const val MIN_WINDOW = 8
         const val MAX_WINDOW = 64
@@ -610,5 +655,8 @@ private class LivingFramesFactory(
 }
 
 /** Kept outside the service so both paths agree on the adapter URI shape. */
-internal fun livingFramesAdapterUri(appWidgetId: Int, frameId: String): Uri =
-    Uri.parse("toolz://living-frames/$appWidgetId/$frameId")
+internal fun livingFramesAdapterUri(
+    appWidgetId: Int,
+    frameId: String,
+    startIndex: Int = 0
+): Uri = Uri.parse("toolz://living-frames/$appWidgetId/$frameId/${startIndex.coerceAtLeast(0)}")

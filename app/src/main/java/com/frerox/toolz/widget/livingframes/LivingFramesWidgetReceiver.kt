@@ -81,6 +81,7 @@ class LivingFramesWidgetReceiver : AppWidgetProvider() {
         ids.forEach {
             r?.unbindWidget(it)
             LivingFramesSlideshow.cancel(context, it)
+            LivingFramesPause.clear(context, it)
             LivingFramesWidgetHelper.clearInfo(context, it)
             LivingFramesRenderWorker.cancel(context, it)
         }

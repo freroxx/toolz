@@ -87,7 +87,13 @@ class LivingFramesWatchdogWorker @AssistedInject constructor(
                                 ctx, id, frame.slideshowIntervalMin
                             )
                         }
-                        if (info == null || info.error != null) {
+                        if (info == null ||
+                            info.error != null ||
+                            info.renderVersion < LivingFramesWidgetHelper.RENDER_VERSION
+                        ) {
+                            // Renders from an older build may still have the
+                            // frame-zero flash or over-scaled corners; refresh
+                            // them once after an upgrade.
                             LivingFramesRenderWorker.enqueue(ctx, id)
                         }
                     }
