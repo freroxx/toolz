@@ -50,6 +50,7 @@ import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 import kotlin.math.ceil
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 /**
  * Supplies one frame at a time to an `AdapterViewFlipper` in the launcher.
@@ -236,8 +237,23 @@ private class LivingFramesFactory(
         val mgr = AppWidgetManager.getInstance(context)
         val (w, h) = LivingFramesWidgetHelper.widgetSizePx(context, mgr, appWidgetId)
         val resolution = LivingFrameResolution.snap(current.resolutionPercent)
-        val outW = (w * resolution / 100f).roundToInt().coerceAtLeast(48)
-        val outH = (h * resolution / 100f).roundToInt().coerceAtLeast(48)
+        var outW = (w * resolution / 100f).roundToInt().coerceAtLeast(48)
+        var outH = (h * resolution / 100f).roundToInt().coerceAtLeast(48)
+        // The launcher's adapter keeps only a small amount of loaded views (about
+        // 2 MB in AOSP). Frames bigger than HOST_FRAME_BYTES leave it holding one
+        // or two, so most flips find their view not loaded yet and show the
+        // loading view (frame zero): the flicker. Keep frames small enough that
+        // it can hold a few ahead.
+        val hostBpp = if (LivingFrameRenderer.isOpaque(current) &&
+            current.quality == LivingFrameQuality.COMPACT
+        ) 2L else 4L
+        val maxPixels = HOST_FRAME_BYTES / hostBpp
+        val pixelCount = outW.toLong() * outH
+        if (pixelCount > maxPixels) {
+            val f = sqrt(maxPixels.toDouble() / pixelCount)
+            outW = (outW * f).roundToInt().coerceAtLeast(48)
+            outH = (outH * f).roundToInt().coerceAtLeast(48)
+        }
 
         // Size the cache from real numbers, not a frame-count guess.
         val budget = budgetBytes()
@@ -569,6 +585,9 @@ private class LivingFramesFactory(
 
         /** Total bitmap cache across all Living Widgets, split per widget. */
         const val MAX_TOTAL_CACHE = 64L * MB
+
+        /** Largest frame sent to the launcher's adapter; see onDataSetChanged. */
+        const val HOST_FRAME_BYTES = 512L * 1024L
 
         const val MIN_WINDOW = 8
         const val MAX_WINDOW = 64

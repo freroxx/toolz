@@ -326,7 +326,17 @@ object LivingFramesWidgetHelper {
         // Streaming is the default for every animation, not a quality tier.
         // The adapter fetches one frame at a time, so the launcher's binder
         // budget cannot force a long clip down to a handful of pixels.
-        if (animated) {
+        // Short loops that fit the RemoteViews bitmap budget are pushed as one
+        // static ViewFlipper: every frame is already inside the launcher, so
+        // there is no adapter, no loading view and nothing that can miss.
+        // Streaming is for clips that would have to be shrunk or thinned to fit.
+        val staticMinScale = 0.7f
+        val preferStatic = animated && LivingFrameEngine.plan(
+            sequence.size, outW, outH, LivingFrameRenderer.isOpaque(frame),
+            displayFps, budget, LivingFrameLoopMode.LOOP
+        ).let { it.step == 1 && it.scale >= staticMinScale }
+
+        suspend fun tryStreaming(): Boolean {
             var base: Bitmap? = null
             try {
                 val views = RemoteViews(
@@ -370,7 +380,7 @@ object LivingFramesWidgetHelper {
                         streamed = true, speed = frame.speed
                     )
                 )
-                return@withContext true
+                return true
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
                 // Some launchers reject collection widgets. Fall through to
@@ -380,7 +390,10 @@ object LivingFramesWidgetHelper {
             } finally {
                 base?.let { runCatching { if (!it.isRecycled) it.recycle() } }
             }
+            return false
         }
+
+        if (animated && !preferStatic && tryStreaming()) return@withContext true
 
         for (attempt in 0 until 4) {
             // The sequence already contains speed resampling and boomerang
@@ -470,6 +483,8 @@ object LivingFramesWidgetHelper {
                 bitmaps.forEach { runCatching { if (!it.isRecycled) it.recycle() } }
             }
         }
+        // The static path could not be pushed; streaming is still better than nothing.
+        if (animated && preferStatic && tryStreaming()) return@withContext true
         writeInfo(
             context, appWidgetId,
             WidgetInfo(
