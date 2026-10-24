@@ -25,6 +25,7 @@ import coil3.imageLoader
 import coil3.network.NetworkHeaders
 import coil3.network.httpHeaders
 import coil3.request.ImageRequest
+import com.frerox.toolz.data.ai.AiCatalogRepository
 import com.frerox.toolz.data.device.DeviceSpecsRepository
 import com.frerox.toolz.data.news.NewsRepository
 import com.frerox.toolz.data.notepad.NoteDao
@@ -50,6 +51,7 @@ class LoadingViewModel @Inject constructor(
     private val specsRepository: DeviceSpecsRepository,
     private val newsRepository: NewsRepository,
     private val noteDao: NoteDao,
+    private val aiCatalogRepository: AiCatalogRepository,
 ) : ViewModel() {
 
     private val _isInitialized = MutableStateFlow(false)
@@ -105,6 +107,9 @@ class LoadingViewModel @Inject constructor(
                 awaitNotesReady(timeoutMs = 3_000L)
                 // Fire-and-forget news sync so the popup/data is fresh.
                 launch { try { newsRepository.syncIfStale() } catch (_: Exception) { } }
+                // Keep the live model catalog fresh even on the fast boot path
+                // (respects the Advanced → Live model catalog updates toggle).
+                launch { try { aiCatalogRepository.refreshLive() } catch (_: Exception) { } }
                 _loadingProgress.value = 1f
                 _isInitialized.value = true
                 delay(100) // Minimal breather for Compose to render before hiding
@@ -138,6 +143,13 @@ class LoadingViewModel @Inject constructor(
             try {
                 withTimeoutOrNull(8_000L) { newsRepository.syncIfStale() }
             } catch (_: Exception) { /* Non-fatal: cached news still works */ }
+
+            // ── Stage 3.3: Live AI model catalog (respects user toggle) ────
+            _loadingMessage.value = "SYNCING AI MODELS"
+            _loadingProgress.value = 0.65f
+            try {
+                withTimeoutOrNull(6_000L) { aiCatalogRepository.refreshLive() }
+            } catch (_: Exception) { /* Non-fatal: cached/bundled models still work */ }
 
             // ── Stage 3.5: Prefetch Device Specs & Image ────
             try {
