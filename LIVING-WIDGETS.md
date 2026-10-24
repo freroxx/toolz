@@ -143,20 +143,34 @@ reclaimable orphan folders.
 ## Rendering and launcher limits
 
 - The widget renders at the size the launcher reports, including orientation.
-- Animations always stream one frame at a time through
+- **Static-first playback.** Toolz prefers a single RemoteViews whose
+  `ViewFlipper` already contains every display frame. All children arrive in
+  one push, so the launcher cannot skip the loading view and flash back to
+  frame 0. `LivingFrameEngine.planStatic` tries each supported rate from
+  8 fps up to the requested rate, finds the largest resolution that fits the
+  bitmap budget, and keeps the sharpest plan (ties go to the higher fps). The
+  plan returns null when the loop would need a scale below 40% or more than
+  240 children; only then does the widget stream.
+- **Bitmap budget.** The RemoteViews ceiling is
+  `6 × screen width × screen height × 4` bytes. Toolz uses at most 55% of it,
+  counting every child bitmap plus per-child binder overhead. If the launcher
+  still rejects the update, the budget is halved and the plan recomputed up to
+  four times. The UI reports when a render was reduced.
+- **Corner radius.** The renderer draws at the output bitmap size rather than
+  letting an `ImageView` crop it afterwards. Corners are baked with
+  `densityX = density × outW / widgetW` and
+  `densityY = density × outH / widgetH`, so the launcher's scale-back lands on
+  the configured dp at every resolution and aspect ratio. Radii are clamped to
+  half the output side.
+- **Streaming fallback.** Loops too long to embed use
   `LivingFramesRemoteViewsService` and an `AdapterViewFlipper`. Each frame is
-  its own binder transaction, so long clips keep the widget's native
-  resolution and there is no playback-engine switch to misconfigure.
-- A static single-update `ViewFlipper` remains only as a fallback for
-  launchers that cannot animate collection widgets. It uses the already
-  resampled display sequence and a bitmap budget of
-  `6 × screen width × screen height × 4` bytes, capped below 55% of that
-  ceiling. If needed, Toolz reduces resolution, switches to 16-bit colour,
-  samples frames, or eventually keeps one frame. The UI reports when a render
-  was reduced.
+  its own binder transaction, so long clips keep the requested resolution.
+  A static first-frame bitmap sits behind the flipper, and a cache miss reuses
+  the last frame the launcher was handed, so streaming no longer flashes back
+  to frame 0.
 - Resizes are debounced before re-rendering. Each settled resize rebuilds the
-  streaming session at the new size. A widget that cannot be rendered shows a
-  short explanatory placeholder instead of a blank frame.
+  static push or streaming session at the new size. A widget that cannot be
+  rendered shows a short explanatory placeholder instead of a blank frame.
 
 ### Playback timing
 
@@ -182,6 +196,21 @@ reclaimable orphan folders.
 - **Resolution** (40–100%) is a render scale. Lowering it is instant and cuts
   battery and memory use; 100% is the full stored detail. Going above 100% is
   not offered because it would only upscale an already stored copy.
+- **Loop transition.** GIF and video imports default to **Fade**; existing
+  sets keep **None**. `LivingFrameEngine.displaySteps` appends one or more
+  blend children that dissolve the last source frame into the first over about
+  0.18 s. **Soft blur** renders those blends through a quarter-resolution
+  round-trip for a softer seam. Boomerang loops already have matching
+  endpoints and ignore the setting. Seam children count toward the bitmap
+  budget, so a long clip can fall back to a hard cut instead of streaming.
+- **Pause / play.** New GIF and video imports default their tap action to
+  **Pause / play**. The static path attaches a distinct PendingIntent to every
+  flipper child, so a tap saves that exact display step (including a seam
+  blend) and re-pushes one still image with no flipper running. Resuming
+  rotates the loop so the saved step becomes child 0, so playback continues
+  without a visual jump. Streaming collection children cannot carry their own
+  tap intents, so very long loops fall back to opening Living Widgets instead
+  of pausing on an unknown frame.
 
 ### Streaming service
 
@@ -202,10 +231,15 @@ reclaimable orphan folders.
 - **Misses.** The launcher keeps whatever it is handed for a position until
   its window moves, so a stale frame would repeat for a full pass. A miss
   therefore waits up to 100 ms for a decode already in flight, or decodes on
-  the launcher's loader thread, and only falls back to the last frame if that
-  fails. The loading view is always the first frame.
+  the launcher's loader thread, and only falls back to the last frame handed
+  to the launcher if that fails. The loading view reuses that same last frame,
+  never frame zero.
 - **Item ids** include a per-session id, so a change to speed, fps,
   resolution or frames cannot match a stale launcher-side view.
+- **Host cache.** Each streamed frame is capped at roughly `2 MB / 6` so the
+  launcher's loaded-view cache holds several frames ahead and a flip rarely
+  finds a view still loading. Provisional proxies are rendered at the same
+  compensated density axes as the static path.
 - Rendering uses a plain bitmap blit when corners are square, and marks fully
   opaque output as having no alpha so the launcher can skip blending.
 - Some launchers pause widget animations in battery saver, and a few do not
@@ -226,8 +260,9 @@ reclaimable orphan folders.
   minutes) and are shown as scrollable choice chips instead of a squashed
   button group.
 - Tap actions can open Living Widgets, open any curated Toolz tool directly,
-  advance the slideshow, or do nothing. Tool routes are validated against the
-  curated catalog before the widget uses them.
+  freeze an animation on the exact tapped frame (tap again to resume from
+  there), advance the slideshow, or do nothing. Tool routes are validated
+  against the curated catalog before the widget uses them.
 
 ## Failure messages
 
