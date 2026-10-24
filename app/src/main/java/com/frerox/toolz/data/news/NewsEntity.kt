@@ -72,10 +72,10 @@ interface NewsDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAll(items: List<NewsEntity>)
 
-    @Query("SELECT * FROM news_items ORDER BY pinned DESC, publishAt DESC LIMIT :limit OFFSET :offset")
+    @Query("SELECT * FROM news_items WHERE status = 'published' ORDER BY pinned DESC, publishAt DESC LIMIT :limit OFFSET :offset")
     suspend fun page(limit: Int, offset: Int): List<NewsEntity>
 
-    @Query("SELECT COUNT(*) FROM news_items")
+    @Query("SELECT COUNT(*) FROM news_items WHERE status = 'published'")
     suspend fun count(): Int
 
     @Query("SELECT * FROM news_items WHERE id = :id LIMIT 1")
@@ -85,11 +85,10 @@ interface NewsDao {
     suspend fun publishedOrdered(): List<NewsEntity>
 
     /**
-     * Full-history search backing the search field: covers cached items of any
-     * status (archived/expired live in history), not just the loaded pages.
+     * Search backing the search field: covers active published items.
      * Wildcards are escaped by the repository before the query runs.
      */
-    @Query("SELECT * FROM news_items WHERE (LOWER(title) LIKE '%' || LOWER(:q) || '%' ESCAPE '\\' OR LOWER(body) LIKE '%' || LOWER(:q) || '%' ESCAPE '\\') ORDER BY pinned DESC, publishAt DESC LIMIT :limit")
+    @Query("SELECT * FROM news_items WHERE status = 'published' AND (LOWER(title) LIKE '%' || LOWER(:q) || '%' ESCAPE '\\' OR LOWER(body) LIKE '%' || LOWER(:q) || '%' ESCAPE '\\') ORDER BY pinned DESC, publishAt DESC LIMIT :limit")
     suspend fun searchRaw(q: String, limit: Int): List<NewsEntity>
 
     @Query("SELECT id FROM news_items WHERE status = 'published'")
@@ -100,6 +99,12 @@ interface NewsDao {
 
     @Query("DELETE FROM news_items WHERE id IN (:ids)")
     suspend fun deleteByIds(ids: List<String>)
+
+    @Query("DELETE FROM news_items WHERE status != 'published'")
+    suspend fun deleteStaleNonPublished(): Int
+
+    @Query("DELETE FROM news_items")
+    suspend fun deleteAll(): Int
 
     @Query("DELETE FROM news_items WHERE (showInHistory = 0 AND expiresAt IS NOT NULL AND expiresAt <= :now) OR (disappearing = 1 AND expiresAt IS NOT NULL AND expiresAt <= :now) OR (expiresAt IS NOT NULL AND expiresAt <= :pruneBefore)")
     suspend fun prune(now: Long, pruneBefore: Long): Int

@@ -81,7 +81,8 @@ class NewsRepository @Inject constructor(
                         try { NewsNotifier.cancel(context, id) } catch (_: Exception) { }
                     }
                 }
-                reconcileRemovals(feedIds = feed.news.map { it.id }.toSet(), appVersion = av, now = now)
+                reconcileRemovals(feedIds = feed.news.map { it.id }.toSet(), appVersion = av)
+                newsDao.deleteStaleNonPublished()
                 newsDao.prune(now, now - PRUNE_AFTER_MS)
                 settingsRepository.setNewsLastSync(now)
                 if (feed.feedVersion >= 0) settingsRepository.setNewsFeedVersion(feed.feedVersion)
@@ -201,23 +202,15 @@ class NewsRepository @Inject constructor(
     }
 
     /**
-     * Unpublish/archive propagation: the feed only contains live items, so a cached
-     * `published` item that is still time-valid and version-eligible for THIS device
-     * but absent from the feed was removed server-side → archive it locally so it
-     * stops popping up (it stays in history). Items targeting other versions are
-     * never touched. Skipped for empty feeds (outage vs wipeout is
-     * indistinguishable; true deletes arrive as tombstones) and for possibly
-     * truncated feeds (100-id fetch cap).
+     * Delete propagation: the feed returns live items. Any cached item eligible for this
+     * device's appVersion that is absent from a valid (non-degraded) feed was deleted
+     * or removed server-side. Hard-delete it locally so it disappears from the news screen,
+     * popups, and notification shade.
      */
-    private suspend fun reconcileRemovals(feedIds: Set<String>, appVersion: String, now: Long) {
+    private suspend fun reconcileRemovals(feedIds: Set<String>, appVersion: String) {
         try {
-            // An empty feed is indistinguishable from a failed fetch, so it
-            // must never trigger mass-archival (real deletes arrive as
-            // tombstones via removedIds). Same for a possibly-truncated feed.
-            if (feedIds.isEmpty() || feedIds.size >= 100) return
             val stale = newsDao.publishedOrdered().filter { cached ->
                 cached.id !in feedIds &&
-                    timeValid(cached, now) &&
                     NewsVersion.isEligible(
                         appVersion,
                         cached.minAppVersion,
@@ -226,7 +219,12 @@ class NewsRepository @Inject constructor(
                         csv(cached.excludedVersionsCsv)
                     )
             }.map { it.id }
-            if (stale.isNotEmpty()) newsDao.markArchived(stale)
+            if (stale.isNotEmpty()) {
+                newsDao.deleteByIds(stale)
+                for (id in stale) {
+                    try { NewsNotifier.cancel(context, id) } catch (_: Exception) { }
+                }
+            }
         } catch (_: Exception) { /* never break sync on reconciliation */ }
     }
 
@@ -243,7 +241,7 @@ class NewsRepository @Inject constructor(
      */
     suspend fun searchHistory(query: String): List<NewsEntity> {
         val trimmed = query.trim()
-        if (trimmed.isEmpty()) return emptyList()
+        if (trimmed.isEmpty()) return newsDao.publishedOrdered()
         return try {
             val escaped = buildString {
                 for (c in trimmed) {

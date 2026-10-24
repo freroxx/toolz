@@ -34,13 +34,12 @@ ends.
 
 Corrections and limits worth knowing up front:
 
-- Unpublish/archive propagation is best-effort reconciliation, not instant.
-  `NewsRepository.syncIfStale()` archives locally any cached `published` item
-  that is still time-valid and version-eligible for this device but absent from
-  a non-empty feed. Empty or degraded feeds never trigger reconciliation (an
-  empty feed is indistinguishable from a failed fetch; true deletes arrive as
-  tombstones), and a degraded feed aborts the sync without touching the DB or
-  the retry timestamp. Items targeting other versions are never touched.
+- Delete/unpublish propagation: `NewsRepository.syncIfStale()` hard-deletes
+  locally any cached item that is version-eligible for this device but absent from
+  a valid (non-degraded) feed or reported in `removedIds` tombstones. Stale
+  non-published rows in Room are purged so deleted announcements disappear
+  completely from the device (popups, notification shade, and news screen).
+  Degraded feeds (server outage) abort the sync without touching the DB.
 - Propagation is version-driven, not window-driven: every admin mutation bumps
   the `news:version` generation counter (served as feed `v` and by the tiny
   `GET /api/news-version`, CDN-cached 60 s, with `ETag` support on both).

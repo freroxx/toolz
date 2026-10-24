@@ -280,6 +280,30 @@ class NewsViewModel @Inject constructor(
         }
     }
 
+    fun onScreenEntered() {
+        if (_history.value.isEmpty()) {
+            loadHistory(force = false)
+        } else {
+            refreshUnread()
+        }
+        if (!gate.sandboxed(UPDATE_NEWS)) {
+            viewModelScope.launch {
+                try {
+                    val changed = newsRepository.syncIfChanged()
+                    if (changed) {
+                        historyPage = 0
+                        _historyEnd.value = false
+                        val items = newsRepository.historyPage(0)
+                        _history.value = items
+                        if (items.size < NewsRepository.HISTORY_PAGE_SIZE) _historyEnd.value = true
+                        else historyPage = 1
+                        refreshUnread()
+                    }
+                } catch (_: Exception) { }
+            }
+        }
+    }
+
     fun loadHistory(force: Boolean = false) {
         viewModelScope.launch {
             try {
