@@ -63,6 +63,7 @@ import com.frerox.toolz.data.livingframes.LivingFrameEstimate
 import com.frerox.toolz.data.livingframes.LivingFrameFit
 import com.frerox.toolz.data.livingframes.LivingFrameFps
 import com.frerox.toolz.data.livingframes.LivingFrameLoopMode
+import com.frerox.toolz.data.livingframes.LivingFrameLoopTransition
 import com.frerox.toolz.data.livingframes.LivingFrameResolution
 import com.frerox.toolz.data.livingframes.LivingFrameSpeed
 import com.frerox.toolz.data.livingframes.LivingFrameTapAction
@@ -176,11 +177,13 @@ internal fun MotionPanel(frame: LivingFrame, vm: LivingFramesViewModel) {
     val sourceFps = frame.sourceFps.coerceAtLeast(1)
     // The widget flips at playbackFps, not at the slider value (the slider is a ceiling).
     val playFps = LivingFrameEngine.playbackFps(frame)
-    val displayFrames = LivingFrameEngine.displaySequence(
-        frame.frameCount, sourceFps, playFps, frame.speed, frame.loopMode
+    val displayFrames = LivingFrameEngine.displaySteps(
+        frame.frameCount, sourceFps, playFps, frame.speed, frame.loopMode,
+        frame.loopTransition
     ).size
-    val loopMs = LivingFrameEngine.loopDurationMs(
-        frame.frameCount, sourceFps, frame.loopMode, frame.speed
+    val loopMs = LivingFrameEngine.displayDurationMs(
+        frame.frameCount, sourceFps, playFps, frame.speed, frame.loopMode,
+        frame.loopTransition
     )
     val stored = LivingFrameEstimate.storedSize(frame.width, frame.height, frame.quality)
     val renderW = (stored.first * frame.resolutionPercent / 100f).roundToInt()
@@ -285,6 +288,33 @@ internal fun MotionPanel(frame: LivingFrame, vm: LivingFramesViewModel) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+        if (frame.loopMode != LivingFrameLoopMode.BOOMERANG) {
+            SettingBlock("Loop transition") {
+                ChoiceChips(
+                    options = LivingFrameLoopTransition.entries,
+                    selected = frame.loopTransition,
+                    label = {
+                        when (it) {
+                            LivingFrameLoopTransition.NONE -> "None"
+                            LivingFrameLoopTransition.FADE -> "Fade"
+                            LivingFrameLoopTransition.BLUR -> "Soft blur"
+                        }
+                    },
+                    onSelect = { vib?.vibrateTick(); vm.setLoopTransition(frame.id, it) }
+                )
+                Text(
+                    if (frame.loopTransition == LivingFrameLoopTransition.NONE) {
+                        "The loop restarts on a hard cut."
+                    } else {
+                        "The last frame dissolves into the first over about 0.2 s. " +
+                                "Seam frames use extra widget memory, so very long or high-resolution " +
+                                "loops may fall back to no transition."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
     }
 }
 
@@ -371,6 +401,7 @@ internal fun LookPanel(frame: LivingFrame, vm: LivingFramesViewModel) {
         add("Living Widgets" to LivingFrameTapAction.OPEN_PREVIEW)
         add("Open a tool" to LivingFrameTapAction.OPEN_TOOL)
         if (frame.isSlideshow) add("Next photo" to LivingFrameTapAction.NEXT_FRAME)
+        if (frame.isAnimated) add("Pause / play" to LivingFrameTapAction.PAUSE_PLAY)
         add("Nothing" to LivingFrameTapAction.NOTHING)
     }
     val selectedTool = LivingFrameTools.byRoute(frame.tapTargetRoute)
@@ -378,12 +409,12 @@ internal fun LookPanel(frame: LivingFrame, vm: LivingFramesViewModel) {
     // A slideshow can become a still/photo through old metadata. The widget
     // already falls back to opening Living Widgets for that stale action, so
     // show the same effective choice here instead of no selected chip.
-    val effectiveTap = if (
-        frame.tapAction == LivingFrameTapAction.NEXT_FRAME && !frame.isSlideshow
-    ) {
-        LivingFrameTapAction.OPEN_PREVIEW
-    } else {
-        frame.tapAction
+    val effectiveTap = when {
+        frame.tapAction == LivingFrameTapAction.NEXT_FRAME && !frame.isSlideshow ->
+            LivingFrameTapAction.OPEN_PREVIEW
+        frame.tapAction == LivingFrameTapAction.PAUSE_PLAY && !frame.isAnimated ->
+            LivingFrameTapAction.OPEN_PREVIEW
+        else -> frame.tapAction
     }
     PanelCard {
         SettingBlock("Framing") {
@@ -443,6 +474,14 @@ internal fun LookPanel(frame: LivingFrame, vm: LivingFramesViewModel) {
             } else if (frame.tapAction == LivingFrameTapAction.OPEN_PREVIEW) {
                 Text(
                     "Opens Living Widgets, where you can edit this set or add another copy.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else if (frame.tapAction == LivingFrameTapAction.PAUSE_PLAY) {
+                Text(
+                    "Freezes the exact frame on screen; tap again to continue from there. " +
+                            "The animation must fit in the widget's memory budget — very long loops " +
+                            "open Living Widgets instead.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

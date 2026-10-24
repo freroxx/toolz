@@ -570,10 +570,12 @@ private fun StageSection(
                             val displayFps = LivingFrameFps.snap(frame.fps)
                             val sourceFps = frame.sourceFps.coerceAtLeast(1)
                             val shown = LivingFrameEngine.displayDurationMs(
-                                frames.size, sourceFps, displayFps, frame.speed, frame.loopMode
+                                frames.size, sourceFps, displayFps, frame.speed,
+                                frame.loopMode, frame.loopTransition
                             )
                             val total = LivingFrameEngine.displayDurationMs(
-                                frame.frameCount, sourceFps, displayFps, frame.speed, frame.loopMode
+                                frame.frameCount, sourceFps, displayFps, frame.speed,
+                                frame.loopMode, frame.loopTransition
                             )
                             "Preview · first %.1f s of %.1f s".format(
                                 shown / 1000f,
@@ -603,10 +605,12 @@ private fun describe(frame: LivingFrame): String = when {
     frame.isSlideshow -> "Slideshow · ${frame.frameCount} photos · ${frame.quality.label}"
     frame.isAnimated -> {
         val sourceFps = frame.sourceFps.coerceAtLeast(1)
-        val seconds = LivingFrameEngine.loopDurationMs(
-            frame.frameCount, sourceFps, frame.loopMode, frame.speed
-        ) / 1000f
         val displayFps = LivingFrameFps.snap(frame.fps)
+        val playFps = LivingFrameEngine.playbackFps(frame)
+        val seconds = LivingFrameEngine.displayDurationMs(
+            frame.frameCount, sourceFps, playFps, frame.speed, frame.loopMode,
+            frame.loopTransition
+        ) / 1000f
         val rate = if (displayFps > sourceFps) {
             "$displayFps fps (captured at $sourceFps)"
         } else {
@@ -654,28 +658,33 @@ private fun LivePreview(
     corner: Dp,
     modifier: Modifier = Modifier
 ) {
-    var tick by remember(frames) { mutableIntStateOf(0) }
     val displayFps = LivingFrameFps.snap(frame.fps)
-    LaunchedEffect(frames, frame.fps, frame.speed, frame.loopMode, frame.type, playing) {
-        if (!playing || frames.size < 2) return@LaunchedEffect
-        val order = if (frame.isSlideshow) {
-            frames.indices.toList()
+    val sourceFps = frame.sourceFps.coerceAtLeast(1)
+    // Slideshows use their own cadence; animations share the widget's planner
+    // so the preview shows exactly the steps (including seam blends) that will
+    // be pushed to the launcher.
+    val steps = remember(
+        frames, frame.fps, frame.speed, frame.loopMode, frame.loopTransition,
+        frame.isSlideshow
+    ) {
+        if (frame.isSlideshow) {
+            frames.indices.map { LivingFrameEngine.DisplayStep(it, it, 0f) }
         } else {
-            LivingFrameEngine.displaySequence(
-                frames.size,
-                frame.sourceFps.coerceAtLeast(1),
-                displayFps,
-                frame.speed,
-                frame.loopMode
+            LivingFrameEngine.displaySteps(
+                frames.size, sourceFps, displayFps, frame.speed, frame.loopMode,
+                frame.loopTransition
             )
         }
-        if (order.size < 2) return@LaunchedEffect
+    }
+    var tick by remember(steps) { mutableIntStateOf(0) }
+    LaunchedEffect(steps, displayFps, frame.isSlideshow, playing) {
+        if (!playing || steps.size < 2) return@LaunchedEffect
         val intervalNs = if (frame.isSlideshow) {
             2_400_000_000L
         } else {
             1_000_000_000L / displayFps.coerceAtLeast(1)
         }
-        var pos = order.indexOf(tick).coerceAtLeast(0)
+        var pos = tick.coerceIn(0, steps.lastIndex)
         var acc = 0L
         var last = withFrameNanos { it }
         while (true) {
@@ -683,35 +692,64 @@ private fun LivePreview(
             acc += now - last
             last = now
             if (acc >= intervalNs) {
-                pos = (pos + (acc / intervalNs).toInt()) % order.size
+                pos = (pos + (acc / intervalNs).toInt()) % steps.size
                 acc %= intervalNs
-                tick = order[pos]
+                tick = pos
             }
         }
     }
     val shape = RoundedCornerShape(corner)
-    val index = tick.coerceIn(0, frames.lastIndex)
-    if (frame.isSlideshow) {
-        Crossfade(targetState = index, animationSpec = tween(500), modifier = modifier, label = "slide") { i ->
-            PreviewImage(frames[i.coerceIn(0, frames.lastIndex)], frame, shape)
+    val step = steps[tick.coerceIn(0, steps.lastIndex)]
+    when {
+        frame.isSlideshow -> {
+            Crossfade(
+                targetState = step.from.coerceIn(0, frames.lastIndex),
+                animationSpec = tween(500),
+                modifier = modifier,
+                label = "slide"
+            ) { i ->
+                PreviewImage(frames[i.coerceIn(0, frames.lastIndex)], frame, shape)
+            }
         }
-    } else {
-        Box(modifier) { PreviewImage(frames[index], frame, shape) }
+        step.blended -> {
+            // The widget bakes this step as a blend; draw both sides at their
+            // weights so the seam reads the same in the preview.
+            Box(modifier) {
+                PreviewImage(
+                    frames[step.from.coerceIn(0, frames.lastIndex)], frame, shape
+                )
+                PreviewImage(
+                    frames[step.to.coerceIn(0, frames.lastIndex)], frame, shape,
+                    alphaScale = step.mix
+                )
+            }
+        }
+        else -> {
+            Box(modifier) {
+                PreviewImage(frames[step.from.coerceIn(0, frames.lastIndex)], frame, shape)
+            }
+        }
     }
 }
 
 @Composable
-private fun PreviewImage(bitmap: ImageBitmap, frame: LivingFrame, shape: Shape) {
+private fun PreviewImage(
+    bitmap: ImageBitmap,
+    frame: LivingFrame,
+    shape: Shape,
+    alphaScale: Float = 1f
+) {
+    val alpha = (frame.opacity * alphaScale.coerceIn(0f, 1f)).coerceIn(0f, 1f)
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         if (frame.fit == LivingFrameFit.FILL) {
             Image(
                 bitmap = bitmap, contentDescription = frame.name, contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize().clip(shape).alpha(frame.opacity)
+                modifier = Modifier.fillMaxSize().clip(shape).alpha(alpha)
             )
         } else {
             Image(
                 bitmap = bitmap, contentDescription = frame.name, contentScale = ContentScale.FillBounds,
-                modifier = Modifier.aspectRatio(bitmap.width / bitmap.height.toFloat()).clip(shape).alpha(frame.opacity)
+                modifier = Modifier.aspectRatio(bitmap.width / bitmap.height.toFloat()).clip(shape).alpha(alpha)
             )
         }
     }

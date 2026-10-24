@@ -30,6 +30,7 @@ import com.frerox.toolz.data.livingframes.LivingFrameFps
 import com.frerox.toolz.data.livingframes.LivingFrameImportResult
 import com.frerox.toolz.data.livingframes.LivingFrameImporter
 import com.frerox.toolz.data.livingframes.LivingFrameLoopMode
+import com.frerox.toolz.data.livingframes.LivingFrameLoopTransition
 import com.frerox.toolz.data.livingframes.LivingFrameQuality
 import com.frerox.toolz.data.livingframes.LivingFrameResolution
 import com.frerox.toolz.data.livingframes.LivingFrameSpeed
@@ -361,6 +362,9 @@ class LivingFramesViewModel @Inject constructor(
         edit(id) { it.copy(resolutionPercent = LivingFrameResolution.snap(percent)) }
 
     fun setLoopMode(id: String, mode: LivingFrameLoopMode) = edit(id) { it.copy(loopMode = mode) }
+
+    fun setLoopTransition(id: String, transition: LivingFrameLoopTransition) =
+        edit(id) { it.copy(loopTransition = transition) }
     fun setFit(id: String, fit: LivingFrameFit) = edit(id) { it.copy(fit = fit) }
 
     fun setTapAction(id: String, action: LivingFrameTapAction) = edit(id) { frame ->

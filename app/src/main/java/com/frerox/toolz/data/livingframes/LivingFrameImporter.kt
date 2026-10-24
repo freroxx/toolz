@@ -783,6 +783,8 @@ class LivingFrameImporter @Inject constructor(
                         "free before importing."
                 )
             }
+            val animated = (type == LivingFrameType.GIF || type == LivingFrameType.VIDEO) &&
+                    count > 1
             val frame = LivingFrame(
                 id = id,
                 name = name,
@@ -794,7 +796,19 @@ class LivingFrameImporter @Inject constructor(
                 avgFrameBytes = totalBytes / count.coerceAtLeast(1),
                 sourceLabel = sourceLabel.take(160),
                 capturedFps = capturedFps.coerceIn(0, LivingFrameFps.MAX),
-                quality = quality
+                quality = quality,
+                // Animations are useful only if a tap can stop them on the
+                // exact frame the user saw. Stills keep the neutral default.
+                tapAction = if (animated) {
+                    LivingFrameTapAction.PAUSE_PLAY
+                } else {
+                    LivingFrameTapAction.OPEN_PREVIEW
+                },
+                loopTransition = if (animated) {
+                    LivingFrameLoopTransition.FADE
+                } else {
+                    LivingFrameLoopTransition.NONE
+                }
             )
             // Once the files are in place, finish the metadata swap even if the
             // caller is being cancelled. Otherwise a cancellation at exactly
