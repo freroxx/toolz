@@ -51,6 +51,7 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import androidx.palette.graphics.Palette
@@ -173,15 +174,17 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         // FGS safeguard: every startForegroundService() call MUST be followed by
         // startForeground() within the system timeout, or the system raises
         // "Context.startForegroundService() did not then call
-        // Service.startForeground()" ANR. Media3's MediaSessionService only goes
-        // foreground when playback is active (playlist non-empty + playing), so
-        // non-playback commands (favorite/shuffle/repeat/warm-up, or an async
-        // restore that hasn't finished yet) never promoted -> ANR. We promote
-        // synchronously on every onStartCommand with a lightweight placeholder
-        // and demote right after if still idle; Media3 re-promotes with the real
-        // media notification as soon as playback starts.
+        // Service.startForeground()" ANR. Media3's MediaSessionService only
+        // shows a notification once a queue exists, so non-playback commands
+        // (favorite/shuffle/repeat/warm-up) sent while the queue is still empty
+        // have nothing to promote. We post a lightweight placeholder ONLY in
+        // that case, and it shares Media3's notification id/channel so the real
+        // media notification replaces it in place (no second notification, no
+        // flicker, no cancel race). When a queue exists Media3 always owns the
+        // single notification on this id.
         private const val FGS_NOTIFICATION_ID = 1101
         private const val FGS_CHANNEL_ID = "music_playback"
+        private const val FGS_CHANNEL_NAME = "Music playback"
     }
 
     private var mediaSession: MediaSession? = null
@@ -845,6 +848,15 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             .setCallback(CustomMediaSessionCallback())
             .build()
 
+        configureMediaNotification()
+
+        // Register the session ourselves instead of waiting for an external
+        // MediaController (UI) or a media-button intent. Widget/headset/cold
+        // starts drive the singleton player directly, so without this the
+        // notification manager never sees the session and no media
+        // notification can be posted until Toolz's UI is opened.
+        mediaSession?.let { addSession(it) }
+
         player.addListener(playerListener)
 
         observeAudioFocusSettings()
@@ -874,6 +886,62 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             restorePlaybackState(autoPlay = false)
         }
     }
+
+    /**
+     * Single source of truth for the media notification: one id, one channel,
+     * the app's small icon. Sharing the id with the placeholder in
+     * [ensureForegroundForStartCommand] means the real media notification
+     * replaces "Preparing music…" in place instead of racing/cancelling it.
+     */
+    @OptIn(UnstableApi::class)
+    private fun configureMediaNotification() {
+        runCatching {
+            ensureMusicNotificationChannel()
+            val provider = DefaultMediaNotificationProvider.Builder(this)
+                .setNotificationId(FGS_NOTIFICATION_ID)
+                .setChannelId(FGS_CHANNEL_ID)
+                .build()
+            provider.setSmallIcon(R.drawable.ic_music_note)
+            setMediaNotificationProvider(provider)
+            setShowNotificationForIdlePlayer(
+                MediaSessionService.SHOW_NOTIFICATION_FOR_IDLE_PLAYER_ALWAYS
+            )
+        }.onFailure {
+            Log.w("MusicPlayerService", "configureMediaNotification failed", it)
+        }
+    }
+
+    private fun ensureMusicNotificationChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val nm = getSystemService(NotificationManager::class.java) ?: return
+        nm.createNotificationChannel(
+            NotificationChannel(
+                FGS_CHANNEL_ID,
+                FGS_CHANNEL_NAME,
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Keeps music playing in the background"
+                setShowBadge(false)
+                enableLights(false)
+                enableVibration(false)
+            }
+        )
+    }
+
+    /**
+     * Media3 normally demotes the service 10 minutes after a pause, and then
+     * the system may destroy it (and its notification) when the UI controller
+     * is gone. Any media notification must keep the service in the foreground,
+     * so always forward `true` to Media3's update path. The async variant is
+     * the one that actually passes this flag to the notification manager and
+     * is the documented override point; never override the sync
+     * `onUpdateNotification` at the same time.
+     */
+    @OptIn(UnstableApi::class)
+    override fun onUpdateNotificationAsync(
+        session: MediaSession,
+        startInForegroundRequired: Boolean
+    ): ListenableFuture<Void?> = super.onUpdateNotificationAsync(session, true)
 
     @OptIn(UnstableApi::class)
     private inner class CustomMediaSessionCallback : MediaSession.Callback {
@@ -1239,26 +1307,19 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
      * foreground, and posting a placeholder for them is what caused the
      * flickering/stuck "Preparing music…" notification on every app open.
      */
+    @OptIn(UnstableApi::class)
     private fun ensureForegroundForStartCommand(action: String?) {
         try {
             if (action == null) return
             if (runCatching { player.isPlaying }.getOrDefault(false)) return
+            // If Media3 already holds the foreground with its rich media
+            // notification on this same id, never overwrite it with the
+            // placeholder. Otherwise (fresh start/update, or nothing playing
+            // yet) the placeholder fulfils the startForegroundService()
+            // contract until Media3 posts its own notification.
+            if (runCatching { isPlaybackOngoing() }.getOrDefault(false)) return
             if (isPlaceholderActive) return
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val nm = getSystemService(NotificationManager::class.java)
-                nm?.createNotificationChannel(
-                    NotificationChannel(
-                        FGS_CHANNEL_ID,
-                        "Music playback",
-                        NotificationManager.IMPORTANCE_LOW
-                    ).apply {
-                        description = "Keeps music playing in the background"
-                        setShowBadge(false)
-                        enableLights(false)
-                        enableVibration(false)
-                    }
-                )
-            }
+            ensureMusicNotificationChannel()
             val contentIntent = PendingIntent.getActivity(
                 this, 2001,
                 Intent(this, MainActivity::class.java).apply {
@@ -1297,33 +1358,34 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
     }
 
     /**
-     * Remove ONLY our transient placeholder (id 1101), keeping Media3's own
-     * media notification / foreground state untouched so the real player
-     * notification always shows up once playback starts.
+     * Hand the notification back to Media3 without cancelling anything.
+     *
+     * The placeholder now shares Media3's notification id, so once playback
+     * (or a restored queue) exists Media3 has already replaced the placeholder
+     * in place. Cancelling by id here would delete the real media notification
+     * — the exact race that made it flicker/disappear — so just drop our flag
+     * and let Media3's next update own the view.
      */
     private fun cancelPlaceholderKeepForeground() {
         if (!isPlaceholderActive) return
         isPlaceholderActive = false
         placeholderDemoteJob?.cancel()
-        runCatching {
-            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            nm.cancel(FGS_NOTIFICATION_ID)
-        }
     }
 
     /**
-     * Drop the placeholder when playback isn't active. Only ever touches OUR
-     * id and only exits foreground if WE are the ones holding it (flag set).
-     * Uses REMOVE (not DETACH) so the placeholder can't linger as a stuck
-     * regular notification after demotion.
+     * Remove the placeholder when there is genuinely nothing to play. Only
+     * ever calls stopForeground()/cancel() when the queue is empty: a non-empty
+     * queue means the notification on this id belongs to Media3 and must stay.
      */
+    @OptIn(UnstableApi::class)
     private fun demoteForegroundIfIdle() {
         try {
             if (!isPlaceholderActive) return
-            val playing = runCatching { player.isPlaying }.getOrDefault(false)
-            if (playing) {
-                // Media3 owns foreground now — just remove our id.
-                cancelPlaceholderKeepForeground()
+            if (runCatching { player.mediaItemCount }.getOrDefault(0) > 0) {
+                // Media3 owns the foreground/notification now.
+                isPlaceholderActive = false
+                placeholderDemoteJob?.cancel()
+                triggerNotificationUpdate()
                 return
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -1352,12 +1414,18 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         }
     }
 
+    @OptIn(UnstableApi::class)
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // ANR fix: promote synchronously BEFORE any async restore/widget work,
-        // but only when a real action needs it (see helper — warm-ups skip).
+        // ANR fix: promote synchronously BEFORE any async restore/widget work.
+        // Empty queue -> lightweight placeholder (Media3 has nothing to show);
+        // non-empty queue -> make Media3 re-assert its media notification and
+        // foreground immediately (covers cold start/restore and any demotion).
         val action = intent?.action
         if (action != null) MusicEventLog.add("cmd", "onStartCommand $action svc=$svcId")
         ensureForegroundForStartCommand(action)
+        if (runCatching { player.mediaItemCount }.getOrDefault(0) > 0) {
+            runCatching { triggerNotificationUpdate() }
+        }
         try {
             when (action) {
                 ACTION_TOGGLE_PLAY -> {
@@ -1857,9 +1925,19 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
 
+    @OptIn(UnstableApi::class)
     override fun onTaskRemoved(rootIntent: Intent?) {
         // Save state one last time — swiping the app away must not lose the second.
         savePlaybackState()
+        // Media3's default pauses and stops the service whenever playback isn't
+        // actively ongoing, which is exactly why a paused Toolz lost its
+        // notification after a recents swipe. A loaded queue means the user
+        // still has a track: keep the foreground service (and its media
+        // notification) alive outside the app instead of delegating to super.
+        if (runCatching { player.mediaItemCount }.getOrDefault(0) > 0) {
+            runCatching { triggerNotificationUpdate() }
+            return
+        }
         super.onTaskRemoved(rootIntent)
     }
 
