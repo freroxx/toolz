@@ -70,6 +70,20 @@ data class FlashlightState(
     val timerMinutes: Int              = 0,
     /** Remaining time in seconds when timer is active. */
     val remainingSeconds: Int?         = null,
+
+    // ── Start defaults ("always set …") ────────────────────────────────────
+    /** When true, [defaultMode] is selected every time the beam starts. */
+    val defaultModeEnabled: Boolean           = false,
+    val defaultMode: FlashlightMode           = FlashlightMode.STEADY,
+    /** When true, [alwaysIntensity] replaces the last-used intensity on start. */
+    val alwaysIntensityEnabled: Boolean       = false,
+    val alwaysIntensity: Float                = 1.0f,
+    /** When true, [alwaysStrobeMs] replaces the last-used strobe speed on start. */
+    val alwaysStrobeEnabled: Boolean          = false,
+    val alwaysStrobeMs: Long                  = 80L,
+    /** When true, [alwaysPaceRange] replaces the last-used disco range on start. */
+    val alwaysPaceEnabled: Boolean            = false,
+    val alwaysPaceRange: Pair<Long, Long>     = 40L to 300L,
 )
 
 // ─────────────────────────────────────────────────────────────
@@ -137,7 +151,15 @@ class FlashlightViewModel @Inject constructor(
             repository.isOn.collect { isOn ->
                 // DEV-SPOOF: real service state must not override the fake toggle.
                 if (!gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.SYSTEM)) {
-                    _uiState.update { it.copy(isOn = isOn) }
+                    if (!isOn && _uiState.value.isOn) {
+                        // The beam was stopped by the service timer or by an
+                        // external camera grab: retire the UI countdown too.
+                        timerJob?.cancel()
+                        timerJob = null
+                        _uiState.update { it.copy(isOn = false, remainingSeconds = null) }
+                    } else {
+                        _uiState.update { it.copy(isOn = isOn) }
+                    }
                 }
             }
         }
@@ -166,13 +188,43 @@ class FlashlightViewModel @Inject constructor(
                 val discoMin = prefs[longPreferencesKey("flashlight_disco_min")] ?: 40L
                 val discoMax = prefs[longPreferencesKey("flashlight_disco_max")] ?: 300L
                 val timer = prefs[intPreferencesKey("flashlight_timer")] ?: 0
+                val defaultModeEnabled =
+                    prefs[booleanPreferencesKey("flashlight_default_mode_enabled")] ?: false
+                val defaultMode = runCatching {
+                    FlashlightMode.valueOf(
+                        prefs[stringPreferencesKey("flashlight_default_mode")]
+                            ?: FlashlightMode.STEADY.name
+                    )
+                }.getOrDefault(FlashlightMode.STEADY)
+                val alwaysIntensityEnabled =
+                    prefs[booleanPreferencesKey("flashlight_always_intensity_enabled")] ?: false
+                val alwaysIntensity =
+                    prefs[floatPreferencesKey("flashlight_always_intensity")] ?: brightness
+                val alwaysStrobeEnabled =
+                    prefs[booleanPreferencesKey("flashlight_always_strobe_enabled")] ?: false
+                val alwaysStrobe =
+                    prefs[longPreferencesKey("flashlight_always_strobe")] ?: strobeInterval
+                val alwaysPaceEnabled =
+                    prefs[booleanPreferencesKey("flashlight_always_pace_enabled")] ?: false
+                val alwaysPaceMin =
+                    prefs[longPreferencesKey("flashlight_always_pace_min")] ?: discoMin
+                val alwaysPaceMax =
+                    prefs[longPreferencesKey("flashlight_always_pace_max")] ?: discoMax
 
                 _uiState.update { it.copy(
                     mode = mode,
                     brightness = brightness,
                     strobeIntervalMs = strobeInterval,
                     discoIntervalRange = discoMin to discoMax,
-                    timerMinutes = timer
+                    timerMinutes = timer,
+                    defaultModeEnabled = defaultModeEnabled,
+                    defaultMode = defaultMode,
+                    alwaysIntensityEnabled = alwaysIntensityEnabled,
+                    alwaysIntensity = alwaysIntensity.coerceIn(0.1f, 1.0f),
+                    alwaysStrobeEnabled = alwaysStrobeEnabled,
+                    alwaysStrobeMs = alwaysStrobe.coerceIn(40L, 500L),
+                    alwaysPaceEnabled = alwaysPaceEnabled,
+                    alwaysPaceRange = normalisePace(alwaysPaceMin, alwaysPaceMax),
                 ) }
                 
                 repository.setMode(mode)
@@ -255,19 +307,62 @@ class FlashlightViewModel @Inject constructor(
             return
         }
         val newOn = !_uiState.value.isOn
+        if (newOn) applyStartDefaults()
 
+        val resolved = _uiState.value
         val intent = Intent(context, FlashlightService::class.java).apply {
             action = if (newOn) FlashlightService.ACTION_TOGGLE else FlashlightService.ACTION_STOP
             if (newOn) {
-                putExtra("mode", _uiState.value.mode.name)
-                putExtra("brightness", _uiState.value.brightness)
+                putExtra("mode", resolved.mode.name)
+                putExtra("brightness", resolved.brightness)
+                putExtra("strobe", resolved.strobeIntervalMs)
+                putExtra("disco_min", resolved.discoIntervalRange.first)
+                putExtra("disco_max", resolved.discoIntervalRange.second)
+                putExtra("timer", resolved.timerMinutes)
             }
         }
+        context.startService(intent)
+
+        // The countdown belongs to a running beam. Restart it on every start so
+        // a timer configured while idle takes effect immediately, and cancel it
+        // when the beam is turned off by hand.
         if (newOn) {
-            context.startService(intent)
+            if (resolved.timerMinutes > 0) startTimer(resolved.timerMinutes)
         } else {
-            context.startService(intent)
+            timerJob?.cancel()
+            timerJob = null
+            _uiState.update { it.copy(remainingSeconds = null) }
         }
+    }
+
+    /**
+     * Resolves the "always set …" defaults once, right before the service is
+     * started. Live in-app controls stay authoritative until the next start.
+     */
+    private fun applyStartDefaults() {
+        val current = _uiState.value
+        var resolved = current
+        if (current.defaultModeEnabled) resolved = resolved.copy(mode = current.defaultMode)
+        if (current.alwaysIntensityEnabled) {
+            resolved = resolved.copy(brightness = current.alwaysIntensity.coerceIn(0.1f, 1.0f))
+        }
+        if (current.alwaysStrobeEnabled) {
+            resolved = resolved.copy(strobeIntervalMs = current.alwaysStrobeMs.coerceIn(40L, 500L))
+        }
+        if (current.alwaysPaceEnabled) {
+            val pace = normalisePace(current.alwaysPaceRange.first, current.alwaysPaceRange.second)
+            resolved = resolved.copy(discoIntervalRange = pace)
+        }
+        if (resolved == current) return
+
+        _uiState.value = resolved
+        saveSetting("flashlight_mode", resolved.mode.name)
+        saveSetting("flashlight_brightness", resolved.brightness)
+        saveSetting("flashlight_strobe_interval", resolved.strobeIntervalMs)
+        saveSetting("flashlight_disco_min", resolved.discoIntervalRange.first)
+        saveSetting("flashlight_disco_max", resolved.discoIntervalRange.second)
+        repository.setMode(resolved.mode)
+        repository.setBrightness(resolved.brightness)
     }
 
     fun setMode(mode: FlashlightMode) {
@@ -329,7 +424,14 @@ class FlashlightViewModel @Inject constructor(
         FlashlightService.getInstance()?.setTimer(minutes)
 
         if (minutes > 0) {
-            startTimer(minutes)
+            // A timer only counts down while the beam is running. While idle it
+            // is stored and starts on the next toggle.
+            if (_uiState.value.isOn) {
+                startTimer(minutes)
+            } else {
+                timerJob?.cancel()
+                _uiState.update { it.copy(remainingSeconds = null) }
+            }
         } else {
             timerJob?.cancel()
             _uiState.update { it.copy(remainingSeconds = null) }
@@ -347,6 +449,56 @@ class FlashlightViewModel @Inject constructor(
         // If in disco, no need to restart job as it picks up values dynamically
     }
 
+    // ── Start defaults ("always set …") ────────────────────────────────────
+
+    fun setDefaultModeEnabled(enabled: Boolean) {
+        _uiState.update { it.copy(defaultModeEnabled = enabled) }
+        saveSetting("flashlight_default_mode_enabled", enabled)
+    }
+
+    fun setDefaultMode(mode: FlashlightMode) {
+        _uiState.update { it.copy(defaultMode = mode) }
+        saveSetting("flashlight_default_mode", mode.name)
+    }
+
+    fun setAlwaysIntensityEnabled(enabled: Boolean) {
+        _uiState.update { it.copy(alwaysIntensityEnabled = enabled) }
+        saveSetting("flashlight_always_intensity_enabled", enabled)
+    }
+
+    fun setAlwaysIntensity(normalised: Float) {
+        val clamped = normalised.coerceIn(0.1f, 1.0f)
+        _uiState.update { it.copy(alwaysIntensity = clamped) }
+        saveSetting("flashlight_always_intensity", clamped)
+    }
+
+    fun setAlwaysStrobeEnabled(enabled: Boolean) {
+        _uiState.update { it.copy(alwaysStrobeEnabled = enabled) }
+        saveSetting("flashlight_always_strobe_enabled", enabled)
+    }
+
+    fun setAlwaysStrobe(ms: Long) {
+        val clamped = ms.coerceIn(40L, 500L)
+        _uiState.update { it.copy(alwaysStrobeMs = clamped) }
+        saveSetting("flashlight_always_strobe", clamped)
+    }
+
+    fun setAlwaysPaceEnabled(enabled: Boolean) {
+        _uiState.update { it.copy(alwaysPaceEnabled = enabled) }
+        saveSetting("flashlight_always_pace_enabled", enabled)
+    }
+
+    fun setAlwaysPaceRange(min: Long, max: Long) {
+        val pace = normalisePace(min, max)
+        _uiState.update { it.copy(alwaysPaceRange = pace) }
+        saveSetting("flashlight_always_pace_min", pace.first)
+        saveSetting("flashlight_always_pace_max", pace.second)
+    }
+
+    private fun normalisePace(min: Long, max: Long): Pair<Long, Long> =
+        min.coerceIn(30L, 1000L).coerceAtMost(max.coerceIn(30L, 1000L)) to
+            max.coerceIn(30L, 1000L).coerceAtLeast(min.coerceIn(30L, 1000L))
+
     private fun startTimer(minutes: Int) {
         timerJob?.cancel()
         timerJob = viewModelScope.launch {
@@ -357,10 +509,16 @@ class FlashlightViewModel @Inject constructor(
                 seconds--
             }
             _uiState.update { it.copy(remainingSeconds = 0) }
-            if (_uiState.value.isOn) {
-                toggleFlashlight()
-            }
+            // Always send STOP instead of toggling: if the service timer (or an
+            // external camera grab) already turned the beam off, toggling here
+            // would light it again.
+            context.startService(
+                Intent(context, FlashlightService::class.java).apply {
+                    action = FlashlightService.ACTION_STOP
+                }
+            )
             _uiState.update { it.copy(remainingSeconds = null, timerMinutes = 0) }
+            saveSetting("flashlight_timer", 0)
         }
     }
 

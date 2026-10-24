@@ -80,6 +80,8 @@ class FlashlightService : Service() {
     private var maxBright:     Int      = 1
     private var modeJob:       Job?     = null
     private var timerJob:      Job?     = null
+    /** True once a start intent supplied authoritative state; loadSettings must not clobber it. */
+    private var hasStartExtras: Boolean = false
 
     private val _mode           = MutableStateFlow(FlashlightMode.STEADY)
     private val _brightness     = MutableStateFlow(1.0f)
@@ -108,21 +110,29 @@ class FlashlightService : Service() {
 
     private val torchCallback = object : CameraManager.TorchCallback() {
         override fun onTorchModeChanged(id: String, enabled: Boolean) {
-            if (id == cameraId) {
-                repository.setOn(enabled)
-                if (enabled) {
+            if (id != cameraId) return
+
+            // Strobe / SOS / disco deliberately pulse the hardware OFF between
+            // flashes. Those physical OFF events must never leak into the
+            // logical beam state, otherwise the UI button (and the service)
+            // flickers while a mode loop is driving the torch.
+            if (!enabled && repository.isOn.value && modeJob?.isActive == true) {
+                return
+            }
+
+            repository.setOn(enabled)
+            if (enabled) {
+                runAsForeground()
+            } else {
+                // Stop foreground but keep notification if persistent
+                if (persistentNotif) {
                     runAsForeground()
                 } else {
-                    // Stop foreground but keep notification if persistent
-                    if (persistentNotif) {
-                        runAsForeground()
-                    } else {
-                        stopForeground(STOP_FOREGROUND_REMOVE)
-                        stopSelf()
-                    }
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
                 }
-                broadcastStateChange()
             }
+            broadcastStateChange()
         }
     }
 
@@ -218,6 +228,12 @@ class FlashlightService : Service() {
     }
 
     private fun handleExtras(intent: Intent) {
+        if (intent.hasExtra("brightness") || intent.hasExtra("mode") ||
+            intent.hasExtra("strobe") || intent.hasExtra("disco_min") ||
+            intent.hasExtra("disco_max") || intent.hasExtra("timer")
+        ) {
+            hasStartExtras = true
+        }
         if (intent.hasExtra("brightness")) {
             val b = intent.getFloatExtra("brightness", _brightness.value)
             _brightness.value = b.coerceIn(0.1f, 1.0f)
@@ -226,11 +242,23 @@ class FlashlightService : Service() {
         if (intent.hasExtra("mode")) {
             val mName = intent.getStringExtra("mode")
             try {
-                mName?.let { 
+                mName?.let {
                     _mode.value = FlashlightMode.valueOf(it)
                     repository.setMode(_mode.value)
                 }
             } catch (_: Exception) {}
+        }
+        if (intent.hasExtra("strobe")) {
+            _strobeMs.value = intent.getLongExtra("strobe", _strobeMs.value).coerceIn(40L, 500L)
+        }
+        if (intent.hasExtra("disco_min") || intent.hasExtra("disco_max")) {
+            val min = intent.getLongExtra("disco_min", _discoRange.value.first)
+            val max = intent.getLongExtra("disco_max", _discoRange.value.second)
+            _discoRange.value = min.coerceIn(30L, 1000L).coerceAtMost(max.coerceIn(30L, 1000L)) to
+                max.coerceIn(30L, 1000L).coerceAtLeast(min.coerceIn(30L, 1000L))
+        }
+        if (intent.hasExtra("timer")) {
+            _timerMinutes.value = intent.getIntExtra("timer", _timerMinutes.value).coerceAtLeast(0)
         }
     }
 
@@ -422,6 +450,9 @@ class FlashlightService : Service() {
     private suspend fun loadSettings() {
         try {
             val p = dataStore.data.first()
+            // A start intent already carried the resolved state; do not let a
+            // slower DataStore read overwrite it.
+            if (hasStartExtras) return
             val modeName = p[stringPreferencesKey("flashlight_mode")]
             if (modeName != null) {
                 try {
@@ -533,7 +564,8 @@ class FlashlightService : Service() {
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_flashlight)
-            .setLargeIcon(com.frerox.toolz.util.NotificationHelper.toolzLargeIcon(this))
+            // No large icon: it collapses the decorated custom view and squeezes
+            // the brightness/progress controls.
             .setContentTitle(modeLabel())
             .setContentText("$brightPct% intensity \u00B7 tap to open")
             .setCustomContentView(compact)

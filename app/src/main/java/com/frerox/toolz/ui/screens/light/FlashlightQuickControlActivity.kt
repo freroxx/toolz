@@ -332,13 +332,22 @@ private fun QuickSheetContent(
                         )
                     }
 
-                    val timerOptions = listOf(0, 1, 5, 10, 30)
+                    val timerOptions = listOf(0, 1, 2, 5, 10, 15, 30, 45, 60, 90, 120)
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(timerOptions) { mins ->
                             ExpressiveFilterChip(
                                 selected = state.timerMinutes == mins,
                                 onClick = { onSetTimer(mins) },
-                                label = { Text(if (mins == 0) "OFF" else "${mins}m") }
+                                label = {
+                                    Text(
+                                        when {
+                                            mins == 0 -> "OFF"
+                                            mins < 60 -> "${mins}m"
+                                            mins % 60 == 0 -> "${mins / 60}h"
+                                            else -> "${mins / 60}h${mins % 60}"
+                                        }
+                                    )
+                                }
                             )
                         }
                     }
