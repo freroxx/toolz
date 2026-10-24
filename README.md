@@ -324,7 +324,7 @@ All product names, logos, brands, and registered trademarks cited within this pr
 
 ## 🙏 Credits & Community
 
-Toolz is an independent project, made substantially better by early adopters and contributors from the community:
+Toolz is an independent project, made substantially better by early adopters and contributors from the community (on the discord server):
 
 | Contributor                            | Contribution                                                                                             | Profile |
 |----------------------------------------|----------------------------------------------------------------------------------------------------------|---|
