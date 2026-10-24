@@ -30,6 +30,7 @@ import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.focus.CaffeinateRepository
 import com.frerox.toolz.data.focus.InstalledAppInfo
 import com.frerox.toolz.data.settings.SettingsRepository
+import com.frerox.toolz.service.CaffeinateAccessibilityService
 import com.frerox.toolz.service.CaffeinateService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -129,11 +130,21 @@ class CaffeinateViewModel @Inject constructor(
     }
 
     private fun isAccessibilityServiceEnabled(context: Context): Boolean {
+        val serviceName = CaffeinateAccessibilityService::class.java.name
         return try {
             val manager = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager
-            manager?.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_GENERIC)?.any {
-                it.resolveInfo.serviceInfo.packageName == context.packageName
+            val enabled = manager?.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_GENERIC)?.any {
+                it.resolveInfo.serviceInfo.packageName == context.packageName &&
+                    it.resolveInfo.serviceInfo.name == serviceName
             } == true
+            if (enabled) return true
+            // Fallback to secure settings: AccessibilityManager can lag right
+            // after the user flips the toggle and returns to the app.
+            val expected = "${context.packageName}/$serviceName"
+            android.provider.Settings.Secure.getString(
+                context.contentResolver,
+                android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+            )?.contains(expected) == true
         } catch (e: Exception) {
             false
         }

@@ -138,7 +138,7 @@ fun CaffeinateScreen(
             },
             text = {
                 Text(
-                    text = "Caffeinate requires Accessibility access to detect which app you are currently using. This ensures the screen stays awake ONLY while you are inside an app, and automatically turns off on your home screen or lock screen.",
+                    text = "Caffeinate requires the \"${stringResource(R.string.st_Manifest_Caffeinate)}\" Accessibility service to detect which app you are currently using. Enable it in Settings (not Focus Flow). This keeps the screen awake only while you are inside an app and turns it off on your home screen or lock screen.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

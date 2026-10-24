@@ -841,7 +841,7 @@ class CaffeinateService : Service() {
             .setContentTitle("Caffeinate is active")
             .setContentText(text)
             .setSmallIcon(R.drawable.ic_notif_caffeinate)
-            .setLargeIcon(com.frerox.toolz.util.NotificationHelper.toolzLargeIcon(this))
+            // Ongoing status with an action: no large icon, keep the text room.
             .setOngoing(true)
             .setSilent(true)
             .setOnlyAlertOnce(true)
