@@ -31,6 +31,12 @@ import kotlin.math.roundToInt
  * One renderer for every widget bitmap. It draws straight to the widget's
  * exact pixel size, so rounded corners, fit/fill and opacity land exactly
  * where the user sees them — no ImageView cropping afterwards.
+ *
+ * [densityX]/[densityY] must already include `outPx / widgetPx`
+ * ([LivingFrameEngine.densityScale]): the launcher scales the bitmap back to
+ * widget size, and the baked corner radius has to be scaled by the same
+ * amount. Passing the raw display density made corners grow with the render
+ * resolution.
  */
 object LivingFrameRenderer {
 
@@ -39,17 +45,84 @@ object LivingFrameRenderer {
         frame: LivingFrame,
         outW: Int,
         outH: Int,
-        density: Float,
+        densityX: Float,
+        densityY: Float,
         rgb565: Boolean
     ): Bitmap {
         val w = outW.coerceAtLeast(2)
         val h = outH.coerceAtLeast(2)
+        val out = newBitmap(w, h, rgb565, frame)
+        val canvas = Canvas(out)
+        drawSource(
+            canvas, src, frame, w, h, densityX, densityY,
+            alpha = frame.opacity.coerceIn(0f, 1f), rgb565 = rgb565
+        )
+        return out
+    }
+
+    /**
+     * Crossfade between two source frames for the loop seam. [mix] is the
+     * weight of [to] (0 = [from], 1 = [to]). With [soft] the result is
+     * rendered through a low-resolution pass, which gives the blur transition
+     * its soft-focus dissolve without an expensive stack blur.
+     */
+    fun renderBlend(
+        from: Bitmap,
+        to: Bitmap,
+        frame: LivingFrame,
+        outW: Int,
+        outH: Int,
+        densityX: Float,
+        densityY: Float,
+        mix: Float,
+        rgb565: Boolean,
+        soft: Boolean
+    ): Bitmap {
+        val w = outW.coerceAtLeast(2)
+        val h = outH.coerceAtLeast(2)
+        val amount = mix.coerceIn(0f, 1f)
+        if (amount <= 0.001f) {
+            return render(from, frame, w, h, densityX, densityY, rgb565)
+        }
+        if (amount >= 0.999f) {
+            return render(to, frame, w, h, densityX, densityY, rgb565)
+        }
+        val out = newBitmap(w, h, rgb565, frame)
+        val canvas = Canvas(out)
+        val opacity = frame.opacity.coerceIn(0f, 1f)
+        // Drawing `to` over `from` leaves the colour at (1-mix)·from + mix·to
+        // while the union of the two identical corner masks keeps alpha right.
+        drawSource(canvas, from, frame, w, h, densityX, densityY, opacity, rgb565)
+        drawSource(canvas, to, frame, w, h, densityX, densityY, opacity * amount, rgb565)
+        if (!soft) return out
+        return try {
+            soften(out, frame, rgb565)
+        } finally {
+            // The softened copy is what the flipper keeps; the intermediate
+            // full-size blend would otherwise linger until the next GC.
+            runCatching { out.recycle() }
+        }
+    }
+
+    private fun newBitmap(w: Int, h: Int, rgb565: Boolean, frame: LivingFrame): Bitmap {
         val config = if (rgb565) Bitmap.Config.RGB_565 else Bitmap.Config.ARGB_8888
         val out = Bitmap.createBitmap(w, h, config)
         // A fully covered opaque output lets the host skip alpha blending.
         if (!rgb565 && isOpaque(frame)) out.setHasAlpha(false)
-        val canvas = Canvas(out)
+        return out
+    }
 
+    private fun drawSource(
+        canvas: Canvas,
+        src: Bitmap,
+        frame: LivingFrame,
+        w: Int,
+        h: Int,
+        densityX: Float,
+        densityY: Float,
+        alpha: Float,
+        rgb565: Boolean
+    ) {
         val dst = if (frame.fit == LivingFrameFit.FIT) {
             val s = minOf(w / src.width.toFloat(), h / src.height.toFloat())
             val dw = src.width * s
@@ -78,12 +151,17 @@ object LivingFrameRenderer {
 
         val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
             isDither = rgb565
-            alpha = (frame.opacity.coerceIn(0f, 1f) * 255f).toInt()
+            this.alpha = (alpha.coerceIn(0f, 1f) * 255f).toInt()
         }
-        val radius = (frame.cornerRadiusDp * density)
-            .coerceIn(0f, minOf(dst.width(), dst.height()) / 2f)
+        val radii = LivingFrameEngine.cornerRadii(
+            cornerDp = frame.cornerRadiusDp,
+            densityX = densityX,
+            densityY = densityY,
+            widthPx = w,
+            heightPx = h
+        )
 
-        if (radius < 0.5f) {
+        if (radii.rx < 0.5f && radii.ry < 0.5f) {
             // Square corners: a plain blit is much cheaper than a shader
             // round-rect and is the common case for video loops.
             val crop = Rect(
@@ -97,8 +175,31 @@ object LivingFrameRenderer {
             val matrix = Matrix().apply { setRectToRect(srcRect, dst, Matrix.ScaleToFit.FILL) }
             paint.shader = BitmapShader(src, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
                 .also { it.setLocalMatrix(matrix) }
-            canvas.drawRoundRect(dst, radius, radius, paint)
+            canvas.drawRoundRect(dst, radii.rx, radii.ry, paint)
         }
+    }
+
+    /** Low-resolution round-trip used by the BLUR loop transition. */
+    private fun soften(src: Bitmap, frame: LivingFrame, rgb565: Boolean): Bitmap {
+        val w = (src.width / 4).coerceAtLeast(2)
+        val h = (src.height / 4).coerceAtLeast(2)
+        val config = if (rgb565) Bitmap.Config.RGB_565 else Bitmap.Config.ARGB_8888
+        val small = Bitmap.createBitmap(w, h, config)
+        Canvas(small).drawBitmap(
+            src,
+            Rect(0, 0, src.width, src.height),
+            Rect(0, 0, w, h),
+            Paint(Paint.FILTER_BITMAP_FLAG)
+        )
+        val out = Bitmap.createBitmap(src.width, src.height, config)
+        if (!rgb565 && isOpaque(frame)) out.setHasAlpha(false)
+        Canvas(out).drawBitmap(
+            small,
+            Rect(0, 0, small.width, small.height),
+            Rect(0, 0, src.width, src.height),
+            Paint(Paint.FILTER_BITMAP_FLAG)
+        )
+        small.recycle()
         return out
     }
 
@@ -108,7 +209,15 @@ object LivingFrameRenderer {
      * and opacity are applied afterwards by [render].
      */
     fun renderBase(src: Bitmap, frame: LivingFrame, outW: Int, outH: Int, rgb565: Boolean): Bitmap =
-        render(src, frame.copy(cornerRadiusDp = 0, opacity = 1f), outW, outH, 1f, rgb565)
+        render(
+            src,
+            frame.copy(cornerRadiusDp = 0, opacity = 1f),
+            outW,
+            outH,
+            1f,
+            1f,
+            rgb565
+        )
 
     /**
      * Only decoded video frames are guaranteed to have no alpha channel.

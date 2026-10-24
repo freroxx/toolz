@@ -33,6 +33,15 @@ enum class LivingFrameType { GIF, VIDEO, PHOTO, SLIDESHOW }
 @Serializable
 enum class LivingFrameLoopMode { LOOP, BOOMERANG }
 
+/**
+ * Softens the jump from the last frame back to the first. FADE is a straight
+ * alpha crossfade; BLUR is a cheap soft-focus dissolve. NONE is the default
+ * for existing sets, so their playback does not change after an update.
+ * BOOMERANG and single-frame sets ignore it.
+ */
+@Serializable
+enum class LivingFrameLoopTransition { NONE, FADE, BLUR }
+
 /** FILL = centre-crop to the widget, FIT = letterbox inside it. */
 @Serializable
 enum class LivingFrameFit { FIT, FILL }
@@ -40,9 +49,12 @@ enum class LivingFrameFit { FIT, FILL }
 /**
  * Tap behaviour. NEXT_FRAME means "next photo" and only applies to slideshows.
  * OPEN_TOOL opens any Toolz tool via [LivingFrame.tapTargetRoute].
+ * PAUSE_PLAY pauses an animated widget on the exact frame that was tapped;
+ * tapping the paused widget resumes from that same frame. It only works when
+ * the set fits the single-update (static) path.
  */
 @Serializable
-enum class LivingFrameTapAction { OPEN_PREVIEW, OPEN_TOOL, NEXT_FRAME, NOTHING }
+enum class LivingFrameTapAction { OPEN_PREVIEW, OPEN_TOOL, NEXT_FRAME, NOTHING, PAUSE_PLAY }
 
 /**
  * Import/export quality. This is chosen when a set is imported: it decides how
@@ -145,7 +157,9 @@ data class LivingFrame(
     /** Playback multiplier. Applied by resampling, not by re-encoding frames. */
     val speed: Float = LivingFrameSpeed.DEFAULT,
     /** Render resolution as a percentage of the stored frame size. */
-    val resolutionPercent: Int = LivingFrameResolution.DEFAULT
+    val resolutionPercent: Int = LivingFrameResolution.DEFAULT,
+    /** Softens the loop seam. Ignored by boomerang and single-frame sets. */
+    val loopTransition: LivingFrameLoopTransition = LivingFrameLoopTransition.NONE
 ) {
     val isAnimated: Boolean
         get() = (type == LivingFrameType.GIF || type == LivingFrameType.VIDEO) && frameCount > 1

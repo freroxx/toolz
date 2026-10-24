@@ -17,6 +17,7 @@
 
 package com.frerox.toolz.data.livingframes
 
+import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.roundToInt
@@ -145,16 +146,148 @@ object LivingFrameEngine {
         sourceFps: Int,
         displayFps: Int,
         speed: Float,
-        mode: LivingFrameLoopMode
+        mode: LivingFrameLoopMode,
+        transition: LivingFrameLoopTransition = LivingFrameLoopTransition.NONE
     ): Long {
-        val frames = displaySequence(frameCount, sourceFps, displayFps, speed, mode).size
+        val frames = displaySteps(
+            frameCount, sourceFps, displayFps, speed, mode, transition
+        ).size
         return frames.toLong() * LivingFrameFps.intervalMs(displayFps)
     }
 
     /**
+     * One flipper child. Normal frames are `from == to`; seam frames blend the
+     * last source frame into the first. [mix] is 0 for normal frames and
+     * (0, 1) for a blend.
+     */
+    data class DisplayStep(
+        val from: Int,
+        val to: Int,
+        val mix: Float
+    ) {
+        val blended: Boolean get() = from != to && mix > 0f
+    }
+
+    /** Target length of the loop-seam crossfade. */
+    const val LOOP_SEAM_MS = 180
+
+    /**
+     * Number of extra blend children needed to fade the seam over roughly
+     * [LOOP_SEAM_MS]. The wrap back to the first frame completes the last
+     * step, so this is one less than the number of flipper intervals in the
+     * fade. At least one blend child is always produced, so a slow loop still
+     * softens instead of snapping.
+     */
+    fun seamStepCount(displayFps: Int): Int {
+        val interval = LivingFrameFps.intervalMs(displayFps).coerceAtLeast(1)
+        return ((LOOP_SEAM_MS.toFloat() / interval).roundToInt() - 1).coerceAtLeast(1)
+    }
+
+    /**
+     * Playback children, including the loop-seam crossfade. BOOMERANG already
+     * has matching endpoints, and a single-frame or identical-endpoint loop
+     * has nothing to fade, so those ignore [transition].
+     */
+    fun displaySteps(
+        frameCount: Int,
+        sourceFps: Int,
+        displayFps: Int,
+        speed: Float,
+        mode: LivingFrameLoopMode,
+        transition: LivingFrameLoopTransition
+    ): List<DisplayStep> {
+        val base = displaySequence(frameCount, sourceFps, displayFps, speed, mode)
+        val normal = base.map { DisplayStep(it, it, 0f) }
+        if (transition == LivingFrameLoopTransition.NONE) return normal
+        if (mode == LivingFrameLoopMode.BOOMERANG || base.size <= 1) return normal
+        val first = base.first()
+        val last = base.last()
+        if (first == last) return normal
+        val count = seamStepCount(displayFps)
+        val seam = List(count) { i ->
+            DisplayStep(last, first, (i + 1f) / (count + 1f))
+        }
+        return normal + seam
+    }
+
+    fun displaySteps(
+        frame: LivingFrame,
+        displayFps: Int = playbackFps(frame)
+    ): List<DisplayStep> = displaySteps(
+        frame.frameCount,
+        frame.sourceFps,
+        displayFps,
+        frame.speed,
+        frame.loopMode,
+        frame.loopTransition
+    )
+
+    /** Rotate a loop so [first] becomes child 0; used when resuming from a pause. */
+    fun rotateSteps(steps: List<DisplayStep>, first: Int): List<DisplayStep> {
+        if (steps.size <= 1) return steps
+        val i = first.coerceIn(0, steps.lastIndex)
+        if (i == 0) return steps
+        return steps.subList(i, steps.size) + steps.subList(0, i)
+    }
+
+    /**
+     * Find the display step closest to a saved pause point. Fps, speed or a
+     * resize can change the step list while a widget is paused; the paused
+     * look should survive that instead of jumping to frame 0.
+     */
+    fun nearestStepIndex(steps: List<DisplayStep>, from: Int, to: Int, mix: Float): Int {
+        if (steps.isEmpty()) return 0
+        var best = 0
+        var bestScore = Float.MAX_VALUE
+        steps.forEachIndexed { index, step ->
+            val score = when {
+                step.from == from && step.to == to -> abs(step.mix - mix)
+                step.from == from -> 1f + abs(step.mix - mix)
+                else -> 2f + abs(step.mix - mix)
+            }
+            if (score < bestScore) {
+                bestScore = score
+                best = index
+            }
+        }
+        return best
+    }
+
+    /** Baked corner radius in output pixels, before the ImageView scales it back. */
+    data class CornerRadii(val rx: Float, val ry: Float)
+
+    /**
+     * Corner radius for a bitmap that will be drawn into a [widthPx]×
+     * [heightPx] view. [densityX]/[densityY] already include `outPx /
+     * widgetPx`, so when the view scales the bitmap back to widget size the
+     * radius lands on the configured dp at every resolution and aspect ratio.
+     */
+    fun cornerRadii(
+        cornerDp: Int,
+        densityX: Float,
+        densityY: Float,
+        widthPx: Int,
+        heightPx: Int
+    ): CornerRadii {
+        if (cornerDp <= 0) return CornerRadii(0f, 0f)
+        val maxRx = widthPx.coerceAtLeast(1) / 2f
+        val maxRy = heightPx.coerceAtLeast(1) / 2f
+        return CornerRadii(
+            rx = (cornerDp * densityX.coerceAtLeast(0f)).coerceIn(0f, maxRx),
+            ry = (cornerDp * densityY.coerceAtLeast(0f)).coerceIn(0f, maxRy)
+        )
+    }
+
+    /** Density for a bitmap that scales [outPx] → [widgetPx] in the view. */
+    fun densityScale(density: Float, outPx: Int, widgetPx: Int): Float =
+        density * outPx.coerceAtLeast(1) / widgetPx.coerceAtLeast(1)
+
+    /**
      * How a widget gets rendered so the RemoteViews fit the system's bitmap
      * memory ceiling. [bytes] counts every child bitmap in the RemoteViews,
-     * including the duplicates a boomerang playback order creates.
+     * including seam blends and the duplicates a boomerang order creates.
+     * [frames] is the number of flipper children (not the number of stored
+     * source frames).
      */
     data class RenderPlan(
         val scale: Float,
@@ -164,7 +297,8 @@ object LivingFrameEngine {
         val outW: Int,
         val outH: Int,
         val bytes: Long,
-        val effectiveFps: Int
+        val effectiveFps: Int,
+        val transition: Boolean = false
     ) {
         val reduced: Boolean get() = scale < 0.999f || step > 1 || rgb565
     }
@@ -174,64 +308,142 @@ object LivingFrameEngine {
     )
 
     /** Binder/serialization cost per child; without it tiny budgets are fictional. */
-    private const val FRAME_OVERHEAD_BYTES = 64L
+    private const val FRAME_OVERHEAD_BYTES = 1024L
+
+    /** Below this fps a static push is no better than a slideshow. */
+    const val MIN_STATIC_FPS = 8
+
+    /** Below this scale the widget looks soft enough to prefer streaming. */
+    const val MIN_STATIC_SCALE = 0.4f
 
     /**
-     * Preference order: keep every frame at full size, then use a cheaper
-     * pixel format, then lower resolution, and only then drop frames (fps is
-     * rescaled so the loop keeps its real-time length). The returned plan is
-     * guaranteed to fit [budgetBytes] whenever even a 2×2 frame can fit.
+     * A 900-child RemoteViews would be enormous regardless of the bitmap
+     * budget. 240 children is 20 s at 12 fps and still comfortable to inflate.
      */
-    fun plan(
+    const val MAX_STATIC_CHILDREN = 240
+
+    /**
+     * Fps-first static planner: for each supported rate (highest first) it
+     * finds the largest resolution that fits, then returns the plan with the
+     * best resolution, breaking ties by fps. This deliberately prefers 10 fps
+     * at 70% over 30 fps at 20%: sharpness is what the user notices first.
+     *
+     * Returns null when no plan meets [minFps] and [minScale]; callers stream
+     * in that case. The transition is included in the byte count, so enabling
+     * Fade/BLUR can push a clip over the line.
+     */
+    fun planStatic(
         frameCount: Int,
+        sourceFps: Int,
+        speed: Float,
+        requestedFps: Int,
         widthPx: Int,
         heightPx: Int,
         opaque: Boolean,
-        fps: Int,
         budgetBytes: Long,
-        loopMode: LivingFrameLoopMode = LivingFrameLoopMode.LOOP
-    ): RenderPlan {
+        loopMode: LivingFrameLoopMode,
+        transition: LivingFrameLoopTransition = LivingFrameLoopTransition.NONE,
+        minFps: Int = MIN_STATIC_FPS,
+        minScale: Float = MIN_STATIC_SCALE
+    ): RenderPlan? {
         val n = frameCount.coerceAtLeast(1)
+        if (n <= 1) return null
         val budget = budgetBytes.coerceAtLeast(0L)
         val width = widthPx.coerceAtLeast(2)
         val height = heightPx.coerceAtLeast(2)
-        val steps = listOf(1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 30, 40)
-            .filter { it <= n }
-            .ifEmpty { listOf(1) }
-        var fallback: RenderPlan? = null
-        for (step in steps) {
-            val kept = ceil(n / step.toFloat()).toInt().coerceAtLeast(1)
-            for (scale in SCALES) {
-                val w = (width * scale).roundToInt().coerceAtLeast(2)
-                val h = (height * scale).roundToInt().coerceAtLeast(2)
-                val formats = if (opaque) listOf(false, true) else listOf(false)
-                for (is565 in formats) {
-                    val bpp = if (is565) 2L else 4L
-                    val children = playbackOrder(kept, loopMode).size
-                    val bytes = children.toLong() *
-                            (w.toLong() * h * bpp + FRAME_OVERHEAD_BYTES)
-                    val p = RenderPlan(
-                        scale, step, is565, kept, w, h, bytes,
-                        LivingFrameFps.snap(fps / step.toFloat())
+        // Never play faster than the user asked: minFps is the floor for
+        // lowering a faster request, not a reason to raise a slow one.
+        val top = LivingFrameFps.snap(requestedFps).coerceAtLeast(1)
+        val floor = minOf(minFps, top).coerceAtLeast(1)
+        var best: RenderPlan? = null
+        for (rate in LivingFrameFps.STEPS.filter { it in floor..top }.sortedDescending()) {
+            val steps = displaySteps(n, sourceFps, rate, speed, loopMode, transition)
+            if (steps.size > MAX_STATIC_CHILDREN) continue
+            val plan = bestFit(
+                children = steps.size,
+                width = width,
+                height = height,
+                opaque = opaque,
+                budget = budget,
+                fps = rate,
+                minScale = minScale,
+                transition = transition != LivingFrameLoopTransition.NONE
+            ) ?: continue
+            val current = best
+            if (current == null ||
+                plan.scale > current.scale + 1e-4f ||
+                (abs(plan.scale - current.scale) <= 1e-4f &&
+                        plan.effectiveFps > current.effectiveFps)
+            ) {
+                best = plan
+            }
+        }
+        return best
+    }
+
+    /** One still image, scaled only as far as the budget requires. */
+    fun planStill(
+        widthPx: Int,
+        heightPx: Int,
+        opaque: Boolean,
+        budgetBytes: Long
+    ): RenderPlan {
+        val width = widthPx.coerceAtLeast(2)
+        val height = heightPx.coerceAtLeast(2)
+        val budget = budgetBytes.coerceAtLeast(0L)
+        return bestFit(
+            children = 1,
+            width = width,
+            height = height,
+            opaque = opaque,
+            budget = budget,
+            fps = 1,
+            minScale = 0.1f,
+            transition = false
+        ) ?: oneFramePlan(width, height, opaque, 1, budget)
+    }
+
+    private fun bestFit(
+        children: Int,
+        width: Int,
+        height: Int,
+        opaque: Boolean,
+        budget: Long,
+        fps: Int,
+        minScale: Float,
+        transition: Boolean
+    ): RenderPlan? {
+        for (scale in SCALES) {
+            if (scale < minScale) break
+            val w = (width * scale).roundToInt().coerceAtLeast(2)
+            val h = (height * scale).roundToInt().coerceAtLeast(2)
+            val formats = if (opaque) listOf(false, true) else listOf(false)
+            for (is565 in formats) {
+                val bpp = if (is565) 2L else 4L
+                val bytes = children.toLong() *
+                        (w.toLong() * h * bpp + FRAME_OVERHEAD_BYTES)
+                if (bytes <= budget) {
+                    return RenderPlan(
+                        scale = scale,
+                        step = 1,
+                        rgb565 = is565,
+                        frames = children,
+                        outW = w,
+                        outH = h,
+                        bytes = bytes,
+                        effectiveFps = fps,
+                        transition = transition
                     )
-                    fallback = p
-                    if (bytes <= budget) return p
                 }
             }
         }
-        if (fallback != null && fallback.bytes <= budget) return fallback
-        // The smallest scale in the normal ladder can still be too large on
-        // tiny screens/tiny budgets. Keep one frame and solve for the largest
-        // 2..N pixel rectangle that fits, instead of returning a plan the
-        // caller cannot push.
-        return oneFramePlan(width, height, opaque, n, fps, budget)
+        return null
     }
 
     private fun oneFramePlan(
         width: Int,
         height: Int,
         opaque: Boolean,
-        step: Int,
         fps: Int,
         budget: Long
     ): RenderPlan {
@@ -239,10 +451,10 @@ object LivingFrameEngine {
         val available = (budget - FRAME_OVERHEAD_BYTES).coerceAtLeast(0L)
         if (available < bpp * 4L) {
             return RenderPlan(
-                scale = 0.1f, step = step, rgb565 = opaque,
+                scale = 0.1f, step = 1, rgb565 = opaque,
                 frames = 1, outW = 2, outH = 2,
                 bytes = (2L * 2L * bpp) + FRAME_OVERHEAD_BYTES,
-                effectiveFps = LivingFrameFps.snap(fps.toFloat() / step)
+                effectiveFps = fps
             )
         }
         val scale = sqrt(
@@ -257,9 +469,9 @@ object LivingFrameEngine {
         val bytes = w.toLong() * h * bpp + FRAME_OVERHEAD_BYTES
         return RenderPlan(
             scale = (w.toFloat() / width).coerceIn(0.001f, 1f),
-            step = step, rgb565 = opaque,
+            step = 1, rgb565 = opaque,
             frames = 1, outW = w, outH = h, bytes = bytes,
-            effectiveFps = LivingFrameFps.snap(fps.toFloat() / step)
+            effectiveFps = fps
         )
     }
 
