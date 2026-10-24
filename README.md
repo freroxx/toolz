@@ -326,12 +326,13 @@ All product names, logos, brands, and registered trademarks cited within this pr
 
 Toolz is an independent project, made substantially better by early adopters and contributors from the community:
 
-| Contributor | Contribution                                                                                             | Profile |
-|---|----------------------------------------------------------------------------------------------------------|---|
-| **Briz** (`clickfun`) | Designed all of the official Toolz icon logos                                                              | [Discord Profile](https://discord.com/users/1525210658529083432) |
+| Contributor                            | Contribution                                                                                             | Profile |
+|----------------------------------------|----------------------------------------------------------------------------------------------------------|---|
+| **Briz** (`clickfun`)                  | Designed all of the official Toolz icon logos                                                            | [Discord Profile](https://discord.com/users/1525210658529083432) |
 | **ARedstonePerson** (`aredstoneperson`) | Deep testing & feature proposals since the earliest beta/alpha releases (OG member)                      | [Discord Profile](https://discord.com/users/1368349335070179329) |
-| **Luciano** (`luciano2996`) | Conceived and suggested the Living Widgets tool                                                          | [Discord Profile](https://discord.com/users/327494558294343680) |
-| **Kreisler** (`itskreisler`) | Diagnosed a critical MIUI crash loop caused by hardware `createBlurEffect` failure (`nativePtr is null`) | [Discord Profile](https://discord.com/users/455456141330219009) |
+| **Luciano** (`luciano2996`)            | Conceived and suggested the Living Widgets tool                                                          | [Discord Profile](https://discord.com/users/327494558294343680) |
+| **Kreisler** (`itskreisler`)           | Diagnosed a critical MIUI crash loop caused by hardware `createBlurEffect` failure (`nativePtr is null`) | [Discord Profile](https://discord.com/users/455456141330219009) |
+| **MinosPrime** (`tkodrift`)             | Major bug reports and suggestions (OG member)                                                            |    [Discord Profile](https://discord.com/users/747397160558919692)     |
 
 *Want to contribute? Report bugs via Developer Mode Fast Reports, submit pull requests, or share ideas in our [Discord Server](https://discord.gg/aAswRUerwh).*
 
