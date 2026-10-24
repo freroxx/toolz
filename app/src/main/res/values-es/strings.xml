@@ -1,6 +1,7 @@
 <resources>
     <string name="app_name">Toolz</string>
     <string name="accessibility_description">Permite que Focus Flow supervise el uso de las aplicaciones y aplique bloqueos estrictos cuando se alcancen los límites.</string>
+    <string name="accessibility_caffeinate_description">Mantiene la pantalla encendida solo mientras usas las aplicaciones que elegiste. Detecta la aplicación en primer plano para activarse y desactivarse; no se lee ningún contenido.</string>
 
     <!-- OnboardingScreen -->
     <string name="accessibility_purgeshot_description">Supervisa las notificaciones de capturas de pantalla del sistema para ofrecer el borrado programado, incluso cuando Toolz está en segundo plano. No se lee ningún contenido.</string>
@@ -3650,9 +3651,10 @@
     <string name="st_Manifest_FlashlightTile">Toolz: Linterna</string>
     <string name="st_Manifest_VaultAutofill">Autocompletar de Vault</string>
     <string name="st_Manifest_NotificationVault">Toolz Bóveda de notificaciones</string>
-    <string name="st_Manifest_FocusFlow">Toolz Focus Flow</string>
-    <string name="st_Manifest_PurgeShot">Toolz PurgeShot</string>
+    <string name="st_Manifest_FocusFlow">Toolz Flujo de enfoque</string>
+    <string name="st_Manifest_PurgeShot">Toolz Borrado de capturas</string>
     <string name="st_Manifest_CleanerAutoClear">Toolz Limpieza automática</string>
+    <string name="st_Manifest_Caffeinate">Toolz Cafeína</string>
     <string name="st_Manifest_ClipboardTile">Toolz: Portapapeles</string>
     <string name="st_Manifest_CaffeinateTile">Toolz: Cafeína</string>
     <string name="st_Manifest_QuickAccessTile">Toolz: Acceso rápido</string>
@@ -4586,5 +4588,35 @@
     <string name="st_FastReport_info_point_discord">Únete al Discord de Toolz y deja el archivo en el canal de reportes de errores para que pueda revisarse. La invitación también está en Ajustes → Acerca de.</string>
     <string name="st_FastReport_info_got_it">Entendido</string>
     <string name="st_FastReport_info_open_discord">Abrir Discord</string>
+
+    <!-- Flashlight polish -->
+    <string name="fl_open_screen_light">Abrir luz de pantalla</string>
+    <string name="fl_open_settings">Ajustes de la linterna</string>
+    <string name="fl_settings_title">Valores de inicio</string>
+    <string name="fl_settings_intro">Elige cómo debe estar la linterna al encenderla. Los cambios se guardan al instante.</string>
+    <string name="fl_default_mode">Modo predeterminado</string>
+    <string name="fl_default_mode_desc">Empezar en este modo cada vez.</string>
+    <string name="fl_always_intensity">Fijar siempre la intensidad en</string>
+    <string name="fl_always_intensity_desc">Restablece el brillo al encender el haz.</string>
+    <string name="fl_always_strobe">Fijar siempre la velocidad del estrobo en</string>
+    <string name="fl_always_strobe_desc">Restablece la frecuencia del estrobo al encender el haz.</string>
+    <string name="fl_always_pace">Fijar siempre el rango de ritmo en</string>
+    <string name="fl_always_pace_desc">Restablece el rango de ritmo del disco al encender el haz.</string>
+    <string name="fl_saved_automatically">Guardado automáticamente</string>
+    <string name="fl_mode_steady">Fijo</string>
+    <string name="fl_mode_strobe">Estrobo</string>
+    <string name="fl_mode_sos">SOS</string>
+    <string name="fl_mode_disco">Disco</string>
+    <string name="fl_timer_title">Temporizador de apagado</string>
+    <string name="fl_timer_subtitle">El haz se apaga solo cuando termina la cuenta atrás.</string>
+    <string name="fl_timer_off">Apagado</string>
+    <string name="fl_timer_start">Iniciar temporizador</string>
+    <string name="fl_timer_update">Actualizar temporizador</string>
+    <string name="fl_timer_cancel">Cancelar temporizador</string>
+    <string name="fl_timer_remaining">%1$02d:%2$02d restantes</string>
+    <string name="fl_timer_minutes">%1$d min</string>
+    <string name="fl_timer_hours">%1$d h</string>
+    <string name="fl_timer_hours_minutes">%1$d h %2$d min</string>
+    <string name="fl_timer_slider_hint">Desliza de 0 a 120 minutos</string>
 
 </resources>

@@ -1,6 +1,7 @@
 <resources>
     <string name="app_name">Toolz</string>
     <string name="accessibility_description">Permite que o Focus Flow monitore o uso de aplicativos e aplique bloqueios rígidos quando os limites forem atingidos.</string>
+    <string name="accessibility_caffeinate_description">Mantém a tela ligada apenas enquanto você usa os aplicativos escolhidos. Detecta o app em primeiro plano para ativar e desativar; nenhum conteúdo é lido.</string>
 
     <!-- OnboardingScreen -->
     <string name="accessibility_purgeshot_description">Monitora as notificações de captura de tela do sistema para oferecer exclusão programada, mesmo quando o Toolz está em segundo plano. Nenhum conteúdo é lido.</string>
@@ -3645,10 +3646,11 @@
     <string name="st_Manifest_VaultAutofill">Preenchimento do Cofre</string>
     <string name="st_Manifest_NotificationVault">Toolz Cofre de notificações</string>
     <string name="st_Manifest_FocusFlow">Toolz Fluxo de Foco</string>
-    <string name="st_Manifest_PurgeShot">Toolz PurgeShot</string>
+    <string name="st_Manifest_PurgeShot">Toolz Exclusão de capturas</string>
     <string name="st_Manifest_CleanerAutoClear">Toolz Limpeza automática</string>
+    <string name="st_Manifest_Caffeinate">Toolz Cafeína</string>
     <string name="st_Manifest_ClipboardTile">Toolz: Área de Transferência</string>
-    <string name="st_Manifest_CaffeinateTile">Toolz: Caffeinate</string>
+    <string name="st_Manifest_CaffeinateTile">Toolz: Cafeína</string>
     <string name="st_Manifest_QuickAccessTile">Toolz: Acesso rápido</string>
     <string name="st_Manifest_AutofillService">Toolz Preenchimento</string>
     <string name="notepad_copied">Copiado</string>
@@ -4556,5 +4558,35 @@
     <string name="st_FocusLock_BtnExit">SAIR PARA A TELA INICIAL</string>
     <string name="st_FocusLock_BtnExit_CD">Sair do app bloqueado para a tela inicial</string>
     <string name="st_FocusLock_ToastCantOpen">Não foi possível abrir o Toolz automaticamente — toque em SAIR PARA A TELA INICIAL e abra o Toolz manualmente.</string>
+
+    <!-- Flashlight polish -->
+    <string name="fl_open_screen_light">Abrir luz da tela</string>
+    <string name="fl_open_settings">Ajustes da lanterna</string>
+    <string name="fl_settings_title">Padrões do feixe</string>
+    <string name="fl_settings_intro">Escolha como a lanterna deve ficar ao ligar. As alterações são salvas na hora.</string>
+    <string name="fl_default_mode">Modo padrão</string>
+    <string name="fl_default_mode_desc">Começar neste modo sempre.</string>
+    <string name="fl_always_intensity">Sempre definir a intensidade em</string>
+    <string name="fl_always_intensity_desc">Redefine o brilho quando o feixe liga.</string>
+    <string name="fl_always_strobe">Sempre definir a velocidade do strobe em</string>
+    <string name="fl_always_strobe_desc">Redefine a frequência do strobe quando o feixe liga.</string>
+    <string name="fl_always_pace">Sempre definir a faixa de ritmo em</string>
+    <string name="fl_always_pace_desc">Redefine a faixa de ritmo do disco quando o feixe liga.</string>
+    <string name="fl_saved_automatically">Salvo automaticamente</string>
+    <string name="fl_mode_steady">Fixo</string>
+    <string name="fl_mode_strobe">Strobe</string>
+    <string name="fl_mode_sos">SOS</string>
+    <string name="fl_mode_disco">Disco</string>
+    <string name="fl_timer_title">Temporizador de desligamento</string>
+    <string name="fl_timer_subtitle">O feixe se desliga sozinho quando a contagem termina.</string>
+    <string name="fl_timer_off">Desligado</string>
+    <string name="fl_timer_start">Iniciar temporizador</string>
+    <string name="fl_timer_update">Atualizar temporizador</string>
+    <string name="fl_timer_cancel">Cancelar temporizador</string>
+    <string name="fl_timer_remaining">%1$02d:%2$02d restantes</string>
+    <string name="fl_timer_minutes">%1$d min</string>
+    <string name="fl_timer_hours">%1$d h</string>
+    <string name="fl_timer_hours_minutes">%1$d h %2$d min</string>
+    <string name="fl_timer_slider_hint">Deslize de 0 a 120 minutos</string>
 
 </resources>

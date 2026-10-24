@@ -1652,7 +1652,11 @@ fun ToolzNavHost(
             )
         }
         composable(Screen.Flashlight.route) {
-            FlashlightScreen(viewModel = hiltViewModel(), onBack = { toolOnBack() })
+            FlashlightScreen(
+                viewModel = hiltViewModel(),
+                onBack = { toolOnBack() },
+                onOpenScreenLight = { navController.navigate(Screen.ScreenLight.route) }
+            )
         }
         composable(Screen.ScreenLight.route) {
             ScreenLightScreen(viewModel = hiltViewModel(), onBack = { toolOnBack() })

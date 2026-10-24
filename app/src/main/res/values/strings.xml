@@ -3,6 +3,7 @@
     <string name="accessibility_description">Enables Focus Flow to monitor app usage and apply hard locks when limits are reached.</string>
     <string name="accessibility_purgeshot_description">Monitors system screenshot notifications to offer timed deletion, even when Toolz is in background. No content is read.</string>
     <string name="accessibility_cleaner_description">Optional. Only when you tap Auto-clear: opens each selected app\'s Storage settings and taps Clear cache. Never runs in background, never reads content.</string>
+    <string name="accessibility_caffeinate_description">Keeps the screen awake only while you use the apps you selected. Detects the foreground app to start and stop automatically; no content is read.</string>
 
     <!-- OnboardingScreen -->
     <string name="st_OnboardingScreen_4f2d">Back</string>
@@ -711,12 +712,24 @@
     <string name="st_SettingsScreen_q7r9">Choose Audio File</string>
     <string name="st_SettingsScreen_s9t1">Custom audio active</string>
     <string name="st_SettingsScreen_u1v3">RESET</string>
-    <string name="st_AppSkin_custom_title">Use photo from device</string>
-    <string name="st_AppSkin_custom_subtitle">Your image becomes the in-app icon (launcher keeps the closest tile)</string>
+    <string name="st_AppSkin_custom_title">Photo icon</string>
+    <string name="st_AppSkin_custom_subtitle">Use a photo as your in-app icon. Your launcher keeps the built-in tile.</string>
     <string name="st_AppSkin_custom_pick">Choose photo</string>
-    <string name="st_AppSkin_custom_picked">Photo applied everywhere in-app</string>
+    <string name="st_AppSkin_custom_replace">Replace photo</string>
+    <string name="st_AppSkin_custom_use_saved">Use saved photo</string>
+    <string name="st_AppSkin_custom_applying">Applying…</string>
+    <string name="st_AppSkin_custom_status_active">In use as your in-app icon</string>
+    <string name="st_AppSkin_custom_status_saved">Saved photo is not in use</string>
+    <string name="st_AppSkin_custom_error">Couldn\'t use that image. Try another.</string>
+    <string name="st_AppSkin_custom_experimental">Experimental</string>
     <string name="st_AppSkin_custom_pin">Add to Home screen</string>
     <string name="st_AppSkin_custom_remove">Remove photo</string>
+    <string name="st_AppSkin_iconpack_title">Icon packs override this tile</string>
+    <string name="st_AppSkin_iconpack_body">If your launcher uses an icon pack, it replaces Toolz\'s icon. Long-press any preset to pin it to your Home screen with its real artwork.</string>
+    <string name="st_AppSkin_pin_added">Shortcut sent — confirm on your Home screen</string>
+    <string name="st_AppSkin_pin_updated">Home screen shortcut updated</string>
+    <string name="st_AppSkin_pin_unsupported">Your launcher doesn\'t support pinned shortcuts</string>
+    <string name="st_AppSkin_pin_failed">Couldn\'t add the shortcut</string>
     <string name="st_SettingsScreen_w3x5">HEALTH &amp; ACTIVITY</string>
     <string name="st_SettingsScreen_y5z7">Step Tracker</string>
     <string name="st_SettingsScreen_a7b9">Monitor activity in background</string>
@@ -949,6 +962,11 @@
     <string name="st_AiSettings_presets_title">PRESETS</string>
     <string name="st_AiSettings_show_key">Show API key</string>
     <string name="st_AiSettings_hide_key">Hide API key</string>
+    <string name="st_AiSettings_live_catalog_title">Live model catalog updates</string>
+    <string name="st_AiSettings_live_catalog_desc">Refresh AI models at launch and whenever the assistant opens</string>
+    <string name="st_AiSettings_catalog_update_title">AI models updated</string>
+    <string name="st_AiSettings_catalog_update_message">Model catalog v%1$d is ready.</string>
+    <string name="st_AiSettings_catalog_update_new_models">Model catalog v%1$d · %2$d new models added</string>
     <string name="st_AiChat_copy">Copy</string>
     <string name="st_AiChat_copied">Copied</string>
 
@@ -3743,6 +3761,7 @@
     <string name="st_Manifest_FocusFlow">Toolz Focus Flow</string>
     <string name="st_Manifest_PurgeShot">Toolz PurgeShot</string>
     <string name="st_Manifest_CleanerAutoClear">Toolz Cleaner Auto-clear</string>
+    <string name="st_Manifest_Caffeinate">Toolz Caffeinate</string>
     <string name="st_Manifest_ClipboardTile">Toolz: Clipboard</string>
     <string name="st_Manifest_CaffeinateTile">Toolz: Caffeinate</string>
     <string name="st_Manifest_QuickAccessTile">Toolz: Quick Access</string>
@@ -4652,5 +4671,35 @@
     <string name="st_FastReport_info_point_discord">Join the Toolz Discord and drop the file in the bug-reports channel so it can be reviewed. The invite is also in Settings → About.</string>
     <string name="st_FastReport_info_got_it">Got it</string>
     <string name="st_FastReport_info_open_discord">Open Discord</string>
+
+    <!-- Flashlight polish -->
+    <string name="fl_open_screen_light">Open screen light</string>
+    <string name="fl_open_settings">Flashlight settings</string>
+    <string name="fl_settings_title">Beam defaults</string>
+    <string name="fl_settings_intro">Choose how the flashlight should look the moment you turn it on. Changes are saved instantly.</string>
+    <string name="fl_default_mode">Default mode</string>
+    <string name="fl_default_mode_desc">Start in this mode every time.</string>
+    <string name="fl_always_intensity">Always set intensity to</string>
+    <string name="fl_always_intensity_desc">Reset the brightness when the beam starts.</string>
+    <string name="fl_always_strobe">Always set strobe speed to</string>
+    <string name="fl_always_strobe_desc">Reset the strobe rate when the beam starts.</string>
+    <string name="fl_always_pace">Always set pace range to</string>
+    <string name="fl_always_pace_desc">Reset the disco pace range when the beam starts.</string>
+    <string name="fl_saved_automatically">Saved automatically</string>
+    <string name="fl_mode_steady">Steady</string>
+    <string name="fl_mode_strobe">Strobe</string>
+    <string name="fl_mode_sos">SOS</string>
+    <string name="fl_mode_disco">Disco</string>
+    <string name="fl_timer_title">Auto-off timer</string>
+    <string name="fl_timer_subtitle">The beam turns itself off when the countdown ends.</string>
+    <string name="fl_timer_off">Off</string>
+    <string name="fl_timer_start">Start timer</string>
+    <string name="fl_timer_update">Update timer</string>
+    <string name="fl_timer_cancel">Cancel timer</string>
+    <string name="fl_timer_remaining">%1$02d:%2$02d remaining</string>
+    <string name="fl_timer_minutes">%1$d min</string>
+    <string name="fl_timer_hours">%1$d h</string>
+    <string name="fl_timer_hours_minutes">%1$d h %2$d min</string>
+    <string name="fl_timer_slider_hint">Slide from 0 to 120 minutes</string>
 
 </resources>

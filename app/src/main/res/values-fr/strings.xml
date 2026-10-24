@@ -1,6 +1,7 @@
 <resources>
     <string name="app_name">Toolz</string>
     <string name="accessibility_description">Permet à Focus Flow de surveiller l\'utilisation des applications et d\'appliquer des verrouillages stricts lorsque les limites sont atteintes.</string>
+    <string name="accessibility_caffeinate_description">Garde l\'écran allumé uniquement pendant l\'utilisation des applications choisies. Détecte l\'application au premier plan pour s\'activer et se désactiver ; aucun contenu n\'est lu.</string>
 
     <!-- OnboardingScreen -->
     <string name="accessibility_purgeshot_description">Surveille les notifications de capture d\'écran du système pour proposer une suppression programmée, même lorsque Toolz est en arrière-plan. Aucun contenu n\'est lu.</string>
@@ -3651,9 +3652,10 @@ La plupart des optimisations nécessitent Shizuku pour un accès shell privilég
     <string name="st_Manifest_FlashlightTile">Toolz : Lampe torche</string>
     <string name="st_Manifest_VaultAutofill">Remplissage auto du Coffre</string>
     <string name="st_Manifest_NotificationVault">Toolz Coffre de notifications</string>
-    <string name="st_Manifest_FocusFlow">Toolz Focus Flow</string>
-    <string name="st_Manifest_PurgeShot">Toolz PurgeShot</string>
+    <string name="st_Manifest_FocusFlow">Toolz Flux de concentration</string>
+    <string name="st_Manifest_PurgeShot">Toolz Suppression de captures</string>
     <string name="st_Manifest_CleanerAutoClear">Toolz Nettoyage auto</string>
+    <string name="st_Manifest_Caffeinate">Toolz Caféine</string>
     <string name="st_Manifest_ClipboardTile">Toolz : Presse-papiers</string>
     <string name="st_Manifest_CaffeinateTile">Toolz : Caféine</string>
     <string name="st_Manifest_QuickAccessTile">Toolz : Accès rapide</string>
@@ -4563,5 +4565,35 @@ La plupart des optimisations nécessitent Shizuku pour un accès shell privilég
     <string name="st_FocusLock_BtnExit">RETOUR À L\'ACCUEIL</string>
     <string name="st_FocusLock_BtnExit_CD">Quitter l\'app bloquée vers l\'accueil</string>
     <string name="st_FocusLock_ToastCantOpen">Impossible d\'ouvrir Toolz automatiquement — appuyez sur RETOUR À L\'ACCUEIL, puis ouvrez Toolz manuellement.</string>
+
+    <!-- Flashlight polish -->
+    <string name="fl_open_screen_light">Ouvrir la lumière d\'écran</string>
+    <string name="fl_open_settings">Réglages de la lampe</string>
+    <string name="fl_settings_title">Réglages du faisceau</string>
+    <string name="fl_settings_intro">Choisissez l\'état de la lampe dès l\'allumage. Les modifications sont enregistrées instantanément.</string>
+    <string name="fl_default_mode">Mode par défaut</string>
+    <string name="fl_default_mode_desc">Démarrer dans ce mode à chaque fois.</string>
+    <string name="fl_always_intensity">Toujours régler l\'intensité à</string>
+    <string name="fl_always_intensity_desc">Réinitialise la luminosité au démarrage du faisceau.</string>
+    <string name="fl_always_strobe">Toujours régler la vitesse du stroboscope à</string>
+    <string name="fl_always_strobe_desc">Réinitialise la fréquence du stroboscope au démarrage du faisceau.</string>
+    <string name="fl_always_pace">Toujours régler la plage de rythme à</string>
+    <string name="fl_always_pace_desc">Réinitialise la plage de rythme du disco au démarrage du faisceau.</string>
+    <string name="fl_saved_automatically">Enregistré automatiquement</string>
+    <string name="fl_mode_steady">Fixe</string>
+    <string name="fl_mode_strobe">Stroboscope</string>
+    <string name="fl_mode_sos">SOS</string>
+    <string name="fl_mode_disco">Disco</string>
+    <string name="fl_timer_title">Minuterie d\'extinction</string>
+    <string name="fl_timer_subtitle">Le faisceau s\'éteint tout seul à la fin du compte à rebours.</string>
+    <string name="fl_timer_off">Désactivée</string>
+    <string name="fl_timer_start">Démarrer la minuterie</string>
+    <string name="fl_timer_update">Mettre à jour la minuterie</string>
+    <string name="fl_timer_cancel">Annuler la minuterie</string>
+    <string name="fl_timer_remaining">%1$02d:%2$02d restantes</string>
+    <string name="fl_timer_minutes">%1$d min</string>
+    <string name="fl_timer_hours">%1$d h</string>
+    <string name="fl_timer_hours_minutes">%1$d h %2$d min</string>
+    <string name="fl_timer_slider_hint">Faites glisser de 0 à 120 minutes</string>
 
 </resources>
