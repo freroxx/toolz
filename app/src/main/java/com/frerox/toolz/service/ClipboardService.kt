@@ -358,7 +358,11 @@ class ClipboardService : Service() {
             gateStatus == ClipboardGate.Status.ACTIVE_ACCESSIBILITY -> "Clipboard watching" to "Via accessibility • tap to open"
             else -> "Clipboard setup needed" to "Requires Shizuku or accessibility"
         }
-        return NotificationHelper.baseBuilder(this, NotificationHelper.CHANNEL_CLIPBOARD)
+        return NotificationHelper.baseBuilder(
+            this,
+            NotificationHelper.CHANNEL_CLIPBOARD,
+            showLargeIcon = false
+        )
             .setContentTitle(title)
             .setContentText(text)
             .setSmallIcon(R.drawable.ic_stat_toolz)

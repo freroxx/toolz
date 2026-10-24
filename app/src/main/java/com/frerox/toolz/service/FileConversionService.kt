@@ -191,7 +191,8 @@ class FileConversionService : Service() {
             .setContentTitle(if (queueTotal > 1) "Converting $queuePos of $queueTotal files" else "Converting file")
             .setContentText(content)
             .setSmallIcon(R.drawable.ic_stat_toolz)
-            .setLargeIcon(com.frerox.toolz.util.NotificationHelper.toolzLargeIcon(this))
+            // Progress notification: skip the large icon so the bar and file
+            // names keep the full notification width.
             .setColor(com.frerox.toolz.util.NotificationHelper.ACCENT_COLOR)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(!finished)

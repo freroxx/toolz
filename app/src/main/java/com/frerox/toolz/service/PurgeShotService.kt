@@ -264,7 +264,7 @@ class PurgeShotService : Service() {
             .setContentTitle("PurgeShot active")
             .setContentText("Watching for screenshots")
             .setSmallIcon(R.drawable.ic_stat_toolz)
-            .setLargeIcon(com.frerox.toolz.util.NotificationHelper.toolzLargeIcon(this))
+            // Ongoing status notification: no large icon so the text stays readable.
             .setOngoing(true)
             .setSilent(true)
             .setContentIntent(pi)
