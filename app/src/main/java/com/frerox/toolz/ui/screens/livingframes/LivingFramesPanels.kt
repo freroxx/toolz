@@ -175,9 +175,9 @@ internal fun MotionPanel(frame: LivingFrame, vm: LivingFramesViewModel) {
     val displayFps = LivingFrameFps.snap(frame.fps)
     val sourceFps = frame.sourceFps.coerceAtLeast(1)
     // The widget flips at playbackFps, not at the slider value (the slider is a ceiling).
+    val playFps = LivingFrameEngine.playbackFps(frame)
     val displayFrames = LivingFrameEngine.displaySequence(
-        frame.frameCount, sourceFps, LivingFrameEngine.playbackFps(frame),
-        frame.speed, frame.loopMode
+        frame.frameCount, sourceFps, playFps, frame.speed, frame.loopMode
     ).size
     val loopMs = LivingFrameEngine.loopDurationMs(
         frame.frameCount, sourceFps, frame.loopMode, frame.speed
@@ -230,10 +230,10 @@ internal fun MotionPanel(frame: LivingFrame, vm: LivingFramesViewModel) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            if (displayFps > sourceFps) {
+            if (displayFps > playFps) {
                 Text(
-                    "This set was captured at $sourceFps fps. Running it at $displayFps fps " +
-                            "repeats captured frames; it cannot add detail that was never captured. " +
+                    "This set was captured at $sourceFps fps, so it plays at $playFps fps. " +
+                            "A higher setting only repeats frames and is not used. " +
                             "Re-import at a higher capture rate for genuinely new frames.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant

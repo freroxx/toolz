@@ -64,6 +64,11 @@ files that were not saved.
   and is clamped to the import-quality preset and the 900-frame ceiling. A
   30-second window therefore captures up to 30 fps; a 15-second window can
   capture 60 fps.
+- Each capture slot takes the **nearest** decoded frame to its target time,
+  within half a source frame period (read from the stream and refined from the
+  decoder's real output spacing). Taking the first frame at or after the
+  target let a rounding error of a microsecond pick the following frame, which
+  showed up as judder in the stored loop.
 - Import quality presets store video frames at up to 1280 px (Compact),
   1920 px (High) or 2560 px (Ultra) on the longest edge, with matching WebP
   quality. That keeps a 1080p clip at 1920×1080 instead of shrinking it to a
@@ -71,7 +76,8 @@ files that were not saved.
   explicitly, so changing quality in the sheet cannot be ignored by a stale
   state update.
 - Codec-based extraction falls back to `MediaMetadataRetriever` when a decoder
-  cannot handle the file.
+  cannot handle the file. The codec path keeps the decoder's input queue full
+  rather than feeding one buffer per loop.
 - A window with no detectable motion is rejected with a suggestion to choose
   a different start point.
 - The clip sheet is scrollable with a fixed **Create loop** button, so the
@@ -141,10 +147,6 @@ reclaimable orphan folders.
   `LivingFramesRemoteViewsService` and an `AdapterViewFlipper`. Each frame is
   its own binder transaction, so long clips keep the widget's native
   resolution and there is no playback-engine switch to misconfigure.
-- The streaming service prefetches up to 12 frames ahead on one worker, keeps
-  a 24-frame / 48 MB cache, and returns the last rendered frame (plus a
-  non-blank loading view) while the next frame decodes. This removes the
-  blank flash between the loading view and the first frames.
 - A static single-update `ViewFlipper` remains only as a fallback for
   launchers that cannot animate collection widgets. It uses the already
   resampled display sequence and a bitmap budget of
@@ -152,26 +154,64 @@ reclaimable orphan folders.
   ceiling. If needed, Toolz reduces resolution, switches to 16-bit colour,
   samples frames, or eventually keeps one frame. The UI reports when a render
   was reduced.
+- Resizes are debounced before re-rendering. Each settled resize rebuilds the
+  streaming session at the new size. A widget that cannot be rendered shows a
+  short explanatory placeholder instead of a blank frame.
+
+### Playback timing
+
+- **Flipper rate.** `flipInterval` is an XML-only attribute, so there is one
+  layout per supported rate (1/2/4/5/6/8/10/12/15/20/24/30/40/48/60 fps). The
+  rate a widget uses is `LivingFrameEngine.playbackFps`: the lower of the
+  user's **Frames per second** setting and the rate the content needs
+  (`captured fps × speed`, snapped to a supported rate). The layout, the
+  display sequence and the Motion panel summary all use this one value.
+- **FPS is a ceiling.** Setting it above what the content needs does nothing:
+  the old behaviour only repeated frames, which cost launcher redraws and
+  binder calls for no extra motion. Setting it lower decimates frames to save
+  battery. The Motion panel says when the setting is not being used.
+- **Real interval.** The flipper interval is a whole number of milliseconds,
+  so 60 fps runs at about 58.8 and 48 fps at about 47.6. The display sequence
+  is resampled against the real interval, picking the source frame at the
+  centre of each display slot, so loop length follows the chosen speed and
+  dropped or repeated frames are spread evenly.
 - **Speed** (×0.25 to ×4) is a resampling multiplier, separate from FPS.
-  Changing it re-derives the display sequence instantly without touching the
-  stored frames.
+  Changing it re-derives the display sequence without touching the stored
+  frames. Because speed changes the content rate, it can change the flipper
+  layout as well.
 - **Resolution** (40–100%) is a render scale. Lowering it is instant and cuts
   battery and memory use; 100% is the full stored detail. Going above 100% is
   not offered because it would only upscale an already stored copy.
-- **Frames per second** can be raised above the captured rate. The extra
-  display frames repeat captured frames, so they smooth the launcher's flip
-  cadence but cannot add detail. The UI states this and suggests re-importing
-  at a higher capture rate for genuinely new frames.
-- Animated playback layouts are generated per supported rate
-  (1/2/4/5/6/8/10/12/15/20/24/30/40/48/60 fps) because `flipInterval` is an
-  XML-only attribute. The launcher animates the prepared frames; no
-  foreground service runs per frame.
+
+### Streaming service
+
+- **Resident loops.** Rendered frames are cached against a shared budget
+  (the smaller of one sixth of the app's heap limit and 64 MB, divided across
+  active Living Widgets). When every unique frame of the loop fits, the whole
+  loop stays in memory and, after the first pass, playback does no decoding.
+  An opaque video loop switches to 16-bit colour if that is what lets it stay
+  resident.
+- **Windowed loops.** When the loop does not fit, a sliding window of 8–64
+  frames is kept. Frames are evicted by how far ahead of the playhead they
+  are needed, so the frame just shown goes first. Plain least-recently-used
+  eviction is the worst policy for a cyclic scan, since it drops the frame
+  needed soonest.
+- **Prefetch.** Two workers render about 0.6 s of frames ahead (4–24 frames).
+  They re-read the playhead each time, so a newer position replaces older
+  work and there is no queue to fall behind.
+- **Misses.** The launcher keeps whatever it is handed for a position until
+  its window moves, so a stale frame would repeat for a full pass. A miss
+  therefore waits up to 100 ms for a decode already in flight, or decodes on
+  the launcher's loader thread, and only falls back to the last frame if that
+  fails. The loading view is always the first frame.
+- **Item ids** include a per-session id, so a change to speed, fps,
+  resolution or frames cannot match a stale launcher-side view.
+- Rendering uses a plain bitmap blit when corners are square, and marks fully
+  opaque output as having no alpha so the launcher can skip blending.
 - Some launchers pause widget animations in battery saver, and a few do not
   support collection widgets at all. If a streamed widget stays blank, lower
   **Resolution** in Motion or remove and re-add it. This is a launcher
   limitation, not a lost import.
-- Resizes are debounced before re-rendering. A widget that cannot be rendered
-  shows a short explanatory placeholder instead of a blank frame.
 
 ## Slideshow timing
 
@@ -211,6 +251,10 @@ and slideshow-option coverage lives in:
   --tests com.frerox.toolz.widget.LivingFrameEngineTest --offline
 ```
 
+Playback-rate coverage should include `playbackFps` (a set captured at 30 fps
+at ×1 with a 60 fps ceiling plays at 30) and `displaySequence` against the
+real flipper interval.
+
 For a full build check:
 
 ```bash
@@ -218,6 +262,24 @@ For a full build check:
 ```
 
 ## Release notes
+
+### Video playback pass
+
+- Video widgets follow FPS and speed through one rate. `playbackFps` picks the
+  flipper rate, and the layout, display sequence and Motion summary share it.
+  FPS is now a ceiling rather than a source of repeated frames.
+- The display sequence is resampled against the flipper's real millisecond
+  interval, so high rates such as 48 and 60 fps no longer drift against the
+  chosen speed.
+- The streaming service keeps whole loops resident when they fit, uses a
+  distance-based window when they do not, runs two prefetch workers, and
+  avoids handing the launcher a stale frame on a miss. All per-playback state
+  is swapped as one session.
+- Video import picks the nearest decoded frame to each capture time instead
+  of the first one after it, removing one-frame jitter from stored loops, and
+  keeps the decoder's input queue full.
+- The renderer uses a direct blit for square corners and marks opaque output
+  as alpha-free.
 
 ### Living Widgets quality and control pass
 
@@ -227,8 +289,6 @@ For a full build check:
 - Added a real speed control (×0.25–×4) separate from FPS, plus a 40–100%
   render-resolution control. Speed resamples the display sequence; resolution
   lowers rendering cost. Neither re-encodes stored frames.
-- FPS and quality controls are honest: raising FPS above the capture rate
-  repeats frames instead of claiming new detail, and the UI says so.
 - Long clips are the default: the clip sheet starts at 12 seconds, supports up
   to 30 seconds, and has a scrollable body with a fixed **Create loop**
   button. The selected import quality is passed explicitly to the importer.
@@ -236,9 +296,7 @@ For a full build check:
   library progress card, an ongoing notification, and cancel from either.
 - Storage estimates now use source dimensions and measured bits-per-pixel
   values; the real byte count replaces the estimate after import.
-- The widget streaming service prefetches ahead, caches frames, and returns
-  the last frame instead of an empty RemoteViews while loading, removing the
-  loading/frame flicker. The static fallback budget is corrected to
+- The static fallback budget is corrected to
   `6 × screen width × screen height × 4` bytes.
 - Tap actions can open any curated Toolz tool, not just the app; slideshow
   intervals now run from 1 minute to daily and use scrollable choice chips
