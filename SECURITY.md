@@ -8,7 +8,7 @@ Only the current active release line receives updates:
 
 | Version | Status |
 |---|---|
-| Latest Release (1.1.x) | Supported |
+| Latest Release (1.1.6) | Supported |
 | Older builds | Unsupported — please update |
 
 ## Reporting a Security Issue
