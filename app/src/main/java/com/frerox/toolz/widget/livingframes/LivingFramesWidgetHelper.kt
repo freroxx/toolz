@@ -115,7 +115,7 @@ object LivingFramesWidgetHelper {
         val d = context.resources.displayMetrics.density
         val (w, h) = widgetSizeDp(context, mgr, appWidgetId)
         return (w * d).roundToInt().coerceIn(96, 1600) to
-            (h * d).roundToInt().coerceIn(96, 1600)
+                (h * d).roundToInt().coerceIn(96, 1600)
     }
 
     /** Launcher grid cells, e.g. "4×2" (standard 70dp-cell rule). */
@@ -286,12 +286,18 @@ object LivingFramesWidgetHelper {
         val (w, h) = widgetSizePx(context, mgr, appWidgetId)
         val density = context.resources.displayMetrics.density
         val animated = frame.isAnimated
-        val displayFps = LivingFrameFps.snap(frame.fps)
+        // Must match LivingFramesRemoteViewsService: the sequence is resampled
+        // for this exact flipper rate, and the layout below is chosen from it.
+        val displayFps = if (animated) {
+            LivingFrameEngine.playbackFps(frame)
+        } else {
+            LivingFrameFps.snap(frame.fps)
+        }
         val resolution = LivingFrameResolution.snap(frame.resolutionPercent)
         val outW = (w * resolution / 100f).roundToInt().coerceAtLeast(48)
         val outH = (h * resolution / 100f).roundToInt().coerceAtLeast(48)
         val rgb565 = frame.quality == LivingFrameQuality.COMPACT &&
-            LivingFrameRenderer.isOpaque(frame)
+                LivingFrameRenderer.isOpaque(frame)
 
         // Speed and display rate are resolved into an explicit display
         // sequence. The launcher flipper only understands a fixed interval,

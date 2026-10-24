@@ -22,8 +22,10 @@ import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Shader
+import kotlin.math.roundToInt
 
 /**
  * One renderer for every widget bitmap. It draws straight to the widget's
@@ -44,6 +46,8 @@ object LivingFrameRenderer {
         val h = outH.coerceAtLeast(2)
         val config = if (rgb565) Bitmap.Config.RGB_565 else Bitmap.Config.ARGB_8888
         val out = Bitmap.createBitmap(w, h, config)
+        // A fully covered opaque output lets the host skip alpha blending.
+        if (!rgb565 && isOpaque(frame)) out.setHasAlpha(false)
         val canvas = Canvas(out)
 
         val dst = if (frame.fit == LivingFrameFit.FIT) {
@@ -71,18 +75,30 @@ object LivingFrameRenderer {
                 RectF(0f, t, src.width.toFloat(), t + ch)
             }
         }
-        val matrix = Matrix().apply { setRectToRect(srcRect, dst, Matrix.ScaleToFit.FILL) }
-        val shader = BitmapShader(src, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
-            .also { it.setLocalMatrix(matrix) }
 
         val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
-            this.shader = shader
             isDither = rgb565
             alpha = (frame.opacity.coerceIn(0f, 1f) * 255f).toInt()
         }
         val radius = (frame.cornerRadiusDp * density)
             .coerceIn(0f, minOf(dst.width(), dst.height()) / 2f)
-        canvas.drawRoundRect(dst, radius, radius, paint)
+
+        if (radius < 0.5f) {
+            // Square corners: a plain blit is much cheaper than a shader
+            // round-rect and is the common case for video loops.
+            val crop = Rect(
+                srcRect.left.roundToInt().coerceIn(0, src.width - 1),
+                srcRect.top.roundToInt().coerceIn(0, src.height - 1),
+                srcRect.right.roundToInt().coerceIn(1, src.width),
+                srcRect.bottom.roundToInt().coerceIn(1, src.height)
+            )
+            canvas.drawBitmap(src, crop, dst, paint)
+        } else {
+            val matrix = Matrix().apply { setRectToRect(srcRect, dst, Matrix.ScaleToFit.FILL) }
+            paint.shader = BitmapShader(src, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+                .also { it.setLocalMatrix(matrix) }
+            canvas.drawRoundRect(dst, radius, radius, paint)
+        }
         return out
     }
 
@@ -93,7 +109,7 @@ object LivingFrameRenderer {
      */
     fun isOpaque(frame: LivingFrame): Boolean =
         frame.type == LivingFrameType.VIDEO &&
-            frame.cornerRadiusDp == 0 &&
-            frame.opacity >= 0.999f &&
-            frame.fit == LivingFrameFit.FILL
+                frame.cornerRadiusDp == 0 &&
+                frame.opacity >= 0.999f &&
+                frame.fit == LivingFrameFit.FILL
 }

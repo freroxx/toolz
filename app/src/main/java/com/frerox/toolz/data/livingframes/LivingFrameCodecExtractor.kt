@@ -123,37 +123,67 @@ class LivingFrameCodecExtractor @Inject constructor(
             var inputEos = false
             var next = 0
 
+            // Pick the frame NEAREST each target, not the first one at or
+            // after it. Targets are integer microseconds and frame pts are
+            // rounded by the container, so a target 1 us past a frame used to
+            // grab the following frame: a whole source frame of jitter that
+            // showed up as judder in the loop. Half a frame period is the
+            // tolerance; the period is read from the stream and refined from
+            // the real output spacing.
+            var frameDeltaUs = runCatching {
+                val key = MediaFormat.KEY_FRAME_RATE
+                if (!format.containsKey(key)) {
+                    0L
+                } else {
+                    val rate = runCatching { format.getInteger(key).toFloat() }
+                        .getOrElse { format.getFloat(key) }
+                    if (rate > 0f) (1_000_000f / rate).toLong() else 0L
+                }
+            }.getOrDefault(0L)
+            var prevPts = Long.MIN_VALUE
+
             while (next < count) {
                 currentCoroutineContext().ensureActive()
                 val now = SystemClock.elapsedRealtime()
                 if (now - startedAt > 180_000L) break // never decode forever
-                if (!inputEos) {
-                    val inIdx = codec.dequeueInputBuffer(10_000L)
-                    if (inIdx >= 0) {
-                        val buf = codec.getInputBuffer(inIdx)
-                        val n = if (buf != null) extractor.readSampleData(buf, 0) else -1
-                        if (n < 0) {
-                            codec.queueInputBuffer(
-                                inIdx, 0, 0, 0L, MediaCodec.BUFFER_FLAG_END_OF_STREAM
-                            )
-                            inputEos = true
-                        } else {
-                            codec.queueInputBuffer(inIdx, 0, n, extractor.sampleTime, 0)
-                            extractor.advance()
-                        }
+                // Keep the decoder fed: queue every free input buffer instead
+                // of one per loop, so it never idles waiting on us.
+                var fed = 0
+                while (!inputEos && fed < 8) {
+                    val inIdx = codec.dequeueInputBuffer(if (fed == 0) 5_000L else 0L)
+                    if (inIdx < 0) break
+                    val buf = codec.getInputBuffer(inIdx)
+                    val n = if (buf != null) extractor.readSampleData(buf, 0) else -1
+                    if (n < 0) {
+                        codec.queueInputBuffer(
+                            inIdx, 0, 0, 0L, MediaCodec.BUFFER_FLAG_END_OF_STREAM
+                        )
+                        inputEos = true
+                    } else {
+                        codec.queueInputBuffer(inIdx, 0, n, extractor.sampleTime, 0)
+                        extractor.advance()
                     }
+                    fed++
                 }
-                val outIdx = codec.dequeueOutputBuffer(info, 10_000L)
+                val outIdx = codec.dequeueOutputBuffer(info, 5_000L)
                 if (outIdx >= 0) {
                     lastOutputAt = SystemClock.elapsedRealtime()
                     try {
                         val eos = (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
                         if (info.size > 0) {
+                            if (prevPts != Long.MIN_VALUE) {
+                                val delta = info.presentationTimeUs - prevPts
+                                if (delta >= 2_000L && (frameDeltaUs == 0L || delta < frameDeltaUs)) {
+                                    frameDeltaUs = delta
+                                }
+                            }
+                            prevPts = info.presentationTimeUs
+                            val toleranceUs = (frameDeltaUs / 2).coerceAtLeast(1_000L)
                             // One decoded picture can satisfy several targets
                             // (slow clips or a low requested fps).
                             var covered = 0
                             while (next + covered < count &&
-                                info.presentationTimeUs >= targets[next + covered]
+                                info.presentationTimeUs + toleranceUs >= targets[next + covered]
                             ) {
                                 covered++
                             }
@@ -186,7 +216,7 @@ class LivingFrameCodecExtractor @Inject constructor(
                         val outFormat = codec.outputFormat
                         if (outFormat.containsKey(MediaFormat.KEY_COLOR_RANGE)) {
                             range.expand = outFormat.getInteger(MediaFormat.KEY_COLOR_RANGE) !=
-                                MediaFormat.COLOR_RANGE_FULL
+                                    MediaFormat.COLOR_RANGE_FULL
                         }
                     }
                 }

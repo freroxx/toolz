@@ -194,6 +194,14 @@ object LivingFrameFps {
     fun atMost(fps: Float): Int = STEPS.lastOrNull { it <= fps } ?: MIN
     fun atMost(fps: Int): Int = atMost(fps.toFloat())
     fun intervalMs(fps: Int): Int = (1000f / snap(fps)).roundToInt()
+
+    /**
+     * Rate the launcher's flipper really runs at. flipInterval is a whole
+     * number of milliseconds, so 48 fps is 21 ms (47.6 fps) and 60 fps is
+     * 17 ms (58.8 fps). Resampling must use this, not the nominal step, or
+     * every loop drifts against the speed the user picked.
+     */
+    fun actualRate(fps: Int): Double = 1000.0 / intervalMs(fps)
     fun stepIndex(fps: Int): Int = STEPS.indexOf(snap(fps)).coerceAtLeast(0)
 
     fun label(fps: Int): String = when (snap(fps)) {

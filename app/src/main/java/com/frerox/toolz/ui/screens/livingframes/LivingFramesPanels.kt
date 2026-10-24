@@ -174,8 +174,10 @@ internal fun MotionPanel(frame: LivingFrame, vm: LivingFramesViewModel) {
     val resolutionLast = LivingFrameResolution.STEPS.lastIndex
     val displayFps = LivingFrameFps.snap(frame.fps)
     val sourceFps = frame.sourceFps.coerceAtLeast(1)
+    // The widget flips at playbackFps, not at the slider value (the slider is a ceiling).
     val displayFrames = LivingFrameEngine.displaySequence(
-        frame.frameCount, sourceFps, displayFps, frame.speed, frame.loopMode
+        frame.frameCount, sourceFps, LivingFrameEngine.playbackFps(frame),
+        frame.speed, frame.loopMode
     ).size
     val loopMs = LivingFrameEngine.loopDurationMs(
         frame.frameCount, sourceFps, frame.loopMode, frame.speed
@@ -199,7 +201,7 @@ internal fun MotionPanel(frame: LivingFrame, vm: LivingFramesViewModel) {
             )
             Text(
                 "×1 is the original timing. Speed resamples the loop when it renders, " +
-                    "so stored frames are never re-encoded and you can change it instantly.",
+                        "so stored frames are never re-encoded and you can change it instantly.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -231,15 +233,15 @@ internal fun MotionPanel(frame: LivingFrame, vm: LivingFramesViewModel) {
             if (displayFps > sourceFps) {
                 Text(
                     "This set was captured at $sourceFps fps. Running it at $displayFps fps " +
-                        "repeats captured frames; it cannot add detail that was never captured. " +
-                        "Re-import at a higher capture rate for genuinely new frames.",
+                            "repeats captured frames; it cannot add detail that was never captured. " +
+                            "Re-import at a higher capture rate for genuinely new frames.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             Text(
                 "Stored copy: ${frame.width}×${frame.height} px · ${frame.quality.label} " +
-                    "quality · $sourceFps fps capture.",
+                        "quality · $sourceFps fps capture.",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -263,8 +265,8 @@ internal fun MotionPanel(frame: LivingFrame, vm: LivingFramesViewModel) {
             )
             Text(
                 "Renders at ${renderW}×${renderH} px. Lowering this is instant and cuts " +
-                    "battery and memory use; 100% is the full stored detail, and going " +
-                    "higher would only upscale a copy that is already stored.",
+                        "battery and memory use; 100% is the full stored detail, and going " +
+                        "higher would only upscale a copy that is already stored.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -304,7 +306,7 @@ internal fun TimingPanel(frame: LivingFrame, nextIn: String?, vm: LivingFramesVi
             )
             Text(
                 "Slide timing is scheduled by the launcher. Battery saver can delay a change; " +
-                    "opening the widget always shows the current photo immediately.",
+                        "opening the widget always shows the current photo immediately.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -512,7 +514,7 @@ internal fun StoragePanel(
             "Storage",
             storage?.let {
                 "${LivingFramesRepository.formatBytes(it.usedBytes)} / " +
-                    LivingFramesRepository.formatBytes(it.quotaBytes)
+                        LivingFramesRepository.formatBytes(it.quotaBytes)
             }
         )
         if (loadFailed) {
@@ -553,7 +555,7 @@ internal fun StoragePanel(
             )
             Text(
                 "${s.setCount} set${if (s.setCount == 1) "" else "s"} · " +
-                    "${LivingFramesRepository.formatBytes(s.freeBytes)} free on this device",
+                        "${LivingFramesRepository.formatBytes(s.freeBytes)} free on this device",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -561,7 +563,7 @@ internal fun StoragePanel(
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         "${s.orphanDirs.size} unused folder${if (s.orphanDirs.size == 1) "" else "s"} " +
-                            "(${LivingFramesRepository.formatBytes(s.orphanBytes)})",
+                                "(${LivingFramesRepository.formatBytes(s.orphanBytes)})",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f)
@@ -572,11 +574,11 @@ internal fun StoragePanel(
         }
         Text(
             "Long clips are streamed one frame at a time, so the launcher's memory limit " +
-                "doesn't shrink them. Animations can hold up to " +
-                "${LivingFramesRepository.MAX_CLIP_MS / 1000} s (capped at " +
-                "${LivingFramesRepository.MAX_FRAMES} frames) and slideshows up to " +
-                "${LivingFramesRepository.MAX_SLIDES} photos. Imports keep at least " +
-                "${LivingFramesRepository.formatBytes(LivingFramesRepository.MIN_FREE_BYTES)} free.",
+                    "doesn't shrink them. Animations can hold up to " +
+                    "${LivingFramesRepository.MAX_CLIP_MS / 1000} s (capped at " +
+                    "${LivingFramesRepository.MAX_FRAMES} frames) and slideshows up to " +
+                    "${LivingFramesRepository.MAX_SLIDES} photos. Imports keep at least " +
+                    "${LivingFramesRepository.formatBytes(LivingFramesRepository.MIN_FREE_BYTES)} free.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

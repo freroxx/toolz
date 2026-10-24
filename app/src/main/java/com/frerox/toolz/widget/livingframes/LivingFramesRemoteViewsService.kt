@@ -29,7 +29,6 @@ import android.widget.RemoteViewsService
 import com.frerox.toolz.R
 import com.frerox.toolz.data.livingframes.LivingFrame
 import com.frerox.toolz.data.livingframes.LivingFrameEngine
-import com.frerox.toolz.data.livingframes.LivingFrameFps
 import com.frerox.toolz.data.livingframes.LivingFrameQuality
 import com.frerox.toolz.data.livingframes.LivingFrameRenderer
 import com.frerox.toolz.data.livingframes.LivingFrameResolution
@@ -39,26 +38,98 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
+import kotlin.math.ceil
 import kotlin.math.roundToInt
 
 /**
  * Supplies one frame at a time to an `AdapterViewFlipper` in the launcher.
  *
- * A collection widget sends each frame in its own transaction, so a 900-frame
- * 30 fps clip can render at the widget's native resolution instead of being
- * crushed into the binder's bitmap budget.
- *
- * Smoothness rule: the host asks for a position and immediately shows the
- * result. Decoding synchronously on that call made the widget flash the
- * loading view whenever the launcher ran slightly ahead. This factory
- * prefetches a window ahead, keeps a bounded bitmap cache, and returns the
- * last good frame (never an empty RemoteViews) on a miss.
+ * Playback contract:
+ *  - The flipper runs at [LivingFrameEngine.playbackFps]; the order handed
+ *    out here is resampled for exactly that interval, so loop length follows
+ *    fps and speed.
+ *  - Rendered frames are cached. When the whole loop fits the memory budget
+ *    it stays resident and, after the first pass, playback never decodes.
+ *    Otherwise a sliding window is kept and frames are evicted by how far
+ *    ahead of the playhead they are (the frame just shown is the first to
+ *    go). Plain LRU is the worst policy for a cyclic scan: it evicts the
+ *    frame needed soonest and misses on every frame.
+ *  - A miss never returns a stale frame if it can be avoided. The host
+ *    caches whatever it is handed for that position until its window
+ *    moves, so a stale frame would repeat for a full pass. A miss waits
+ *    briefly for an in-flight decode, or decodes inline on the host's
+ *    loader thread, before falling back to the last frame.
  */
 class LivingFramesRemoteViewsService : RemoteViewsService() {
     override fun onGetViewFactory(intent: Intent): RemoteViewsFactory =
         LivingFramesFactory(applicationContext, intent)
+}
+
+/**
+ * Everything one data-set generation needs. Swapped atomically so
+ * getViewAt never sees a half-updated order/size/cache combination, and a
+ * decode that finishes after a swap lands in the retired session's cache.
+ */
+private class Session(
+    val id: Int,
+    val frame: LivingFrame,
+    val order: IntArray,
+    val outW: Int,
+    val outH: Int,
+    val density: Float,
+    val rgb565: Boolean,
+    val resident: Boolean,
+    val capacity: Int,
+    val ahead: Int
+) {
+    val lock = ReentrantLock()
+    val changed = lock.newCondition()
+    val cache = HashMap<Int, Bitmap>()
+    val pending = HashSet<Int>()
+    val cursor = AtomicInteger(0)
+    val active = AtomicInteger(0)
+
+    /** Resident session with every unique frame rendered: nothing left to do. */
+    @Volatile var warm = false
+
+    /** Display positions at which each source frame appears. */
+    private val positions: Array<IntArray?> = run {
+        val size = maxOf(frame.frameCount, (order.maxOrNull() ?: 0) + 1)
+        val counts = IntArray(size)
+        order.forEach { counts[it]++ }
+        val result = arrayOfNulls<IntArray>(size)
+        val fill = IntArray(size)
+        order.forEachIndexed { position, index ->
+            val slots = result[index] ?: IntArray(counts[index]).also { result[index] = it }
+            slots[fill[index]++] = position
+        }
+        result
+    }
+
+    val unique: Int = positions.count { it != null }
+
+    /** Display ticks until [frameIndex] is next needed, from the playhead. */
+    fun distance(frameIndex: Int): Int {
+        val n = order.size
+        val c = cursor.get()
+        var best = Int.MAX_VALUE
+        positions.getOrNull(frameIndex)?.forEach { p ->
+            val d = (p - c + n) % n
+            if (d < best) best = d
+        }
+        return best
+    }
+
+    fun release() = lock.withLock {
+        cache.clear()
+        pending.clear()
+        changed.signalAll()
+    }
 }
 
 private class LivingFramesFactory(
@@ -77,35 +148,18 @@ private class LivingFramesFactory(
         }
     }
 
-    @Volatile private var frame: LivingFrame? = null
-    @Volatile private var order: IntArray = IntArray(0)
-    @Volatile private var outW: Int = 0
-    @Volatile private var outH: Int = 0
-    @Volatile private var density: Float = 1f
-    @Volatile private var rgb565: Boolean = false
-
-    /** Incremented on every data-set change so stale prefetches can stop. */
-    @Volatile private var generation: Int = 0
-
-    /**
-     * Recently rendered frames, in access order. The launcher may still draw a
-     * view after it leaves this cache, so evicted bitmaps are left to the GC
-     * rather than recycled underneath it.
-     */
-    private val recent = LinkedHashMap<Int, Bitmap>(24, 0.75f, true)
-    private val pending = HashSet<Int>()
+    @Volatile private var session: Session? = null
 
     /** Last frame handed to the launcher; used instead of a blank on a miss. */
     @Volatile private var last: Bitmap? = null
 
-    /** Coalesced prefetch request; only the newest target is worth decoding. */
-    private val prefetchTarget = AtomicInteger(-1)
-    private val prefetchScheduled = AtomicBoolean(false)
-    @Volatile private var prefetchGeneration = -1
-    @Volatile private var prefetchFrame: LivingFrame? = null
+    private val sessionIds = AtomicInteger(0)
+    private val registered = AtomicBoolean(false)
 
-    private val executor = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "living-frames-prefetch").apply {
+    // Two workers: WebP decode is the bottleneck, and the host's loader
+    // thread decodes inline on a miss, so this is the useful parallelism.
+    private val executor = Executors.newFixedThreadPool(WORKERS) { runnable ->
+        Thread(runnable, "living-frames-decode").apply {
             isDaemon = true
             priority = Thread.NORM_PRIORITY - 1
         }
@@ -124,199 +178,237 @@ private class LivingFramesFactory(
         }
     }
 
-    override fun onCreate() = Unit
+    override fun onCreate() {
+        if (registered.compareAndSet(false, true)) ACTIVE_FACTORIES.incrementAndGet()
+    }
 
     override fun onDataSetChanged() {
-        generation++
-        val currentGeneration = generation
         val repository = repo
         if (repository == null || appWidgetId == AppWidgetManager.INVALID_APPWIDGET_ID) {
-            clearFrames()
+            retire()
             return
         }
         // Metadata is small; a bounded synchronous load here is safer than
         // showing a blank widget because a coroutine had not finished yet.
         runBlocking(Dispatchers.IO) { repository.ensureLoaded() }
         val current = repository.boundFrame(appWidgetId)?.let { repository.get(it) }
-        clearFrames()
-        frame = current
-        if (current == null || !current.isAnimated) return
+        if (current == null || !current.isAnimated) {
+            retire()
+            return
+        }
 
-        val displayFps = LivingFrameFps.snap(current.fps)
-        order = LivingFrameEngine.displaySequence(
+        val rate = LivingFrameEngine.playbackFps(current)
+        val order = LivingFrameEngine.displaySequence(
             current.frameCount,
             current.sourceFps,
-            displayFps,
+            rate,
             current.speed,
             current.loopMode
         ).toIntArray()
+        if (order.isEmpty()) {
+            retire()
+            return
+        }
 
         val mgr = AppWidgetManager.getInstance(context)
         val (w, h) = LivingFramesWidgetHelper.widgetSizePx(context, mgr, appWidgetId)
         val resolution = LivingFrameResolution.snap(current.resolutionPercent)
-        outW = (w * resolution / 100f).roundToInt().coerceAtLeast(48)
-        outH = (h * resolution / 100f).roundToInt().coerceAtLeast(48)
-        density = context.resources.displayMetrics.density
-        // 16-bit only for the compact preset; High/Ultra keep full colour.
-        rgb565 = current.quality == LivingFrameQuality.COMPACT &&
-            LivingFrameRenderer.isOpaque(current)
+        val outW = (w * resolution / 100f).roundToInt().coerceAtLeast(48)
+        val outH = (h * resolution / 100f).roundToInt().coerceAtLeast(48)
 
-        // Render frame zero before the host asks. This is the frame the
-        // loading view and the first flipper child both use.
-        if (order.isNotEmpty()) {
-            last = runCatching {
-                rendered(current, order[0], currentGeneration)
-            }.onFailure {
-                Log.w(TAG, "Couldn't render the first Living Widget frame", it)
-            }.getOrNull()
-            prefetch(current, 0, currentGeneration)
+        // Size the cache from real numbers, not a frame-count guess.
+        val budget = budgetBytes()
+        val unique = order.toHashSet().size
+        val pixels = outW.toLong() * outH
+        val opaque = LivingFrameRenderer.isOpaque(current)
+        // 16-bit for the compact preset, and also whenever it is the only
+        // way an opaque loop stays fully resident.
+        val rgb565 = opaque && (
+                current.quality == LivingFrameQuality.COMPACT ||
+                        (unique * pixels * 4L > budget && unique * pixels * 2L <= budget)
+                )
+        val frameBytes = pixels * if (rgb565) 2L else 4L
+        val resident = unique * frameBytes <= budget
+        val capacity = if (resident) {
+            unique
+        } else {
+            (budget / frameBytes).toInt().coerceIn(MIN_WINDOW, MAX_WINDOW)
         }
+        val ahead = if (resident) {
+            order.size
+        } else {
+            ceil(rate * PREFETCH_SECONDS).toInt()
+                .coerceIn(MIN_AHEAD, MAX_AHEAD)
+                .coerceAtMost((capacity - 3).coerceAtLeast(2))
+        }
+
+        val s = Session(
+            id = sessionIds.incrementAndGet(),
+            frame = current,
+            order = order,
+            outW = outW,
+            outH = outH,
+            density = context.resources.displayMetrics.density,
+            rgb565 = rgb565,
+            resident = resident,
+            capacity = capacity,
+            ahead = ahead
+        )
+        val old = session
+        session = s
+        old?.release()
+
+        // Frame zero is the loading view and the first child; have it ready
+        // before the host asks, then let the workers run ahead of it.
+        obtain(s, order[0], FIRST_FRAME_WAIT_MS)?.let { last = it }
+        schedule(s)
     }
 
     override fun getViewAt(position: Int): RemoteViews {
-        val current = frame
-        val ord = order
-        if (current == null || ord.isEmpty()) {
-            return placeholderViews()
-        }
-        val currentGeneration = generation
-        val frameIndex = ord[position % ord.size]
-        // Never decode on the host's binder thread. A miss returns the last
-        // frame the launcher actually drew (or a deliberate dark tile) and
-        // asks the worker to fetch this frame plus the next window. The old
-        // synchronous decode made the flipper stutter whenever it ran ahead.
-        val bitmap = synchronized(recent) { recent[frameIndex] } ?: last
+        val s = session ?: return frameViews(last)
+        val n = s.order.size
+        if (n == 0) return frameViews(last)
+        val pos = ((position % n) + n) % n
+        s.cursor.set(pos)
+        // Start the workers before we spend time on an inline decode.
+        schedule(s)
+        val bitmap = obtain(s, s.order[pos], MISS_WAIT_MS) ?: last
         if (bitmap != null) last = bitmap
-        prefetch(
-            current,
-            (position - 1 + ord.size) % ord.size,
-            currentGeneration
-        )
         return frameViews(bitmap)
     }
 
-    private fun rendered(
-        current: LivingFrame,
-        frameIndex: Int,
-        requestedGeneration: Int
-    ): Bitmap? {
-        synchronized(recent) { recent[frameIndex] }?.let { return it }
+    /**
+     * Cached frame, the result of an in-flight decode, or a fresh decode on
+     * this thread. Exactly one thread decodes a given frame at a time.
+     */
+    private fun obtain(s: Session, frameIndex: Int, waitMs: Long): Bitmap? {
+        s.lock.withLock {
+            s.cache[frameIndex]?.let { return it }
+            if (!s.pending.add(frameIndex)) {
+                var nanos = TimeUnit.MILLISECONDS.toNanos(waitMs)
+                try {
+                    while (frameIndex in s.pending && nanos > 0L) {
+                        nanos = s.changed.awaitNanos(nanos)
+                    }
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                }
+                return s.cache[frameIndex]
+            }
+        }
+        return complete(s, frameIndex)
+    }
+
+    /** Decode + render + store. The caller must own `pending[frameIndex]`. */
+    private fun complete(s: Session, frameIndex: Int): Bitmap? {
+        var bitmap: Bitmap? = null
+        try {
+            bitmap = produce(s, frameIndex)
+        } catch (e: OutOfMemoryError) {
+            Log.w(TAG, "Out of memory rendering a Living Widget frame", e)
+            s.lock.withLock { s.cache.clear() }
+        } catch (t: Throwable) {
+            Log.w(TAG, "Couldn't render a Living Widget frame", t)
+        } finally {
+            s.lock.withLock {
+                if (bitmap != null) store(s, frameIndex, bitmap)
+                s.pending.remove(frameIndex)
+                s.changed.signalAll()
+            }
+        }
+        return bitmap
+    }
+
+    private fun produce(s: Session, frameIndex: Int): Bitmap? {
         val repository = repo ?: return null
         val required = LivingFrameEngine.requiredSourceSide(
-            outW, outH, current.width, current.height, current.fit
+            s.outW, s.outH, s.frame.width, s.frame.height, s.frame.fit
         )
         val src = runBlocking(Dispatchers.IO) {
-            repository.decodeAtLeast(current.id, frameIndex, required)
+            repository.decodeAtLeast(s.frame.id, frameIndex, required)
         } ?: return null
-        val bmp = try {
+        return try {
             LivingFrameRenderer.render(
                 src = src,
-                frame = current,
-                outW = outW,
-                outH = outH,
-                density = density,
-                rgb565 = rgb565
+                frame = s.frame,
+                outW = s.outW,
+                outH = s.outH,
+                density = s.density,
+                rgb565 = s.rgb565
             )
         } finally {
             runCatching { src.recycle() }
         }
-        // A data-set change while this decode was in flight means the bitmap
-        // belongs to a stale order; don't poison the new cache with it.
-        if (requestedGeneration == generation) remember(frameIndex, bmp)
-        return bmp
     }
 
-    private fun remember(frameIndex: Int, bitmap: Bitmap) {
-        synchronized(recent) {
-            recent[frameIndex] = bitmap
-            var total = 0L
-            recent.values.forEach { total += it.byteCount }
-            val oldest = recent.entries.iterator()
-            while (recent.size > 1 &&
-                (recent.size > MAX_RECENT_FRAMES || total > MAX_RECENT_BYTES) &&
-                oldest.hasNext()
-            ) {
-                val entry = oldest.next()
-                total -= entry.value.byteCount
-                oldest.remove()
+    /** Lock held. Evicted bitmaps are left to the GC: the host may still draw them. */
+    private fun store(s: Session, frameIndex: Int, bitmap: Bitmap) {
+        s.cache[frameIndex] = bitmap
+        if (s.resident) {
+            if (s.cache.size >= s.unique) s.warm = true
+            return
+        }
+        while (s.cache.size > s.capacity) {
+            var victim = -1
+            var farthest = -1
+            for (key in s.cache.keys) {
+                if (key == frameIndex) continue
+                val d = s.distance(key)
+                if (d > farthest) {
+                    farthest = d
+                    victim = key
+                }
             }
+            if (victim < 0) break
+            s.cache.remove(victim)
+        }
+    }
+
+    private fun schedule(s: Session) {
+        if (s.warm) return
+        while (true) {
+            val running = s.active.get()
+            if (running >= WORKERS) return
+            if (s.active.compareAndSet(running, running + 1)) break
+        }
+        try {
+            executor.execute {
+                try {
+                    drain(s)
+                } finally {
+                    s.active.decrementAndGet()
+                }
+            }
+        } catch (_: RejectedExecutionException) {
+            s.active.decrementAndGet()
         }
     }
 
     /**
-     * Ask the single worker to decode [PREFETCH_AHEAD] positions ahead. Calls
-     * are coalesced: the launcher can request a view every 16 ms, but only the
-     * newest target is useful. Without this the executor queued a 12-frame
-     * task per flip, so work fell further behind the animation.
+     * Render frames ahead of the playhead until the window (or, for a
+     * resident loop, the whole loop) is full. The playhead is re-read on
+     * every iteration, so a newer position naturally supersedes older work
+     * and there is no queue to fall behind.
      */
-    private fun prefetch(
-        current: LivingFrame,
-        startPosition: Int,
-        requestedGeneration: Int
-    ) {
-        val ord = order
-        if (ord.isEmpty()) return
-        prefetchFrame = current
-        prefetchGeneration = requestedGeneration
-        prefetchTarget.set(((startPosition % ord.size) + ord.size) % ord.size)
-        schedulePrefetch()
-    }
-
-    private fun schedulePrefetch() {
-        if (!prefetchScheduled.compareAndSet(false, true)) return
-        try {
-            executor.execute { drainPrefetch() }
-        } catch (_: RejectedExecutionException) {
-            prefetchScheduled.set(false)
+    private fun drain(s: Session) {
+        while (session === s && !s.warm) {
+            val frameIndex = claimNext(s) ?: return
+            complete(s, frameIndex)
         }
     }
 
-    private fun drainPrefetch() {
-        try {
-            while (true) {
-                val requestedGeneration = prefetchGeneration
-                val startPosition = prefetchTarget.getAndSet(-1)
-                val current = prefetchFrame
-                val ord = order
-                if (current == null || ord.isEmpty() ||
-                    requestedGeneration != generation || startPosition < 0
-                ) {
-                    return
+    private fun claimNext(s: Session): Int? {
+        val n = s.order.size
+        val c = s.cursor.get()
+        s.lock.withLock {
+            for (offset in 1..s.ahead) {
+                val frameIndex = s.order[(c + offset) % n]
+                if (!s.cache.containsKey(frameIndex) && s.pending.add(frameIndex)) {
+                    return frameIndex
                 }
-                for (offset in 1..PREFETCH_AHEAD) {
-                    if (requestedGeneration != generation) return
-                    // A newer position arrived: handle it before spending more
-                    // time on frames the launcher has already passed.
-                    if (prefetchTarget.get() >= 0) break
-                    val position = (startPosition + offset) % ord.size
-                    val frameIndex = ord[position]
-                    val alreadyQueued = synchronized(recent) {
-                        if (recent.containsKey(frameIndex) || pending.contains(frameIndex)) {
-                            true
-                        } else {
-                            pending.add(frameIndex)
-                            false
-                        }
-                    }
-                    if (alreadyQueued) continue
-                    try {
-                        runCatching {
-                            rendered(current, frameIndex, requestedGeneration)
-                        }.onFailure {
-                            Log.w(TAG, "Couldn't prefetch a Living Widget frame", it)
-                        }
-                    } finally {
-                        synchronized(recent) { pending.remove(frameIndex) }
-                    }
-                }
-                if (prefetchTarget.get() < 0) return
-            }
-        } finally {
-            prefetchScheduled.set(false)
-            if (prefetchTarget.get() >= 0 && prefetchGeneration == generation) {
-                schedulePrefetch()
             }
         }
+        return null
     }
 
     private fun frameViews(bitmap: Bitmap?): RemoteViews {
@@ -326,63 +418,71 @@ private class LivingFramesFactory(
         } else {
             // Never hand the host an empty image: a solid tile reads as a
             // deliberate loading state instead of a flicker to transparent.
-            views.setInt(
-                R.id.living_frame_item,
-                "setBackgroundColor",
-                PLACEHOLDER_COLOR
-            )
+            views.setInt(R.id.living_frame_item, "setBackgroundColor", PLACEHOLDER_COLOR)
         }
         return views
     }
 
-    private fun placeholderViews(): RemoteViews = frameViews(last)
-
-    override fun getCount(): Int = order.size
+    override fun getCount(): Int = session?.order?.size ?: 0
 
     override fun getLoadingView(): RemoteViews {
-        val ord = order
-        val first = if (ord.isNotEmpty()) {
-            synchronized(recent) { recent[ord[0]] }
-        } else {
-            null
+        val s = session
+        val first = s?.let { sess ->
+            sess.lock.withLock { sess.cache[sess.order[0]] }
         }
         return frameViews(first ?: last)
     }
 
     override fun getViewTypeCount(): Int = 1
 
-    override fun getItemId(position: Int): Long = position.toLong()
+    /**
+     * The session id is part of the id, so a data-set change (new speed, fps,
+     * resolution or frames) can never be matched to a stale host-side view
+     * that happens to share a position.
+     */
+    override fun getItemId(position: Int): Long =
+        ((session?.id ?: 0).toLong() shl 32) or position.toLong()
 
     override fun hasStableIds(): Boolean = true
 
     override fun onDestroy() {
-        // Invalidate before stopping the worker. A decode already in flight
-        // must not repopulate the cache after the service is gone.
-        generation++
-        prefetchTarget.set(-1)
-        prefetchFrame = null
+        if (registered.compareAndSet(true, false)) ACTIVE_FACTORIES.decrementAndGet()
+        retire()
         executor.shutdownNow()
-        clearFrames()
     }
 
-    private fun clearFrames() {
-        frame = null
-        order = IntArray(0)
-        prefetchTarget.set(-1)
-        prefetchFrame = null
-        synchronized(recent) {
-            recent.clear()
-            pending.clear()
-        }
+    private fun retire() {
+        val old = session
+        session = null
+        old?.release()
         last = null
     }
 
     private companion object {
         const val TAG = "LivingFramesRVS"
-        const val PREFETCH_AHEAD = 12
-        const val MAX_RECENT_FRAMES = 24
-        const val MAX_RECENT_BYTES = 48L * 1024 * 1024
+        const val WORKERS = 2
+        const val MB = 1024L * 1024L
+
+        /** Total bitmap cache across all Living Widgets, split per widget. */
+        const val MAX_TOTAL_CACHE = 64L * MB
+
+        const val MIN_WINDOW = 8
+        const val MAX_WINDOW = 64
+        const val MIN_AHEAD = 4
+        const val MAX_AHEAD = 24
+        const val PREFETCH_SECONDS = 0.6
+
+        /** How long a miss waits on an in-flight decode before decoding itself. */
+        const val MISS_WAIT_MS = 100L
+        const val FIRST_FRAME_WAIT_MS = 2_000L
+
         val PLACEHOLDER_COLOR = Color.rgb(24, 24, 24)
+        val ACTIVE_FACTORIES = AtomicInteger(0)
+
+        fun budgetBytes(): Long {
+            val total = minOf(Runtime.getRuntime().maxMemory() / 6L, MAX_TOTAL_CACHE)
+            return total / ACTIVE_FACTORIES.get().coerceAtLeast(1)
+        }
     }
 }
 
