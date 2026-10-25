@@ -68,6 +68,7 @@ import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -105,6 +106,7 @@ import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.components.ToolzExpressiveTextButton
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.components.horizontalFadingEdges
 import com.frerox.toolz.ui.components.rememberToolzHapticFeedback
 import com.frerox.toolz.ui.components.stripMarkdown
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
@@ -145,6 +147,9 @@ fun ToolzNewsScreen(
     var notifDenials by rememberSaveable { mutableStateOf(0) }
 
     val listState = rememberLazyListState()
+    val chipsState = rememberLazyListState()
+    val chipsFadeStart by remember { derivedStateOf { chipsState.canScrollBackward } }
+    val chipsFadeEnd by remember { derivedStateOf { chipsState.canScrollForward } }
     val keyboard = LocalSoftwareKeyboardController.current
 
     // Android 13+ notification permission handling.
@@ -250,16 +255,18 @@ fun ToolzNewsScreen(
                         }
                     },
                     actions = {
-                        val infiniteTransition = rememberInfiniteTransition(label = "newsSyncRotation")
-                        val rotation by infiniteTransition.animateFloat(
-                            initialValue = 0f,
-                            targetValue = 360f,
-                            animationSpec = infiniteRepeatable(
-                                animation = tween(900, easing = LinearEasing),
-                                repeatMode = RepeatMode.Restart
-                            ),
-                            label = "syncRotationAngle"
-                        )
+                        val syncRotation = if (syncing) {
+                            val infiniteTransition = rememberInfiniteTransition(label = "newsSyncRotation")
+                            infiniteTransition.animateFloat(
+                                initialValue = 0f,
+                                targetValue = 360f,
+                                animationSpec = infiniteRepeatable(
+                                    animation = tween(900, easing = LinearEasing),
+                                    repeatMode = RepeatMode.Restart
+                                ),
+                                label = "syncRotationAngle"
+                            )
+                        } else null
                         IconButton(onClick = {
                             haptic.click()
                             viewModel.refreshNow()
@@ -267,7 +274,9 @@ fun ToolzNewsScreen(
                             Icon(
                                 Icons.Rounded.Refresh,
                                 contentDescription = stringResource(R.string.st_News_refresh),
-                                modifier = if (syncing) Modifier.graphicsLayer { rotationZ = rotation } else Modifier
+                                modifier = if (syncRotation != null) {
+                                    Modifier.graphicsLayer { rotationZ = syncRotation.value }
+                                } else Modifier
                             )
                         }
                     },
@@ -418,7 +427,7 @@ fun ToolzNewsScreen(
                                     }
                                 }
                             }
-                            if (syncing || searching) {
+                            if (searching) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -426,7 +435,7 @@ fun ToolzNewsScreen(
                                 ) {
                                     CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                                     Text(
-                                        stringResource(if (searching) R.string.st_News_searching else R.string.st_News_syncing),
+                                        stringResource(R.string.st_News_searching),
                                         style = MaterialTheme.typography.labelMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -548,8 +557,19 @@ fun ToolzNewsScreen(
                                 modifier = Modifier.fillMaxWidth()
                             )
                             LazyRow(
+                                state = chipsState,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                contentPadding = PaddingValues(vertical = 2.dp)
+                                contentPadding = PaddingValues(vertical = 2.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .then(
+                                        if (chipsFadeStart || chipsFadeEnd) {
+                                            Modifier.horizontalFadingEdges(
+                                                left = if (chipsFadeStart) 16.dp else 0.dp,
+                                                right = if (chipsFadeEnd) 16.dp else 0.dp
+                                            )
+                                        } else Modifier
+                                    )
                             ) {
                                 items(NEWS_FILTERS) { p ->
                                     ExpressiveFilterChip(
@@ -580,16 +600,24 @@ fun ToolzNewsScreen(
                                     )
                                 }
                             }
-                            if (lastSync > 0) {
-                                val shortDelta = remember(lastSync, now) {
-                                    NewsTime.relativeShort(lastSync, now)
+                            val syncDelta = NewsTime.relativeShort(lastSync, now)
+                            val syncStamp = when {
+                                lastSync <= 0L -> null
+                                syncDelta.isNotEmpty() -> stringResource(R.string.st_News_last_synced, syncDelta)
+                                else -> {
+                                    val syncDate = NewsTime.newsDate(
+                                        lastSync,
+                                        now,
+                                        stringResource(R.string.st_News_today),
+                                        stringResource(R.string.st_News_yesterday)
+                                    )
+                                    if (syncDate.isEmpty()) null
+                                    else stringResource(R.string.st_News_last_synced_date, syncDate)
                                 }
+                            }
+                            if (syncStamp != null) {
                                 Text(
-                                    stringResource(
-                                        if (shortDelta.isEmpty()) R.string.st_News_last_synced_date
-                                        else R.string.st_News_last_synced,
-                                        shortDelta
-                                    ),
+                                    syncStamp,
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                                 )
@@ -629,12 +657,6 @@ fun ToolzNewsScreen(
                                         }
                                     }
                                 }
-                            } else if (searchResults == null && filteredItems.size != items.size) {
-                                Text(
-                                    stringResource(R.string.st_News_shown_count, filteredItems.size, items.size),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
                             }
                         }
                     }
@@ -792,6 +814,9 @@ fun NewsHistoryCard(
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(8.dp)
                     ) {}
+                } else {
+                    // Keep the priority pill aligned whether or not the item is unread.
+                    Spacer(Modifier.size(8.dp))
                 }
                 NewsPriorityChip(item.priority, small = true)
                 if (item.pinned) {

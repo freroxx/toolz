@@ -397,7 +397,7 @@ popup, never a crash.
   with subtitle + refresh action, `toolzBackground`, fading list edges,
   full history: search field (clear button, `ImeAction.Search` hides the
   keyboard) + horizontally scrolling priority filter chips (`LazyRow`,
-  parity with `/news`) + Android 13+
+  parity with `/news`, with direction-aware edge fades) + Android 13+
   "Notifications off → Enable" card (one-tap `POST_NOTIFICATIONS` request;
   after the first denial — when Android stops showing the dialog — the card
   switches to an always-works `ACTION_APP_NOTIFICATION_SETTINGS` deep link),
@@ -412,9 +412,9 @@ popup, never a crash.
   row, real unread dots via `seenIds`, notification deep-link
   scroll-to-highlight (+1 header offset, keeps paging until the target loads,
   2 s highlight then spring back), DAO-backed full-history search results,
-  syncing/searching indicator + honest sync-error card with Retry + first-run
-  error state, "Updated X ago" freshness stamp from `news_last_sync`,
-  loading/empty/error states, refresh button.
+  searching indicator + honest sync-error card with Retry + first-run
+  error state, "Updated X ago" freshness stamp from `news_last_sync` (dated
+  fallback after a week), loading/empty/error states, refresh button.
 - `NewsViewModel.kt` — immediate popup on dashboard arrival (no delay),
   critical-overrides-non-critical queue rule (`shouldReplacePopup`),
   session guard, foreground `checkNotifications` (sync + immediate notify +
