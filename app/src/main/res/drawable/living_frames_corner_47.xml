@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Host-side clip outline for a 47 dp corner. The bitmap itself stays
+     square and fully opaque so videos can use RGB_565. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <corners android:radius="47dp" />
+</shape>
