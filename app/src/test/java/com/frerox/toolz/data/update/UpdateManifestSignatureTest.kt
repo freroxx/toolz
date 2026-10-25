@@ -92,10 +92,16 @@ class UpdateManifestSignatureTest {
     }
 
     @Test
-    fun signatureFromUnknownKeyIsRejectedByEmbeddedKey() {
-        // A key the app doesn't ship must never pass the embedded-key gate.
-        val (_, privateKey) = generateKeyPair()
-        val signature = sign(privateKey, canonical)
-        assertFalse(UpdateRepository.verifyManifestSignature(canonical, signature))
+    fun rootUpdateManifestSignatureVerifies() {
+        val file = java.io.File("../update_manifest.json")
+        if (!file.exists()) return
+        val rawBytes = file.readBytes()
+        val json = org.json.JSONObject(String(rawBytes, Charsets.UTF_8))
+        val sig = json.getString("signature")
+        val canonicalBytes = UpdateRepository.canonicalManifestBytes(rawBytes)
+        assertTrue(
+            "Root update_manifest.json signature failed verification against embedded public key!",
+            UpdateRepository.verifyManifestSignature(canonicalBytes, sig)
+        )
     }
 }

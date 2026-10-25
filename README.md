@@ -76,7 +76,7 @@ Toolz includes **50+ precision instruments** across 9 categories:
 </details>
 
 <details>
-<summary><strong>💾 Media &amp; PDF</strong> (8 tools)</summary>
+<summary><strong>💾 Media &amp; PDF</strong> (9 tools)</summary>
 
 | Tool | Description |
 |---|---|
@@ -86,6 +86,7 @@ Toolz includes **50+ precision instruments** across 9 categories:
 | **File Converter** | FFmpeg-powered media transformation for video, audio, and image formats |
 | **PDF Reader** | Native document viewer with text extraction and document summary support |
 | **Background Remover** | Offline AI-powered background removal — runs fully on-device (ONNX Runtime) |
+| **Living Widgets** | Animated homescreen widgets for looping GIF/video frames, photos, and photo slideshows |
 | **File Cleaner** | Storage management utility to reclaim space and remove redundant cache |
 | **Sound Meter** | Real-time decibel analysis for monitoring environmental noise levels |
 
