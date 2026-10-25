@@ -437,7 +437,7 @@ object LivingFramesWidgetHelper {
         }
 
         var budget = bitmapBudget(context)
-        var error = "The launcher rejected the update."
+        var error = context.getString(R.string.lw_widget_rejected)
 
         // Static-first: one push carries the whole loop, so the launcher has
         // every frame in memory and cannot miss one and fall back to frame 0.
@@ -568,7 +568,7 @@ object LivingFramesWidgetHelper {
         )
         pushPlaceholder(
             context, appWidgetId,
-            "Couldn't render this Living Widget. Try resizing it or re-adding it."
+            context.getString(R.string.lw_widget_render_failed)
         )
         false
     }
@@ -946,7 +946,7 @@ object LivingFramesWidgetHelper {
             LivingFramesSlideshow.cancel(context, appWidgetId)
             pushPlaceholder(
                 context, appWidgetId,
-                "This widget was deleted. Long-press to remove it."
+                context.getString(R.string.lw_widget_placeholder_deleted)
             )
             return false
         }
@@ -964,21 +964,20 @@ object LivingFramesWidgetHelper {
             }
             if (pick == null) {
                 val text = when {
-                    repo.isLoadFailed() ->
-                        "Couldn't read the Living Widget library. Your files are safe."
+                    repo.isLoadFailed() -> context.getString(R.string.lw_widget_library_failed)
                     pendingPin != null -> {
                         // The set was removed while the pin request was in
                         // flight. Drop the stale request and ask for a new one.
                         clearPendingPin(context)
-                        "That set was deleted. Choose another one in Toolz."
+                        context.getString(R.string.lw_widget_set_deleted)
                     }
-                    else -> "Choose a Living Widget set in Toolz"
+                    else -> context.getString(R.string.lw_widget_choose_set)
                 }
                 pushPlaceholder(context, appWidgetId, text)
                 return false
             }
             if (!repo.bindWidget(appWidgetId, pick.id)) {
-                pushPlaceholder(context, appWidgetId, "Couldn't attach this widget. Try re-adding it.")
+                pushPlaceholder(context, appWidgetId, context.getString(R.string.lw_widget_attach_failed))
                 return false
             }
             if (pendingPin != null) clearPendingPin(context)
@@ -992,7 +991,7 @@ object LivingFramesWidgetHelper {
                 // binding; the next successful load restores it.
                 pushPlaceholder(
                     context, appWidgetId,
-                    "Couldn't read the Living Widget library. Your files are safe."
+                    context.getString(R.string.lw_widget_library_failed)
                 )
                 return false
             }
@@ -1003,7 +1002,7 @@ object LivingFramesWidgetHelper {
             LivingFramesPause.clear(context, appWidgetId)
             pushPlaceholder(
                 context, appWidgetId,
-                "This widget was deleted. Long-press to remove it."
+                context.getString(R.string.lw_widget_placeholder_deleted)
             )
             return false
         }

@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.frerox.toolz.R
 import com.frerox.toolz.data.livingframes.LivingFrame
 import com.frerox.toolz.data.livingframes.LivingFrameCorners
 import com.frerox.toolz.data.livingframes.LivingFrameFit
@@ -181,9 +182,12 @@ class LivingFramesViewModel @Inject constructor(
             refreshStorage()
             _messages.emit(
                 if (freed > 0) {
-                    "Cleaned up ${LivingFramesRepository.formatBytes(freed)} of unused files."
+                    context.getString(
+                        R.string.lw_cleaned_up,
+                        LivingFramesRepository.formatBytes(freed)
+                    )
                 } else {
-                    "Nothing to clean up."
+                    context.getString(R.string.lw_nothing_to_clean)
                 }
             )
         }
@@ -220,11 +224,11 @@ class LivingFramesViewModel @Inject constructor(
     private fun runImport(label: String, block: suspend ((Float) -> Unit) -> LivingFrameImportResult) {
         if (importJob?.isActive == true || _ui.value.import != null) return
         if (!_ui.value.loaded) {
-            _messages.tryEmit("The library is still loading. Try again in a moment.")
+            _messages.tryEmit(context.getString(R.string.lw_library_loading))
             return
         }
         if (repo.isLoadFailed()) {
-            _messages.tryEmit("The library couldn't be read. Use “Try loading again” before importing.")
+            _messages.tryEmit(context.getString(R.string.lw_library_failed))
             return
         }
         importJob = viewModelScope.launch {
@@ -251,18 +255,20 @@ class LivingFramesViewModel @Inject constructor(
                     }
                 }
                 _ui.update { it.copy(selectedId = res.frame.id) }
-                _messages.emit(res.note ?: "“${res.frame.name}” is ready. Add it to your home screen.")
+                _messages.emit(
+                    res.note ?: context.getString(R.string.lw_import_ready, res.frame.name)
+                )
             } catch (e: CancellationException) {
                 if (LivingFramesImportCancellation.consume()) {
-                    _messages.tryEmit("Import cancelled.")
+                    _messages.tryEmit(context.getString(R.string.lw_import_cancelled))
                 }
                 throw e
             } catch (e: Throwable) {
                 if (e is CancellationException) throw e
                 _messages.emit(
                     when (e) {
-                        is OutOfMemoryError -> "Not enough memory to import that. Try a shorter video or a smaller photo."
-                        else -> e.message ?: "Import failed"
+                        is OutOfMemoryError -> context.getString(R.string.lw_import_oom)
+                        else -> e.message ?: context.getString(R.string.lw_import_failed)
                     }
                 )
             } finally {
@@ -289,24 +295,30 @@ class LivingFramesViewModel @Inject constructor(
 
     fun importGif(uri: Uri) {
         val quality = _ui.value.importQuality
-        runImport("Reading GIF") { p -> importer.importGif(uri, quality, p) }
+        runImport(context.getString(R.string.lw_import_reading_gif)) { p ->
+            importer.importGif(uri, quality, p)
+        }
     }
 
     fun importPhoto(uri: Uri) {
         val quality = _ui.value.importQuality
-        runImport("Adding photo") { p -> importer.importPhoto(uri, quality, p) }
+        runImport(context.getString(R.string.lw_import_adding_photo)) { p ->
+            importer.importPhoto(uri, quality, p)
+        }
     }
 
     fun importSlideshow(uris: List<Uri>) {
         val quality = _ui.value.importQuality
-        runImport("Adding photos") { p -> importer.importSlideshow(uris, quality, p) }
+        runImport(context.getString(R.string.lw_import_adding_photos)) { p ->
+            importer.importSlideshow(uris, quality, p)
+        }
     }
 
     fun onVideoPicked(uri: Uri) {
         viewModelScope.launch {
             val probe = importer.probeVideo(uri)
             if (probe == null || probe.durationMs <= 0L) {
-                _messages.emit("Couldn't read that video.")
+                _messages.emit(context.getString(R.string.lw_video_unreadable))
             } else {
                 _ui.update {
                     it.copy(
@@ -332,7 +344,7 @@ class LivingFramesViewModel @Inject constructor(
     ) {
         val pv = _ui.value.pendingVideo ?: return
         _ui.update { it.copy(pendingVideo = null) }
-        runImport("Decoding video") { p ->
+        runImport(context.getString(R.string.lw_import_decoding_video)) { p ->
             importer.importVideo(pv.uri, startMs, lengthMs, quality, fps, p)
         }
     }
@@ -414,7 +426,12 @@ class LivingFramesViewModel @Inject constructor(
     fun refreshWidget(widgetId: Int) {
         viewModelScope.launch {
             val ok = LivingFramesWidgetHelper.refresh(context, repo, widgetId)
-            _messages.emit(if (ok) "Widget updated" else "That widget couldn't be updated. See the note under it.")
+            _messages.emit(
+                context.getString(
+                    if (ok) R.string.lw_widget_updated
+                    else R.string.lw_widget_update_failed
+                )
+            )
         }
     }
 
@@ -422,7 +439,7 @@ class LivingFramesViewModel @Inject constructor(
         viewModelScope.launch {
             val ids = repo.boundWidgetIds(frameId)
             if (ids.isEmpty()) {
-                _messages.emit("Add the slideshow to your home screen first.")
+                _messages.emit(context.getString(R.string.lw_add_slideshow_first))
                 return@launch
             }
             ids.forEach { LivingFramesWidgetHelper.advanceSlideshow(context, repo, it) }
@@ -433,19 +450,23 @@ class LivingFramesViewModel @Inject constructor(
         viewModelScope.launch {
             val widgetIds = repo.boundWidgetIds(id)
             if (!repo.delete(id)) {
-                _messages.emit("Couldn't delete this set. Free some storage and try again.")
+                _messages.emit(context.getString(R.string.lw_delete_failed))
                 return@launch
             }
             refreshJobs.remove(id)?.cancel()
             widgetIds.forEach { wid ->
                 LivingFramesRenderWorker.cancel(context, wid)
-                LivingFramesWidgetHelper.pushPlaceholder(context, wid, "This widget was deleted. Long-press to remove it.")
+                LivingFramesWidgetHelper.pushPlaceholder(
+                    context,
+                    wid,
+                    context.getString(R.string.lw_widget_placeholder_deleted)
+                )
                 LivingFramesSlideshow.cancel(context, wid)
                 LivingFramesWidgetHelper.clearInfo(context, wid)
             }
             synchronized(previewCache) { previewCache.keys.removeAll { it.startsWith("$id:") } }
             refreshStorage()
-            _messages.emit("Widget set deleted")
+            _messages.emit(context.getString(R.string.lw_set_deleted))
         }
     }
 

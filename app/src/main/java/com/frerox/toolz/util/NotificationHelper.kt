@@ -218,10 +218,10 @@ object NotificationHelper {
             },
             NotificationChannel(
                 CHANNEL_LIVING_FRAMES_IMPORT,
-                "Living Widget imports",
+                context.getString(R.string.lw_notification_channel),
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Progress while a video or photo set is being decoded"
+                description = context.getString(R.string.lw_notification_channel_desc)
                 setShowBadge(false)
                 enableVibration(false)
             }

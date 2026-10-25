@@ -30,6 +30,7 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
 import android.util.Log
+import com.frerox.toolz.R
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -156,7 +157,7 @@ class LivingFrameImporter @Inject constructor(
             if (animated != null) return@withLock finishAnimated(animated, onProgress, uri)
 
             val still = loadDownscaled(uri, quality.storedSide)
-                ?: throw IllegalArgumentException("Couldn't read that GIF.")
+                ?: throw IllegalArgumentException(context.getString(R.string.lw_import_gif_failed))
             val writer = newWriter(
                 maxFrames = LivingFramesRepository.MAX_FRAMES,
                 quality = quality
@@ -165,11 +166,11 @@ class LivingFrameImporter @Inject constructor(
                 writer.add(still)
                 onProgress(1f)
                 writer.finish(
-                    name = "Photo Frame",
+                    name = context.getString(R.string.lw_import_name_photo),
                     type = LivingFrameType.PHOTO,
                     fps = 1,
                     sourceLabel = uri.toString(),
-                    note = "That GIF has a single frame, so it was added as a photo."
+                    note = context.getString(R.string.lw_import_note_gif_single)
                 )
             } catch (t: Throwable) {
                 writer.abort()
@@ -225,9 +226,7 @@ class LivingFrameImporter @Inject constructor(
                 )
                 if (fallback != null) return@withLock fallback
 
-                throw IllegalArgumentException(
-                    "No motion in that part of the video. Try another start point."
-                )
+                throw IllegalArgumentException(context.getString(R.string.lw_import_no_motion))
             }
         }
     }
@@ -239,13 +238,13 @@ class LivingFrameImporter @Inject constructor(
     ): LivingFrameImportResult = withContext(Dispatchers.IO) {
         importLock.withLock {
             val bmp = loadDownscaled(uri, quality.photoSide)
-                ?: throw IllegalArgumentException("Couldn't read that image.")
+                ?: throw IllegalArgumentException(context.getString(R.string.lw_import_image_failed))
             val writer = newWriter(maxFrames = 1, quality = quality)
             try {
                 writer.add(bmp)
                 onProgress(1f)
                 writer.finish(
-                    name = "Photo Frame",
+                    name = context.getString(R.string.lw_import_name_photo),
                     type = LivingFrameType.PHOTO,
                     fps = 1,
                     sourceLabel = uri.toString()
@@ -264,7 +263,7 @@ class LivingFrameImporter @Inject constructor(
     ): LivingFrameImportResult = withContext(Dispatchers.IO) {
         importLock.withLock {
             val picked = uris.take(LivingFramesRepository.MAX_SLIDES)
-            require(picked.isNotEmpty()) { "None of those photos could be read." }
+            require(picked.isNotEmpty()) { context.getString(R.string.lw_import_photos_failed) }
             val writer = newWriter(
                 maxFrames = LivingFramesRepository.MAX_SLIDES,
                 quality = quality
@@ -281,20 +280,30 @@ class LivingFrameImporter @Inject constructor(
                     }
                     onProgress((i + 1) / picked.size.toFloat())
                 }
-                require(writer.count > 0) { "None of those photos could be read." }
+                require(writer.count > 0) { context.getString(R.string.lw_import_photos_failed) }
                 onProgress(1f)
                 val note = when {
                     uris.size > LivingFramesRepository.MAX_SLIDES ->
-                        "Slideshows hold up to ${LivingFramesRepository.MAX_SLIDES} photos; the rest were left out."
-                    skipped > 0 ->
-                        "$skipped photo${if (skipped == 1) "" else "s"} couldn't be read and were skipped."
+                        context.getString(
+                            R.string.lw_import_note_slides_limit,
+                            LivingFramesRepository.MAX_SLIDES
+                        )
+                    skipped > 0 -> context.resources.getQuantityString(
+                        R.plurals.lw_skipped_photos,
+                        skipped,
+                        skipped
+                    )
                     else -> null
                 }
                 writer.finish(
-                    name = "Slideshow",
+                    name = context.getString(R.string.lw_import_name_slideshow),
                     type = LivingFrameType.SLIDESHOW,
                     fps = 1,
-                    sourceLabel = "${writer.count} photos",
+                    sourceLabel = context.resources.getQuantityString(
+                        R.plurals.lw_photos_count,
+                        writer.count,
+                        writer.count
+                    ),
                     note = note
                 )
             } catch (t: Throwable) {
@@ -467,22 +476,21 @@ class LivingFrameImporter @Inject constructor(
             val moving = writer.count > 1 && writer.hasMotion
             if (!moving) {
                 writer.finish(
-                    name = "Photo Frame",
+                    name = context.getString(R.string.lw_import_name_photo),
                     type = LivingFrameType.PHOTO,
                     fps = 1,
                     sourceLabel = uri.toString(),
-                    note = if (writer.count <= 1) {
-                        "That GIF has a single frame, so it was added as a photo."
-                    } else {
-                        "That image doesn't move, so it was added as a photo."
-                    }
+                    note = context.getString(
+                        if (writer.count <= 1) R.string.lw_import_note_gif_single
+                        else R.string.lw_import_note_image_still
+                    )
                 )
             } else {
                 val fps = LivingFrameFps.snap(
                     writer.count * 1000f / writer.durationMs.coerceAtLeast(1L)
                 )
                 writer.finish(
-                    name = "GIF Loop",
+                    name = context.getString(R.string.lw_import_name_gif),
                     type = LivingFrameType.GIF,
                     fps = fps,
                     capturedFps = fps,
@@ -539,7 +547,7 @@ class LivingFrameImporter @Inject constructor(
             // capture rate than the files contain, or playback would run fast.
             val actualFps = LivingFrameFps.snap(writer.count * 1000f / len.coerceAtLeast(1L))
             return writer.finish(
-                name = "Video Loop",
+                name = context.getString(R.string.lw_import_name_video),
                 type = LivingFrameType.VIDEO,
                 fps = actualFps,
                 capturedFps = actualFps,
@@ -669,7 +677,7 @@ class LivingFrameImporter @Inject constructor(
             try {
                 currentCoroutineContext().ensureActive()
                 if (count >= maxFrames) {
-                    throw LivingFrameStorageException("That set has too many frames.")
+                    throw LivingFrameStorageException(context.getString(R.string.lw_import_too_many_frames))
                 }
                 if (startUsedBytes < 0L) startUsedBytes = repo.usageBytes()
                 val estimate = (bitmap.byteCount.toLong() / 2)
@@ -680,7 +688,7 @@ class LivingFrameImporter @Inject constructor(
                 val projected = startUsedBytes + totalBytes + estimate
                 if (projected > LivingFramesRepository.MAX_STORE_BYTES) {
                     throw LivingFrameStorageException(
-                        "Living Widgets storage is full. Delete a widget set first."
+                        context.getString(R.string.lw_import_storage_full)
                     )
                 }
                 if (count == 0 || count % 8 == 0) {
@@ -689,28 +697,31 @@ class LivingFrameImporter @Inject constructor(
                     val free = context.filesDir.usableSpace.coerceAtLeast(0L)
                     if (free - estimate < LivingFramesRepository.MIN_FREE_BYTES) {
                         throw LivingFrameStorageException(
-                            "Not enough free space. Keep at least " +
-                                "${LivingFramesRepository.formatBytes(LivingFramesRepository.MIN_FREE_BYTES)} " +
-                                "free before importing."
+                            context.getString(
+                                R.string.lw_import_need_space,
+                                LivingFramesRepository.formatBytes(
+                                    LivingFramesRepository.MIN_FREE_BYTES
+                                )
+                            )
                         )
                     }
                 }
                 if (totalBytes + estimate > LivingFramesRepository.MAX_SET_BYTES) {
-                    throw LivingFrameStorageException("That set is too large to store.")
+                    throw LivingFrameStorageException(context.getString(R.string.lw_import_set_too_large))
                 }
                 val file = File(dir, String.format(Locale.US, "frame_%04d.webp", count))
                 FileOutputStream(file).use { out ->
                     if (!bitmap.compress(webp(), quality.webpQuality, out)) {
-                        throw IOException("Couldn't encode a frame.")
+                        throw IOException(context.getString(R.string.lw_import_frame_encode_failed))
                     }
                     // No per-frame fsync: these files are staging data until
                     // finish() publishes the directory. A crash leaves an
                     // orphan for cleanup, never a half-published set.
                 }
-                if (file.length() <= 0L) throw IOException("Couldn't encode a frame.")
+                if (file.length() <= 0L) throw IOException(context.getString(R.string.lw_import_frame_encode_failed))
                 totalBytes += file.length()
                 if (totalBytes > LivingFramesRepository.MAX_SET_BYTES) {
-                    throw LivingFrameStorageException("That set is too large to store.")
+                    throw LivingFrameStorageException(context.getString(R.string.lw_import_set_too_large))
                 }
                 if (count == 0) {
                     width = bitmap.width
@@ -741,7 +752,7 @@ class LivingFrameImporter @Inject constructor(
             try {
                 FileOutputStream(File(dir, "cover.webp")).use { out ->
                     if (!cover.compress(webp(), 80, out)) {
-                        throw IOException("Couldn't encode a cover image.")
+                        throw IOException(context.getString(R.string.lw_import_cover_failed))
                     }
                     out.fd.sync()
                 }
@@ -758,7 +769,7 @@ class LivingFrameImporter @Inject constructor(
             capturedFps: Int = 0,
             note: String? = null
         ): LivingFrameImportResult {
-            if (count <= 0) throw IOException("Nothing to import")
+            if (count <= 0) throw IOException(context.getString(R.string.lw_import_nothing))
             // A still GIF can arrive as several identical frames from Movie.
             // Keep only frame 0 so PHOTO metadata and storage stay truthful.
             if (type == LivingFrameType.PHOTO && count > 1) {
@@ -773,14 +784,15 @@ class LivingFrameImporter @Inject constructor(
             if (startUsedBytes < 0L) startUsedBytes = repo.usageBytes()
             if (startUsedBytes + totalBytes > LivingFramesRepository.MAX_STORE_BYTES) {
                 throw LivingFrameStorageException(
-                    "Living Widgets storage is full. Delete a widget set first."
+                    context.getString(R.string.lw_import_storage_full)
                 )
             }
             if (context.filesDir.usableSpace < LivingFramesRepository.MIN_FREE_BYTES) {
                 throw LivingFrameStorageException(
-                    "Not enough free space. Keep at least " +
-                        "${LivingFramesRepository.formatBytes(LivingFramesRepository.MIN_FREE_BYTES)} " +
-                        "free before importing."
+                    context.getString(
+                        R.string.lw_import_need_space,
+                        LivingFramesRepository.formatBytes(LivingFramesRepository.MIN_FREE_BYTES)
+                    )
                 )
             }
             val animated = (type == LivingFrameType.GIF || type == LivingFrameType.VIDEO) &&

@@ -57,12 +57,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.frerox.toolz.MainActivity
+import com.frerox.toolz.R
 import com.frerox.toolz.data.livingframes.LivingFrame
+import com.frerox.toolz.data.livingframes.LivingFrameType
 import com.frerox.toolz.data.livingframes.LivingFramesRepository
 import com.frerox.toolz.ui.navigation.Screen
 import com.frerox.toolz.ui.theme.ToolzTheme
@@ -200,12 +204,12 @@ private fun ConfigScreen(
                 .padding(horizontal = 20.dp, vertical = 16.dp)
         ) {
             Text(
-                "Configure Living Widget",
+                stringResource(R.string.lw_config_title),
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold
             )
             Text(
-                "Pick the set this home-screen widget should show. You can pin more copies later.",
+                stringResource(R.string.lw_config_subtitle),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 6.dp)
@@ -221,22 +225,24 @@ private fun ConfigScreen(
                 Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            if (loadFailed) "Couldn't read the library" else "No Living Widget sets yet",
+                            stringResource(
+                                if (loadFailed) R.string.lw_config_load_failed
+                                else R.string.lw_config_empty
+                            ),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold
                         )
                         Text(
-                            if (loadFailed) {
-                                "The saved files are still on disk. Open Toolz, use “Try loading again”, then add this widget again."
-                            } else {
-                                "Create a GIF, video or photo set in Toolz, then add this widget again."
-                            },
+                            stringResource(
+                                if (loadFailed) R.string.lw_config_load_failed_body
+                                else R.string.lw_config_empty_body
+                            ),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 8.dp)
                         )
                         TextButton(onClick = onOpenToolz, modifier = Modifier.padding(top = 8.dp)) {
-                            Text("Open Living Widgets")
+                            Text(stringResource(R.string.lw_open_living_widgets))
                         }
                     }
                 }
@@ -261,7 +267,7 @@ private fun ConfigScreen(
 
             if (bindFailed) {
                 Text(
-                    "Couldn't save this choice. Free some storage and try again.",
+                    stringResource(R.string.lw_config_bind_failed),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.padding(top = 10.dp)
@@ -273,7 +279,7 @@ private fun ConfigScreen(
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                TextButton(onClick = onCancel) { Text("Cancel") }
+                TextButton(onClick = onCancel) { Text(stringResource(R.string.lw_cancel)) }
                 Spacer(Modifier.size(8.dp))
                 Button(
                     onClick = {
@@ -283,7 +289,7 @@ private fun ConfigScreen(
                     },
                     enabled = selected != null
                 ) {
-                    Text("Use this set")
+                    Text(stringResource(R.string.lw_config_use))
                 }
             }
         }
@@ -343,22 +349,49 @@ private fun ConfigRow(
                 overflow = TextOverflow.Ellipsis
             )
             Text(
-                when (frame.type) {
-                    com.frerox.toolz.data.livingframes.LivingFrameType.GIF -> "GIF · ${frame.frameCount} frames"
-                    com.frerox.toolz.data.livingframes.LivingFrameType.VIDEO -> "Video · ${frame.frameCount} frames"
-                    com.frerox.toolz.data.livingframes.LivingFrameType.PHOTO -> "Photo"
-                    com.frerox.toolz.data.livingframes.LivingFrameType.SLIDESHOW -> "Slideshow · ${frame.frameCount} photos"
-                },
+                configSummary(frame),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
         if (selected) {
             Text(
-                "Selected",
+                stringResource(R.string.lw_selected),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary
             )
         }
     }
+}
+
+@Composable
+private fun configSummary(frame: LivingFrame): String = when (frame.type) {
+    LivingFrameType.GIF -> stringResource(
+        R.string.lw_config_summary,
+        stringResource(R.string.lw_type_gif),
+        pluralStringResource(
+            R.plurals.lw_frames_count,
+            frame.frameCount,
+            frame.frameCount
+        )
+    )
+    LivingFrameType.VIDEO -> stringResource(
+        R.string.lw_config_summary,
+        stringResource(R.string.lw_type_video),
+        pluralStringResource(
+            R.plurals.lw_frames_count,
+            frame.frameCount,
+            frame.frameCount
+        )
+    )
+    LivingFrameType.PHOTO -> stringResource(R.string.lw_type_photo)
+    LivingFrameType.SLIDESHOW -> stringResource(
+        R.string.lw_config_summary,
+        stringResource(R.string.lw_type_slideshow),
+        pluralStringResource(
+            R.plurals.lw_photos_count,
+            frame.frameCount,
+            frame.frameCount
+        )
+    )
 }

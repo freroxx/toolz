@@ -26,6 +26,7 @@ import android.os.Build
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.frerox.toolz.MainActivity
+import com.frerox.toolz.R
 import com.frerox.toolz.ui.navigation.Screen
 import com.frerox.toolz.util.NotificationHelper
 import com.frerox.toolz.widget.livingframes.LivingFramesImportCancelReceiver
@@ -61,8 +62,6 @@ object LivingFramesImportCancellation {
  * gives them a cancel action from outside the app.
  */
 object LivingFramesImportNotifications {
-
-    private const val TITLE = "Importing Living Widget"
 
     private fun canNotify(context: Context): Boolean = try {
         val permission = Build.VERSION.SDK_INT < 33 ||
@@ -106,13 +105,17 @@ object LivingFramesImportNotifications {
             val notification = NotificationHelper.progressBuilder(
                 context,
                 NotificationHelper.CHANNEL_LIVING_FRAMES_IMPORT,
-                TITLE,
+                context.getString(R.string.lw_notification_title),
                 label,
                 pct
             )
                 .setOngoing(true)
                 .setContentIntent(contentIntent(context))
-                .addAction(0, "Cancel", cancelIntent(context))
+                .addAction(
+                    0,
+                    context.getString(R.string.lw_notification_cancel),
+                    cancelIntent(context)
+                )
                 .build()
             NotificationManagerCompat.from(context)
                 .notify(NotificationHelper.ID_LIVING_FRAMES_IMPORT, notification)

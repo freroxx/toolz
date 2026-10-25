@@ -22,6 +22,7 @@ import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Log
+import com.frerox.toolz.R
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -253,14 +254,14 @@ class LivingFramesRepository @Inject constructor(
             LivingFrameValidation.normalize(
                 LivingFrame(
                     id = id,
-                    name = "Recovered set",
+                    name = context.getString(R.string.lw_recovered_set),
                     type = type,
                     frameCount = contiguous,
                     width = bounds.outWidth.takeIf { it > 0 } ?: 1,
                     height = bounds.outHeight.takeIf { it > 0 } ?: 1,
                     slideshowIntervalMin = 1,
                     createdAt = dir.lastModified().takeIf { it > 0L } ?: now,
-                    sourceLabel = "Recovered after metadata repair"
+                    sourceLabel = context.getString(R.string.lw_recovered_source)
                 )
             )
         }
@@ -593,13 +594,20 @@ class LivingFramesRepository @Inject constructor(
         if (projected > MAX_STORE_BYTES) {
             return StorageCheck(
                 false,
-                "Living Widgets storage is full (${formatBytes(stats.usedBytes)} of ${formatBytes(MAX_STORE_BYTES)}). Delete a widget set first."
+                context.getString(
+                    R.string.lw_storage_full_usage,
+                    formatBytes(stats.usedBytes),
+                    formatBytes(MAX_STORE_BYTES)
+                )
             )
         }
         if (stats.freeBytes - extraBytes < MIN_FREE_BYTES) {
             return StorageCheck(
                 false,
-                "Not enough free space. Keep at least ${formatBytes(MIN_FREE_BYTES)} free before importing."
+                context.getString(
+                    R.string.lw_import_need_space,
+                    formatBytes(MIN_FREE_BYTES)
+                )
             )
         }
         return StorageCheck(true)

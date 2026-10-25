@@ -21,6 +21,7 @@ import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import com.frerox.toolz.R
 import com.frerox.toolz.data.livingframes.LivingFrame
 import com.frerox.toolz.data.livingframes.LivingFrameEngine
 
@@ -179,9 +180,13 @@ object LivingFramesSlideshow {
         if (ms < 0) return null
         val mins = ms / 60_000L
         return when {
-            ms < 60_000L -> "under a minute"
-            mins < 60L -> "$mins min"
-            else -> "${mins / 60} h ${mins % 60} min"
+            ms < 60_000L -> context.getString(R.string.lw_next_under_minute)
+            mins < 60L -> context.getString(R.string.lw_next_min, mins.toInt())
+            else -> context.getString(
+                R.string.lw_next_hours_min,
+                (mins / 60).toInt(),
+                (mins % 60).toInt()
+            )
         }
     }
 }

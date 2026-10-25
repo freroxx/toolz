@@ -20,6 +20,22 @@ into private app storage, and never uploaded.
   set, 1 GB total Living Widgets quota, and at least 256 MB free device
   storage before an import.
 
+## Interface and localization
+
+- The tool screen, configuration activity, widget placeholders, import
+  notification, imported set names and notes are translated into every locale
+  Toolz supports: **English**, **Spanish**, **French** and **Brazilian
+  Portuguese**. Counts use plural resources, and interval, tap-action,
+  quality, speed, loop and framing labels are resolved from string resources
+  without changing the stored enum values.
+- Horizontal scrollers fade at their edges so partially visible chips and
+  library tiles read as scrollable: 12 dp on chip rows and 16 dp on the
+  library.
+- The bottom **Add to home screen** / **Add another copy** bar uses rounded
+  top corners, matching the rest of the editor's expressive surfaces.
+- The launcher shortcut uses the Material Symbols Rounded `widgets` glyph on
+  the existing pink circle.
+
 ## Adding a widget
 
 1. Open **Living Widgets** in Toolz. The selected set plays at the top and
@@ -341,6 +357,20 @@ For a full build check:
 ```
 
 ## Release notes
+
+### Living Widgets localization and icon pass
+
+- Every Living Widgets surface is translated into English, Spanish, French
+  and Brazilian Portuguese: the editor, configuration screen, widget
+  placeholders, import notification, and the names and notes created by the
+  importer. Counts use plural resources, and model-derived labels such as
+  quality, speed, loop, framing and interval resolve through string resources
+  without changing stored enum values.
+- Chip rows and the library fade at their edges to show that they scroll, and
+  the bottom **Add to home screen** / **Add another copy** bar has rounded top
+  corners.
+- The launcher shortcut now uses the Material Symbols Rounded `widgets` glyph
+  on the existing pink circle.
 
 ### Living Widgets production polish
 

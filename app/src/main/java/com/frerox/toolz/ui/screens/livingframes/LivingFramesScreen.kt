@@ -20,6 +20,7 @@ package com.frerox.toolz.ui.screens.livingframes
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.expandVertically
@@ -122,6 +123,9 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -129,6 +133,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil3.compose.AsyncImage
+import com.frerox.toolz.R
 import com.frerox.toolz.data.livingframes.LivingFrame
 import com.frerox.toolz.data.livingframes.LivingFrameEngine
 import com.frerox.toolz.data.livingframes.LivingFrameEstimate
@@ -158,18 +163,30 @@ import java.util.Locale
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 
-private enum class Source(val title: String, val hint: String, val icon: ImageVector) {
-    GIF("GIF", "Animated image", Icons.Rounded.Gif),
-    VIDEO("Video", "A clip up to 30 s", Icons.Rounded.Videocam),
-    PHOTO("Photo", "One still picture", Icons.Rounded.Photo),
-    SLIDESHOW("Slideshow", "Up to 30 photos", Icons.Rounded.Slideshow)
+private enum class Source(
+    @StringRes val titleRes: Int,
+    @StringRes val hintRes: Int,
+    val icon: ImageVector
+) {
+    GIF(R.string.lw_source_gif, R.string.lw_source_gif_hint, Icons.Rounded.Gif),
+    VIDEO(R.string.lw_source_video, R.string.lw_source_video_hint, Icons.Rounded.Videocam),
+    PHOTO(R.string.lw_source_photo, R.string.lw_source_photo_hint, Icons.Rounded.Photo),
+    SLIDESHOW(
+        R.string.lw_source_slideshow,
+        R.string.lw_source_slideshow_hint,
+        Icons.Rounded.Slideshow
+    )
 }
 
 /** Nominal dp widths of a launcher cell block, so corner radius previews at true proportion. */
-private enum class Aspect(val label: String, val ratio: Float, val nominalWidthDp: Float) {
-    SQUARE("Square", 1f, 156f),
-    WIDE("Wide", 2f, 320f),
-    TALL("Tall", 0.5f, 156f)
+private enum class Aspect(
+    @StringRes val labelRes: Int,
+    val ratio: Float,
+    val nominalWidthDp: Float
+) {
+    SQUARE(R.string.lw_aspect_square, 1f, 156f),
+    WIDE(R.string.lw_aspect_wide, 2f, 320f),
+    TALL(R.string.lw_aspect_tall, 0.5f, 156f)
 }
 
 private val CAPTURE_FPS_CHOICES = listOf(15, 24, 30, 60)
@@ -188,6 +205,7 @@ fun LivingWidgetsScreen(
     val placed by viewModel.placed.collectAsState()
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
+    val context = LocalContext.current
     val selected = ui.selected
 
     var showSources by remember { mutableStateOf(false) }
@@ -238,7 +256,7 @@ fun LivingWidgetsScreen(
     fun pin(frame: LivingFrame) {
         vib?.vibrateLongClick()
         if (viewModel.pinToHome(frame)) {
-            scope.launch { snackbar.showSnackbar("Finish adding it on your home screen.") }
+            scope.launch { snackbar.showSnackbar(context.getString(R.string.lw_pin_added)) }
         } else {
             pinHelpFor = frame
         }
@@ -266,17 +284,21 @@ fun LivingWidgetsScreen(
                             modifier = Modifier.fillMaxWidth()
                         )
                         Text(
-                            "You can keep using the app while this finishes.",
+                            stringResource(R.string.lw_import_keep_using),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 },
                 confirmButton = {
-                    TextButton(onClick = viewModel::hideImport) { Text("Hide") }
+                    TextButton(onClick = viewModel::hideImport) {
+                        Text(stringResource(R.string.lw_hide))
+                    }
                 },
                 dismissButton = {
-                    TextButton(onClick = viewModel::cancelImport) { Text("Cancel") }
+                    TextButton(onClick = viewModel::cancelImport) {
+                        Text(stringResource(R.string.lw_cancel))
+                    }
                 }
             )
         }
@@ -285,14 +307,13 @@ fun LivingWidgetsScreen(
     if (confirmDelete && selected != null) {
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
-            title = { Text("Delete “${selected.name}”?") },
+            title = { Text(stringResource(R.string.lw_delete_title, selected.name)) },
             text = {
                 Text(
-                    if (placed.isEmpty()) {
-                        "Its files will be removed from this device."
-                    } else {
-                        "Its files will be removed, and home-screen copies will turn into placeholders."
-                    }
+                    stringResource(
+                        if (placed.isEmpty()) R.string.lw_delete_body
+                        else R.string.lw_delete_body_placed
+                    )
                 )
             },
             confirmButton = {
@@ -303,9 +324,13 @@ fun LivingWidgetsScreen(
                         viewModel.delete(selected.id)
                     },
                     colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                ) { Text("Delete") }
+                ) { Text(stringResource(R.string.lw_delete)) }
             },
-            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Keep") } }
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = false }) {
+                    Text(stringResource(R.string.lw_keep))
+                }
+            }
         )
     }
 
@@ -313,7 +338,7 @@ fun LivingWidgetsScreen(
         var text by remember(selected.id) { mutableStateOf(selected.name) }
         AlertDialog(
             onDismissRequest = { renaming = false },
-            title = { Text("Rename") },
+            title = { Text(stringResource(R.string.lw_rename)) },
             text = {
                 OutlinedTextField(
                     value = text,
@@ -323,9 +348,15 @@ fun LivingWidgetsScreen(
                 )
             },
             confirmButton = {
-                TextButton(onClick = { viewModel.setName(selected.id, text); renaming = false }) { Text("Save") }
+                TextButton(
+                    onClick = { viewModel.setName(selected.id, text); renaming = false }
+                ) { Text(stringResource(R.string.lw_save)) }
             },
-            dismissButton = { TextButton(onClick = { renaming = false }) { Text("Cancel") } }
+            dismissButton = {
+                TextButton(onClick = { renaming = false }) {
+                    Text(stringResource(R.string.lw_cancel))
+                }
+            }
         )
     }
 
@@ -336,14 +367,15 @@ fun LivingWidgetsScreen(
     pinHelpFor?.let { frame ->
         AlertDialog(
             onDismissRequest = { pinHelpFor = null },
-            title = { Text("Add it from your home screen") },
+            title = { Text(stringResource(R.string.lw_pin_help_title)) },
             text = {
-                Text(
-                    "Long-press an empty spot on your home screen, choose Widgets, then pick " +
-                        "Toolz → Living Widgets and select “${frame.name}”."
-                )
+                Text(stringResource(R.string.lw_pin_help_body, frame.name))
             },
-            confirmButton = { TextButton(onClick = { pinHelpFor = null }) { Text("Got it") } }
+            confirmButton = {
+                TextButton(onClick = { pinHelpFor = null }) {
+                    Text(stringResource(R.string.lw_got_it))
+                }
+            }
         )
     }
 
@@ -359,12 +391,12 @@ fun LivingWidgetsScreen(
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
-                        "New Living Widget",
+                        stringResource(R.string.lw_source_title),
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        "Choose what to start from.",
+                        stringResource(R.string.lw_source_subtitle),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -398,8 +430,8 @@ fun LivingWidgetsScreen(
     Scaffold(
         topBar = {
             ExpressiveTopAppBar(
-                title = "Living Widgets",
-                subtitle = "Bring your home screen to life",
+                title = stringResource(R.string.lw_title),
+                subtitle = stringResource(R.string.lw_subtitle),
                 navigationIcon = {
                     IconButton(
                         onClick = { vib?.vibrateClick(); onBack() },
@@ -407,12 +439,20 @@ fun LivingWidgetsScreen(
                             .padding(8.dp)
                             .clip(SmallExpressiveShape)
                             .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f))
-                    ) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back") }
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Rounded.ArrowBack,
+                            contentDescription = stringResource(R.string.lw_back)
+                        )
+                    }
                 },
                 actions = {
                     if (selected != null) {
                         IconButton(onClick = { vib?.vibrateClick(); openSources() }) {
-                            Icon(Icons.Rounded.Add, contentDescription = "New Living Widget")
+                            Icon(
+                                Icons.Rounded.Add,
+                                contentDescription = stringResource(R.string.lw_new)
+                            )
                         }
                     }
                 },
@@ -423,6 +463,7 @@ fun LivingWidgetsScreen(
         bottomBar = {
             if (selected != null) {
                 Surface(
+                    shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
                     color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
                     shadowElevation = 12.dp
                 ) {
@@ -442,7 +483,10 @@ fun LivingWidgetsScreen(
                             Icon(Icons.Rounded.AddToHomeScreen, null, Modifier.size(20.dp))
                             Spacer(Modifier.width(8.dp))
                             Text(
-                                if (placed.isEmpty()) "Add to home screen" else "Add another copy",
+                                stringResource(
+                                    if (placed.isEmpty()) R.string.lw_add_to_home
+                                    else R.string.lw_add_another_copy
+                                ),
                                 fontWeight = FontWeight.SemiBold
                             )
                         }
@@ -536,7 +580,7 @@ fun LivingWidgetsScreen(
                         StaggeredEntrance(index = 2) {
                             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Text(
-                                    "Make it yours",
+                                    stringResource(R.string.lw_make_it_yours),
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.SemiBold
                                 )
@@ -591,12 +635,12 @@ private fun EmptyState(
     Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
-                "Make your home screen move",
+                stringResource(R.string.lw_empty_title),
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.SemiBold
             )
             Text(
-                "Pick a GIF, video or photo to bring your home screen to life.",
+                stringResource(R.string.lw_empty_body),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -609,7 +653,7 @@ private fun EmptyState(
             onChange = onQuality
         )
         Text(
-            "You can resize it any time after adding it.",
+            stringResource(R.string.lw_empty_resize),
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -638,21 +682,21 @@ private fun LoadFailedCard(onRetry: () -> Unit) {
                 )
                 Spacer(Modifier.width(10.dp))
                 Text(
-                    "Your widgets didn't open",
+                    stringResource(R.string.lw_load_failed_title),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onErrorContainer
                 )
             }
             Text(
-                "Your files are safe. Try loading them again.",
+                stringResource(R.string.lw_load_failed_body),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onErrorContainer
             )
             ToolzExpressiveButton(
                 onClick = onRetry,
                 modifier = Modifier.fillMaxWidth()
-            ) { Text("Try again", fontWeight = FontWeight.SemiBold) }
+            ) { Text(stringResource(R.string.lw_try_again), fontWeight = FontWeight.SemiBold) }
         }
     }
 }
@@ -685,7 +729,7 @@ private fun ImportProgressCard(
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        "Running in the background",
+                        stringResource(R.string.lw_running_in_background),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f)
                     )
@@ -700,9 +744,9 @@ private fun ImportProgressCard(
                 modifier = Modifier.fillMaxWidth()
             )
             Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
-                TextButton(onClick = onCancel) { Text("Cancel") }
+                TextButton(onClick = onCancel) { Text(stringResource(R.string.lw_cancel)) }
                 Spacer(Modifier.width(8.dp))
-                TextButton(onClick = onShow) { Text("Show progress") }
+                TextButton(onClick = onShow) { Text(stringResource(R.string.lw_show_progress)) }
             }
         }
     }
@@ -726,6 +770,13 @@ private fun StageSection(
         value = PreviewState(false, viewModel.previewFrames(frame))
     }
     var menuOpen by remember { mutableStateOf(false) }
+    val summary = frameSummary(frame)
+    val placedSuffix = when (placedCount) {
+        0 -> ""
+        1 -> " · " + stringResource(R.string.lw_home_screen_suffix)
+        else -> " · " + stringResource(R.string.lw_home_screen_suffix_count, placedCount)
+    }
+    val aspectLabels = Aspect.entries.map { stringResource(it.labelRes) }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -738,13 +789,7 @@ private fun StageSection(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    buildString {
-                        append(frameSummary(frame))
-                        if (placedCount > 0) {
-                            append(" · ")
-                            append(if (placedCount == 1) "on your home screen" else "$placedCount on your home screen")
-                        }
-                    },
+                    summary + placedSuffix,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -753,22 +798,30 @@ private fun StageSection(
             }
             Box {
                 IconButton(onClick = { menuOpen = true }) {
-                    Icon(Icons.Rounded.MoreVert, contentDescription = "More actions")
+                    Icon(
+                        Icons.Rounded.MoreVert,
+                        contentDescription = stringResource(R.string.lw_more_actions)
+                    )
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                     DropdownMenuItem(
-                        text = { Text("Rename") },
+                        text = { Text(stringResource(R.string.lw_rename)) },
                         leadingIcon = { Icon(Icons.Rounded.Edit, null) },
                         onClick = { menuOpen = false; onRename() }
                     )
                     DropdownMenuItem(
-                        text = { Text("Details") },
+                        text = { Text(stringResource(R.string.lw_details)) },
                         leadingIcon = { Icon(Icons.Rounded.Info, null) },
                         onClick = { menuOpen = false; onDetails() }
                     )
                     HorizontalDivider()
                     DropdownMenuItem(
-                        text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                        text = {
+                            Text(
+                                stringResource(R.string.lw_delete),
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        },
                         leadingIcon = {
                             Icon(Icons.Rounded.Delete, null, tint = MaterialTheme.colorScheme.error)
                         },
@@ -817,7 +870,10 @@ private fun StageSection(
                                             if (canPlay) {
                                                 Modifier.clickable(
                                                     onClickLabel =
-                                                        if (playing) "Pause preview" else "Play preview",
+                                                        stringResource(
+                                                            if (playing) R.string.lw_pause_preview
+                                                            else R.string.lw_play_preview
+                                                        ),
                                                     onClick = onTogglePlay
                                                 )
                                             } else {
@@ -855,13 +911,13 @@ private fun StageSection(
 
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
-                "Preview shape",
+                stringResource(R.string.lw_preview_shape),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             ToolzConnectedButtonGroup(
                 selectedIndex = Aspect.entries.indexOf(aspect),
-                options = Aspect.entries.map { it.label },
+                options = aspectLabels,
                 onOptionSelected = { onAspect(Aspect.entries[it]) },
                 modifier = Modifier.fillMaxWidth()
             )
@@ -877,7 +933,7 @@ private fun PreviewLoading() {
     ) {
         ExpressiveLoadingIndicator()
         Text(
-            "Preparing preview…",
+            stringResource(R.string.lw_preparing_preview),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -896,12 +952,12 @@ private fun PreviewUnavailable() {
             tint = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Text(
-            "Preview unavailable",
+            stringResource(R.string.lw_preview_unavailable),
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.SemiBold
         )
         Text(
-            "The widget can still use this set.",
+            stringResource(R.string.lw_preview_unavailable_body),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
@@ -909,21 +965,38 @@ private fun PreviewUnavailable() {
     }
 }
 
+@Composable
 private fun frameSummary(frame: LivingFrame): String = when {
-    frame.isSlideshow -> "Slideshow · ${frame.frameCount} photos"
+    frame.isSlideshow -> stringResource(
+        R.string.lw_summary_slideshow,
+        stringResource(R.string.lw_type_slideshow),
+        pluralStringResource(
+            R.plurals.lw_photos_count,
+            frame.frameCount,
+            frame.frameCount
+        )
+    )
     frame.isAnimated -> {
         val fps = LivingFrameEngine.playbackFps(frame)
         val ms = LivingFrameEngine.displayDurationMs(
             frame.frameCount, frame.sourceFps, fps, frame.speed,
             frame.loopMode, frame.loopTransition
         )
-        "${if (frame.type == LivingFrameType.GIF) "GIF" else "Video"} · ${seconds(ms)}"
+        stringResource(
+            R.string.lw_summary_animated,
+            stringResource(
+                if (frame.type == LivingFrameType.GIF) R.string.lw_type_gif
+                else R.string.lw_type_video
+            ),
+            seconds(ms)
+        )
     }
-    frame.type == LivingFrameType.PHOTO -> "Photo"
-    frame.type == LivingFrameType.GIF -> "GIF"
-    else -> "Video"
+    frame.type == LivingFrameType.PHOTO -> stringResource(R.string.lw_type_photo)
+    frame.type == LivingFrameType.GIF -> stringResource(R.string.lw_type_gif)
+    else -> stringResource(R.string.lw_type_video)
 }
 
+@Composable
 private fun previewNote(frame: LivingFrame, shownFrames: Int): String? {
     if (!frame.isAnimated || shownFrames <= 0 || shownFrames >= frame.frameCount) return null
     val fps = LivingFrameEngine.playbackFps(frame)
@@ -939,13 +1012,15 @@ private fun previewNote(frame: LivingFrame, shownFrames: Int): String? {
     val half = frame.type == LivingFrameType.VIDEO &&
         shownFrames >= (frame.frameCount / 2).coerceAtLeast(1)
     return if (half) {
-        "Previewing the first half (${seconds(shown)}) — the widget plays the full ${seconds(total)}."
+        stringResource(R.string.lw_preview_half_note, seconds(shown), seconds(total))
     } else {
-        "Previewing the first ${seconds(shown)} — the widget plays the full ${seconds(total)}."
+        stringResource(R.string.lw_preview_excerpt_note, seconds(shown), seconds(total))
     }
 }
 
-private fun seconds(ms: Long): String = String.format(Locale.US, "%.1f s", ms / 1000f)
+@Composable
+private fun seconds(ms: Long): String =
+    stringResource(R.string.lw_duration_seconds, ms / 1000f)
 
 /** Circle when paused, squircle when playing — the shape change is the state change. */
 @Composable
@@ -965,7 +1040,9 @@ private fun PlayToggle(playing: Boolean, onClick: () -> Unit, modifier: Modifier
         Box(contentAlignment = Alignment.Center) {
             Icon(
                 if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                contentDescription = if (playing) "Pause preview" else "Play preview",
+                contentDescription = stringResource(
+                    if (playing) R.string.lw_pause_preview else R.string.lw_play_preview
+                ),
                 modifier = Modifier.size(22.dp)
             )
         }
@@ -1101,7 +1178,11 @@ private fun Library(
     onNew: () -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("Your widgets", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Text(
+            stringResource(R.string.lw_your_widgets),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold
+        )
         LazyRow(
             Modifier.fillMaxWidth().horizontalFadingEdges(left = 16.dp, right = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -1124,11 +1205,14 @@ private fun Library(
                         modifier = Modifier.size(92.dp)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
-                            Icon(Icons.Rounded.Add, contentDescription = "New Living Widget")
+                            Icon(
+                                Icons.Rounded.Add,
+                                contentDescription = stringResource(R.string.lw_new)
+                            )
                         }
                     }
                     Text(
-                        "New",
+                        stringResource(R.string.lw_new_short),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1
@@ -1235,13 +1319,13 @@ private fun SourceGrid(onPick: (Source) -> Unit) {
                             Icon(source.icon, null, Modifier.size(30.dp), tint = onContainers[i])
                             Column {
                                 Text(
-                                    source.title,
+                                    stringResource(source.titleRes),
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.SemiBold,
                                     color = onContainers[i]
                                 )
                                 Text(
-                                    source.hint,
+                                    stringResource(source.hintRes),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = onContainers[i].copy(alpha = 0.75f)
                                 )
@@ -1261,6 +1345,8 @@ private fun ImportQualityRow(
     onToggle: () -> Unit,
     onChange: (LivingFrameQuality) -> Unit
 ) {
+    val qualityOptions = LivingFrameQuality.entries.map { qualityLabel(it) }
+    val selectedQualityLabel = qualityLabel(quality)
     Surface(
         shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.55f),
@@ -1281,19 +1367,26 @@ private fun ImportQualityRow(
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
-                        "Quality",
+                        stringResource(R.string.lw_quality),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        "${quality.label} · ${qualityHint(quality)}",
+                        stringResource(
+                            R.string.lw_quality_summary,
+                            selectedQualityLabel,
+                            qualityHint(quality)
+                        ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 Icon(
                     if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
-                    contentDescription = if (expanded) "Hide quality options" else "Change quality",
+                    contentDescription = stringResource(
+                        if (expanded) R.string.lw_quality_toggle_hide
+                        else R.string.lw_quality_toggle_show
+                    ),
                     modifier = Modifier.size(20.dp)
                 )
             }
@@ -1308,12 +1401,12 @@ private fun ImportQualityRow(
                 ) {
                     ToolzConnectedButtonGroup(
                         selectedIndex = LivingFrameQuality.entries.indexOf(quality),
-                        options = LivingFrameQuality.entries.map { it.label },
+                        options = qualityOptions,
                         onOptionSelected = { onChange(LivingFrameQuality.entries[it]) },
                         modifier = Modifier.fillMaxWidth()
                     )
                     Text(
-                        "Higher quality looks sharper and uses more space.",
+                        stringResource(R.string.lw_quality_note),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1323,10 +1416,18 @@ private fun ImportQualityRow(
     }
 }
 
+@Composable
 private fun qualityHint(quality: LivingFrameQuality): String = when (quality) {
-    LivingFrameQuality.COMPACT -> "saves space"
-    LivingFrameQuality.HIGH -> "recommended"
-    LivingFrameQuality.ULTRA -> "sharpest"
+    LivingFrameQuality.COMPACT -> stringResource(R.string.lw_quality_hint_standard)
+    LivingFrameQuality.HIGH -> stringResource(R.string.lw_quality_hint_high)
+    LivingFrameQuality.ULTRA -> stringResource(R.string.lw_quality_hint_maximum)
+}
+
+@Composable
+private fun qualityLabel(quality: LivingFrameQuality): String = when (quality) {
+    LivingFrameQuality.COMPACT -> stringResource(R.string.lw_quality_standard)
+    LivingFrameQuality.HIGH -> stringResource(R.string.lw_quality_high)
+    LivingFrameQuality.ULTRA -> stringResource(R.string.lw_quality_maximum)
 }
 
 // ── Details ──────────────────────────────────────────────────────────────
@@ -1335,33 +1436,74 @@ private fun qualityHint(quality: LivingFrameQuality): String = when (quality) {
 private fun DetailsDialog(frame: LivingFrame, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Details") },
+        title = { Text(stringResource(R.string.lw_details)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                DetailRow("Type", typeLabel(frame))
+                DetailRow(stringResource(R.string.lw_detail_type), typeLabel(frame))
                 if (frame.isSlideshow) {
-                    DetailRow("Photos", "${frame.frameCount}")
-                } else if (frame.isAnimated) {
-                    DetailRow("Length", seconds(frameDurationMs(frame)))
-                    DetailRow("Frames", "${frame.frameCount}")
-                    DetailRow("Plays at", "${LivingFrameEngine.playbackFps(frame)} fps")
                     DetailRow(
-                        "Captured at",
-                        "${frame.sourceFps} fps · ${frame.quality.label} quality"
+                        stringResource(R.string.lw_detail_photos),
+                        pluralStringResource(
+                            R.plurals.lw_photos_count,
+                            frame.frameCount,
+                            frame.frameCount
+                        )
+                    )
+                } else if (frame.isAnimated) {
+                    DetailRow(
+                        stringResource(R.string.lw_detail_length),
+                        seconds(frameDurationMs(frame))
+                    )
+                    DetailRow(
+                        stringResource(R.string.lw_detail_frames),
+                        pluralStringResource(
+                            R.plurals.lw_frames_count,
+                            frame.frameCount,
+                            frame.frameCount
+                        )
+                    )
+                    DetailRow(
+                        stringResource(R.string.lw_detail_plays_at),
+                        stringResource(
+                            R.string.lw_fps_value,
+                            LivingFrameEngine.playbackFps(frame)
+                        )
+                    )
+                    DetailRow(
+                        stringResource(R.string.lw_detail_captured_at),
+                        stringResource(
+                            R.string.lw_detail_captured_value,
+                            frame.sourceFps,
+                            qualityLabel(frame.quality)
+                        )
                     )
                 } else {
-                    DetailRow("Size", "${frame.width}×${frame.height}")
-                    DetailRow("Quality", frame.quality.label)
+                    DetailRow(
+                        stringResource(R.string.lw_detail_size),
+                        "${frame.width}×${frame.height}"
+                    )
+                    DetailRow(
+                        stringResource(R.string.lw_detail_quality),
+                        qualityLabel(frame.quality)
+                    )
                 }
                 if (frame.resolutionPercent != 100) {
-                    DetailRow("Detail", "${frame.resolutionPercent}%")
+                    DetailRow(
+                        stringResource(R.string.lw_detail_detail),
+                        "${frame.resolutionPercent}%"
+                    )
                 }
                 if (frame.storedBytes > 0L) {
-                    DetailRow("On disk", LivingFramesRepository.formatBytes(frame.storedBytes))
+                    DetailRow(
+                        stringResource(R.string.lw_detail_on_disk),
+                        LivingFramesRepository.formatBytes(frame.storedBytes)
+                    )
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } }
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.lw_done)) }
+        }
     )
 }
 
@@ -1383,11 +1525,12 @@ private fun DetailRow(label: String, value: String) {
     }
 }
 
+@Composable
 private fun typeLabel(frame: LivingFrame): String = when (frame.type) {
-    LivingFrameType.SLIDESHOW -> "Slideshow"
-    LivingFrameType.PHOTO -> "Photo"
-    LivingFrameType.GIF -> "GIF"
-    LivingFrameType.VIDEO -> "Video loop"
+    LivingFrameType.SLIDESHOW -> stringResource(R.string.lw_type_slideshow)
+    LivingFrameType.PHOTO -> stringResource(R.string.lw_type_photo)
+    LivingFrameType.GIF -> stringResource(R.string.lw_type_gif)
+    LivingFrameType.VIDEO -> stringResource(R.string.lw_type_video_loop)
 }
 
 private fun frameDurationMs(frame: LivingFrame): Long = LivingFrameEngine.displayDurationMs(
@@ -1447,6 +1590,8 @@ private fun ClipSheet(
     )
     val presets = listOf(3_000L, 6_000L, 8_000L, 12_000L, 20_000L, 30_000L)
         .filter { it <= maxLenMs }
+    val qualityOptions = LivingFrameQuality.entries.map { qualityLabel(it) }
+    val selectedQualityLabel = qualityLabel(quality)
 
     val thumb by produceState<ImageBitmap?>(null, pending.uri, startMs / 250L) {
         delay(120L)
@@ -1466,12 +1611,12 @@ private fun ClipSheet(
                 .navigationBarsPadding()
         ) {
             Text(
-                "Trim your video",
+                stringResource(R.string.lw_clip_title),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold
             )
             Text(
-                "Choose the moment you want to loop.",
+                stringResource(R.string.lw_clip_subtitle),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 2.dp)
@@ -1512,7 +1657,10 @@ private fun ClipSheet(
 
                 if (maxStart > 0f) {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        SettingHeader("Starts at", clock(startMs))
+                        SettingHeader(
+                            stringResource(R.string.lw_clip_start),
+                            clock(startMs)
+                        )
                         Slider(
                             value = start.coerceIn(0f, maxStart),
                             onValueChange = { start = it },
@@ -1526,7 +1674,10 @@ private fun ClipSheet(
                 }
 
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    SettingHeader("Length", "%.1f s".format(Locale.US, lengthMs / 1000f))
+                    SettingHeader(
+                        stringResource(R.string.lw_clip_length),
+                        seconds(lengthMs)
+                    )
                     Slider(
                         value = lengthMs.toFloat(),
                         onValueChange = { length = it },
@@ -1540,12 +1691,15 @@ private fun ClipSheet(
                         ChoiceChips(
                             options = presets,
                             selected = presets.firstOrNull { it == lengthMs },
-                            label = { "${it / 1000} s" },
+                            label = { stringResource(R.string.lw_clip_seconds, it / 1000) },
                             onSelect = { length = it.toFloat() }
                         )
                     }
                     Text(
-                        "About ${LivingFramesRepository.formatBytes(estimate)} on this device",
+                        stringResource(
+                            R.string.lw_clip_estimate,
+                            LivingFramesRepository.formatBytes(estimate)
+                        ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1557,7 +1711,13 @@ private fun ClipSheet(
                 ) {
                     Icon(Icons.Rounded.Tune, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text(if (advanced) "Fewer options" else "More options", modifier = Modifier.weight(1f))
+                    Text(
+                        stringResource(
+                            if (advanced) R.string.lw_fewer_options
+                            else R.string.lw_more_options
+                        ),
+                        modifier = Modifier.weight(1f)
+                    )
                     Icon(
                         if (advanced) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
                         null,
@@ -1571,7 +1731,10 @@ private fun ClipSheet(
                     exit = shrinkVertically() + fadeOut()
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        SettingBlock("Smoothness", "$effectiveFps fps") {
+                        SettingBlock(
+                            stringResource(R.string.lw_smoothness),
+                            stringResource(R.string.lw_fps_value, effectiveFps)
+                        ) {
                             ToolzConnectedButtonGroup(
                                 selectedIndex = CAPTURE_FPS_CHOICES.indexOf(chosenFps).coerceAtLeast(0),
                                 options = CAPTURE_FPS_CHOICES.map { "$it" },
@@ -1580,21 +1743,28 @@ private fun ClipSheet(
                             )
                             if (effectiveFps < chosenFps) {
                                 Text(
-                                    "Limited to $effectiveFps fps for this length and quality.",
+                                    stringResource(R.string.lw_clip_limited, effectiveFps),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
-                        SettingBlock("Quality", quality.label) {
+                        SettingBlock(
+                            stringResource(R.string.lw_quality),
+                            selectedQualityLabel
+                        ) {
                             ToolzConnectedButtonGroup(
                                 selectedIndex = LivingFrameQuality.entries.indexOf(quality),
-                                options = LivingFrameQuality.entries.map { it.label },
+                                options = qualityOptions,
                                 onOptionSelected = { onQuality(LivingFrameQuality.entries[it]) },
                                 modifier = Modifier.fillMaxWidth()
                             )
                             Text(
-                                "Stored at ${stored.first}×${stored.second} px",
+                                stringResource(
+                                    R.string.lw_clip_stored,
+                                    stored.first,
+                                    stored.second
+                                ),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -1606,7 +1776,9 @@ private fun ClipSheet(
             ToolzExpressiveButton(
                 onClick = { onConfirm(startMs, lengthMs, effectiveFps, quality) },
                 modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)
-            ) { Text("Create loop", fontWeight = FontWeight.SemiBold) }
+            ) {
+                Text(stringResource(R.string.lw_clip_create), fontWeight = FontWeight.SemiBold)
+            }
         }
     }
 }

@@ -63,10 +63,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.frerox.toolz.R
 import com.frerox.toolz.data.livingframes.LivingFrame
 import com.frerox.toolz.data.livingframes.LivingFrameCorners
 import com.frerox.toolz.data.livingframes.LivingFrameEngine
@@ -82,6 +84,7 @@ import com.frerox.toolz.data.livingframes.LivingFramesRepository
 import com.frerox.toolz.data.livingframes.LivingFramesStorage
 import com.frerox.toolz.ui.components.ExpressiveCard
 import com.frerox.toolz.ui.components.SquircleShape
+import com.frerox.toolz.ui.components.horizontalFadingEdges
 import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.widget.livingframes.LivingFramesSlideshow
 import kotlin.math.roundToInt
@@ -165,10 +168,15 @@ internal fun StyledSlider(
 internal fun <T> ChoiceChips(
     options: List<T>,
     selected: T?,
-    label: (T) -> String,
+    label: @Composable (T) -> String,
     onSelect: (T) -> Unit
 ) {
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    LazyRow(
+        Modifier
+            .fillMaxWidth()
+            .horizontalFadingEdges(left = 12.dp, right = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
         items(options) { option ->
             FilterChip(
                 selected = option == selected,
@@ -187,6 +195,14 @@ internal fun <T> ChoiceChips(
 
 // ── Customize ────────────────────────────────────────────────────────────
 
+@Composable
+private fun slideshowIntervalLabel(mins: Int): String = when {
+    mins == 1440 -> stringResource(R.string.lw_interval_daily)
+    mins == 60 -> stringResource(R.string.lw_interval_one_hour)
+    mins % 60 == 0 -> stringResource(R.string.lw_interval_hours, mins / 60)
+    else -> stringResource(R.string.lw_interval_min, mins)
+}
+
 /**
  * The controls most people need are visible; anything that changes how the
  * stored file is processed, or that only matters to power users, is folded
@@ -203,18 +219,18 @@ internal fun CustomizePanel(
 
     PanelCard {
         if (frame.isSlideshow) {
-            SettingBlock("Change photo every") {
+            SettingBlock(stringResource(R.string.lw_change_photo_every)) {
                 ChoiceChips(
                     options = LivingFramesSlideshow.INTERVALS_MIN,
                     selected = frame.slideshowIntervalMin,
-                    label = { LivingFramesSlideshow.intervalLabel(it) },
+                    label = { slideshowIntervalLabel(it) },
                     onSelect = { vib?.vibrateTick(); vm.setSlideshowInterval(frame.id, it) }
                 )
             }
             if (nextIn != null) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        "Next photo in $nextIn",
+                        stringResource(R.string.lw_next_photo_in, nextIn),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f)
@@ -222,18 +238,18 @@ internal fun CustomizePanel(
                     TextButton(onClick = { vib?.vibrateClick(); vm.skipSlide(frame.id) }) {
                         Icon(Icons.Rounded.SkipNext, null, Modifier.size(18.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("Skip")
+                        Text(stringResource(R.string.lw_skip))
                     }
                 }
             }
             SwitchRow(
-                title = "Shuffle",
-                subtitle = "Mix up the order",
+                title = stringResource(R.string.lw_shuffle),
+                subtitle = stringResource(R.string.lw_shuffle_desc),
                 checked = frame.shuffle,
                 onChange = { vib?.vibrateTick(); vm.setShuffle(frame.id, it) }
             )
         } else if (frame.isAnimated) {
-            SettingBlock("Speed", LivingFrameSpeed.label(frame.speed)) {
+            SettingBlock(stringResource(R.string.lw_speed), LivingFrameSpeed.label(frame.speed)) {
                 StyledSlider(
                     value = LivingFrameSpeed.index(frame.speed).toFloat(),
                     range = 0f..LivingFrameSpeed.STEPS.lastIndex.toFloat(),
@@ -249,7 +265,10 @@ internal fun CustomizePanel(
             }
         }
 
-        SettingBlock("Corners", "${frame.cornerRadiusDp} dp") {
+        SettingBlock(
+            stringResource(R.string.lw_corners),
+            stringResource(R.string.lw_corner_value, frame.cornerRadiusDp)
+        ) {
             StyledSlider(
                 value = frame.cornerRadiusDp.toFloat(),
                 range = LivingFrameCorners.MIN.toFloat()..LivingFrameCorners.MAX.toFloat(),
@@ -258,24 +277,30 @@ internal fun CustomizePanel(
             )
         }
 
-        SettingBlock("Framing") {
+        SettingBlock(stringResource(R.string.lw_framing)) {
             ChoiceChips(
                 options = listOf(LivingFrameFit.FILL, LivingFrameFit.FIT),
                 selected = frame.fit,
-                label = { if (it == LivingFrameFit.FILL) "Fill" else "Fit" },
+                label = {
+                    stringResource(
+                        if (it == LivingFrameFit.FILL) R.string.lw_fill else R.string.lw_fit
+                    )
+                },
                 onSelect = { vib?.vibrateTick(); vm.setFit(frame.id, it) }
             )
             Text(
-                if (frame.fit == LivingFrameFit.FILL) "Fills the widget and crops the edges."
-                else "Shows the whole picture, with space around it.",
+                stringResource(
+                    if (frame.fit == LivingFrameFit.FILL) R.string.lw_fill_desc
+                    else R.string.lw_fit_desc
+                ),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
 
         SwitchRow(
-            title = "Show name",
-            subtitle = "Adds a small label to the widget",
+            title = stringResource(R.string.lw_show_name),
+            subtitle = stringResource(R.string.lw_show_name_desc),
             checked = frame.showCaption,
             onChange = { vib?.vibrateTick(); vm.setShowCaption(frame.id, it) }
         )
@@ -286,7 +311,12 @@ internal fun CustomizePanel(
         ) {
             Icon(Icons.Rounded.Tune, null, Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
-            Text(if (advanced) "Fewer options" else "More options", modifier = Modifier.weight(1f))
+            Text(
+                stringResource(
+                    if (advanced) R.string.lw_fewer_options else R.string.lw_more_options
+                ),
+                modifier = Modifier.weight(1f)
+            )
             Icon(
                 if (advanced) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
                 null,
@@ -316,7 +346,10 @@ private fun AdvancedControls(frame: LivingFrame, vm: LivingFramesViewModel) {
 
     Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
         if (frame.isAnimated) {
-            SettingBlock("Smoothness", "$displayFps fps") {
+            SettingBlock(
+                stringResource(R.string.lw_smoothness),
+                stringResource(R.string.lw_fps_value, displayFps)
+            ) {
                 StyledSlider(
                     value = LivingFrameFps.stepIndex(frame.fps).toFloat(),
                     range = 0f..LivingFrameFps.STEPS.lastIndex.toFloat(),
@@ -331,8 +364,7 @@ private fun AdvancedControls(frame: LivingFrame, vm: LivingFramesViewModel) {
                 )
                 if (displayFps > playFps) {
                     Text(
-                        "This clip was captured at $sourceFps fps, so it plays at $playFps fps. " +
-                            "Extra frames would only repeat.",
+                        stringResource(R.string.lw_capture_note, sourceFps, playFps),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -340,7 +372,10 @@ private fun AdvancedControls(frame: LivingFrame, vm: LivingFramesViewModel) {
             }
         }
 
-        SettingBlock("Detail", "${frame.resolutionPercent}% · ${renderW}×${renderH} px") {
+        SettingBlock(
+            stringResource(R.string.lw_detail_detail),
+            stringResource(R.string.lw_detail_summary, frame.resolutionPercent, renderW, renderH)
+        ) {
             StyledSlider(
                 value = LivingFrameResolution.STEPS
                     .indexOf(LivingFrameResolution.snap(frame.resolutionPercent))
@@ -358,32 +393,39 @@ private fun AdvancedControls(frame: LivingFrame, vm: LivingFramesViewModel) {
                 }
             )
             Text(
-                "Lower settings save battery and memory.",
+                stringResource(R.string.lw_detail_hint),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
 
         if (frame.isAnimated) {
-            SettingBlock("Direction") {
+            SettingBlock(stringResource(R.string.lw_direction)) {
                 ChoiceChips(
                     options = LivingFrameLoopMode.entries,
                     selected = frame.loopMode,
-                    label = { if (it == LivingFrameLoopMode.BOOMERANG) "Back and forth" else "Loop" },
+                    label = {
+                        stringResource(
+                            if (it == LivingFrameLoopMode.BOOMERANG) R.string.lw_back_and_forth
+                            else R.string.lw_loop
+                        )
+                    },
                     onSelect = { vib?.vibrateTick(); vm.setLoopMode(frame.id, it) }
                 )
             }
             if (frame.loopMode != LivingFrameLoopMode.BOOMERANG) {
-                SettingBlock("Loop transition") {
+                SettingBlock(stringResource(R.string.lw_loop_transition)) {
                     ChoiceChips(
                         options = LivingFrameLoopTransition.entries,
                         selected = frame.loopTransition,
                         label = {
-                            when (it) {
-                                LivingFrameLoopTransition.NONE -> "None"
-                                LivingFrameLoopTransition.FADE -> "Fade"
-                                LivingFrameLoopTransition.BLUR -> "Soft blur"
-                            }
+                            stringResource(
+                                when (it) {
+                                    LivingFrameLoopTransition.NONE -> R.string.lw_none
+                                    LivingFrameLoopTransition.FADE -> R.string.lw_fade
+                                    LivingFrameLoopTransition.BLUR -> R.string.lw_soft_blur
+                                }
+                            )
                         },
                         onSelect = { vib?.vibrateTick(); vm.setLoopTransition(frame.id, it) }
                     )
@@ -398,12 +440,17 @@ private fun AdvancedControls(frame: LivingFrame, vm: LivingFramesViewModel) {
 @Composable
 private fun TapActionSetting(frame: LivingFrame, vm: LivingFramesViewModel) {
     val vib = LocalVibrationManager.current
+    val openWidgets = stringResource(R.string.lw_tap_open_widgets)
+    val openTool = stringResource(R.string.lw_tap_open_tool)
+    val nextPhoto = stringResource(R.string.lw_tap_next_photo)
+    val pausePlay = stringResource(R.string.lw_tap_pause_play)
+    val nothing = stringResource(R.string.lw_tap_nothing)
     val tapActions = buildList {
-        add("Open Living Widgets" to LivingFrameTapAction.OPEN_PREVIEW)
-        add("Open a tool" to LivingFrameTapAction.OPEN_TOOL)
-        if (frame.isSlideshow) add("Next photo" to LivingFrameTapAction.NEXT_FRAME)
-        if (frame.isAnimated) add("Pause or play" to LivingFrameTapAction.PAUSE_PLAY)
-        add("Do nothing" to LivingFrameTapAction.NOTHING)
+        add(openWidgets to LivingFrameTapAction.OPEN_PREVIEW)
+        add(openTool to LivingFrameTapAction.OPEN_TOOL)
+        if (frame.isSlideshow) add(nextPhoto to LivingFrameTapAction.NEXT_FRAME)
+        if (frame.isAnimated) add(pausePlay to LivingFrameTapAction.PAUSE_PLAY)
+        add(nothing to LivingFrameTapAction.NOTHING)
     }
     val effectiveTap = when {
         frame.tapAction == LivingFrameTapAction.NEXT_FRAME && !frame.isSlideshow ->
@@ -412,7 +459,7 @@ private fun TapActionSetting(frame: LivingFrame, vm: LivingFramesViewModel) {
             LivingFrameTapAction.OPEN_PREVIEW
         else -> frame.tapAction
     }
-    SettingBlock("When tapped") {
+    SettingBlock(stringResource(R.string.lw_when_tapped)) {
         ChoiceChips(
             options = tapActions,
             selected = tapActions.firstOrNull { it.second == effectiveTap },
@@ -430,7 +477,12 @@ private fun TapActionSetting(frame: LivingFrame, vm: LivingFramesViewModel) {
 
 @Composable
 private fun ToolChips(selectedRoute: String?, onSelect: (String) -> Unit) {
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    LazyRow(
+        Modifier
+            .fillMaxWidth()
+            .horizontalFadingEdges(left = 12.dp, right = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
         items(LivingFrameTools.ALL, key = { it.route }) { tool ->
             FilterChip(
                 selected = tool.route == selectedRoute,
@@ -462,7 +514,7 @@ internal fun PlacedWidgetsPanel(
     onRefresh: (Int) -> Unit
 ) {
     PanelCard {
-        SettingHeader("On your home screen", "${placed.size}")
+        SettingHeader(stringResource(R.string.lw_placed_title), "${placed.size}")
         placed.forEach { PlacedRow(it, onRefresh) }
     }
 }
@@ -507,26 +559,30 @@ private fun PlacedRow(w: PlacedWidget, onRefresh: (Int) -> Unit) {
             )
             if (info?.reduced == true && !failed) {
                 Text(
-                    "Optimized to fit your launcher",
+                    stringResource(R.string.lw_placed_optimized),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
         IconButton(onClick = { onRefresh(w.widgetId) }) {
-            Icon(Icons.Rounded.Refresh, "Refresh widget")
+            Icon(Icons.Rounded.Refresh, stringResource(R.string.lw_refresh_widget))
         }
     }
 }
 
+@Composable
 private fun renderSummary(w: PlacedWidget): String {
-    val i = w.info ?: return "Waiting for your launcher…"
+    val i = w.info ?: return stringResource(R.string.lw_placed_waiting)
     // Launcher exceptions are technical and often truncated. Keep them in the
     // widget diagnostics; show an actionable sentence here instead.
-    if (i.error != null) return "Couldn't draw here. Tap refresh, or add it again."
-    val kind = if (i.frames == 1) "Still" else "${i.fps} fps"
-    val next = w.nextSlideIn?.let { " · next in $it" } ?: ""
-    return "$kind · ${i.widthPx}×${i.heightPx} px$next"
+    if (i.error != null) return stringResource(R.string.lw_placed_failed)
+    val kind = if (i.frames == 1) stringResource(R.string.lw_placed_still)
+    else stringResource(R.string.lw_fps_value, i.fps)
+    val next = w.nextSlideIn?.let {
+        " · " + stringResource(R.string.lw_placed_next_in, it)
+    } ?: ""
+    return stringResource(R.string.lw_placed_summary, kind, i.widthPx, i.heightPx, next)
 }
 
 // ── Storage ──────────────────────────────────────────────────────────────
@@ -534,6 +590,15 @@ private fun renderSummary(w: PlacedWidget): String {
 @Composable
 internal fun StoragePanel(storage: LivingFramesStorage, onCleanup: () -> Unit) {
     var expanded by rememberSaveable { mutableStateOf(false) }
+    val used = stringResource(
+        R.string.lw_storage_used,
+        LivingFramesRepository.formatBytes(storage.usedBytes)
+    )
+    val sets = pluralStringResource(
+        R.plurals.lw_sets_count,
+        storage.setCount,
+        storage.setCount
+    )
     PanelCard {
         Row(
             Modifier.fillMaxWidth(),
@@ -541,19 +606,22 @@ internal fun StoragePanel(storage: LivingFramesStorage, onCleanup: () -> Unit) {
         ) {
             Column(Modifier.weight(1f)) {
                 Text(
-                    "Storage",
+                    stringResource(R.string.lw_storage),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold
                 )
                 Text(
-                    "${LivingFramesRepository.formatBytes(storage.usedBytes)} used · " +
-                        "${storage.setCount} set${if (storage.setCount == 1) "" else "s"}",
+                    "$used · $sets",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             TextButton(onClick = { expanded = !expanded }) {
-                Text(if (expanded) "Hide" else "Manage")
+                Text(
+                    stringResource(
+                        if (expanded) R.string.lw_hide else R.string.lw_manage
+                    )
+                )
                 Icon(
                     if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
                     null,
@@ -572,21 +640,28 @@ internal fun StoragePanel(storage: LivingFramesStorage, onCleanup: () -> Unit) {
                     modifier = Modifier.fillMaxWidth()
                 )
                 Text(
-                    "${LivingFramesRepository.formatBytes(storage.freeBytes)} free on this device",
+                    stringResource(
+                        R.string.lw_free_space,
+                        LivingFramesRepository.formatBytes(storage.freeBytes)
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 if (storage.orphanBytes > 0L) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            "${storage.orphanDirs.size} unused folder" +
-                                "${if (storage.orphanDirs.size == 1) "" else "s"} " +
-                                "(${LivingFramesRepository.formatBytes(storage.orphanBytes)})",
+                            pluralStringResource(
+                                R.plurals.lw_unused_folders,
+                                storage.orphanDirs.size,
+                                storage.orphanDirs.size
+                            ) + " (${LivingFramesRepository.formatBytes(storage.orphanBytes)})",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.weight(1f)
                         )
-                        TextButton(onClick = onCleanup) { Text("Clean up") }
+                        TextButton(onClick = onCleanup) {
+                            Text(stringResource(R.string.lw_clean_up))
+                        }
                     }
                 }
             }
