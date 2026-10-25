@@ -251,6 +251,7 @@
     <string name="st_Whisper_MsgStatus_Read">Read</string>
     <string name="cd_Whisper_DisappearingImage">Disappearing image</string>
     <string name="st_Whisper_Locked_Short">🔒 Encrypted message</string>
+    <string name="st_Whisper_SayHi">Say hi 👋</string>
     <string name="st_Whisper_HideFromDiscover">Hide from Discover</string>
     <string name="st_Whisper_Error_KeyVerifyFailed">Unable to verify this key.</string>
     <string name="st_Whisper_Error_KeyAcceptFailed">Unable to accept this key.</string>

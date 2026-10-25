@@ -1435,7 +1435,7 @@ class WhisperRepository @Inject constructor(
      * silence stretches the cadence to save battery/server load. Every stretch is
      * counted in diagnostics so field regressions are provable.
      */
-    private class QuietBackoff(private val stepsMs: List<Long>, private val tag: String) {
+    internal class QuietBackoff(private val stepsMs: List<Long>, private val tag: String) {
         private var level = 0
         fun delayMs(): Long = stepsMs[level]
         fun onQuiet() {
@@ -1544,6 +1544,14 @@ class WhisperRepository @Inject constructor(
         runCatchingCE { selfReadStore.forget(messageId) }
     }
 
+    /**
+     * Bumped by [retryLockedDecryptions] so [getMessagesFlow] re-runs the whole
+     * decryption pass even though neither Room nor the peer key changed. This is
+     * what turns a stale lock marker into a successful decrypt without forcing the
+     * user to leave and re-enter the chat.
+     */
+    private val decryptionRetryEpoch = MutableStateFlow(0L)
+
     fun getMessagesFlow(otherUserId: String): Flow<List<WhisperMessage>> {
         val currentId = myId
         if (currentId.isBlank()) return flowOf(emptyList())
@@ -1554,8 +1562,9 @@ class WhisperRepository @Inject constructor(
         return combine(
             messageDao.getMessages(currentId, otherUserId),
             peerKeys.map { it[otherUserId] },
-            blockedIds
-        ) { entities, inMemoryKey, blocked ->
+            blockedIds,
+            decryptionRetryEpoch,
+        ) { entities, inMemoryKey, blocked, _ ->
             withContext(Dispatchers.Default) {
                 val peerKey = keyTrustStore.knownKey(otherUserId) ?: inMemoryKey
                 // One bulk query: own rows resolve from their sealed self copy, which is
@@ -1580,6 +1589,37 @@ class WhisperRepository @Inject constructor(
 
     /** Key used to decrypt a partner's cached ciphertext (accepted key, never a changed one). */
     fun getDecryptionKey(peerId: String): String? = peerKeyFor(peerId)
+
+    /**
+     * Bounded self-heal for cached lock markers.
+     *
+     * A locked row is usually caused by Room hydrating before the peer key has been
+     * fetched (cold start / process death), not by permanently lost key material.
+     * Force-refreshing the profile re-populates [peerKeys] (and auto-adopts a
+     * cert-chained rotation when one exists); bumping the epoch then makes
+     * [getMessagesFlow] re-decrypt every cached row for this conversation.
+     *
+     * Returns false when there is no fresh profile/key to try. Callers must cap the
+     * number of attempts per chat — this method never loops on its own.
+     */
+    suspend fun retryLockedDecryptions(otherUserId: String): Boolean {
+        val currentId = myId
+        if (currentId.isBlank() || otherUserId.isBlank() || otherUserId == currentId) return false
+        val profile = getProfile(otherUserId, forceRefresh = true).getOrNull() ?: return false
+        val freshKey = profile.publicKey
+        if (!freshKey.isNullOrBlank()) {
+            // TOFU rules still apply inside adoptFreshKeyIfFresh: verified peers and
+            // untrusted key swaps are never silently accepted during self-heal.
+            adoptFreshKeyIfFresh(otherUserId, freshKey)
+            cachePeerKey(otherUserId, freshKey)
+        }
+        decryptionRetryEpoch.update { it + 1 }
+        ProtocolDiagnostics.increment("decrypt.selfHealRetry")
+        ProtocolDiagnostics.log(
+            "decrypt.selfHeal: epoch bumped for ${otherUserId.take(6)}… (hasKey=${!freshKey.isNullOrBlank()})"
+        )
+        return true
+    }
 
     suspend fun getMessages(otherUserId: String, limit: Int = 100, beforeCreatedAt: String? = null): Result<List<WhisperMessage>> = runCatching {
         val currentId = myId
@@ -2806,9 +2846,14 @@ class WhisperRepository @Inject constructor(
             table = "messages"
             filter("sender_id", FilterOperator.EQ, userId)
         }
+        // V6-R7 parity with the chat poller: a shared realtime-activity clock.
+        // Channel status alone lies when the socket is half-dead; polling is
+        // suppressed only while real events are actually landing.
+        val lastRealtimeEventAtMs = java.util.concurrent.atomic.AtomicLong(System.currentTimeMillis())
         val dbJob = launch {
             merge(asReceiverChanges, asSenderChanges).collect { action ->
                 try {
+                    lastRealtimeEventAtMs.set(System.currentTimeMillis())
                     val msg = when (action) {
                         is PostgresAction.Insert -> action.decodeRecord<WhisperMessage>()
                         is PostgresAction.Update -> action.decodeRecord<WhisperMessage>()
@@ -2853,6 +2898,7 @@ class WhisperRepository @Inject constructor(
         var lastInboxStatusSubscribed = false
         val inboxSeen = java.util.concurrent.ConcurrentHashMap<String, Boolean>() // id -> isRead
         var inboxSeeded = false
+        val inboxFlowStartMs = System.currentTimeMillis()
         // FIX: faster fallback for notifications (was 8s, now 3s base) — delayed
         // notifications were reported when FCM + realtime both missed.
         val inboxBackoff = QuietBackoff(listOf(3_000L, 8_000L, 16_000L), tag = "inbox")
@@ -2864,28 +2910,41 @@ class WhisperRepository @Inject constructor(
                         channel.status.value == io.github.jan.supabase.realtime.RealtimeChannel.Status.SUBSCRIBED
                     val justRecovered = nowSubscribed && !lastInboxStatusSubscribed
                     lastInboxStatusSubscribed = nowSubscribed
-                    if (!justRecovered && nowSubscribed && dbJob.isActive) {
-                        // Healthy realtime lane AND its collector alive → skip.
-                        // (dbJob cancel during teardown also stops us via isActive.)
+                    // V6-R7 FIX: same 5s activity window as the chat poller. The
+                    // previous status-based skip trusted a half-dead socket and
+                    // silenced notifications until the screen was reopened.
+                    if (!justRecovered &&
+                        System.currentTimeMillis() - lastRealtimeEventAtMs.get() < 5_000
+                    ) {
                         continue
                     }
                     if (!dbJob.isActive) continue
                     ProtocolDiagnostics.increment("inbox.pollTick")
+                    var sawChange = false
                     val rows = runCatchingCE {
                         db.from("messages").select {
                             filter { or { eq("sender_id", userId); eq("receiver_id", userId) } }
                             order("created_at", Order.DESCENDING)
-                            limit(20)
+                            limit(30)
                         }.decodeList<WhisperMessage>()
                     }.getOrDefault(emptyList())
                     for (msg in rows.reversed()) {
                         if (msg.id.isBlank() || deletedStore.isMessageDeleted(msg.id)) continue
                         val prev = inboxSeen.put(msg.id, msg.isRead)
-                        if (!inboxSeeded && prev == null) continue // silent seed
                         if (prev != null && prev == msg.isRead) continue
+                        // V6-R5 SEED-SWALLOW FIX: the first pass used to silently mark
+                        // everything seen, dropping messages that arrived between flow
+                        // start and the first tick. Emit rows newer than flowStartMs.
+                        if (!inboxSeeded && prev == null) {
+                            val arrivedAfterOpen = runCatching {
+                                WhisperMessageEntity.parseSortEpoch(msg.createdAt) > inboxFlowStartMs
+                            }.getOrDefault(false)
+                            if (!arrivedAfterOpen) continue
+                        }
                         val isNewMessage = prev == null
                         val isReadFlip = prev != null && prev != msg.isRead
                         // P5: a read-flip or brand-new row is activity for the cadence.
+                        sawChange = true
                         inboxBackoff.onActivity()
                         // FIX: read flips must bypass dedupe (shouldEmit blocks within 30s)
                         // so the UI can immediately clear badge/notification instead of
@@ -2898,6 +2957,7 @@ class WhisperRepository @Inject constructor(
                         }
                     }
                     inboxSeeded = true
+                    if (!sawChange) inboxBackoff.onQuiet()
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e
                 } catch (_: Exception) {
@@ -3157,9 +3217,9 @@ class WhisperRepository @Inject constructor(
                 )
                 conversations.add(WhisperConversation(profile, previewMsg, row.unreadCount.toInt()))
             }
-            conversations.also { result ->
-                conversationsCache = ConversationsCacheEntry(result, System.currentTimeMillis())
-            }
+            // Accepted friends must appear in Messages even before the first message:
+            // append empty-preview placeholders after the real threads.
+            mergeAcceptedFriendConversations(conversations, blockedPartnerIds, profilesById)
         } else {
             // Fallback when RPC is unavailable: paginate instead of truncating at 200, otherwise
             // users with >200 messages silently lose conversations.
@@ -3226,7 +3286,9 @@ class WhisperRepository @Inject constructor(
                 val unread = visibleMsgs.count { it.receiverId == myId && !it.isRead }
                 conversations.add(WhisperConversation(profile, lastMsg.copy(content = decryptedContent), unread))
             }
-            conversations.sortedByDescending { it.lastMessage.createdAt }
+            val sorted = conversations.sortedByDescending { it.lastMessage.createdAt }
+            // Same placeholder contract as the RPC branch; keep them after real threads.
+            mergeAcceptedFriendConversations(sorted, blockedPartnerIds, profilesById)
         }.also { result ->
             conversationsCache = ConversationsCacheEntry(result, System.currentTimeMillis())
         }

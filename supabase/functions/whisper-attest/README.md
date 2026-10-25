@@ -14,7 +14,7 @@ client headers; gating it would break all push delivery.
 # Strict baseline (no Google Cloud needed — runnable as-is):
 supabase secrets set OFFICIAL_PACKAGE=com.frerox.toolz
 supabase secrets set OFFICIAL_CERT_SHA256=<release keystore SHA-256, colons optional>
-supabase secrets set MIN_VERSION_CODE=17
+supabase secrets set MIN_VERSION_CODE=18
 
 # Optional strong path (hardware verdict via Play Integrity API):
 supabase secrets set PLAY_INTEGRITY_ENABLED=true

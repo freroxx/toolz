@@ -75,6 +75,11 @@ class ToolzApplication : Application(), Configuration.Provider {
     @Inject
     lateinit var launcherIconManager: com.frerox.toolz.data.skin.LauncherIconManager
 
+    // App-scoped Whisper realtime/notification lanes. Starting here keeps
+    // notifications alive even when no Whisper screen is composed.
+    @Inject
+    lateinit var whisperNotificationMonitor: com.frerox.toolz.data.whisper.WhisperNotificationMonitor
+
     private val appScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
 
     override fun onCreate() {
@@ -107,6 +112,9 @@ class ToolzApplication : Application(), Configuration.Provider {
         }
         scheduleWhisperLocalCleanup()
         scheduleWhisperDelivery()
+        // Idempotent: the hub also calls start(), so notifications survive a
+        // screen teardown without ever double-subscribing the inbox channel.
+        whisperNotificationMonitor.start()
         schedulePurgeShotReschedule()
         com.frerox.toolz.worker.ClipboardCleanupWorker.schedule(this)
         // Re-assert the persisted launcher icon (survives reboot + app update,

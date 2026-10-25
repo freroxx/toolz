@@ -100,8 +100,15 @@ class WhisperNotificationManager @Inject constructor(
     // Dedupe: same messageId from FCM + realtime must not double-notify within TTL.
     private val recentlyNotifiedMessageIds = ConcurrentHashMap<String, Long>()
     private val lastBlankNotifyAt = ConcurrentHashMap<String, Long>()
+    // Friend requests arrive through TWO lanes (FCM wake ping without a
+    // friendship id + realtime Postgres row with one) and the realtime lane may
+    // re-emit on reconnect/poll-seed. Dedupe by BOTH sender and friendship id
+    // so either lane can suppress the other.
+    private val recentlyNotifiedFriendRequests = ConcurrentHashMap<String, Long>()
     private val NOTIF_DEDUPE_TTL_MS = 30_000L
     private val MAX_RECENT_NOTIF_IDS = 1_024
+    private val FRIEND_REQUEST_DEDUPE_TTL_MS = 3 * 60_000L
+    private val MAX_RECENT_FRIEND_REQUEST_KEYS = 256
 
     init {
         createChannel()
@@ -270,8 +277,16 @@ class WhisperNotificationManager @Inject constructor(
     }
 
     /** Friend request notification — stable sender id avoids display-name collisions. V2-FIX M-H?: id lives in the dedicated FRIEND_REQUEST_* band, disjoint from conversation ids. */
-    fun showFriendRequestNotification(fromId: String, fromName: String) {
+    fun showFriendRequestNotification(
+        fromId: String,
+        fromName: String,
+        friendshipId: String? = null,
+    ) {
         if (!whisperNotificationsEnabled) return
+        // Mark both lanes BEFORE the visibility early-return: a request seen live
+        // on the friends surface must not be re-posted by a wake ping arriving a
+        // moment later, once the user has navigated away.
+        if (!shouldNotifyForFriendRequest(fromId, friendshipId)) return
         if (isInForeground && isViewingFriendRequests) return
         val notifId = friendRequestNotifId(fromId)
         // Tapping the notification opens MainActivity and surfaces the request list
@@ -354,6 +369,39 @@ class WhisperNotificationManager @Inject constructor(
         recentlyNotifiedMessageIds[messageId] = now
         return true
     }
+
+    /**
+     * Cross-lane friend-request dedupe. The FCM wake ping has no friendship id;
+     * the realtime row does. Marking/checking BOTH keys means whichever lane
+     * lands first suppresses the other, while a genuinely re-sent request after
+     * the TTL still pings.
+     */
+    private fun shouldNotifyForFriendRequest(fromId: String, friendshipId: String?): Boolean =
+        synchronized(recentlyNotifiedFriendRequests) {
+            val now = System.currentTimeMillis()
+            val keys = buildList {
+                add("sender:$fromId")
+                if (!friendshipId.isNullOrBlank()) add("friendship:$friendshipId")
+            }
+            val duplicate = keys.any { key ->
+                val seenAt = recentlyNotifiedFriendRequests[key] ?: return@any false
+                now - seenAt <= FRIEND_REQUEST_DEDUPE_TTL_MS
+            }
+            if (duplicate) return@synchronized false
+            keys.forEach { recentlyNotifiedFriendRequests[it] = now }
+            if (recentlyNotifiedFriendRequests.size > MAX_RECENT_FRIEND_REQUEST_KEYS) {
+                recentlyNotifiedFriendRequests.entries.removeIf { (_, ts) ->
+                    now - ts > FRIEND_REQUEST_DEDUPE_TTL_MS
+                }
+                if (recentlyNotifiedFriendRequests.size > MAX_RECENT_FRIEND_REQUEST_KEYS) {
+                    recentlyNotifiedFriendRequests.entries
+                        .sortedBy { it.value }
+                        .take(recentlyNotifiedFriendRequests.size / 3)
+                        .forEach { recentlyNotifiedFriendRequests.remove(it.key) }
+                }
+            }
+            true
+        }
 
     /** Stable id for a friend-request notification inside [FRIEND_REQUEST_NOTIF_ID_BASE, +SPAN). */
     private fun friendRequestNotifId(fromId: String): Int =

@@ -25,7 +25,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.flow.retry
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -39,6 +38,10 @@ class WhisperViewModel @Inject constructor(
     private val repository: WhisperRepository,
     private val authManager: WhisperAuthManager,
     private val notificationManager: WhisperNotificationManager,
+    // App-scoped realtime/notification owner. The hub only observes its flows;
+    // it never owns the inbox/friend subscribers itself (closing the screen
+    // must not silence notifications).
+    private val notificationMonitor: WhisperNotificationMonitor,
     private val mutePrefs: WhisperMutePreferences,
     private val hiddenChatsStore: WhisperHiddenChatsStore,
     private val settingsRepository: SettingsRepository,
@@ -149,6 +152,9 @@ class WhisperViewModel @Inject constructor(
     private val droppedNotifiedClientIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     init {
+        // Safety net for process entry points that do not construct the hub
+        // (tests, deep links); start() is idempotent.
+        notificationMonitor.start()
         observeMutes()
         observeHiddenChats()
         startDroppedCollector()
@@ -915,86 +921,45 @@ class WhisperViewModel @Inject constructor(
         isMyFingerprintComputed = true
     }
 
+    /**
+     * UI-only consumer of the app-scoped inbox lane. Notifications are posted by
+     * [WhisperNotificationMonitor]; the hub only refreshes its conversation list.
+     */
     private fun subscribeToMessages() {
         val myId = authManager.currentUserId ?: return
         messagesJob?.cancel()
         messagesJob = viewModelScope.launch {
-            repository.subscribeToIncomingMessages(myId)
-                .retry { cause ->
-                    // Stop retrying once the session is gone or the server rejects the token;
-                    // infinite retries against a dead session only churn the network.
-                    if (authManager.currentUserId == null || WhisperErrorMapper.isSessionExpired(cause) ||
-                        (cause is io.github.jan.supabase.exceptions.RestException && cause.statusCode in 401..403)
-                    ) {
-                        false
-                    } else {
-                        android.util.Log.e("WhisperVM", "Incoming messages realtime error: ${cause.message}. Retrying in 3s...")
-                        delay(3000)
-                        true
-                    }
+            notificationMonitor.messageEvents.collect { msg ->
+                // Refresh the chats list for INCOMING messages only. Own outgoing sends
+                // already invalidate the conversations cache in the repository, and
+                // refreshing on every echo turned each sent message into a network storm.
+                // M-11: debounced — see scheduleConversationRefresh.
+                if (msg.senderId != myId) {
+                    scheduleConversationRefresh(forceRefresh = true)
+                } else {
+                    repository.invalidateConversationsCache()
+                    scheduleConversationRefresh(forceRefresh = false)
                 }
-                .collect { msg ->
-                    // Refresh the chats list for INCOMING messages only. Own outgoing sends
-                    // already invalidate the conversations cache in the repository, and
-                    // refreshing on every echo turned each sent message into a network storm.
-                    // M-11: debounced — see scheduleConversationRefresh.
-                    if (msg.senderId != myId) {
-                        scheduleConversationRefresh(forceRefresh = true)
-                    } else {
-                        repository.invalidateConversationsCache()
-                        scheduleConversationRefresh(forceRefresh = false)
-                    }
-                    // FIX: never notify for read or deleted messages (ghost after mark-as-read).
-                    if (msg.isRead || msg.isDeletedForEveryone) return@collect
-                    if (msg.senderId == myId) return@collect
-                    // Fix: hidden (archive) must NOT suppress pings — asymmetric bug:
-                    // userA archived B never got notified when B replied, while B did.
-                    // Muted stays suppressed (intentional), hidden does not.
-                    if (mutePrefs.isMuted(msg.senderId)) return@collect
-                    // FIX: show immediately with generic title — profile lookup previously
-                    // blocked notification for cache misses (network) and caused delay.
-                    // The notification body is privacy-preserving (no content) so name is
-                    // not needed for delay; use senderId for dedupe.
-                    notificationManager.showMessageNotification(
-                        senderId = msg.senderId,
-                        senderName = msg.senderId,
-                        messageId = msg.id,
-                        isRead = msg.isRead,
-                    )
-                }
+            }
         }
     }
 
+    /**
+     * UI-only consumer of the shared friendship lane. Fresh state is reloaded
+     * here; the global monitor owns the friend-request notification.
+     */
     private fun subscribeToFriends() {
         friendsJob?.cancel()
         friendsJob = viewModelScope.launch {
-            repository.subscribeToFriendUpdates()
-                .retry { cause ->
-                    if (authManager.currentUserId == null || WhisperErrorMapper.isSessionExpired(cause) ||
-                        (cause is io.github.jan.supabase.exceptions.RestException && cause.statusCode in 401..403)
-                    ) {
-                        false
-                    } else {
-                        android.util.Log.e("WhisperVM", "Friends realtime error: ${cause.message}. Retrying in 3s...")
-                        delay(3000)
-                        true
-                    }
+            notificationMonitor.friendshipEvents.collect { friendship ->
+                loadFriendsInternal()
+                loadRecommendationsInternal()
+                // An accepted/removed friendship changes the Messages list even
+                // when no message was ever exchanged.
+                if (friendship.status != "pending") {
+                    repository.invalidateConversationsCache()
                 }
-                .collect { friendship ->
-                    loadFriendsInternal()
-                    loadRecommendationsInternal()
-                    val myId = authManager.currentUserId
-                    if (friendship.userB == myId && friendship.status == "pending") {
-                        if (mutePrefs.isMuted(friendship.userA)) return@collect
-                        // V2-FIX L-?: same cached path as message notifications —
-                        // repository.getProfile serves from its 5-minute profileCache.
-                        val senderProfile = repository.getProfile(friendship.userA).getOrNull()
-                        val senderName = senderProfile?.effectiveName
-                            // V6-R2 (review): was hardcoded English "Someone".
-                            ?: appContext.getString(R.string.st_Whisper_SomeoneDefault)
-                        notificationManager.showFriendRequestNotification(friendship.userA, senderName)
-                    }
-                }
+            }
         }
     }
 

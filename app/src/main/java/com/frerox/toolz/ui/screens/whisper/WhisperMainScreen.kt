@@ -310,34 +310,43 @@ fun WhisperMainScreen(
                 )
             },
             bottomBar = {
-                ExpressiveNavigationBar {
-                    tabs.forEachIndexed { index, (label, icon, selectedIcon) ->
-                        val unread = if (index == 0) totalUnreadCount else 0
-                        val pendingCount = if (index == 0) uiState.pendingIncomingRequests.size else 0
-                        ExpressiveNavigationBarItem(
-                            selected = pagerState.currentPage == index,
-                            onClick = {
-                                haptic.click()
-                                if (pagerState.currentPage == 2 && hasUnsavedProfileChanges && index != 2) {
-                                    pendingTabSwitchIndex = index
-                                    showUnsavedChangesDialog = true
-                                } else {
-                                    scope.launch { pagerState.animateScrollToPage(index) }
-                                }
-                            },
-                            icon = {
-                                BadgedBox(
-                                    badge = {
-                                        if (unread > 0 || pendingCount > 0) {
-                                            Badge { Text(((unread + pendingCount).coerceAtMost(99)).toString()) }
-                                        }
+                // Floating-friendly rounded sheet: the nav bar itself stays
+                // transparent so only this top-rounded surface paints. Its default
+                // window insets remain, extending the sheet behind the system bar.
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainerLowest,
+                    shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+                    tonalElevation = 0.dp,
+                ) {
+                    ExpressiveNavigationBar(containerColor = Color.Transparent) {
+                        tabs.forEachIndexed { index, (label, icon, selectedIcon) ->
+                            val unread = if (index == 0) totalUnreadCount else 0
+                            val pendingCount = if (index == 0) uiState.pendingIncomingRequests.size else 0
+                            ExpressiveNavigationBarItem(
+                                selected = pagerState.currentPage == index,
+                                onClick = {
+                                    haptic.click()
+                                    if (pagerState.currentPage == 2 && hasUnsavedProfileChanges && index != 2) {
+                                        pendingTabSwitchIndex = index
+                                        showUnsavedChangesDialog = true
+                                    } else {
+                                        scope.launch { pagerState.animateScrollToPage(index) }
                                     }
-                                ) {
-                                    Icon(if (pagerState.currentPage == index) selectedIcon else icon, label)
-                                }
-                            },
-                            label = { Text(label) },
-                        )
+                                },
+                                icon = {
+                                    BadgedBox(
+                                        badge = {
+                                            if (unread > 0 || pendingCount > 0) {
+                                                Badge { Text(((unread + pendingCount).coerceAtMost(99)).toString()) }
+                                            }
+                                        }
+                                    ) {
+                                        Icon(if (pagerState.currentPage == index) selectedIcon else icon, label)
+                                    }
+                                },
+                                label = { Text(label) },
+                            )
+                        }
                     }
                 }
             },
@@ -953,7 +962,9 @@ private fun MergedChatsAndFriendsTab(
                 LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                     contentPadding = PaddingValues(vertical = 4.dp),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalFadingEdges(left = 8.dp, right = 24.dp)
                 ) {
                     items(uiState.friends, key = { "friend_chip_${it.id}" }) { friend ->
                         Column(
@@ -1190,7 +1201,10 @@ private fun ConversationCard(
                         // leak `{"v":2,...}` JSON into the subtitle.
                         val rawPreview = conversation.lastMessage.content.trim()
                         val previewText = when {
-                            rawPreview.isBlank() -> ""
+                            rawPreview.isBlank() ->
+                                // Accepted friends have a placeholder row with no
+                                // message content until the first message is sent.
+                                stringResource(R.string.st_Whisper_SayHi)
                             com.frerox.toolz.data.whisper.WhisperTombstone.isLockedMarker(rawPreview) ->
                                 stringResource(R.string.st_Whisper_Locked_Short)
                             com.frerox.toolz.data.whisper.WhisperImageAttachment.fromMessageContent(rawPreview) != null ||

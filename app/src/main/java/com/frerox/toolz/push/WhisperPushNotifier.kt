@@ -165,6 +165,9 @@ class WhisperPushNotifier @Inject constructor(
                 notificationManager.showFriendRequestNotification(
                     fromId = senderId,
                     fromName = senderName,
+                    // The server puts the friendship row id in messageId; sharing it
+                    // lets this wake ping dedupe against the realtime lane.
+                    friendshipId = messageId.takeIf { it.isNotBlank() },
                 )
             }
             return

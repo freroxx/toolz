@@ -147,6 +147,9 @@ class WhisperChatViewModel @Inject constructor(
     private val reactionSyncJobs = mutableMapOf<String, Job>()
     private var messagesCollectionJob: Job? = null
     private var searchDebounceJob: Job? = null
+    private var lockedRetryJob: Job? = null
+    private var lockedRetryAttempts = 0
+    private var lastLockedRetryAtMs = 0L
     private var isCurrentlyTyping = false
 
     // V2-FIX (reviewwhisper.md) V-1: read receipts only fire while the chat is on screen.
@@ -206,6 +209,12 @@ class WhisperChatViewModel @Inject constructor(
 
         /** V2-FIX (reviewwhisper.md) V-15: SavedStateHandle key for the draft text. */
         private const val KEY_DRAFT = "whisper_chat_draft"
+
+        /** Bounded decrypt self-heal: never fight a permanently unreadable frame. */
+        private const val MAX_LOCKED_DECRYPT_RETRIES = 3
+
+        /** Spacing between self-heal attempts for the same open chat. */
+        private const val LOCKED_RETRY_COOLDOWN_MS = 15_000L
     }
 
     // V2-FIX (reviewwhisper.md) V-5: true LRU cache (accessOrder=true) guarded by a Mutex.
@@ -331,6 +340,7 @@ class WhisperChatViewModel @Inject constructor(
         reactionSyncJobs.values.forEach { it.cancel() }
         reactionSyncJobs.clear()
         messagesCollectionJob?.cancel()
+        lockedRetryJob?.cancel()
     }
 
     private fun loadInitialData() {
@@ -493,6 +503,16 @@ class WhisperChatViewModel @Inject constructor(
                     if (newMessages.any { it.senderId == otherUserId && !it.isRead }) {
                         requestMarkPartnerRead()
                     }
+                    // Self-heal: Room can hydrate before the peer key is available
+                    // (cold start), leaving a permanent-looking lock marker. Retry
+                    // bounded, or the UI stays locked until the user re-enters.
+                    if (newMessages.any {
+                            it.senderId == otherUserId &&
+                                WhisperTombstone.isLockedMarker(it.content)
+                        }
+                    ) {
+                        scheduleLockedDecryptSelfHeal()
+                    }
                 }
             }
         }
@@ -503,6 +523,35 @@ class WhisperChatViewModel @Inject constructor(
                 .onFailure { err ->
                     handleError(err, "getMessagesSync")
                 }
+        }
+    }
+
+    /**
+     * Triggers the repository's bounded decrypt self-heal for this conversation.
+     *
+     * Only three attempts per open chat, spaced by [LOCKED_RETRY_COOLDOWN_MS]. The
+     * repository force-refreshes the peer profile and bumps its decryption epoch,
+     * which re-runs [WhisperRepository.getMessagesFlow] against the same Room rows.
+     */
+    private fun scheduleLockedDecryptSelfHeal() {
+        if (lockedRetryAttempts >= MAX_LOCKED_DECRYPT_RETRIES) return
+        if (lockedRetryJob?.isActive == true) return
+        val cooldownLeft =
+            (lastLockedRetryAtMs + LOCKED_RETRY_COOLDOWN_MS - System.currentTimeMillis())
+                .coerceAtLeast(0L)
+        lockedRetryJob = viewModelScope.launch {
+            if (cooldownLeft > 0) delay(cooldownLeft)
+            lockedRetryAttempts += 1
+            lastLockedRetryAtMs = System.currentTimeMillis()
+            val healed = runCatching { repository.retryLockedDecryptions(otherUserId) }
+                .getOrDefault(false)
+            if (healed) {
+                ProtocolDiagnostics.log(
+                    "decrypt.selfHeal: attempt $lockedRetryAttempts/$MAX_LOCKED_DECRYPT_RETRIES"
+                )
+            } else {
+                ProtocolDiagnostics.increment("decrypt.selfHealSkipped")
+            }
         }
     }
 

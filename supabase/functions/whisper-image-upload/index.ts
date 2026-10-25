@@ -15,7 +15,7 @@ import { createRemoteJWKSet, jwtVerify } from "https://esm.sh/jose@5.9.6";
 //   OFFICIAL_PACKAGE      e.g. "com.frerox.toolz" (default when unset)
 //   OFFICIAL_CERT_SHA256  upper/lower/colon-separated accepted; enforced only
 //                         when set (unset = warn + pass cert check)
-//   MIN_VERSION_CODE      e.g. "17"; enforced only when > 0
+//   MIN_VERSION_CODE      e.g. "18"; defaults to 18 when unset/invalid
 // Optional (Play Integrity verdict path, used by whisper-attest):
 //   PLAY_INTEGRITY_ENABLED  "true" to ALSO require X-Play-Integrity-Token
 //                           presence (JWT verdict is verified server-side
@@ -64,7 +64,7 @@ export function verifyAttestHeaders(req: Request): AttestVerdict {
   const officialPkg =
     Deno.env.get("OFFICIAL_PACKAGE") ?? "com.frerox.toolz";
   const officialCert = normCert(Deno.env.get("OFFICIAL_CERT_SHA256") ?? "");
-  const minCode = parseInt(Deno.env.get("MIN_VERSION_CODE") ?? "0", 10) || 0;
+  const minCode = parseInt(Deno.env.get("MIN_VERSION_CODE") ?? "18", 10) || 18;
 
   const pkg = (req.headers.get(HEADER_PACKAGE) ?? "").trim();
   const cert = normCert(req.headers.get(HEADER_CERT) ?? "");

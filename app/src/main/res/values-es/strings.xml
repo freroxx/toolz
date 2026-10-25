@@ -250,6 +250,7 @@
     <string name="st_Whisper_MsgStatus_Read">Leído</string>
     <string name="cd_Whisper_DisappearingImage">Imagen efímera</string>
     <string name="st_Whisper_Locked_Short">🔒 Mensaje cifrado</string>
+    <string name="st_Whisper_SayHi">Di hola 👋</string>
     <string name="st_Whisper_HideFromDiscover">Ocultar de Descubrir</string>
     <string name="st_Whisper_Error_KeyVerifyFailed">No se pudo verificar esta clave.</string>
     <string name="st_Whisper_Error_KeyAcceptFailed">No se pudo aceptar esta clave.</string>

@@ -33,6 +33,8 @@ import io.github.jan.supabase.realtime.decodeRecord
 import io.github.jan.supabase.realtime.postgresChangeFlow
 import io.github.jan.supabase.realtime.realtime
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.callbackFlow
@@ -47,14 +49,18 @@ import kotlinx.serialization.json.put
 import io.github.jan.supabase.realtime.broadcast.BroadcastPayload
 import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
+
+private const val FRIENDS_POLL_LIMIT = 500
+private const val FRIENDS_POLL_ACTIVITY_WINDOW_MS = 5_000L
 
 // FRIENDS
-    // FRIENDS
-    suspend fun WhisperRepository.getFriendships(): Result<List<WhisperFriendship>> = runCatching {
+    suspend fun WhisperRepository.getFriendships(limit: Int? = null): Result<List<WhisperFriendship>> = runCatching {
         val currentId = myId
         if (currentId.isBlank()) return Result.success(emptyList())
         db.from("friends").select {
             filter { or { eq("user_a", currentId); eq("user_b", currentId) } }
+            limit?.let { maxRows -> this.limit(maxRows.toLong()) }
         }.decodeList()
     }
 
@@ -65,6 +71,69 @@ import java.util.concurrent.ConcurrentHashMap
         if (partnerIds.isEmpty()) return@runCatching emptyList()
         val (_, profilesById) = batchProfilesById(partnerIds)
         friendships.mapNotNull { profilesById[it.otherUserId(myId)] }
+    }
+
+    /**
+     * Makes every accepted friendship visible in Messages, even before the first
+     * message exists. Conversations that already have a thread are left untouched;
+     * only missing partners receive an empty-preview placeholder sorted after the
+     * real conversations by the caller.
+     */
+    internal suspend fun WhisperRepository.mergeAcceptedFriendConversations(
+        conversations: List<WhisperConversation>,
+        blockedPartnerIds: Set<String>,
+        profilesById: Map<String, WhisperProfile>,
+    ): List<WhisperConversation> {
+        val currentId = myId
+        if (currentId.isBlank()) return conversations
+        val friendships = getFriendships(limit = 1_000).getOrElse { return conversations }
+        if (friendships.none { it.status == "accepted" }) return conversations
+
+        val existingPartnerIds = conversations.mapTo(mutableSetOf()) { it.otherUser.id }
+        val friendshipByPartner = LinkedHashMap<String, WhisperFriendship>()
+        for (friendship in friendships) {
+            if (friendship.status != "accepted") continue
+            val partnerId = friendship.otherUserId(currentId)
+            if (partnerId.isBlank() || partnerId == currentId) continue
+            friendshipByPartner.putIfAbsent(partnerId, friendship)
+        }
+        val missingPartnerIds = friendshipByPartner.keys.filter {
+            it !in existingPartnerIds && it !in blockedPartnerIds
+        }
+        if (missingPartnerIds.isEmpty()) return conversations
+
+        val knownProfiles = profilesById.toMutableMap()
+        val unresolved = missingPartnerIds.filter { it !in knownProfiles }
+        val allBlocked = if (unresolved.isEmpty()) {
+            blockedPartnerIds
+        } else {
+            val (extraBlocked, extraProfiles) = runCatchingCE {
+                batchProfilesById(unresolved)
+            }.getOrElse { return conversations }
+            knownProfiles.putAll(extraProfiles)
+            blockedPartnerIds + extraBlocked
+        }
+
+        val additions = missingPartnerIds.mapNotNull { partnerId ->
+            if (partnerId in allBlocked) return@mapNotNull null
+            val profile = knownProfiles[partnerId] ?: return@mapNotNull null
+            val friendship = friendshipByPartner[partnerId] ?: return@mapNotNull null
+            WhisperConversation(
+                otherUser = profile,
+                lastMessage = WhisperMessage(
+                    id = "",
+                    senderId = currentId,
+                    receiverId = partnerId,
+                    content = "",
+                    isRead = true,
+                    createdAt = friendship.updatedAt.ifBlank { friendship.createdAt },
+                ),
+                unreadCount = 0,
+            )
+        }
+        if (additions.isEmpty()) return conversations
+        ProtocolDiagnostics.increment("conversations.friendPlaceholders")
+        return conversations + additions
     }
 
     suspend fun WhisperRepository.getPendingIncoming(): Result<List<WhisperFriendship>> = runCatching {
@@ -154,6 +223,9 @@ import java.util.concurrent.ConcurrentHashMap
                 }
             }
         }
+        // The hub builds conversation rows from messages; an accepted friend with
+        // no messages must appear immediately, so drop the cached list.
+        invalidateConversationsCache()
     }
 
     suspend fun WhisperRepository.deleteFriendship(friendshipId: String): Result<Unit> = runCatching {
@@ -182,6 +254,7 @@ import java.util.concurrent.ConcurrentHashMap
                 )
             }
         }
+        invalidateConversationsCache()
     }
 
     suspend fun WhisperRepository.getFriendshipStatus(otherUserId: String): Result<Pair<FriendStatus, WhisperFriendship?>> = runCatching {
@@ -222,6 +295,11 @@ import java.util.concurrent.ConcurrentHashMap
         }
         val channel = this@subscribeToFriendUpdates.supabase.channel(channelName)
 
+        // V6-R8: same realtime-activity clock as the inbox/chat lanes. The channel
+        // status alone is unreliable when the socket is half-dead; the REST poller
+        // below only backs off while real friendship events are actually landing.
+        val lastRealtimeEventAtMs = AtomicLong(System.currentTimeMillis())
+
         // H-8 FIX (reviewwhisper.md): realtime BROADCASTS on this channel are no longer
         // consumed. Broadcasts cannot prove sender identity — any user who knows the
         // channel name could fabricate friendship state (fake requests/acceptances) and
@@ -234,9 +312,14 @@ import java.util.concurrent.ConcurrentHashMap
         val pJob = launch {
             changes.collect { action ->
                 try {
+                    // Any authenticated event (including a DELETE) proves the lane is
+                    // alive, so the REST fallback can stay quiet for 5s.
+                    lastRealtimeEventAtMs.set(System.currentTimeMillis())
                     val record = when (action) {
                         is PostgresAction.Insert -> action.decodeRecord<WhisperFriendship>()
                         is PostgresAction.Update -> action.decodeRecord<WhisperFriendship>()
+                        is PostgresAction.Delete -> action.decodeOldRecord<WhisperFriendship>()
+                            .copy(status = "deleted")
                         else -> null
                     }
                     if (record != null && (record.userA == currentId || record.userB == currentId)) {
@@ -251,8 +334,79 @@ import java.util.concurrent.ConcurrentHashMap
         }
         // V6-R3: auto-heal dropped realtime channels (friend updates).
         val healthJob = this@subscribeToFriendUpdates.watchChannelHealth(this, channelName, channel)
+
+        // ── FRIEND NOTIFICATION SOLIDITY: REST fallback ──
+        // Friend requests are the one event a user cannot discover by opening a
+        // screen — if the websocket misses the INSERT, the request stays invisible
+        // until a manual refresh. Mirror the inbox/chat poller:
+        //   • poll only while no authenticated event landed for >5s;
+        //   • emit rows newer than the flow start even during the seed pass;
+        //   • emit status flips (pending → accepted / deleted);
+        //   • synthesise a "deleted" row only when the response was NOT truncated,
+        //     because a limit-hit absence means "not in this page", not "gone".
+        val seenFriendships = ConcurrentHashMap<String, WhisperFriendship>()
+        var friendsSeeded = false
+        var lastFriendsStatusSubscribed = false
+        val friendsFlowStartMs = System.currentTimeMillis()
+        val friendsBackoff = WhisperRepository.QuietBackoff(
+            listOf(3_000L, 8_000L, 16_000L),
+            tag = "friends",
+        )
+        val friendsPollJob = launch {
+            while (isActive) {
+                delay(friendsBackoff.delayMs())
+                try {
+                    val nowSubscribed =
+                        channel.status.value == io.github.jan.supabase.realtime.RealtimeChannel.Status.SUBSCRIBED
+                    val justRecovered = nowSubscribed && !lastFriendsStatusSubscribed
+                    lastFriendsStatusSubscribed = nowSubscribed
+                    if (!justRecovered &&
+                        System.currentTimeMillis() - lastRealtimeEventAtMs.get() < FRIENDS_POLL_ACTIVITY_WINDOW_MS
+                    ) {
+                        continue
+                    }
+                    if (!pJob.isActive) continue
+                    ProtocolDiagnostics.increment("friends.pollTick")
+                    val rows = getFriendships(limit = FRIENDS_POLL_LIMIT).getOrElse {
+                        ProtocolDiagnostics.increment("friends.pollError")
+                        continue
+                    }
+                    var sawChange = false
+                    val currentIds = rows.mapTo(mutableSetOf()) { it.id }
+                    for (friendship in rows) {
+                        val previous = seenFriendships.put(friendship.id, friendship)
+                        if (previous?.status == friendship.status) continue
+                        if (!friendsSeeded && previous == null) {
+                            val arrivedAfterOpen = runCatching {
+                                WhisperMessageEntity.parseSortEpoch(
+                                    friendship.updatedAt.ifBlank { friendship.createdAt }
+                                ) > friendsFlowStartMs
+                            }.getOrDefault(false)
+                            if (!arrivedAfterOpen) continue
+                        }
+                        sawChange = true
+                        trySend(friendship)
+                    }
+                    if (friendsSeeded && rows.size < FRIENDS_POLL_LIMIT) {
+                        for (vanishedId in seenFriendships.keys.filter { it !in currentIds }) {
+                            val vanished = seenFriendships.remove(vanishedId) ?: continue
+                            sawChange = true
+                            trySend(vanished.copy(status = "deleted"))
+                        }
+                    }
+                    friendsSeeded = true
+                    if (sawChange) friendsBackoff.onActivity() else friendsBackoff.onQuiet()
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    ProtocolDiagnostics.increment("friends.pollError")
+                }
+            }
+        }
+
         awaitClose {
             healthJob.cancel()
+            friendsPollJob.cancel()
             pJob.cancel()
             // H-1 FIX: see subscribeToChat — cleanup must survive collection cancellation.
             this@subscribeToFriendUpdates.appScope.launch {

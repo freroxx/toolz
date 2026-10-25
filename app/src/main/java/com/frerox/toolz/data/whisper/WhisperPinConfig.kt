@@ -55,13 +55,20 @@ object WhisperPinConfig {
     const val OFFICIAL_CERT_SHA256 = "58A16BCD6E9CEF75706A957B19A15BED19BD47F0B7FDB602364D9EBFC5C369F9"
 
     /**
-     * Minimum versionCode accepted by the anti-mod gate. Synced with
-     * update_manifest.json `minimumVersionCode` and the edge secret
-     * MIN_VERSION_CODE; also the static floor of the LOCAL Whisper
-     * runtime gate (gateWhisperAccess) when no signature-verified
-     * manifest floor has been cached yet. 0 = no floor.
+     * Minimum versionCode accepted by the anti-mod gate. This is the static
+     * floor of the LOCAL Whisper runtime gate (gateWhisperAccess); the gate
+     * applies `max(cached manifest floor, this value)`. Keep in sync with the
+     * edge secret MIN_VERSION_CODE.
+     *
+     * `update_manifest.json` may lag (`minimumVersionCode: 17`) because the
+     * file is Ed25519-signed; do not edit it without re-signing. The local
+     * max() still rejects older builds as soon as this constant is raised.
+     *
+     * 18 = v1.1.7. v1.1.6 (17) is intentionally locked out of Whisper: it
+     * cannot decrypt the current protocol and has no app-scoped notification
+     * monitor, so letting it in produces silent message loss.
      */
-    const val MIN_VERSION_CODE = 17L
+    const val MIN_VERSION_CODE = 18L
 
     /** Flip to true ONLY together with a fully populated [PINS]. */
     const val ENFORCE = false

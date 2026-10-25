@@ -13,8 +13,11 @@
 //      per-recipient fan-out row, one sealed descriptor, one friend.
 //      DASHBOARD CHECKLIST: one webhook per group table, INSERT-only; the
 //      in-code op gate is defense-in-depth, not the primary filter.
-//   3. Skip if the receiver was recently active (< 60 s last_seen_at): their app is
-//      open and realtime already delivers the message.
+//   3. Message pushes: skip if the receiver was recently active (< 60 s
+//      last_seen_at) — their app is open and realtime already delivers the
+//      message. Friend-request pushes ALWAYS send: a foreground app is not
+//      proof the receiver is looking at the friends surface, and suppressing
+//      them here is what dropped requests in the past.
 //   4. Look up receiver push targets in whisper_push_targets via the service
 //      role key. Group fan-out: invites → the invitee; messages → every member
 //      except the sender; join/leave/decline events → owner +
@@ -191,10 +194,15 @@ serve(async (request) => {
     if (!receiverId) return json({ skipped: "not_a_pushable_event" }, 200);
   }
 
-  // 3. Skip when the receiver was seen recently — the app is foregrounded and the
-  //    message arrives via realtime anyway; a push would be redundant noise.
-  const seenSkip = await recentlyActive(env, receiverId);
-  if (seenSkip) return json({ skipped: seenSkip }, 200);
+  // 3. Message pushes skip when the receiver was seen recently — the app is
+  //    foregrounded and the message arrives via realtime anyway; a push would
+  //    be redundant noise. Friend requests bypass this: the receiver may be
+  //    active in a chat while the request sits unseen on the friends surface,
+  //    and the client already dedupes realtime + push by sender/friendship id.
+  if (!isFriendPush) {
+    const seenSkip = await recentlyActive(env, receiverId);
+    if (seenSkip) return json({ skipped: seenSkip }, 200);
+  }
 
   // Data-only payload: NO content (privacy). messageId enables client-side
   // dedupe with the in-app realtime path.

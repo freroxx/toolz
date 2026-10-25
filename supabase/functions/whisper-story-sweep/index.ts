@@ -45,7 +45,7 @@ function verifyAttestHeaders(req: Request): { ok: boolean; reason: string } {
   const officialPkg =
     Deno.env.get("OFFICIAL_PACKAGE") ?? "com.frerox.toolz";
   const officialCert = normCert(Deno.env.get("OFFICIAL_CERT_SHA256") ?? "");
-  const minCode = parseInt(Deno.env.get("MIN_VERSION_CODE") ?? "0", 10) || 0;
+  const minCode = parseInt(Deno.env.get("MIN_VERSION_CODE") ?? "18", 10) || 18;
 
   const pkg = (req.headers.get(HEADER_PACKAGE) ?? "").trim();
   const cert = normCert(req.headers.get(HEADER_CERT) ?? "");
