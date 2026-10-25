@@ -3,4 +3,5 @@
     android:id="@+id/living_frame_item"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:clipToOutline="true"
     android:scaleType="fitXY" />

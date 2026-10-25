@@ -7,16 +7,6 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
-    <!-- Static first frame behind the flipper. The launcher can draw the
-         collection before the adapter supplies its first child; without this
-         the widget flashes blank. push() only fills it for opaque frames. -->
-    <ImageView
-        android:id="@+id/living_frame_static"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:importantForAccessibility="no"
-        android:scaleType="fitXY"
-        android:visibility="gone" />
 
     <AdapterViewFlipper
         android:id="@+id/living_frame_flip"

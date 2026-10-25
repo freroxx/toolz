@@ -313,8 +313,13 @@ object LivingFrameEngine {
     /** Below this fps a static push is no better than a slideshow. */
     const val MIN_STATIC_FPS = 8
 
-    /** Below this scale the widget looks soft enough to prefer streaming. */
-    const val MIN_STATIC_SCALE = 0.4f
+    /**
+     * A static push must stay close to the widget's real pixel size. Below
+     * this a video is visibly soft next to the launcher's own UI; streaming
+     * (even at a reduced size) keeps the motion smooth and avoids locking a
+     * blurry copy into the launcher forever.
+     */
+    const val MIN_STATIC_SCALE = 0.8f
 
     /**
      * A 900-child RemoteViews would be enormous regardless of the bitmap
@@ -323,14 +328,15 @@ object LivingFrameEngine {
     const val MAX_STATIC_CHILDREN = 240
 
     /**
-     * Fps-first static planner: for each supported rate (highest first) it
-     * finds the largest resolution that fits, then returns the plan with the
-     * best resolution, breaking ties by fps. This deliberately prefers 10 fps
-     * at 70% over 30 fps at 20%: sharpness is what the user notices first.
+     * Sharpness-first static planner: try the requested rate first, then each
+     * lower supported rate, and return the first one that fits at or above
+     * [minScale]. Repeated display steps share one bitmap, so the byte budget
+     * counts unique pictures rather than every flipper child.
      *
-     * Returns null when no plan meets [minFps] and [minScale]; callers stream
-     * in that case. The transition is included in the byte count, so enabling
-     * Fade/BLUR can push a clip over the line.
+     * Returns null when no rate meets [minFps] and [minScale]; callers stream
+     * in that case instead of pinning a soft copy into the launcher. The
+     * transition is included in the byte count, so enabling Fade/Blur can
+     * legitimately tip a clip over the line.
      */
     fun planStatic(
         frameCount: Int,
@@ -355,12 +361,16 @@ object LivingFrameEngine {
         // lowering a faster request, not a reason to raise a slow one.
         val top = LivingFrameFps.snap(requestedFps).coerceAtLeast(1)
         val floor = minOf(minFps, top).coerceAtLeast(1)
-        var best: RenderPlan? = null
         for (rate in LivingFrameFps.STEPS.filter { it in floor..top }.sortedDescending()) {
             val steps = displaySteps(n, sourceFps, rate, speed, loopMode, transition)
+            // Child count and unique bitmap count are different limits: a
+            // 60 fps request over a 12 fps source repeats each picture five
+            // times, which is one bitmap but five RemoteViews children.
             if (steps.size > MAX_STATIC_CHILDREN) continue
+            val bitmaps = steps.toHashSet().size
             val plan = bestFit(
                 children = steps.size,
+                bitmaps = bitmaps,
                 width = width,
                 height = height,
                 opaque = opaque,
@@ -369,16 +379,11 @@ object LivingFrameEngine {
                 minScale = minScale,
                 transition = transition != LivingFrameLoopTransition.NONE
             ) ?: continue
-            val current = best
-            if (current == null ||
-                plan.scale > current.scale + 1e-4f ||
-                (abs(plan.scale - current.scale) <= 1e-4f &&
-                        plan.effectiveFps > current.effectiveFps)
-            ) {
-                best = plan
-            }
+            // Rates are descending, so the first fit is the smoothest loop
+            // that still clears the sharpness floor.
+            return plan
         }
-        return best
+        return null
     }
 
     /** One still image, scaled only as far as the budget requires. */
@@ -411,7 +416,8 @@ object LivingFrameEngine {
         budget: Long,
         fps: Int,
         minScale: Float,
-        transition: Boolean
+        transition: Boolean,
+        bitmaps: Int = children
     ): RenderPlan? {
         for (scale in SCALES) {
             if (scale < minScale) break
@@ -420,7 +426,7 @@ object LivingFrameEngine {
             val formats = if (opaque) listOf(false, true) else listOf(false)
             for (is565 in formats) {
                 val bpp = if (is565) 2L else 4L
-                val bytes = children.toLong() *
+                val bytes = bitmaps.toLong() *
                         (w.toLong() * h * bpp + FRAME_OVERHEAD_BYTES)
                 if (bytes <= budget) {
                     return RenderPlan(

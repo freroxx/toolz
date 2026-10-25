@@ -168,6 +168,18 @@ private class LivingFramesFactory(
     /** Last frame handed to the launcher; used instead of frame zero on a miss. */
     @Volatile private var last: Bitmap? = null
 
+    /** Radius the host clips to; updated with the session's frame. */
+    @Volatile private var cornerDp: Int = 0
+
+    /**
+     * A one-pixel neutral tile, scaled by the host. Drawing it through the
+     * rounded outline gives a clean loading state at any widget size without
+     * pinning the first video frame into the host's permanent template.
+     */
+    private val placeholder = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888).apply {
+        eraseColor(PLACEHOLDER_COLOR)
+    }
+
     private val sessionIds = AtomicInteger(0)
     private val proxies = LivingFrameProxyCache(context)
     private val registered = AtomicBoolean(false)
@@ -239,11 +251,17 @@ private class LivingFramesFactory(
         // (about 2 MB in AOSP). Keeping each frame near 2 MB / 6 means it can
         // hold several frames ahead, so a flip almost never finds its view
         // still loading and falls back to the loading view.
-        val opaque = LivingFrameRenderer.isOpaque(current)
+        val opaque = LivingFrameRenderer.isOpaqueForWidget(current)
         val compact = opaque && current.quality == LivingFrameQuality.COMPACT
-        val hostBpp = if (compact) 2L else 4L
+        // Opaque video has no alpha to preserve, so spend the same host bytes
+        // on twice the pixels instead of downscaling. Corners are clipped by
+        // the launcher, which is why an opaque video with rounded corners can
+        // still use RGB_565.
+        val targetPixels = outW.toLong() * outH
+        val rgb565 = opaque && (compact || targetPixels * 4L > HOST_FRAME_BYTES)
+        val hostBpp = if (rgb565) 2L else 4L
         val maxPixels = HOST_FRAME_BYTES / hostBpp
-        val pixelCount = outW.toLong() * outH
+        val pixelCount = targetPixels
         if (pixelCount > maxPixels) {
             val f = sqrt(maxPixels.toDouble() / pixelCount)
             outW = (outW * f).roundToInt().coerceAtLeast(48)
@@ -254,12 +272,6 @@ private class LivingFramesFactory(
         val budget = budgetBytes()
         val unique = steps.toHashSet().size
         val pixels = outW.toLong() * outH
-        // 16-bit for the compact preset, and also whenever it is the only
-        // way an opaque loop stays fully resident.
-        val rgb565 = opaque && (
-                compact ||
-                        (unique * pixels * 4L > budget && unique * pixels * 2L <= budget)
-                )
         val frameBytes = pixels * if (rgb565) 2L else 4L
         val resident = unique * frameBytes <= budget
         val capacity = if (resident) {
@@ -282,6 +294,7 @@ private class LivingFramesFactory(
         }
 
         val density = context.resources.displayMetrics.density
+        cornerDp = current.cornerRadiusDp
         val s = Session(
             id = sessionIds.incrementAndGet(),
             frame = current,
@@ -411,7 +424,7 @@ private class LivingFramesFactory(
                 if (s.proxyWritable) proxies.write(proxyDir, step.from, base)
                 finish(s, base)
             } else {
-                LivingFrameRenderer.render(
+                LivingFrameRenderer.renderWidget(
                     src = src,
                     frame = s.frame,
                     outW = s.outW,
@@ -447,7 +460,7 @@ private class LivingFramesFactory(
             return null
         }
         return try {
-            LivingFrameRenderer.renderBlend(
+            LivingFrameRenderer.renderBlendWidget(
                 from = from,
                 to = to,
                 frame = s.frame,
@@ -465,11 +478,11 @@ private class LivingFramesFactory(
         }
     }
 
-    /** Corners and opacity on top of a widget-size base picture. */
+    /** Opacity on top of a widget-size base picture; corners are host-clipped. */
     private fun finish(s: Session, base: Bitmap): Bitmap {
-        if (s.frame.cornerRadiusDp == 0 && s.frame.opacity >= 0.999f) return base
+        if (s.frame.opacity >= 0.999f) return base
         return try {
-            LivingFrameRenderer.render(
+            LivingFrameRenderer.renderWidget(
                 src = base,
                 frame = s.frame,
                 outW = s.outW,
@@ -575,24 +588,24 @@ private class LivingFramesFactory(
 
     private fun frameViews(bitmap: Bitmap?): RemoteViews {
         val views = RemoteViews(context.packageName, R.layout.living_frames_frame)
-        if (bitmap != null) {
-            views.setImageViewBitmap(R.id.living_frame_item, bitmap)
-        } else {
-            // Never hand the host an empty image: a solid tile reads as a
-            // deliberate loading state instead of a flicker to transparent.
-            views.setInt(R.id.living_frame_item, "setBackgroundColor", PLACEHOLDER_COLOR)
-        }
+        // A miss or the host's loading template gets the neutral tile, never
+        // frame zero: the template is created once and reused for the life of
+        // the widget, so a first frame here would flash back on every loop.
+        views.setImageViewBitmap(R.id.living_frame_item, bitmap ?: placeholder)
+        // The bitmap is square; the launcher measures the rounded outline in
+        // its own pixels, so the radius is exact at every widget size.
+        LivingFramesCorners.apply(views, R.id.living_frame_item, cornerDp)
         return views
     }
 
     override fun getCount(): Int = session?.steps?.size ?: 0
 
     /**
-     * A miss must never jump back to frame zero. Reuse the last frame actually
-     * handed to the launcher; on the first pass that is the pre-rendered first
-     * child, so even the initial load shows the right picture.
+     * Neutral, not the last frame: the host fixes this template at metadata
+     * load time. Returning [last] there would keep showing that one frame on
+     * every later miss, which reads as a jump back to the start of the loop.
      */
-    override fun getLoadingView(): RemoteViews = frameViews(last)
+    override fun getLoadingView(): RemoteViews = frameViews(null)
 
     override fun getViewTypeCount(): Int = 1
 
@@ -617,6 +630,7 @@ private class LivingFramesFactory(
         session = null
         old?.release()
         last = null
+        cornerDp = 0
     }
 
     private companion object {

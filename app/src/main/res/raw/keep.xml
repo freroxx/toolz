@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Resource-shrinker guard for the launcher tile art.
+
+  PresetTileRenderer looks these resources up by name at runtime
+  (getIdentifier), which R8 cannot see. The mipmaps are kept through the
+  manifest aliases and the fg/bg through the mipmaps, but keep them
+  explicitly so a future manifest refactor cannot silently blank pinned
+  Home-screen shortcuts.
+-->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/ic_fg_*,@color/ic_bg_*,@mipmap/ic_icon_*" />

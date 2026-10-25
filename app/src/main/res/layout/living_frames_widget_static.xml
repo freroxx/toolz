@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Photos, slideshows and placeholders. The bitmap is pre-rendered at the widget's exact
-     pixel size (corners, fit/fill, opacity baked in), so fitXY never distorts it. -->
+     pixel size (fit/fill and opacity baked in); the launcher clips its square corners to the
+     rounded background, so fitXY never distorts it and the radius always matches the widget. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/living_frame_root"
     android:layout_width="match_parent"
@@ -10,6 +11,7 @@
         android:id="@+id/living_frame_static"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
+        android:clipToOutline="true"
         android:scaleType="fitXY"
         android:visibility="gone" />
 

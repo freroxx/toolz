@@ -204,9 +204,59 @@ object LivingFrameRenderer {
     }
 
     /**
+     * Widget rendering keeps the bitmap square: the launcher clips it to a
+     * rounded outline. A radius baked at `outPx / estimatedWidgetPx` can only
+     * be correct if the estimate matches the host's measured size, which the
+     * provider is never told. Square corners also let opaque video use
+     * RGB_565 without painting transparent corner pixels.
+     */
+    fun renderWidget(
+        src: Bitmap,
+        frame: LivingFrame,
+        outW: Int,
+        outH: Int,
+        densityX: Float,
+        densityY: Float,
+        rgb565: Boolean
+    ): Bitmap = render(
+        src,
+        frame.copy(cornerRadiusDp = 0),
+        outW,
+        outH,
+        densityX,
+        densityY,
+        rgb565
+    )
+
+    /** [renderBlend] for the host-clipped widget path; corners are square. */
+    fun renderBlendWidget(
+        from: Bitmap,
+        to: Bitmap,
+        frame: LivingFrame,
+        outW: Int,
+        outH: Int,
+        densityX: Float,
+        densityY: Float,
+        mix: Float,
+        rgb565: Boolean,
+        soft: Boolean
+    ): Bitmap = renderBlend(
+        from,
+        to,
+        frame.copy(cornerRadiusDp = 0),
+        outW,
+        outH,
+        densityX,
+        densityY,
+        mix,
+        rgb565,
+        soft
+    )
+
+    /**
      * The opaque picture alone: cropped/scaled to [outW]×[outH] with no
-     * corners and full opacity. This is what the proxy cache stores; corners
-     * and opacity are applied afterwards by [render].
+     * corners and full opacity. This is what the proxy cache stores; opacity
+     * is applied afterwards by [renderWidget].
      */
     fun renderBase(src: Bitmap, frame: LivingFrame, outW: Int, outH: Int, rgb565: Boolean): Bitmap =
         render(
@@ -220,13 +270,20 @@ object LivingFrameRenderer {
         )
 
     /**
+     * True when the widget picture itself needs no alpha. Corner radius is
+     * deliberately ignored: the launcher draws the rounded outline, so an
+     * opaque video can still use RGB_565 with rounded corners.
+     *
      * Only decoded video frames are guaranteed to have no alpha channel.
      * Photos, slideshows and GIFs may carry transparent pixels, so they always
      * get an ARGB output even when their corners/letterbox are fully filled.
      */
-    fun isOpaque(frame: LivingFrame): Boolean =
+    fun isOpaqueForWidget(frame: LivingFrame): Boolean =
         frame.type == LivingFrameType.VIDEO &&
-                frame.cornerRadiusDp == 0 &&
                 frame.opacity >= 0.999f &&
                 frame.fit == LivingFrameFit.FILL
+
+    /** True when a bitmap rendered with baked corners can skip its alpha channel. */
+    fun isOpaque(frame: LivingFrame): Boolean =
+        frame.cornerRadiusDp == 0 && isOpaqueForWidget(frame)
 }

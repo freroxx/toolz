@@ -75,7 +75,13 @@ object LivingFramesWidgetHelper {
      * Bump when rendering changes in a way that invalidates already-pushed
      * RemoteViews. The hourly watchdog re-renders older widgets once.
      */
-    const val RENDER_VERSION = 3
+    const val RENDER_VERSION = 4
+
+    /**
+     * Last-resort static floor for launchers that reject collection widgets.
+     * Normal pushes never go below [LivingFrameEngine.MIN_STATIC_SCALE].
+     */
+    private const val RELAXED_STATIC_SCALE = 0.4f
 
     // -- widget geometry ------------------------------------------------------
 
@@ -353,7 +359,7 @@ object LivingFramesWidgetHelper {
         val resolution = LivingFrameResolution.snap(frame.resolutionPercent)
         val outW = (w * resolution / 100f).roundToInt().coerceAtLeast(48)
         val outH = (h * resolution / 100f).roundToInt().coerceAtLeast(48)
-        val opaque = LivingFrameRenderer.isOpaque(frame)
+        val opaque = LivingFrameRenderer.isOpaqueForWidget(frame)
 
         // Pause only exists while it is the configured action on an animation.
         // Changing the action (or deleting the set) must not leave a widget
@@ -403,104 +409,119 @@ object LivingFramesWidgetHelper {
 
         // Static-first: one push carries the whole loop, so the launcher has
         // every frame in memory and cannot miss one and fall back to frame 0.
-        // planStatic returns null only when the clip is too long or would need
-        // to be blurred below 40% to fit; those stream instead.
-        for (attempt in 0 until 4) {
-            val plan = LivingFrameEngine.planStatic(
-                frameCount = frame.frameCount,
-                sourceFps = frame.sourceFps,
-                speed = frame.speed,
-                requestedFps = displayFps,
-                widthPx = outW,
-                heightPx = outH,
-                opaque = opaque,
-                budgetBytes = budget,
-                loopMode = frame.loopMode,
-                transition = frame.loopTransition
-            ) ?: break
-            // The planner may trade fps for sharpness. The children and the
-            // flipper layout must use the rate it actually chose, or the loop
-            // plays at the wrong speed and the byte budget counts the wrong
-            // number of frames.
-            val planSteps = if (plan.effectiveFps == displayFps) {
-                baseSteps
-            } else {
-                LivingFrameEngine.displaySteps(frame, plan.effectiveFps)
-            }
-            val planStart = if (resume != null) {
-                LivingFrameEngine.nearestStepIndex(
-                    planSteps, resume.from, resume.to, resume.mix
-                )
-            } else {
-                0
-            }
-            val steps = LivingFrameEngine.rotateSteps(planSteps, planStart)
-            val bitmaps = try {
-                renderSteps(repo, frame, steps, plan, w, h, density)
-            } catch (t: Throwable) {
-                if (t is CancellationException) throw t
-                val message = t.message
-                if (!message.isNullOrBlank()) error = message.take(90)
-                null
-            }
-            if (bitmaps == null) {
-                // A decode failure is usually an out-of-memory attempt; retry
-                // with half the bitmap budget. A corrupt frame ends in the
-                // clear placeholder after the retries.
-                error = "Some frames are missing. Re-import this widget."
-                budget /= 2
-                continue
-            }
-            try {
-                val pauseEnabled = frame.tapAction == LivingFrameTapAction.PAUSE_PLAY
-                val views = buildFlipper(
-                    context, appWidgetId, frame, steps, bitmaps, plan.effectiveFps,
-                    pauseEnabled
-                )
-                applyChrome(
-                    context, views, appWidgetId, frame,
-                    rootTap = if (pauseEnabled) null else tapIntent(
-                        context, appWidgetId, frame, allowPause = false
+        // planStatic returns null when the clip is too long or would need to
+        // be blurred below 80% to fit; those stream instead.
+        suspend fun tryStatic(minScale: Float, startBudget: Long): Boolean {
+            var attemptBudget = startBudget
+            for (attempt in 0 until 4) {
+                val plan = LivingFrameEngine.planStatic(
+                    frameCount = frame.frameCount,
+                    sourceFps = frame.sourceFps,
+                    speed = frame.speed,
+                    requestedFps = displayFps,
+                    widthPx = outW,
+                    heightPx = outH,
+                    opaque = opaque,
+                    budgetBytes = attemptBudget,
+                    loopMode = frame.loopMode,
+                    transition = frame.loopTransition,
+                    minScale = minScale
+                ) ?: return false
+                // The planner may trade fps for sharpness. The children and
+                // the flipper layout must use the rate it actually chose, or
+                // the loop plays at the wrong speed and the byte budget
+                // counts the wrong number of frames.
+                val planSteps = if (plan.effectiveFps == displayFps) {
+                    baseSteps
+                } else {
+                    LivingFrameEngine.displaySteps(frame, plan.effectiveFps)
+                }
+                val planStart = if (resume != null) {
+                    LivingFrameEngine.nearestStepIndex(
+                        planSteps, resume.from, resume.to, resume.mix
                     )
-                )
-                mgr.updateAppWidget(appWidgetId, views)
-                writeInfo(
-                    context, appWidgetId,
-                    WidgetInfo(
-                        plan.outW, plan.outH, steps.size,
-                        plan.bytes,
-                        (plan.outW * 100f / w).roundToInt().coerceIn(1, 100),
-                        plan.rgb565, plan.step, plan.effectiveFps,
-                        System.currentTimeMillis(), null,
-                        streamed = false, speed = frame.speed,
-                        paused = false, renderVersion = RENDER_VERSION
+                } else {
+                    0
+                }
+                val steps = LivingFrameEngine.rotateSteps(planSteps, planStart)
+                val bitmaps = try {
+                    renderSteps(repo, frame, steps, plan, w, h, density)
+                } catch (t: Throwable) {
+                    if (t is CancellationException) throw t
+                    val message = t.message
+                    if (!message.isNullOrBlank()) error = message.take(90)
+                    null
+                }
+                if (bitmaps == null) {
+                    // A decode failure is usually an out-of-memory attempt;
+                    // retry with half the bitmap budget. A corrupt frame ends
+                    // in the clear placeholder after the retries.
+                    error = "Some frames are missing. Re-import this widget."
+                    attemptBudget /= 2
+                    continue
+                }
+                try {
+                    val pauseEnabled = frame.tapAction == LivingFrameTapAction.PAUSE_PLAY
+                    val views = buildFlipper(
+                        context, appWidgetId, frame, steps, bitmaps, plan.effectiveFps,
+                        pauseEnabled
                     )
-                )
-                LivingFramesPause.clearResume(context, appWidgetId)
-                return@withContext true
-            } catch (t: Throwable) {
-                if (t is CancellationException) throw t
-                val message = t.message
-                if (!message.isNullOrBlank()) error = message.take(90)
-                budget /= 2
-            } finally {
-                bitmaps.values.forEach { runCatching { if (!it.isRecycled) it.recycle() } }
+                    applyChrome(
+                        context, views, appWidgetId, frame,
+                        rootTap = if (pauseEnabled) null else tapIntent(
+                            context, appWidgetId, frame, allowPause = false
+                        )
+                    )
+                    mgr.updateAppWidget(appWidgetId, views)
+                    writeInfo(
+                        context, appWidgetId,
+                        WidgetInfo(
+                            plan.outW, plan.outH, steps.size,
+                            plan.bytes,
+                            (plan.outW * 100f / w).roundToInt().coerceIn(1, 100),
+                            plan.rgb565, plan.step, plan.effectiveFps,
+                            System.currentTimeMillis(), null,
+                            streamed = false, speed = frame.speed,
+                            paused = false, renderVersion = RENDER_VERSION
+                        )
+                    )
+                    LivingFramesPause.clearResume(context, appWidgetId)
+                    return true
+                } catch (t: Throwable) {
+                    if (t is CancellationException) throw t
+                    val message = t.message
+                    if (!message.isNullOrBlank()) error = message.take(90)
+                    attemptBudget /= 2
+                } finally {
+                    bitmaps.values.forEach { runCatching { if (!it.isRecycled) it.recycle() } }
+                }
             }
+            return false
+        }
+
+        if (tryStatic(LivingFrameEngine.MIN_STATIC_SCALE, budget)) {
+            return@withContext true
         }
 
         // Static was impossible or rejected. Streaming still beats a blank
-        // widget, and its smaller frames plus last-frame loading view remove
-        // the worst of the old frame-zero flash.
+        // widget, and its last-frame miss fallback avoids a jump to frame 0.
         val streamError = tryStreaming(
-            context, repo, appWidgetId, frame, w, h, outW, outH, density, opaque,
-            displayFps, baseSteps.size, streamStart,
-            baseSteps[streamStart.coerceIn(0, baseSteps.lastIndex)]
+            context, appWidgetId, frame, outW, outH,
+            displayFps, baseSteps.size, streamStart
         )
         if (streamError == null) {
             LivingFramesPause.clearResume(context, appWidgetId)
             return@withContext true
         }
         if (streamError.isNotBlank()) error = streamError
+
+        // Some launchers reject collection widgets entirely. A soft static
+        // loop is still better than a permanent placeholder there, so relax
+        // the sharpness floor only as the last resort.
+        budget = bitmapBudget(context)
+        if (tryStatic(RELAXED_STATIC_SCALE, budget)) {
+            return@withContext true
+        }
 
         writeInfo(
             context, appWidgetId,
@@ -549,6 +570,10 @@ object LivingFramesWidgetHelper {
                 views.setImageViewBitmap(R.id.living_frame_static, bitmap)
                 views.setViewVisibility(R.id.living_frame_static, View.VISIBLE)
                 views.setViewVisibility(R.id.living_frame_placeholder, View.GONE)
+                // The bitmap is square; the launcher clips it to this outline.
+                LivingFramesCorners.apply(
+                    views, R.id.living_frame_static, frame.cornerRadiusDp
+                )
                 applyChrome(
                     context, views, appWidgetId, frame,
                     tapIntent(context, appWidgetId, frame, allowPause = false)
@@ -649,6 +674,10 @@ object LivingFramesWidgetHelper {
                 views.setImageViewBitmap(R.id.living_frame_static, bitmap)
                 views.setViewVisibility(R.id.living_frame_static, View.VISIBLE)
                 views.setViewVisibility(R.id.living_frame_placeholder, View.GONE)
+                // The bitmap is square; the launcher clips it to this outline.
+                LivingFramesCorners.apply(
+                    views, R.id.living_frame_static, frame.cornerRadiusDp
+                )
                 applyChrome(
                     context, views, appWidgetId, frame,
                     pauseIntent(context, appWidgetId, step, index)
@@ -727,7 +756,7 @@ object LivingFramesWidgetHelper {
         if (!step.blended) {
             val src = repo.decodeAtLeast(frame.id, step.from, need) ?: return null
             return try {
-                LivingFrameRenderer.render(
+                LivingFrameRenderer.renderWidget(
                     src, frame, plan.outW, plan.outH,
                     densityX, densityY, plan.rgb565
                 )
@@ -746,7 +775,7 @@ object LivingFramesWidgetHelper {
             return null
         }
         return try {
-            LivingFrameRenderer.renderBlend(
+            LivingFrameRenderer.renderBlendWidget(
                 from = from,
                 to = to,
                 frame = frame,
@@ -791,6 +820,11 @@ object LivingFramesWidgetHelper {
             val child = RemoteViews(context.packageName, R.layout.living_frames_frame)
             val bitmap = bitmaps[step] ?: return@forEachIndexed
             child.setImageViewBitmap(R.id.living_frame_item, bitmap)
+            // Square bitmap, host-measured rounded outline: the radius stays
+            // correct even when the launcher's real size differs from ours.
+            LivingFramesCorners.apply(
+                child, R.id.living_frame_item, frame.cornerRadiusDp
+            )
             if (pauseEnabled) {
                 child.setOnClickPendingIntent(
                     R.id.living_frame_item,
@@ -808,21 +842,14 @@ object LivingFramesWidgetHelper {
      */
     private suspend fun tryStreaming(
         context: Context,
-        repo: LivingFramesRepository,
         appWidgetId: Int,
         frame: LivingFrame,
-        widgetW: Int,
-        widgetH: Int,
         outW: Int,
         outH: Int,
-        density: Float,
-        opaque: Boolean,
         displayFps: Int,
         frames: Int,
-        startIndex: Int,
-        baseStep: LivingFrameEngine.DisplayStep
+        startIndex: Int
     ): String? {
-        var base: Bitmap? = null
         var error = ""
         try {
             val views = RemoteViews(
@@ -838,29 +865,10 @@ object LivingFramesWidgetHelper {
                 data = livingFramesAdapterUri(appWidgetId, frame.id, startIndex)
             }
             views.setRemoteAdapter(R.id.living_frame_flip, adapter)
-            // Some launchers draw a collection widget before the adapter's
-            // first child arrives. Put the first rendered frame behind the
-            // flipper so that gap is the animation's own first frame, not a
-            // blank/loading flash. Translucent sets are skipped: stacking the
-            // same frame behind itself would silently raise opacity.
-            if (frame.opacity >= 0.999f) {
-                val plan = LivingFrameEngine.planStill(
-                    outW, outH, opaque, bitmapBudget(context)
-                )
-                val densityX = LivingFrameEngine.densityScale(density, plan.outW, widgetW)
-                val densityY = LivingFrameEngine.densityScale(density, plan.outH, widgetH)
-                base = try {
-                    renderStep(repo, frame, baseStep, plan, densityX, densityY)
-                } catch (t: Throwable) {
-                    if (t is CancellationException) throw t
-                    // Streaming can still work without the static base.
-                    null
-                }
-                if (base != null) {
-                    views.setImageViewBitmap(R.id.living_frame_static, base)
-                    views.setViewVisibility(R.id.living_frame_static, View.VISIBLE)
-                }
-            }
+            // No static first frame behind the flipper. The host builds its
+            // loading template once, at metadata load, so a first-frame
+            // backdrop (or a first-frame loading view) reappears on every
+            // later miss and makes the loop look like it restarts.
             applyChrome(
                 context, views, appWidgetId, frame,
                 tapIntent(context, appWidgetId, frame, allowPause = false)
@@ -885,8 +893,6 @@ object LivingFramesWidgetHelper {
             // Some launchers reject collection widgets. Fall through to the
             // single-RemoteViews path instead of showing nothing.
             error = t.message?.take(90).orEmpty()
-        } finally {
-            base?.let { runCatching { if (!it.isRecycled) it.recycle() } }
         }
         return error
     }

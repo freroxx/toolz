@@ -181,17 +181,30 @@ class LivingFrameEngineTest {
 
     @Test
     fun displayDuration_keepsRealTimeLengthAcrossDisplayRates() {
-        assertEquals(
+        // flipInterval is a whole number of milliseconds, so the flipper's
+        // real rate is 12.05 or 58.8 fps and a loop can miss the nominal
+        // length by one tick. What matters is that changing the display rate
+        // does not make the same clip play noticeably longer or shorter.
+        fun assertWithinOneTick(expected: Long, actual: Long, tickMs: Long) {
+            assertTrue(
+                "expected $expected ± $tickMs but was $actual",
+                actual in (expected - tickMs)..(expected + tickMs)
+            )
+        }
+        assertWithinOneTick(
             1_000L,
-            LivingFrameEngine.displayDurationMs(12, 12, 12, 1f, LivingFrameLoopMode.LOOP)
+            LivingFrameEngine.displayDurationMs(12, 12, 12, 1f, LivingFrameLoopMode.LOOP),
+            83L
         )
-        assertEquals(
+        assertWithinOneTick(
             1_000L,
-            LivingFrameEngine.displayDurationMs(12, 12, 60, 1f, LivingFrameLoopMode.LOOP)
+            LivingFrameEngine.displayDurationMs(12, 12, 60, 1f, LivingFrameLoopMode.LOOP),
+            17L
         )
-        assertEquals(
+        assertWithinOneTick(
             500L,
-            LivingFrameEngine.displayDurationMs(12, 12, 60, 2f, LivingFrameLoopMode.LOOP)
+            LivingFrameEngine.displayDurationMs(12, 12, 60, 2f, LivingFrameLoopMode.LOOP),
+            17L
         )
     }
 
@@ -254,7 +267,7 @@ class LivingFrameEngineTest {
     }
 
     @Test
-    fun plan_staticPrefersSharpnessOverFps() {
+    fun plan_staticUsesFullScaleWhenTheBudgetFits() {
         val full = LivingFrameEngine.planStatic(
             frameCount = 4,
             sourceFps = 12,
@@ -272,6 +285,50 @@ class LivingFrameEngineTest {
         assertEquals(12, full.effectiveFps)
         assertEquals(false, full.reduced)
         assertEquals(false, full.transition)
+    }
+
+    @Test
+    fun plan_staticBudgetsUniqueBitmapsNotRepeatedDisplayChildren() {
+        val p = LivingFrameEngine.planStatic(
+            frameCount = 12,
+            sourceFps = 12,
+            speed = 1f,
+            requestedFps = 60,
+            widthPx = 100,
+            heightPx = 100,
+            opaque = true,
+            budgetBytes = 1_000_000L,
+            loopMode = LivingFrameLoopMode.LOOP
+        )!!
+        val steps = LivingFrameEngine.displaySteps(
+            12, 12, 60, 1f, LivingFrameLoopMode.LOOP, LivingFrameLoopTransition.NONE
+        )
+        // 59 children, 12 pictures: charging all 59 would need ~2.4 MB.
+        assertEquals(steps.size, p.frames)
+        assertEquals(12, steps.toHashSet().size)
+        assertEquals(60, p.effectiveFps)
+        assertEquals(1f, p.scale)
+        assertTrue(p.bytes <= 1_000_000L)
+    }
+
+    @Test
+    fun plan_staticUsesRgb565BeforeDownscalingOpaqueVideo() {
+        val p = LivingFrameEngine.planStatic(
+            frameCount = 4,
+            sourceFps = 12,
+            speed = 1f,
+            requestedFps = 12,
+            widthPx = 1_000,
+            heightPx = 500,
+            opaque = true,
+            budgetBytes = 5_000_000L,
+            loopMode = LivingFrameLoopMode.LOOP
+        )!!
+        // ARGB at full size is ~8 MB; 565 at full size is ~4 MB, so keep the
+        // pixels and spend colour depth instead of scaling the video down.
+        assertEquals(1f, p.scale)
+        assertTrue(p.rgb565)
+        assertTrue(p.bytes <= 5_000_000L)
     }
 
     @Test

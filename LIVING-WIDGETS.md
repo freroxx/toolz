@@ -146,28 +146,35 @@ reclaimable orphan folders.
 - **Static-first playback.** Toolz prefers a single RemoteViews whose
   `ViewFlipper` already contains every display frame. All children arrive in
   one push, so the launcher cannot skip the loading view and flash back to
-  frame 0. `LivingFrameEngine.planStatic` tries each supported rate from
-  8 fps up to the requested rate, finds the largest resolution that fits the
-  bitmap budget, and keeps the sharpest plan (ties go to the higher fps). The
-  plan returns null when the loop would need a scale below 40% or more than
-  240 children; only then does the widget stream.
+  frame 0. `LivingFrameEngine.planStatic` tries the requested rate first and
+  then each lower supported rate, returning the smoothest plan that fits at
+  **80% or more** of the widget's pixel size. The byte budget counts unique
+  bitmaps, not repeated display children, so a 60 fps request over a 12 fps
+  source is not charged five times for the same picture. The plan returns null
+  when the loop is too long, would need more than 240 children, or would have
+  to fall below the sharpness floor; only then does the widget stream.
 - **Bitmap budget.** The RemoteViews ceiling is
   `6 × screen width × screen height × 4` bytes. Toolz uses at most 55% of it,
-  counting every child bitmap plus per-child binder overhead. If the launcher
-  still rejects the update, the budget is halved and the plan recomputed up to
-  four times. The UI reports when a render was reduced.
-- **Corner radius.** The renderer draws at the output bitmap size rather than
-  letting an `ImageView` crop it afterwards. Corners are baked with
-  `densityX = density × outW / widgetW` and
-  `densityY = density × outH / widgetH`, so the launcher's scale-back lands on
-  the configured dp at every resolution and aspect ratio. Radii are clamped to
-  half the output side.
+  counting unique bitmaps plus per-child binder overhead. An opaque video can
+  use RGB_565 at full resolution before it is scaled down, so sharpness is
+  spent before colour depth. If the launcher still rejects the update, the
+  budget is halved and the plan recomputed up to four times. The UI reports
+  when a render was reduced.
+- **Corner radius.** Widget bitmaps stay square and the launcher clips them to
+  a rounded background drawable (`clipToOutline`) measured in its own pixels.
+  This is exact at every configured dp, widget size, aspect ratio and render
+  scale; baking the radius into the bitmap could only guess the launcher's
+  measured size. Square corners also let opaque video use RGB_565. The Compose
+  preview still clips with Compose because it knows its own size.
 - **Streaming fallback.** Loops too long to embed use
   `LivingFramesRemoteViewsService` and an `AdapterViewFlipper`. Each frame is
-  its own binder transaction, so long clips keep the requested resolution.
-  A static first-frame bitmap sits behind the flipper, and a cache miss reuses
-  the last frame the launcher was handed, so streaming no longer flashes back
-  to frame 0.
+  its own binder transaction, so long clips keep their own resolution. Opaque
+  video uses RGB_565 when the target frame would exceed the host-frame cap,
+  which doubles the pixels available within the launcher's ~2 MB cache. There
+  is no static first-frame backdrop: the host builds its loading template once
+  and would replay that frame on every later miss. Misses reuse the last frame
+  actually handed to the launcher, and the loading template is a neutral
+  rounded tile.
 - Resizes are debounced before re-rendering. Each settled resize rebuilds the
   static push or streaming session at the new size. A widget that cannot be
   rendered shows a short explanatory placeholder instead of a blank frame.
@@ -196,13 +203,14 @@ reclaimable orphan folders.
 - **Resolution** (40–100%) is a render scale. Lowering it is instant and cuts
   battery and memory use; 100% is the full stored detail. Going above 100% is
   not offered because it would only upscale an already stored copy.
-- **Loop transition.** GIF and video imports default to **Fade**; existing
-  sets keep **None**. `LivingFrameEngine.displaySteps` appends one or more
-  blend children that dissolve the last source frame into the first over about
-  0.18 s. **Soft blur** renders those blends through a quarter-resolution
-  round-trip for a softer seam. Boomerang loops already have matching
-  endpoints and ignore the setting. Seam children count toward the bitmap
-  budget, so a long clip can fall back to a hard cut instead of streaming.
+- **Loop transition.** Imports default to **None**: a video that is already a
+  continuous loop should hard-cut at the seam, not fade back to its first
+  frame. Choosing **Fade** or **Soft blur** appends one or more blend children
+  that dissolve the last source frame into the first over about 0.18 s. **Soft
+  blur** renders those blends through a quarter-resolution round-trip for a
+  softer seam. Boomerang loops already have matching endpoints and ignore the
+  setting. Seam children count toward the bitmap budget, so enabling a
+  transition can move a long clip from static to streaming.
 - **Pause / play.** New GIF and video imports default their tap action to
   **Pause / play**. The static path attaches a distinct PendingIntent to every
   flipper child, so a tap saves that exact display step (including a seam
@@ -218,8 +226,8 @@ reclaimable orphan folders.
   (the smaller of one sixth of the app's heap limit and 64 MB, divided across
   active Living Widgets). When every unique frame of the loop fits, the whole
   loop stays in memory and, after the first pass, playback does no decoding.
-  An opaque video loop switches to 16-bit colour if that is what lets it stay
-  resident.
+  Opaque video uses RGB_565 for the host frame cap and, when needed, to keep
+  the whole loop resident.
 - **Windowed loops.** When the loop does not fit, a sliding window of 8–64
   frames is kept. Frames are evicted by how far ahead of the playhead they
   are needed, so the frame just shown goes first. Plain least-recently-used
@@ -316,11 +324,30 @@ For a full build check:
 - The renderer uses a direct blit for square corners and marks opaque output
   as alpha-free.
 
+### Living Widgets smoothness and sharpness pass
+
+- Static playback now requires 80% of the widget's pixel size; otherwise the
+  widget streams at a resolution the launcher can hold instead of pinning a
+  soft copy into the home screen.
+- The static planner budgets unique bitmaps and chooses the highest fps that
+  clears that floor, so repeated display children no longer inflate memory or
+  force an unnecessary downscale.
+- Opaque video spends the host-frame budget on RGB_565 pixels rather than
+  shrinking, and static plans try 16-bit at full resolution before dropping
+  resolution.
+- Rounded corners are clipped by the launcher from transparent drawables, so
+  the radius is exact at every dp, widget size, resolution and aspect ratio.
+- Streaming no longer keeps a first-frame backdrop or returns the first frame
+  as the host's permanent loading template; misses reuse the last displayed
+  frame and the loading state is neutral.
+- GIF and video imports default to **None**; Fade and Soft blur remain
+  explicit choices.
+
 ### Living Widgets quality and control pass
 
-- Animations now always stream at the widget's native resolution; the
+- Animations use static playback when it stays sharp and stream otherwise; the
   user-facing playback-engine selector (and the non-working Standard mode) is
-  gone. A static single-update path remains only as a fallback.
+  gone.
 - Added a real speed control (×0.25–×4) separate from FPS, plus a 40–100%
   render-resolution control. Speed resamples the display sequence; resolution
   lowers rendering cost. Neither re-encodes stored frames.

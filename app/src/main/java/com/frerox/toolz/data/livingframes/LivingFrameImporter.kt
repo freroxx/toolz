@@ -804,11 +804,10 @@ class LivingFrameImporter @Inject constructor(
                 } else {
                     LivingFrameTapAction.OPEN_PREVIEW
                 },
-                loopTransition = if (animated) {
-                    LivingFrameLoopTransition.FADE
-                } else {
-                    LivingFrameLoopTransition.NONE
-                }
+                // Hard cuts are the neutral default. A seam transition is an
+                // explicit style choice: fading every loop to frame zero is
+                // exactly what makes a continuous video look like it restarts.
+                loopTransition = LivingFrameLoopTransition.NONE
             )
             // Once the files are in place, finish the metadata swap even if the
             // caller is being cancelled. Otherwise a cancellation at exactly
