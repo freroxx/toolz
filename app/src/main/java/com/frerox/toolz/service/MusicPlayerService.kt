@@ -1423,7 +1423,13 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         val action = intent?.action
         if (action != null) MusicEventLog.add("cmd", "onStartCommand $action svc=$svcId")
         ensureForegroundForStartCommand(action)
-        if (runCatching { player.mediaItemCount }.getOrDefault(0) > 0) {
+        // IMPORTANT: only refresh for a real app/media-button command.
+        // Media3 promotes the service by calling startForeground(), which
+        // re-delivers its own self-intent (NO action) to onStartCommand.
+        // Refreshing on that self-intent feeds straight back into
+        // startForeground() and spins the main thread forever -> severe jank
+        // and frame drops while a queue is loaded (playing or paused).
+        if (action != null && runCatching { player.mediaItemCount }.getOrDefault(0) > 0) {
             runCatching { triggerNotificationUpdate() }
         }
         try {
