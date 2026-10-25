@@ -81,20 +81,31 @@ object LivingFramesSlideshow {
     /**
      * Repairs lost alarms (force-stop, OEM cleanup, reboot) without moving a
      * still-valid schedule. Called by every refresh and by the watchdog.
+     *
+     * Returns true when the saved slot was already overdue and the slideshow
+     * advanced immediately. The caller must render that new photo; merely
+     * re-arming would leave the old photo up for another whole interval.
      */
-    fun ensureScheduled(context: Context, appWidgetId: Int, intervalMin: Int) {
+    @Synchronized
+    fun ensureScheduled(context: Context, appWidgetId: Int, frame: LivingFrame): Boolean {
         val p = prefs(context)
-        val mins = intervalMin.coerceIn(1, 1440)
+        val mins = frame.slideshowIntervalMin.coerceIn(1, 1440)
         val storedMins = p.getInt("mins_$appWidgetId", 0)
         val next = p.getLong("next_$appWidgetId", 0L)
         val now = System.currentTimeMillis()
-        if (storedMins != mins || next <= 0L || next <= now) {
+        if (storedMins != mins || next <= 0L) {
             schedule(context, appWidgetId, mins)
-        } else {
-            // AlarmManager may have dropped it during force-stop; re-arming
-            // the same timestamp cannot create an early/late tick.
-            armAt(context, appWidgetId, next)
+            return false
         }
+        if (next <= now) {
+            advance(context, appWidgetId, frame)
+            schedule(context, appWidgetId, mins)
+            return true
+        }
+        // AlarmManager may have dropped it during force-stop; re-arming
+        // the same timestamp cannot create an early/late tick.
+        armAt(context, appWidgetId, next)
+        return false
     }
 
     private fun armAt(context: Context, appWidgetId: Int, triggerAtMs: Long) {
@@ -141,6 +152,17 @@ object LivingFramesSlideshow {
         return LivingFrameEngine.slideIndex(
             pos, frame.frameCount, frame.shuffle, seed(appWidgetId, frame)
         )
+    }
+
+    /**
+     * Manual "next photo" tap: move the cursor and start a fresh interval.
+     * Synchronized with [ensureScheduled] so a tick that lands at the same
+     * moment cannot also advance and skip a photo.
+     */
+    @Synchronized
+    fun advanceNow(context: Context, appWidgetId: Int, frame: LivingFrame) {
+        advance(context, appWidgetId, frame)
+        schedule(context, appWidgetId, frame.slideshowIntervalMin)
     }
 
     fun nextInMs(context: Context, appWidgetId: Int): Long {

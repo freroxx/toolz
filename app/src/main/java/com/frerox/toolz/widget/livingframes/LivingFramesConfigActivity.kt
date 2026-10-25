@@ -60,7 +60,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.lifecycleScope
 import coil3.compose.AsyncImage
 import com.frerox.toolz.MainActivity
 import com.frerox.toolz.data.livingframes.LivingFrame
@@ -70,7 +69,6 @@ import com.frerox.toolz.ui.theme.ToolzTheme
 import com.frerox.toolz.worker.LivingFramesRenderWorker
 import dagger.hilt.android.EntryPointAccessors
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -121,12 +119,16 @@ class LivingFramesConfigActivity : ComponentActivity() {
             ToolzTheme {
                 ConfigScreen(
                     repo = repo,
-                    initialId = repo.boundFrame(appWidgetId),
+                    appWidgetId = appWidgetId,
                     onCancel = { finish() },
                     onUse = { frame ->
-                        lifecycleScope.launch {
-                            repo.bindWidget(appWidgetId, frame.id)
+                        if (!repo.bindWidget(appWidgetId, frame.id)) {
+                            false
+                        } else {
                             LivingFramesSlideshow.cancel(applicationContext, appWidgetId)
+                            // The old set's pause point must not freeze the
+                            // new set on an unrelated frame.
+                            LivingFramesPause.clear(applicationContext, appWidgetId)
                             LivingFramesWidgetHelper.clearPendingPin(applicationContext)
                             setResult(
                                 Activity.RESULT_OK,
@@ -137,6 +139,7 @@ class LivingFramesConfigActivity : ComponentActivity() {
                             )
                             LivingFramesRenderWorker.enqueue(applicationContext, appWidgetId)
                             finish()
+                            true
                         }
                     },
                     onOpenToolz = {
@@ -158,9 +161,9 @@ class LivingFramesConfigActivity : ComponentActivity() {
 @Composable
 private fun ConfigScreen(
     repo: LivingFramesRepository,
-    initialId: String?,
+    appWidgetId: Int,
     onCancel: () -> Unit,
-    onUse: (LivingFrame) -> Unit,
+    onUse: (LivingFrame) -> Boolean,
     onOpenToolz: () -> Unit
 ) {
     var frames by remember { mutableStateOf<List<LivingFrame>?>(null) }
@@ -169,13 +172,17 @@ private fun ConfigScreen(
     // them with the composition instead of holding every cover in memory.
     var covers by remember { mutableStateOf<Map<String, File>>(emptyMap()) }
     var selected by remember { mutableStateOf<LivingFrame?>(null) }
+    var bindFailed by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         repo.ensureLoaded()
         loadFailed = repo.isLoadFailed()
         val loaded = repo.snapshot()
         frames = loaded
-        selected = loaded.firstOrNull { it.id == initialId }
+        // Read the binding only after the repository has loaded. Before that,
+        // a reconfiguration after process death looked unbound and showed no
+        // selected set even though the widget was still attached.
+        selected = loaded.firstOrNull { it.id == repo.boundFrame(appWidgetId) }
         covers = withContext(Dispatchers.IO) {
             loaded.associate { frame ->
                 val cover = repo.coverFile(frame.id)
@@ -243,10 +250,22 @@ private fun ConfigScreen(
                             frame = frame,
                             cover = covers[frame.id],
                             selected = selected?.id == frame.id,
-                            onClick = { selected = frame }
+                            onClick = {
+                                bindFailed = false
+                                selected = frame
+                            }
                         )
                     }
                 }
+            }
+
+            if (bindFailed) {
+                Text(
+                    "Couldn't save this choice. Free some storage and try again.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 10.dp)
+                )
             }
 
             Row(
@@ -257,7 +276,11 @@ private fun ConfigScreen(
                 TextButton(onClick = onCancel) { Text("Cancel") }
                 Spacer(Modifier.size(8.dp))
                 Button(
-                    onClick = { selected?.let(onUse) },
+                    onClick = {
+                        selected?.let { frame ->
+                            bindFailed = !onUse(frame)
+                        }
+                    },
                     enabled = selected != null
                 ) {
                     Text("Use this set")

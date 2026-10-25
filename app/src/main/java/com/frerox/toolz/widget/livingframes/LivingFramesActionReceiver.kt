@@ -22,6 +22,9 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import com.frerox.toolz.data.livingframes.LivingFrame
+import com.frerox.toolz.data.livingframes.LivingFrameEngine
+import com.frerox.toolz.data.livingframes.LivingFrameFps
 import com.frerox.toolz.data.livingframes.LivingFrameTapAction
 import com.frerox.toolz.data.livingframes.LivingFramesRepository
 import com.frerox.toolz.worker.LivingFramesRenderWorker
@@ -80,31 +83,18 @@ class LivingFramesActionReceiver : BroadcastReceiver() {
                     LivingFramesPause.clear(context, id)
                     return@launch
                 }
-                if (LivingFramesPause.point(context, id) != null) {
-                    LivingFramesPause.resume(context, id)
-                } else {
-                    val from = intent.getIntExtra(
-                        LivingFramesWidgetHelper.EXTRA_STEP_FROM, -1
-                    )
-                    val to = intent.getIntExtra(
-                        LivingFramesWidgetHelper.EXTRA_STEP_TO, -1
-                    )
-                    if (from !in 0 until frame.frameCount ||
-                        to !in 0 until frame.frameCount
-                    ) {
-                        return@launch
+                // Two quick taps must toggle twice. Without this lock both
+                // coroutines could read the same pre-toggle state and end up
+                // paused (or both resume) after a double tap.
+                synchronized(PAUSE_TOGGLE_LOCK) {
+                    if (LivingFramesPause.point(context, id) != null) {
+                        LivingFramesPause.resume(context, id)
+                    } else {
+                        val point = exactTapPoint(intent, frame)
+                            ?: approximateCurrentPoint(context, id, frame)
+                            ?: return@launch
+                        LivingFramesPause.pause(context, id, point)
                     }
-                    val milli = intent.getIntExtra(
-                        LivingFramesWidgetHelper.EXTRA_STEP_MIX, 0
-                    )
-                    LivingFramesPause.pause(
-                        context, id,
-                        LivingFramesPause.Point(
-                            from = from,
-                            to = to,
-                            mix = milli.coerceIn(0, 1000) / 1000f
-                        )
-                    )
                 }
                 LivingFramesRenderWorker.enqueue(context, id)
             } catch (e: CancellationException) {
@@ -115,6 +105,50 @@ class LivingFramesActionReceiver : BroadcastReceiver() {
                 runCatching { result.finish() }
             }
         }
+    }
+
+    /** The exact step carried by a child tap. Root taps omit the extras. */
+    private fun exactTapPoint(
+        intent: Intent,
+        frame: LivingFrame
+    ): LivingFramesPause.Point? {
+        val from = intent.getIntExtra(LivingFramesWidgetHelper.EXTRA_STEP_FROM, -1)
+        val to = intent.getIntExtra(LivingFramesWidgetHelper.EXTRA_STEP_TO, -1)
+        if (from !in 0 until frame.frameCount ||
+            to !in 0 until frame.frameCount
+        ) {
+            return null
+        }
+        val milli = intent.getIntExtra(LivingFramesWidgetHelper.EXTRA_STEP_MIX, 0)
+        return LivingFramesPause.Point(
+            from = from,
+            to = to,
+            mix = milli.coerceIn(0, 1000) / 1000f
+        )
+    }
+
+    /**
+     * Fallback for a root tap on a widget whose launcher does not deliver
+     * child clicks. The last render report says when the loop started and
+     * which child was first; the flipper advances on the launcher's clock, so
+     * this reconstructs the child that should be on screen now. Exact child
+     * taps always win, and a pause never needs this path.
+     */
+    private fun approximateCurrentPoint(
+        context: Context,
+        appWidgetId: Int,
+        frame: LivingFrame
+    ): LivingFramesPause.Point? {
+        val info = LivingFramesWidgetHelper.readInfo(context, appWidgetId) ?: return null
+        val fps = info.fps.takeIf { it > 0 } ?: LivingFrameEngine.playbackFps(frame)
+        val steps = LivingFrameEngine.displaySteps(frame, fps)
+        if (steps.isEmpty()) return null
+        val start = info.startIndex.coerceIn(0, steps.lastIndex)
+        val interval = LivingFrameFps.intervalMs(fps).coerceAtLeast(1)
+        val elapsed = (System.currentTimeMillis() - info.atMs).coerceAtLeast(0L)
+        val index = ((start + elapsed / interval) % steps.size).toInt()
+        val step = steps[index.coerceIn(0, steps.lastIndex)]
+        return LivingFramesPause.Point(step.from, step.to, step.mix)
     }
 
     private fun handlePin(context: Context, intent: Intent) {
@@ -184,10 +218,20 @@ class LivingFramesActionReceiver : BroadcastReceiver() {
                 r.ensureLoaded()
                 val frame = r.boundFrame(id)?.let { r.get(it) } ?: return@launch
                 if (!frame.isSlideshow) return@launch
-                LivingFramesSlideshow.advance(context, id, frame)
-                LivingFramesSlideshow.schedule(context, id, frame.slideshowIntervalMin)
-                // Rendering runs in a worker; this receiver finishes quickly.
-                LivingFramesRenderWorker.enqueue(context, id)
+                val moved = if (intent.action == LivingFramesWidgetHelper.ACTION_SLIDE_ADVANCE) {
+                    // The alarm is one-shot, but a concurrent refresh may
+                    // already have advanced an overdue slot. Only move once.
+                    LivingFramesSlideshow.ensureScheduled(context, id, frame)
+                } else {
+                    // A tap on a slideshow means "next photo now", even when
+                    // the scheduled slot has not elapsed yet.
+                    LivingFramesSlideshow.advanceNow(context, id, frame)
+                    true
+                }
+                if (moved) {
+                    // Rendering runs in a worker; this receiver finishes quickly.
+                    LivingFramesRenderWorker.enqueue(context, id)
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -200,5 +244,6 @@ class LivingFramesActionReceiver : BroadcastReceiver() {
 
     private companion object {
         const val TAG = "LivingFramesAction"
+        val PAUSE_TOGGLE_LOCK = Any()
     }
 }

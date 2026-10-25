@@ -199,6 +199,11 @@ fun LivingWidgetsScreen(
     var detailsFor by remember { mutableStateOf<LivingFrame?>(null) }
     var pinHelpFor by remember { mutableStateOf<LivingFrame?>(null) }
 
+    // Imports, deletes and external pins can change the selected set without
+    // going through the library tile. Start every new set playing; a paused
+    // state belongs to the set it was paused on.
+    LaunchedEffect(selected?.id) { playing = true }
+
     LaunchedEffect(Unit) { viewModel.messages.collect { snackbar.showSnackbar(it) } }
 
     val gifPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) {
@@ -803,7 +808,26 @@ private fun StageSection(
                         when {
                             preview.loading -> PreviewLoading()
                             preview.frames.isEmpty() -> PreviewUnavailable()
-                            else -> LivePreview(frame, preview.frames, playing, corner, Modifier.fillMaxSize())
+                            else -> {
+                                val canPlay = frame.isAnimated || frame.isSlideshow
+                                Box(
+                                    Modifier
+                                        .fillMaxSize()
+                                        .then(
+                                            if (canPlay) {
+                                                Modifier.clickable(
+                                                    onClickLabel =
+                                                        if (playing) "Pause preview" else "Play preview",
+                                                    onClick = onTogglePlay
+                                                )
+                                            } else {
+                                                Modifier
+                                            }
+                                        )
+                                ) {
+                                    LivePreview(frame, preview.frames, playing, corner, Modifier.fillMaxSize())
+                                }
+                            }
                         }
                         if (!preview.loading && preview.frames.isNotEmpty() &&
                             (frame.isAnimated || frame.isSlideshow)
@@ -910,7 +934,15 @@ private fun previewNote(frame: LivingFrame, shownFrames: Int): String? {
         frame.frameCount, frame.sourceFps, fps, frame.speed, frame.loopMode, frame.loopTransition
     )
     if (shown >= total) return null
-    return "Previewing the first ${seconds(shown)} — the widget plays the full ${seconds(total)}."
+    // Videos intentionally preview their first half. Say so, but do not claim
+    // "half" when the decode cap shortened it even further.
+    val half = frame.type == LivingFrameType.VIDEO &&
+        shownFrames >= (frame.frameCount / 2).coerceAtLeast(1)
+    return if (half) {
+        "Previewing the first half (${seconds(shown)}) — the widget plays the full ${seconds(total)}."
+    } else {
+        "Previewing the first ${seconds(shown)} — the widget plays the full ${seconds(total)}."
+    }
 }
 
 private fun seconds(ms: Long): String = String.format(Locale.US, "%.1f s", ms / 1000f)

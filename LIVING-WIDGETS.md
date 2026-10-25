@@ -23,7 +23,9 @@ into private app storage, and never uploaded.
 ## Adding a widget
 
 1. Open **Living Widgets** in Toolz. The selected set plays at the top and
-   the library below shows a labelled tile for every set.
+   the library below shows a labelled tile for every set. Tap the preview
+   anywhere to pause or play; video sets preview their first half, and the
+   note under the stage says what the widget will play in full.
 2. Use **Add to home screen**. The launcher creates the widget and sends the
    exact `EXTRA_APPWIDGET_ID` back to Toolz.
 3. If the launcher offers configuration, choose the set for this copy.
@@ -241,8 +243,14 @@ reclaimable orphan folders.
   blend) and re-pushes one still image with no flipper running. Resuming
   rotates the loop so the saved step becomes child 0, so playback continues
   without a visual jump. Streaming collection children cannot carry their own
-  tap intents, so very long loops fall back to opening Living Widgets instead
-  of pausing on an unknown frame.
+  tap intents, so the widget root carries a pause intent instead: it
+  reconstructs the current display step from the last render report
+  (`startIndex`, fps and the time elapsed since the push). A tap anywhere on a
+  streaming widget therefore pauses on the step that should be visible, and a
+  second tap resumes from it. Exact child taps still take precedence when the
+  launcher delivers them. If a paused still cannot be rendered (for example
+  under memory pressure), the pause is dropped and normal playback resumes
+  rather than leaving a frozen widget behind an unusable resume tap.
 
 ### Streaming service
 
@@ -285,7 +293,10 @@ reclaimable orphan folders.
   after a reboot and can be re-armed idempotently.
 - The next wall-clock fire time and the current position are persisted per
   widget.
-- The watchdog re-arms alarms after a force-stop or OEM cleanup. Changing the
+- The watchdog, boot receiver and every refresh re-arm alarms after a
+  force-stop or OEM cleanup. If a saved slot is already overdue, the slideshow
+  advances immediately and renders the new photo, so a widget that missed an
+  alarm does not show the old photo for another whole interval. Changing the
   interval starts a fresh interval; changing from a slideshow to an animation
   cancels the stale alarm.
 - Intervals range from 1 minute to daily (1/5/15/30/60/180/360/720/1440
@@ -303,6 +314,7 @@ reclaimable orphan folders.
 | Metadata unreadable | Load-failure card with **Try loading again**; files kept |
 | Set was deleted | Placeholder asking to remove the widget |
 | Library unreadable during refresh | "Couldn't read the Living Widget library" placeholder; binding kept |
+| Widget set cannot be saved during configuration | Inline "Couldn't save this choice. Free some storage and try again."; the activity stays open |
 | Launcher rejects bitmaps | "Couldn't draw here. Tap refresh, or add it again." in the placed-widget row; placeholder suggests resize/re-add |
 | Storage/quota/free-space limit | Import stops with the limit message; staged files are deleted |
 | No motion in video window | Suggestion to choose another start point |
@@ -330,6 +342,32 @@ For a full build check:
 
 ## Release notes
 
+### Living Widgets production polish
+
+- Video sets preview their first half in the editor, still inside the 420 px /
+  90-frame / 24 MB preview cap. The note under the stage says the widget plays
+  the full loop.
+- The whole preview stage is now a play/pause target, including the area
+  around the 44 dp button, and selecting a different set always starts it
+  playing again.
+- Pause / play now works on both render paths. Static children keep their exact
+  step intents; static roots and streaming widgets carry a pause intent that
+  reconstructs the visible step from the last render report. Resuming rotates
+  the loop so that step stays child 0, so playback never jumps back to frame
+  zero.
+- Renderer version 5 refreshes previously placed widgets once so they receive
+  the new tap targets.
+- If the paused still cannot be rendered, the pause is cleared and the normal
+  loop is pushed instead of leaving a frozen widget behind a resume tap that
+  cannot succeed.
+- The configuration activity reads the existing binding after the library has
+  loaded, so reconfiguring after process death still shows the current set. A
+  failed bind now shows an inline error and keeps the activity and pending pin
+  open.
+- Overdue slideshow alarms advance immediately, render the new photo and
+  re-arm. Boot and package-update handling use the same path, so a reboot after
+  a missed slot no longer leaves the old photo on screen for another interval.
+
 ### Living Widgets out-of-the-box pass
 
 - The editor is preview-first: the selected loop plays at the top, the library
@@ -347,8 +385,9 @@ For a full build check:
   smoothness behind **More options**.
 - Corner bounds are shared through `LivingFrameCorners` (0–48 dp) by
   validation, the view model and both sliders.
-- Editor previews are capped at 420 px, 90 frames and 24 MB, and the previous
-  set is dropped before decoding the next one.
+- Editor previews are capped at 420 px, 90 frames and 24 MB. Video sets
+  preview their first half, slideshows preview up to eight photos, and the
+  previous set is dropped before decoding the next one.
 - Repository edits are serialized, a failed save rolls back only the affected
   set, and the metadata writer uses a coherent snapshot. Backup rotation no
   longer re-parses `frames.json` on every save.

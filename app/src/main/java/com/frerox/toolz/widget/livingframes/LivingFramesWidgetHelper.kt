@@ -75,7 +75,7 @@ object LivingFramesWidgetHelper {
      * Bump when rendering changes in a way that invalidates already-pushed
      * RemoteViews. The hourly watchdog re-renders older widgets once.
      */
-    const val RENDER_VERSION = 4
+    const val RENDER_VERSION = 5
 
     /**
      * Last-resort static floor for launchers that reject collection widgets.
@@ -219,9 +219,11 @@ object LivingFramesWidgetHelper {
     // -- tap handling ---------------------------------------------------------
 
     /**
-     * PAUSE_PLAY is only exact on the static path: collection children cannot
-     * carry their own click PendingIntents, so a streaming widget falls back
-     * to opening the editor instead of pausing on an unknown frame.
+     * PAUSE_PLAY needs a step for an exact freeze. Both widget paths now attach
+     * a root pause intent: static children still carry exact steps, while the
+     * root intent reconstructs the current step from the last render report.
+     * Collection children cannot carry their own click PendingIntents, so the
+     * root intent is the only reliable tap target there.
      */
     private fun effectiveTap(frame: LivingFrame, allowPause: Boolean): LivingFrameTapAction {
         val action = frame.tapAction
@@ -242,8 +244,9 @@ object LivingFramesWidgetHelper {
     ): PendingIntent? {
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         return when (val action = effectiveTap(frame, allowPause)) {
-            LivingFrameTapAction.NOTHING,
-            LivingFrameTapAction.PAUSE_PLAY -> null
+            LivingFrameTapAction.NOTHING -> null
+            LivingFrameTapAction.PAUSE_PLAY ->
+                rootPauseIntent(context, appWidgetId)
             LivingFrameTapAction.NEXT_FRAME -> PendingIntent.getBroadcast(
                 context, appWidgetId,
                 Intent(context, LivingFramesActionReceiver::class.java).apply {
@@ -295,6 +298,30 @@ object LivingFramesWidgetHelper {
         return PendingIntent.getBroadcast(
             context,
             appWidgetId * 4096 + (index.coerceAtLeast(0) % 4096),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
+    /**
+     * Root-level pause toggle used when the launcher will not route taps to a
+     * flipper child or collection item. It carries no step: the receiver
+     * reconstructs the current step from the last render report and the
+     * flipper's elapsed time. Exact child intents, when they arrive, remain
+     * authoritative.
+     */
+    private fun rootPauseIntent(
+        context: Context,
+        appWidgetId: Int
+    ): PendingIntent {
+        val intent = Intent(context, LivingFramesActionReceiver::class.java).apply {
+            action = ACTION_PAUSE_PLAY
+            data = Uri.parse("toolz://living-frames/pause/$appWidgetId/root")
+            putExtra(EXTRA_WIDGET_ID, appWidgetId)
+        }
+        return PendingIntent.getBroadcast(
+            context,
+            appWidgetId * 4096 + 4095,
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
@@ -374,10 +401,15 @@ object LivingFramesWidgetHelper {
             null
         }
         if (pausePoint != null) {
-            return@withContext pushPaused(
+            val paused = pushPaused(
                 context, repo, appWidgetId, frame, pausePoint,
                 w, h, outW, outH, density, opaque, displayFps
             )
+            if (paused) return@withContext true
+            // The paused still could not be produced (usually a memory
+            // failure). Drop the pause rather than leaving the old widget
+            // frozen behind a resume tap that can never succeed.
+            LivingFramesPause.clear(context, appWidgetId)
         }
 
         if (!animated) {
@@ -468,9 +500,11 @@ object LivingFramesWidgetHelper {
                     )
                     applyChrome(
                         context, views, appWidgetId, frame,
-                        rootTap = if (pauseEnabled) null else tapIntent(
-                            context, appWidgetId, frame, allowPause = false
-                        )
+                        rootTap = if (pauseEnabled) {
+                            rootPauseIntent(context, appWidgetId)
+                        } else {
+                            tapIntent(context, appWidgetId, frame, allowPause = false)
+                        }
                     )
                     mgr.updateAppWidget(appWidgetId, views)
                     writeInfo(
@@ -482,7 +516,8 @@ object LivingFramesWidgetHelper {
                             plan.rgb565, plan.step, plan.effectiveFps,
                             System.currentTimeMillis(), null,
                             streamed = false, speed = frame.speed,
-                            paused = false, renderVersion = RENDER_VERSION
+                            paused = false, renderVersion = RENDER_VERSION,
+                            startIndex = planStart
                         )
                     )
                     LivingFramesPause.clearResume(context, appWidgetId)
@@ -691,7 +726,8 @@ object LivingFramesWidgetHelper {
                         plan.rgb565, plan.step, displayFps,
                         System.currentTimeMillis(), null,
                         streamed = false, speed = frame.speed,
-                        paused = true, renderVersion = RENDER_VERSION
+                        paused = true, renderVersion = RENDER_VERSION,
+                        startIndex = index
                     )
                 )
                 return true
@@ -871,7 +907,7 @@ object LivingFramesWidgetHelper {
             // later miss and makes the loop look like it restarts.
             applyChrome(
                 context, views, appWidgetId, frame,
-                tapIntent(context, appWidgetId, frame, allowPause = false)
+                tapIntent(context, appWidgetId, frame, allowPause = true)
             )
             AppWidgetManager.getInstance(context).updateAppWidget(appWidgetId, views)
             AppWidgetManager.getInstance(context)
@@ -884,7 +920,8 @@ object LivingFramesWidgetHelper {
                     false, 1, displayFps,
                     System.currentTimeMillis(), null,
                     streamed = true, speed = frame.speed,
-                    paused = false, renderVersion = RENDER_VERSION
+                    paused = false, renderVersion = RENDER_VERSION,
+                    startIndex = startIndex
                 )
             )
             return null
@@ -970,17 +1007,16 @@ object LivingFramesWidgetHelper {
             )
             return false
         }
-        val ok = push(context, repo, appWidgetId, frame)
+        // Repair/advance the timer before rendering so an overdue slideshow
+        // shows the new photo immediately instead of the stale one.
         if (frame.isSlideshow) {
-            LivingFramesSlideshow.ensureScheduled(
-                context, appWidgetId, frame.slideshowIntervalMin
-            )
+            LivingFramesSlideshow.ensureScheduled(context, appWidgetId, frame)
         } else {
             // Reconfiguration from a slideshow to an animation/photo must not
             // leave a stale one-shot alarm behind.
             LivingFramesSlideshow.cancel(context, appWidgetId)
         }
-        return ok
+        return push(context, repo, appWidgetId, frame)
     }
 
     /** Slideshow tick or tap-next: move the cursor, push the photo, arm the next alarm. */
@@ -1024,7 +1060,13 @@ object LivingFramesWidgetHelper {
         val speed: Float = 1f,
         val paused: Boolean = false,
         /** Renderer generation; older widgets are refreshed by the watchdog. */
-        val renderVersion: Int = RENDER_VERSION
+        val renderVersion: Int = RENDER_VERSION,
+        /**
+         * First display step of the loop the launcher is currently playing.
+         * Pause/resume rotates the loop, so a root tap cannot assume child 0
+         * maps to source frame 0.
+         */
+        val startIndex: Int = 0
     ) {
         val reduced: Boolean
             get() = !streamed && (scalePct in 1..99 || step > 1 || rgb565)
@@ -1042,7 +1084,7 @@ object LivingFramesWidgetHelper {
                     if (i.rgb565) 1 else 0, i.step, i.fps, i.atMs,
                     (i.error ?: "").replace('|', '/'),
                     if (i.streamed) 1 else 0, i.speed,
-                    if (i.paused) 1 else 0, i.renderVersion
+                    if (i.paused) 1 else 0, i.renderVersion, i.startIndex
                 ).joinToString("|")
             ).apply()
         } catch (_: Exception) {
@@ -1063,7 +1105,8 @@ object LivingFramesWidgetHelper {
                 paused = p.getOrNull(12) == "1",
                 // Old records have no version: treat them as stale so the
                 // watchdog re-renders the fixed corners once.
-                renderVersion = p.getOrNull(13)?.toIntOrNull() ?: 0
+                renderVersion = p.getOrNull(13)?.toIntOrNull() ?: 0,
+                startIndex = p.getOrNull(14)?.toIntOrNull() ?: 0
             )
         }
     } catch (_: Exception) {
@@ -1072,6 +1115,8 @@ object LivingFramesWidgetHelper {
 
     fun clearInfo(context: Context, id: Int) {
         runCatching { infoPrefs(context).edit().remove("i_$id").apply() }
+        // A widget whose report is gone cannot resume from a saved step.
+        LivingFramesPause.clear(context, id)
     }
 
     // -- pin flow -------------------------------------------------------------

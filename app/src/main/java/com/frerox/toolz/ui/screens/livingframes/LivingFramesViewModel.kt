@@ -36,6 +36,7 @@ import com.frerox.toolz.data.livingframes.LivingFrameQuality
 import com.frerox.toolz.data.livingframes.LivingFrameResolution
 import com.frerox.toolz.data.livingframes.LivingFrameSpeed
 import com.frerox.toolz.data.livingframes.LivingFrameTapAction
+import com.frerox.toolz.data.livingframes.LivingFrameType
 import com.frerox.toolz.data.livingframes.LivingFramesRepository
 import com.frerox.toolz.data.livingframes.LivingFramesStorage
 import com.frerox.toolz.widget.livingframes.LivingFramesSlideshow
@@ -472,7 +473,15 @@ class LivingFramesViewModel @Inject constructor(
         }
         if (cached != null) return cached
         val list = withContext(Dispatchers.IO) {
-            val count = if (frame.isSlideshow) minOf(frame.frameCount, 8) else frame.frameCount
+            val count = when {
+                frame.isSlideshow -> minOf(frame.frameCount, 8)
+                // A video preview shows the first half of the clip. Keeping
+                // the whole clip would either take too long to prepare or
+                // crowd out the widget's own bitmap budget.
+                frame.type == LivingFrameType.VIDEO ->
+                    (frame.frameCount / 2).coerceAtLeast(1)
+                else -> frame.frameCount
+            }
             // Decoding all 900 frames at preview size would exhaust memory.
             // Preview the opening seconds at the real rate; LivePreview notes
             // when it is showing an excerpt, and the widget still plays all

@@ -65,13 +65,22 @@ class LivingFramesBootReceiver : BroadcastReceiver() {
                     LivingFramesRenderWorker.enqueue(context, ids)
                 }
                 if (ids.isNotEmpty()) {
+                    // A reboot can happen long after the saved slot, so an
+                    // overdue slideshow must advance now and have its new
+                    // photo rendered. Enqueue those ids even during a
+                    // republish: unique work replaces the earlier request, so
+                    // this cannot duplicate work.
+                    val advanced = mutableListOf<Int>()
                     ids.forEach { id ->
                         val frame = repo.boundFrame(id)?.let { repo.get(it) }
-                        if (frame != null && frame.isSlideshow) {
-                            LivingFramesSlideshow.ensureScheduled(
-                                context, id, frame.slideshowIntervalMin
-                            )
+                        if (frame != null && frame.isSlideshow &&
+                            LivingFramesSlideshow.ensureScheduled(context, id, frame)
+                        ) {
+                            advanced += id
                         }
+                    }
+                    if (advanced.isNotEmpty()) {
+                        LivingFramesRenderWorker.enqueue(context, advanced.toIntArray())
                     }
                 }
             } catch (_: Exception) {

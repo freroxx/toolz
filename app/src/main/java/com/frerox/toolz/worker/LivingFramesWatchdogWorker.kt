@@ -82,18 +82,21 @@ class LivingFramesWatchdogWorker @AssistedInject constructor(
                     if (frame == null) {
                         LivingFramesRenderWorker.enqueue(ctx, id)
                     } else {
-                        if (frame.isSlideshow) {
-                            LivingFramesSlideshow.ensureScheduled(
-                                ctx, id, frame.slideshowIntervalMin
-                            )
+                        val moved = if (frame.isSlideshow) {
+                            LivingFramesSlideshow.ensureScheduled(ctx, id, frame)
+                        } else {
+                            false
                         }
-                        if (info == null ||
+                        if (moved ||
+                            info == null ||
                             info.error != null ||
                             info.renderVersion < LivingFramesWidgetHelper.RENDER_VERSION
                         ) {
                             // Renders from an older build may still have the
                             // frame-zero flash or over-scaled corners; refresh
-                            // them once after an upgrade.
+                            // them once after an upgrade. A slideshow that
+                            // advanced after a missed alarm also needs its new
+                            // photo pushed immediately.
                             LivingFramesRenderWorker.enqueue(ctx, id)
                         }
                     }
