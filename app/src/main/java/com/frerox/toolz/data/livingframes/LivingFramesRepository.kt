@@ -92,6 +92,14 @@ class LivingFramesRepository @Inject constructor(
     private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val writeLock = Mutex()
     private val loadLock = Mutex()
+
+    /**
+     * Guards every read-modify-write of [_frames]. Slider edits are
+     * synchronous while imports/deletes are suspending, so a Mutex alone
+     * cannot cover both; this monitor keeps the in-memory list coherent and
+     * gives the writer a consistent snapshot.
+     */
+    private val stateLock = Any()
     private val persistSignal = Channel<Unit>(Channel.CONFLATED)
     @Volatile private var loaded = false
     @Volatile private var loadFailed = false
@@ -136,7 +144,7 @@ class LivingFramesRepository @Inject constructor(
             }
             runCatching { File(root, ".nomedia").createNewFile() }
             if (!metaFile.exists() && !backupFile.exists()) {
-                _frames.value = emptyList()
+                setFrames(emptyList())
                 loaded = true
                 loadFailed = false
                 return@withContext
@@ -148,7 +156,7 @@ class LivingFramesRepository @Inject constructor(
                 // recoverable, a bulk file delete is not.
                 Log.e(TAG, "Living Widgets metadata is unreadable; keeping files on disk")
                 loadFailed = true
-                _frames.value = emptyList()
+                setFrames(emptyList())
                 loaded = true
                 return@withContext
             }
@@ -180,7 +188,7 @@ class LivingFramesRepository @Inject constructor(
                     repaired = true
                 }
             }
-            _frames.value = valid.sortedByDescending { it.createdAt }
+            setFrames(valid.sortedByDescending { it.createdAt })
             loaded = true
             // Only a successful read may clear the failure flag. A canceled
             // recovery retry must leave the UI/workers in the safe state.
@@ -191,9 +199,13 @@ class LivingFramesRepository @Inject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load Living Widgets", e)
             loadFailed = true
-            _frames.value = emptyList()
+            setFrames(emptyList())
             loaded = true
         }
+    }
+
+    private fun setFrames(frames: List<LivingFrame>) {
+        synchronized(stateLock) { _frames.value = frames }
     }
 
     private fun readMetadata(): List<LivingFrame>? {
@@ -380,26 +392,53 @@ class LivingFramesRepository @Inject constructor(
     suspend fun upsert(frame: LivingFrame) {
         val valid = LivingFrameValidation.normalize(frame)
             ?: throw IllegalArgumentException("Invalid Living Widget metadata")
-        val previous = _frames.value
-        _frames.value = (previous.filterNot { it.id == valid.id } + valid)
-            .sortedByDescending { it.createdAt }
+        val replaced = synchronized(stateLock) {
+            val previous = _frames.value
+            val existing = previous.firstOrNull { it.id == valid.id }
+            _frames.value = (previous.filterNot { it.id == valid.id } + valid)
+                .sortedByDescending { it.createdAt }
+            existing
+        }
         val saved = withContext(Dispatchers.IO) { writeNow() }
         if (!saved) {
-            _frames.value = previous
+            // Put back only this frame. Other edits made while the write was
+            // in flight must survive; restoring the whole old list would erase
+            // them and could resurrect a deleted set.
+            synchronized(stateLock) {
+                val current = _frames.value
+                if (current.firstOrNull { it.id == valid.id } == valid) {
+                    val restored = if (replaced == null) {
+                        current.filterNot { it.id == valid.id }
+                    } else {
+                        current.map { if (it.id == valid.id) replaced else it }
+                    }
+                    _frames.value = restored.sortedByDescending { it.createdAt }
+                }
+            }
+            // A debounced writer may have persisted the rolled-back frame just
+            // before this write failed; persist the corrected list too.
+            persistSignal.trySend(Unit)
             throw IOException("Couldn't save the Living Widget library")
         }
     }
 
     /** In-memory immediately, persisted shortly after. Safe to call per slider tick. */
     fun update(id: String, transform: (LivingFrame) -> LivingFrame) {
-        _frames.value = _frames.value.map {
-            if (it.id == id) {
-                LivingFrameValidation.normalize(transform(it)) ?: it
-            } else {
-                it
+        val changed = synchronized(stateLock) {
+            var edited = false
+            val next = _frames.value.map { frame ->
+                if (frame.id != id) {
+                    frame
+                } else {
+                    val updated = LivingFrameValidation.normalize(transform(frame)) ?: frame
+                    if (updated != frame) edited = true
+                    updated
+                }
             }
+            if (edited) _frames.value = next
+            edited
         }
-        persistSignal.trySend(Unit)
+        if (changed) persistSignal.trySend(Unit)
     }
 
     suspend fun flush() = withContext(Dispatchers.IO) { writeNow() }
@@ -407,11 +446,25 @@ class LivingFramesRepository @Inject constructor(
     /** Returns false without touching files if the metadata write fails. */
     suspend fun delete(id: String): Boolean {
         if (!LivingFrameValidation.isValidId(id)) return false
-        val previous = _frames.value
-        _frames.value = previous.filterNot { it.id == id }
+        val removed = synchronized(stateLock) {
+            val previous = _frames.value
+            val existing = previous.firstOrNull { it.id == id }
+            _frames.value = previous.filterNot { it.id == id }
+            existing
+        }
         val saved = withContext(Dispatchers.IO) { writeNow() }
         if (!saved) {
-            _frames.value = previous
+            synchronized(stateLock) {
+                // Only restore this set, and only if nothing re-created it
+                // while the write was failing. Other edits stay untouched.
+                if (removed != null && _frames.value.none { it.id == id }) {
+                    _frames.value = (_frames.value + removed)
+                        .sortedByDescending { it.createdAt }
+                }
+            }
+            // Correct any debounced save that ran while delete's own write
+            // was failing.
+            persistSignal.trySend(Unit)
             return false
         }
         markFrameWidgetsDeleted(id)
@@ -435,19 +488,21 @@ class LivingFramesRepository @Inject constructor(
                     throw IOException("The Living Widgets path is not a folder")
                 }
                 runCatching { File(root, ".nomedia").createNewFile() }
-                val payload = json.encodeToString(serializer, _frames.value)
+                // Serialise one coherent snapshot. Reading _frames.value mid
+                // encode could mix an older list with newer edits and write a
+                // document the UI never showed.
+                val snapshot = synchronized(stateLock) { _frames.value }
+                val payload = json.encodeToString(serializer, snapshot)
                 val tmp = File(root, "frames.json.tmp")
                 FileOutputStream(tmp).use { out ->
                     out.write(payload.toByteArray(Charsets.UTF_8))
                     out.fd.sync()
                 }
                 // Never overwrite a good backup with the corrupt primary we
-                // just recovered from. The next successful save can resume
-                // normal rotation.
-                val primaryIsValid = metaFile.exists() && runCatching {
-                    json.decodeFromString(serializer, metaFile.readText())
-                }.isSuccess
-                if (primaryIsValid && !usedBackup) {
+                // just recovered from. usedBackup is set by readMetadata() and
+                // cleared only after a save succeeds, so this check does not
+                // have to re-parse frames.json on every slider tick.
+                if (!usedBackup && metaFile.exists()) {
                     val bakTmp = File(root, "frames.json.bak.tmp")
                     runCatching {
                         metaFile.copyTo(bakTmp, overwrite = true)
@@ -501,7 +556,8 @@ class LivingFramesRepository @Inject constructor(
 
     /** Snapshot used by the storage UI and by quota checks before an import. */
     fun storage(): LivingFramesStorage {
-        val known = _frames.value.map { it.id }.toSet()
+        val framesNow = synchronized(stateLock) { _frames.value }
+        val known = framesNow.map { it.id }.toSet()
         val dirs = root.listFiles { f -> f.isDirectory }.orEmpty()
         // If metadata failed to load, every real frame directory looks like
         // an orphan. Reporting (or deleting) them would be catastrophic.
@@ -518,7 +574,7 @@ class LivingFramesRepository @Inject constructor(
             usedBytes = directorySize(root),
             freeBytes = context.filesDir.usableSpace.coerceAtLeast(0L),
             quotaBytes = MAX_STORE_BYTES,
-            setCount = _frames.value.size,
+            setCount = framesNow.size,
             orphanDirs = orphanDirs,
             orphanBytes = orphanDirs.sumOf { directorySize(it) }
         )
@@ -555,7 +611,7 @@ class LivingFramesRepository @Inject constructor(
             return@withContext 0L
         }
         var freed = 0L
-        val known = _frames.value.map { it.id }.toSet()
+        val known = synchronized(stateLock) { _frames.value.map { it.id }.toSet() }
         val now = System.currentTimeMillis()
         root.listFiles()?.forEach { f ->
             if (!f.isDirectory) return@forEach

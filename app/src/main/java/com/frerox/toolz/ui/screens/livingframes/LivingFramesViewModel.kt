@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.livingframes.LivingFrame
+import com.frerox.toolz.data.livingframes.LivingFrameCorners
 import com.frerox.toolz.data.livingframes.LivingFrameFit
 import com.frerox.toolz.data.livingframes.LivingFrameFps
 import com.frerox.toolz.data.livingframes.LivingFrameImportResult
@@ -385,7 +386,8 @@ class LivingFramesViewModel @Inject constructor(
         )
     }
     fun setOpacity(id: String, opacity: Float) = edit(id) { it.copy(opacity = opacity.coerceIn(0.4f, 1f)) }
-    fun setCorner(id: String, dp: Int) = edit(id) { it.copy(cornerRadiusDp = dp.coerceIn(0, 40)) }
+    fun setCorner(id: String, dp: Int) =
+        edit(id) { it.copy(cornerRadiusDp = LivingFrameCorners.snap(dp)) }
     fun setShowCaption(id: String, show: Boolean) = edit(id) { it.copy(showCaption = show) }
     fun setShuffle(id: String, shuffle: Boolean) = edit(id, pushToWidgets = false) { it.copy(shuffle = shuffle) }
 
@@ -460,7 +462,15 @@ class LivingFramesViewModel @Inject constructor(
      */
     suspend fun previewFrames(frame: LivingFrame): List<ImageBitmap> {
         val key = "${frame.id}:${frame.createdAt}"
-        synchronized(previewCache) { previewCache[key] }?.let { return it }
+        val cached = synchronized(previewCache) {
+            val hit = previewCache[key]
+            // The previous set is no longer on screen. Drop it before decoding
+            // the next one so switching sets never holds two full previews in
+            // memory at the same time.
+            if (hit == null) previewCache.clear()
+            hit
+        }
+        if (cached != null) return cached
         val list = withContext(Dispatchers.IO) {
             val count = if (frame.isSlideshow) minOf(frame.frameCount, 8) else frame.frameCount
             // Decoding all 900 frames at preview size would exhaust memory.
@@ -495,10 +505,14 @@ class LivingFramesViewModel @Inject constructor(
     }
 
     private companion object {
-        const val PREVIEW_SIDE = 480
-        const val MAX_PREVIEW_FRAMES = 120
+        const val PREVIEW_SIDE = 420
+        const val MAX_PREVIEW_FRAMES = 90
 
-        /** Keep the whole preview under ~48 MB, even for tall 2×4 widgets. */
-        const val PREVIEW_BUDGET_BYTES = 48L * 1024 * 1024
+        /**
+         * Keep the whole preview under ~24 MB. The editor only shows one set
+         * at a time, and this leaves room for the import pipeline and the
+         * launcher bitmaps on mid-range devices.
+         */
+        const val PREVIEW_BUDGET_BYTES = 24L * 1024 * 1024
     }
 }

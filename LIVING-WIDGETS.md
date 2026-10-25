@@ -22,7 +22,8 @@ into private app storage, and never uploaded.
 
 ## Adding a widget
 
-1. Open **Living Widgets** in Toolz and choose or import a set.
+1. Open **Living Widgets** in Toolz. The selected set plays at the top and
+   the library below shows a labelled tile for every set.
 2. Use **Add to home screen**. The launcher creates the widget and sends the
    exact `EXTRA_APPWIDGET_ID` back to Toolz.
 3. If the launcher offers configuration, choose the set for this copy.
@@ -30,9 +31,18 @@ into private app storage, and never uploaded.
    "the newest set".
 4. Long-press a placed widget and choose reconfigure to change its set.
 
+The default screen only carries the actions a first-time user needs: play or
+pause, pick a set, and add it. **More options** holds appearance, motion,
+timing and storage controls. Rename, details and delete live in the overflow
+menu; technical diagnostics stay inside the Details dialog. When a launcher
+does not implement direct pinning, Toolz opens a short manual-steps dialog
+instead of failing silently.
+
 Older launchers that omit the widget ID during the pin callback are handled
 conservatively: Toolz binds only when exactly one unbound Living Widget
-exists. Otherwise the widget shows a configuration placeholder.
+exists. Otherwise the widget shows a configuration placeholder. A pending pin
+request expires after two minutes and is cleared, so a later callback cannot
+attach the wrong set.
 
 ## Importing
 
@@ -60,19 +70,23 @@ files that were not saved.
 ### Video
 
 - Video imports decode a selected window of up to 30 seconds. The clip sheet
-  defaults to a 12-second window. **Frames per second** offers 12/24/30/60
-  and is clamped to the import-quality preset and the 900-frame ceiling. A
-  30-second window therefore captures up to 30 fps; a 15-second window can
-  capture 60 fps.
+  opens at a ready-to-use 8-second window and 30 fps; preset chips offer
+  3/6/8/12/20/30 seconds within the clip. **Smoothness** offers 15/24/30/60
+  fps and is clamped to the import-quality preset and the 900-frame ceiling.
+  A 30-second window therefore captures up to 30 fps; a 15-second window can
+  capture 60 fps. The start slider only appears when the clip is longer than
+  the selected window.
 - Each capture slot takes the **nearest** decoded frame to its target time,
   within half a source frame period (read from the stream and refined from the
   decoder's real output spacing). Taking the first frame at or after the
   target let a rounding error of a microsecond pick the following frame, which
   showed up as judder in the stored loop.
-- Import quality presets store video frames at up to 1280 px (Compact),
-  1920 px (High) or 2560 px (Ultra) on the longest edge, with matching WebP
-  quality. That keeps a 1080p clip at 1920×1080 instead of shrinking it to a
-  soft 1080×608. The clip sheet passes the selected preset to the importer
+- Import quality reads **Standard**, **High** or **Maximum** in the UI and
+  stores video frames at up to 1280 px, 1920 px or 2560 px on the longest
+  edge, with matching WebP quality. **High** is the recommended default and
+  keeps a 1080p clip at 1920×1080 instead of shrinking it to a soft 1080×608.
+  The serialized enum names stay `COMPACT`, `HIGH` and `ULTRA`, so existing
+  sets keep loading. The clip sheet passes the selected preset to the importer
   explicitly, so changing quality in the sheet cannot be ignored by a stale
   state update.
 - Codec-based extraction falls back to `MediaMetadataRetriever` when a decoder
@@ -136,6 +150,13 @@ living_frames/
   metadata is unreadable.
 - Deleting a set writes metadata first, then removes files. If the metadata
   write fails, the files and the set remain.
+- In-memory edits are serialized. If a save fails, only the affected set is
+  rolled back (or restored after a failed delete) and the corrected list is
+  queued for writing, so an edit made while that write was in flight is never
+  erased and a deleted set cannot be resurrected.
+- `frames.json` is encoded from one snapshot, so a debounced save cannot mix
+  an older list with newer edits. The backup-rotation check uses the load-time
+  `usedBackup` flag instead of re-parsing the primary file on every save.
 
 The Storage panel shows current usage, the quota, free device space, and any
 reclaimable orphan folders.
@@ -164,8 +185,11 @@ reclaimable orphan folders.
   a rounded background drawable (`clipToOutline`) measured in its own pixels.
   This is exact at every configured dp, widget size, aspect ratio and render
   scale; baking the radius into the bitmap could only guess the launcher's
-  measured size. Square corners also let opaque video use RGB_565. The Compose
-  preview still clips with Compose because it knows its own size.
+  measured size. The 0–48 dp bounds are shared by metadata validation, the
+  view model and the editor sliders through `LivingFrameCorners`, and a
+  drawable exists for every one of the 49 values. Square corners also let
+  opaque video use RGB_565. The Compose preview still clips with Compose
+  because it knows its own size.
 - **Streaming fallback.** Loops too long to embed use
   `LivingFramesRemoteViewsService` and an `AdapterViewFlipper`. Each frame is
   its own binder transaction, so long clips keep their own resolution. Opaque
@@ -279,7 +303,7 @@ reclaimable orphan folders.
 | Metadata unreadable | Load-failure card with **Try loading again**; files kept |
 | Set was deleted | Placeholder asking to remove the widget |
 | Library unreadable during refresh | "Couldn't read the Living Widget library" placeholder; binding kept |
-| Launcher rejects bitmaps | Placeholder suggesting resize/re-add |
+| Launcher rejects bitmaps | "Couldn't draw here. Tap refresh, or add it again." in the placed-widget row; placeholder suggests resize/re-add |
 | Storage/quota/free-space limit | Import stops with the limit message; staged files are deleted |
 | No motion in video window | Suggestion to choose another start point |
 | Static GIF | Imported as a photo with an explanatory note |
@@ -291,7 +315,7 @@ and slideshow-option coverage lives in:
 
 ```bash
 ./gradlew :app:testDebugUnitTest \
-  --tests com.frerox.toolz.widget.LivingFrameEngineTest --offline
+  --tests com.frerox.toolz.widget.LivingFrameEngineTest --console=plain
 ```
 
 Playback-rate coverage should include `playbackFps` (a set captured at 30 fps
@@ -301,10 +325,36 @@ real flipper interval.
 For a full build check:
 
 ```bash
-./gradlew :app:compileDebugKotlin :app:assembleDebug --offline
+./gradlew assembleRelease --console=plain --no-build-cache
 ```
 
 ## Release notes
+
+### Living Widgets out-of-the-box pass
+
+- The editor is preview-first: the selected loop plays at the top, the library
+  shows labelled tiles below, and **Add to home screen** is the primary bottom
+  action. Empty, loading and load-failed states each explain the next step.
+- Appearance, motion, timing and storage moved under **More options**;
+  technical diagnostics moved into the Details dialog. Rename, details and
+  delete are in the overflow menu. Long explanatory paragraphs were removed
+  from the default screen.
+- Aspect choices read **Square / Wide / Tall**, and import quality reads
+  **Standard / High / Maximum**, with **High** marked as recommended. Stored
+  enum names did not change.
+- The clip sheet opens at 8 seconds and 30 fps, shows length preset chips,
+  hides the start slider when the whole clip fits, and keeps quality and
+  smoothness behind **More options**.
+- Corner bounds are shared through `LivingFrameCorners` (0–48 dp) by
+  validation, the view model and both sliders.
+- Editor previews are capped at 420 px, 90 frames and 24 MB, and the previous
+  set is dropped before decoding the next one.
+- Repository edits are serialized, a failed save rolls back only the affected
+  set, and the metadata writer uses a coherent snapshot. Backup rotation no
+  longer re-parses `frames.json` on every save.
+- Expired pending-pin requests are cleared, launcher errors in the placed-
+  widget list are shown as an actionable sentence, and config-activity covers
+  load lazily through Coil instead of decoding every cover up front.
 
 ### Video playback pass
 

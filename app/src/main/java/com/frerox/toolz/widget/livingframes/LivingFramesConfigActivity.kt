@@ -24,7 +24,6 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -57,13 +56,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
+import coil3.compose.AsyncImage
 import com.frerox.toolz.MainActivity
 import com.frerox.toolz.data.livingframes.LivingFrame
 import com.frerox.toolz.data.livingframes.LivingFramesRepository
@@ -74,6 +72,7 @@ import dagger.hilt.android.EntryPointAccessors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * Required by android:configure. Binding the exact appWidgetId here is what
@@ -166,7 +165,9 @@ private fun ConfigScreen(
 ) {
     var frames by remember { mutableStateOf<List<LivingFrame>?>(null) }
     var loadFailed by remember { mutableStateOf(false) }
-    var covers by remember { mutableStateOf<Map<String, ImageBitmap>>(emptyMap()) }
+    // Only file references: Coil decodes the 64 dp tiles lazily and recycles
+    // them with the composition instead of holding every cover in memory.
+    var covers by remember { mutableStateOf<Map<String, File>>(emptyMap()) }
     var selected by remember { mutableStateOf<LivingFrame?>(null) }
 
     LaunchedEffect(Unit) {
@@ -176,10 +177,10 @@ private fun ConfigScreen(
         frames = loaded
         selected = loaded.firstOrNull { it.id == initialId }
         covers = withContext(Dispatchers.IO) {
-            loaded.mapNotNull { frame ->
-                repo.decodeAtLeast(frame.id, 0, 320)
-                    ?.let { bmp -> frame.id to bmp.asImageBitmap() }
-            }.toMap()
+            loaded.associate { frame ->
+                val cover = repo.coverFile(frame.id)
+                frame.id to (if (cover.isFile) cover else repo.frameFile(frame.id, 0))
+            }
         }
     }
 
@@ -269,7 +270,7 @@ private fun ConfigScreen(
 @Composable
 private fun ConfigRow(
     frame: LivingFrame,
-    cover: ImageBitmap?,
+    cover: File?,
     selected: Boolean,
     onClick: () -> Unit
 ) {
@@ -296,15 +297,14 @@ private fun ConfigRow(
                 .background(MaterialTheme.colorScheme.surfaceVariant),
             contentAlignment = Alignment.Center
         ) {
+            Text("◐", style = MaterialTheme.typography.headlineMedium)
             if (cover != null) {
-                Image(
-                    bitmap = cover,
+                AsyncImage(
+                    model = cover,
                     contentDescription = frame.name,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
                 )
-            } else {
-                Text("◐", style = MaterialTheme.typography.headlineMedium)
             }
         }
         Column(

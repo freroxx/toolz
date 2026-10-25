@@ -78,9 +78,9 @@ enum class LivingFrameQuality(
     val webpQuality: Int,
     val maxCaptureFps: Int
 ) {
-    COMPACT("Compact", 1280, 1280, 86, 15),
+    COMPACT("Standard", 1280, 1280, 86, 15),
     HIGH("High", 1920, 1920, 92, 30),
-    ULTRA("Ultra", 2560, 2560, 96, 60);
+    ULTRA("Maximum", 2560, 2560, 96, 60);
 
     companion object {
         val DEFAULT = HIGH
@@ -126,6 +126,19 @@ object LivingFrameResolution {
 }
 
 /**
+ * Widget corner radius in dp. 0 is a sharp rectangle; 48 is a pill on the
+ * smallest 1×1 cell. The slider and the stored metadata share these bounds so
+ * a value can never be saved that the editor cannot represent.
+ */
+object LivingFrameCorners {
+    const val MIN = 0
+    const val MAX = 48
+    const val DEFAULT = 24
+
+    fun snap(dp: Int): Int = dp.coerceIn(MIN, MAX)
+}
+
+/**
  * Persisted set. Pixels live as files under files/living_frames/<id>/ —
  * never in this JSON.
  */
@@ -141,7 +154,7 @@ data class LivingFrame(
     val loopMode: LivingFrameLoopMode = LivingFrameLoopMode.LOOP,
     val fit: LivingFrameFit = LivingFrameFit.FILL,
     val opacity: Float = 1f,
-    val cornerRadiusDp: Int = 24,
+    val cornerRadiusDp: Int = LivingFrameCorners.DEFAULT,
     val tapAction: LivingFrameTapAction = LivingFrameTapAction.OPEN_PREVIEW,
     /** Route opened when [tapAction] is OPEN_TOOL. */
     val tapTargetRoute: String = "",
@@ -258,7 +271,7 @@ object LivingFrameValidation {
             height = height,
             fps = LivingFrameFps.snap(frame.fps),
             opacity = frame.opacity.coerceIn(0.4f, 1f),
-            cornerRadiusDp = frame.cornerRadiusDp.coerceIn(0, 48),
+            cornerRadiusDp = LivingFrameCorners.snap(frame.cornerRadiusDp),
             slideshowIntervalMin = frame.slideshowIntervalMin.coerceIn(1, 1_440),
             avgFrameBytes = frame.avgFrameBytes.coerceAtLeast(0L),
             sourceLabel = frame.sourceLabel.take(160),

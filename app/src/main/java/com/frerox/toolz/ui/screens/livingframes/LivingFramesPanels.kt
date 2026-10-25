@@ -17,6 +17,11 @@
 
 package com.frerox.toolz.ui.screens.livingframes
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -25,7 +30,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -33,12 +37,13 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.SkipNext
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material.icons.rounded.Widgets
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
@@ -49,7 +54,12 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -58,6 +68,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.frerox.toolz.data.livingframes.LivingFrame
+import com.frerox.toolz.data.livingframes.LivingFrameCorners
 import com.frerox.toolz.data.livingframes.LivingFrameEngine
 import com.frerox.toolz.data.livingframes.LivingFrameEstimate
 import com.frerox.toolz.data.livingframes.LivingFrameFit
@@ -71,8 +82,6 @@ import com.frerox.toolz.data.livingframes.LivingFramesRepository
 import com.frerox.toolz.data.livingframes.LivingFramesStorage
 import com.frerox.toolz.ui.components.ExpressiveCard
 import com.frerox.toolz.ui.components.SquircleShape
-import com.frerox.toolz.ui.components.ToolzOutlinedExpressiveButton
-import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.widget.livingframes.LivingFramesSlideshow
 import kotlin.math.roundToInt
@@ -88,7 +97,7 @@ internal fun PanelCard(content: @Composable () -> Unit) {
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)),
         enabled = false
     ) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
             content()
         }
     }
@@ -97,7 +106,12 @@ internal fun PanelCard(content: @Composable () -> Unit) {
 @Composable
 internal fun SettingHeader(title: String, value: String? = null) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+        Text(
+            title,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.weight(1f)
+        )
         if (value != null) {
             Text(value, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
         }
@@ -106,7 +120,7 @@ internal fun SettingHeader(title: String, value: String? = null) {
 
 @Composable
 internal fun SettingBlock(title: String, value: String? = null, content: @Composable () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         SettingHeader(title, value)
         content()
     }
@@ -117,7 +131,11 @@ internal fun SwitchRow(title: String, subtitle: String, checked: Boolean, onChan
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
         Spacer(Modifier.width(12.dp))
         Switch(checked = checked, onCheckedChange = onChange)
@@ -125,14 +143,14 @@ internal fun SwitchRow(title: String, subtitle: String, checked: Boolean, onChan
 }
 
 @Composable
-private fun StyledSlider(
+internal fun StyledSlider(
     value: Float,
     range: ClosedFloatingPointRange<Float>,
     steps: Int,
     onChange: (Float) -> Unit
 ) {
     Slider(
-        value = value,
+        value = value.coerceIn(range.start, range.endInclusive),
         onValueChange = onChange,
         valueRange = range,
         steps = steps,
@@ -144,7 +162,7 @@ private fun StyledSlider(
 }
 
 @Composable
-private fun <T> ChoiceChips(
+internal fun <T> ChoiceChips(
     options: List<T>,
     selected: T?,
     label: (T) -> String,
@@ -155,7 +173,9 @@ private fun <T> ChoiceChips(
             FilterChip(
                 selected = option == selected,
                 onClick = { onSelect(option) },
-                label = { Text(label(option)) },
+                label = {
+                    Text(label(option), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                },
                 colors = FilterChipDefaults.filterChipColors(
                     selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
                     selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer
@@ -165,100 +185,171 @@ private fun <T> ChoiceChips(
     }
 }
 
-// ── Motion (GIF / video) ─────────────────────────────────────────────────────
+// ── Customize ────────────────────────────────────────────────────────────
+
+/**
+ * The controls most people need are visible; anything that changes how the
+ * stored file is processed, or that only matters to power users, is folded
+ * into "More options" so the first screen stays readable.
+ */
+@Composable
+internal fun CustomizePanel(
+    frame: LivingFrame,
+    nextIn: String?,
+    vm: LivingFramesViewModel
+) {
+    val vib = LocalVibrationManager.current
+    var advanced by rememberSaveable(frame.id) { mutableStateOf(false) }
+
+    PanelCard {
+        if (frame.isSlideshow) {
+            SettingBlock("Change photo every") {
+                ChoiceChips(
+                    options = LivingFramesSlideshow.INTERVALS_MIN,
+                    selected = frame.slideshowIntervalMin,
+                    label = { LivingFramesSlideshow.intervalLabel(it) },
+                    onSelect = { vib?.vibrateTick(); vm.setSlideshowInterval(frame.id, it) }
+                )
+            }
+            if (nextIn != null) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "Next photo in $nextIn",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = { vib?.vibrateClick(); vm.skipSlide(frame.id) }) {
+                        Icon(Icons.Rounded.SkipNext, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Skip")
+                    }
+                }
+            }
+            SwitchRow(
+                title = "Shuffle",
+                subtitle = "Mix up the order",
+                checked = frame.shuffle,
+                onChange = { vib?.vibrateTick(); vm.setShuffle(frame.id, it) }
+            )
+        } else if (frame.isAnimated) {
+            SettingBlock("Speed", LivingFrameSpeed.label(frame.speed)) {
+                StyledSlider(
+                    value = LivingFrameSpeed.index(frame.speed).toFloat(),
+                    range = 0f..LivingFrameSpeed.STEPS.lastIndex.toFloat(),
+                    steps = (LivingFrameSpeed.STEPS.lastIndex - 1).coerceAtLeast(0),
+                    onChange = {
+                        val idx = it.roundToInt().coerceIn(0, LivingFrameSpeed.STEPS.lastIndex)
+                        if (idx != LivingFrameSpeed.index(frame.speed)) {
+                            vib?.vibrateTick()
+                            vm.setSpeed(frame.id, LivingFrameSpeed.STEPS[idx])
+                        }
+                    }
+                )
+            }
+        }
+
+        SettingBlock("Corners", "${frame.cornerRadiusDp} dp") {
+            StyledSlider(
+                value = frame.cornerRadiusDp.toFloat(),
+                range = LivingFrameCorners.MIN.toFloat()..LivingFrameCorners.MAX.toFloat(),
+                steps = (LivingFrameCorners.MAX - LivingFrameCorners.MIN - 1).coerceAtLeast(0),
+                onChange = { vm.setCorner(frame.id, it.roundToInt()) }
+            )
+        }
+
+        SettingBlock("Framing") {
+            ChoiceChips(
+                options = listOf(LivingFrameFit.FILL, LivingFrameFit.FIT),
+                selected = frame.fit,
+                label = { if (it == LivingFrameFit.FILL) "Fill" else "Fit" },
+                onSelect = { vib?.vibrateTick(); vm.setFit(frame.id, it) }
+            )
+            Text(
+                if (frame.fit == LivingFrameFit.FILL) "Fills the widget and crops the edges."
+                else "Shows the whole picture, with space around it.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        SwitchRow(
+            title = "Show name",
+            subtitle = "Adds a small label to the widget",
+            checked = frame.showCaption,
+            onChange = { vib?.vibrateTick(); vm.setShowCaption(frame.id, it) }
+        )
+
+        TextButton(
+            onClick = { vib?.vibrateClick(); advanced = !advanced },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(Icons.Rounded.Tune, null, Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(if (advanced) "Fewer options" else "More options", modifier = Modifier.weight(1f))
+            Icon(
+                if (advanced) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                null,
+                Modifier.size(20.dp)
+            )
+        }
+
+        AnimatedVisibility(
+            visible = advanced,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut()
+        ) {
+            AdvancedControls(frame, vm)
+        }
+    }
+}
 
 @Composable
-internal fun MotionPanel(frame: LivingFrame, vm: LivingFramesViewModel) {
+private fun AdvancedControls(frame: LivingFrame, vm: LivingFramesViewModel) {
     val vib = LocalVibrationManager.current
-    val fpsLast = LivingFrameFps.STEPS.lastIndex
-    val speedLast = LivingFrameSpeed.STEPS.lastIndex
-    val resolutionLast = LivingFrameResolution.STEPS.lastIndex
     val displayFps = LivingFrameFps.snap(frame.fps)
     val sourceFps = frame.sourceFps.coerceAtLeast(1)
-    // The widget flips at playbackFps, not at the slider value (the slider is a ceiling).
     val playFps = LivingFrameEngine.playbackFps(frame)
-    val displayFrames = LivingFrameEngine.displaySteps(
-        frame.frameCount, sourceFps, playFps, frame.speed, frame.loopMode,
-        frame.loopTransition
-    ).size
-    val loopMs = LivingFrameEngine.displayDurationMs(
-        frame.frameCount, sourceFps, playFps, frame.speed, frame.loopMode,
-        frame.loopTransition
-    )
     val stored = LivingFrameEstimate.storedSize(frame.width, frame.height, frame.quality)
     val renderW = (stored.first * frame.resolutionPercent / 100f).roundToInt()
     val renderH = (stored.second * frame.resolutionPercent / 100f).roundToInt()
-    PanelCard {
-        SettingBlock("Speed", LivingFrameSpeed.label(frame.speed)) {
-            StyledSlider(
-                value = LivingFrameSpeed.index(frame.speed).toFloat(),
-                range = 0f..speedLast.toFloat(),
-                steps = (speedLast - 1).coerceAtLeast(0),
-                onChange = {
-                    val idx = it.roundToInt().coerceIn(0, speedLast)
-                    if (idx != LivingFrameSpeed.index(frame.speed)) {
-                        vib?.vibrateTick()
-                        vm.setSpeed(frame.id, LivingFrameSpeed.STEPS[idx])
+
+    Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
+        if (frame.isAnimated) {
+            SettingBlock("Smoothness", "$displayFps fps") {
+                StyledSlider(
+                    value = LivingFrameFps.stepIndex(frame.fps).toFloat(),
+                    range = 0f..LivingFrameFps.STEPS.lastIndex.toFloat(),
+                    steps = (LivingFrameFps.STEPS.lastIndex - 1).coerceAtLeast(0),
+                    onChange = {
+                        val idx = it.roundToInt().coerceIn(0, LivingFrameFps.STEPS.lastIndex)
+                        if (idx != LivingFrameFps.stepIndex(frame.fps)) {
+                            vib?.vibrateTick()
+                            vm.setFps(frame.id, LivingFrameFps.STEPS[idx])
+                        }
                     }
-                }
-            )
-            Text(
-                "×1 is the original timing. Speed resamples the loop when it renders, " +
-                        "so stored frames are never re-encoded and you can change it instantly.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        SettingBlock(
-            "Frames per second",
-            "$displayFps fps · ${LivingFrameFps.label(frame.fps)}"
-        ) {
-            StyledSlider(
-                value = LivingFrameFps.stepIndex(frame.fps).toFloat(),
-                range = 0f..fpsLast.toFloat(),
-                steps = (fpsLast - 1).coerceAtLeast(0),
-                onChange = {
-                    val idx = it.roundToInt().coerceIn(0, fpsLast)
-                    if (idx != LivingFrameFps.stepIndex(frame.fps)) {
-                        vib?.vibrateTick()
-                        vm.setFps(frame.id, LivingFrameFps.STEPS[idx])
-                    }
-                }
-            )
-            Text(
-                "One loop lasts %.2f s · %d display frames.".format(
-                    loopMs / 1000f,
-                    displayFrames
-                ),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            if (displayFps > playFps) {
-                Text(
-                    "This set was captured at $sourceFps fps, so it plays at $playFps fps. " +
-                            "A higher setting only repeats frames and is not used. " +
-                            "Re-import at a higher capture rate for genuinely new frames.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                if (displayFps > playFps) {
+                    Text(
+                        "This clip was captured at $sourceFps fps, so it plays at $playFps fps. " +
+                            "Extra frames would only repeat.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
-            Text(
-                "Stored copy: ${frame.width}×${frame.height} px · ${frame.quality.label} " +
-                        "quality · $sourceFps fps capture.",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
-        SettingBlock("Resolution", "${frame.resolutionPercent}%") {
+
+        SettingBlock("Detail", "${frame.resolutionPercent}% · ${renderW}×${renderH} px") {
             StyledSlider(
                 value = LivingFrameResolution.STEPS
                     .indexOf(LivingFrameResolution.snap(frame.resolutionPercent))
                     .coerceAtLeast(0)
                     .toFloat(),
-                range = 0f..resolutionLast.toFloat(),
-                steps = (resolutionLast - 1).coerceAtLeast(0),
+                range = 0f..LivingFrameResolution.STEPS.lastIndex.toFloat(),
+                steps = (LivingFrameResolution.STEPS.lastIndex - 1).coerceAtLeast(0),
                 onChange = {
-                    val idx = it.roundToInt().coerceIn(0, resolutionLast)
+                    val idx = it.roundToInt().coerceIn(0, LivingFrameResolution.STEPS.lastIndex)
                     val percent = LivingFrameResolution.STEPS[idx]
                     if (percent != LivingFrameResolution.snap(frame.resolutionPercent)) {
                         vib?.vibrateTick()
@@ -267,105 +358,75 @@ internal fun MotionPanel(frame: LivingFrame, vm: LivingFramesViewModel) {
                 }
             )
             Text(
-                "Renders at ${renderW}×${renderH} px. Lowering this is instant and cuts " +
-                        "battery and memory use; 100% is the full stored detail, and going " +
-                        "higher would only upscale a copy that is already stored.",
+                "Lower settings save battery and memory.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        SettingBlock("Direction") {
-            ChoiceChips(
-                options = LivingFrameLoopMode.entries,
-                selected = frame.loopMode,
-                label = { if (it == LivingFrameLoopMode.BOOMERANG) "Boomerang" else "Loop" },
-                onSelect = { vib?.vibrateTick(); vm.setLoopMode(frame.id, it) }
-            )
-            Text(
-                if (frame.loopMode == LivingFrameLoopMode.BOOMERANG) "Plays forward, then backward, with no hitch at the seam."
-                else "Restarts from the first frame every time.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        if (frame.loopMode != LivingFrameLoopMode.BOOMERANG) {
-            SettingBlock("Loop transition") {
+
+        if (frame.isAnimated) {
+            SettingBlock("Direction") {
                 ChoiceChips(
-                    options = LivingFrameLoopTransition.entries,
-                    selected = frame.loopTransition,
-                    label = {
-                        when (it) {
-                            LivingFrameLoopTransition.NONE -> "None"
-                            LivingFrameLoopTransition.FADE -> "Fade"
-                            LivingFrameLoopTransition.BLUR -> "Soft blur"
-                        }
-                    },
-                    onSelect = { vib?.vibrateTick(); vm.setLoopTransition(frame.id, it) }
-                )
-                Text(
-                    if (frame.loopTransition == LivingFrameLoopTransition.NONE) {
-                        "The loop restarts on a hard cut."
-                    } else {
-                        "The last frame dissolves into the first over about 0.2 s. " +
-                                "Seam frames use extra widget memory, so very long or high-resolution " +
-                                "loops may fall back to no transition."
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    options = LivingFrameLoopMode.entries,
+                    selected = frame.loopMode,
+                    label = { if (it == LivingFrameLoopMode.BOOMERANG) "Back and forth" else "Loop" },
+                    onSelect = { vib?.vibrateTick(); vm.setLoopMode(frame.id, it) }
                 )
             }
+            if (frame.loopMode != LivingFrameLoopMode.BOOMERANG) {
+                SettingBlock("Loop transition") {
+                    ChoiceChips(
+                        options = LivingFrameLoopTransition.entries,
+                        selected = frame.loopTransition,
+                        label = {
+                            when (it) {
+                                LivingFrameLoopTransition.NONE -> "None"
+                                LivingFrameLoopTransition.FADE -> "Fade"
+                                LivingFrameLoopTransition.BLUR -> "Soft blur"
+                            }
+                        },
+                        onSelect = { vib?.vibrateTick(); vm.setLoopTransition(frame.id, it) }
+                    )
+                }
+            }
         }
+
+        TapActionSetting(frame, vm)
     }
 }
-
-// ── Timing (slideshow) ───────────────────────────────────────────────────────────
 
 @Composable
-internal fun TimingPanel(frame: LivingFrame, nextIn: String?, vm: LivingFramesViewModel) {
+private fun TapActionSetting(frame: LivingFrame, vm: LivingFramesViewModel) {
     val vib = LocalVibrationManager.current
-    val intervals = LivingFramesSlideshow.INTERVALS_MIN
-    PanelCard {
-        SettingBlock("Change photo every") {
-            ChoiceChips(
-                options = intervals,
-                selected = intervals.indexOf(frame.slideshowIntervalMin)
-                    .takeIf { it >= 0 }
-                    ?.let { intervals[it] },
-                label = { LivingFramesSlideshow.intervalLabel(it) },
-                onSelect = { vib?.vibrateTick(); vm.setSlideshowInterval(frame.id, it) }
-            )
-            Text(
-                "Slide timing is scheduled by the launcher. Battery saver can delay a change; " +
-                        "opening the widget always shows the current photo immediately.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        SwitchRow(
-            title = "Shuffle",
-            subtitle = "Every photo once per round, never the same one twice in a row.",
-            checked = frame.shuffle,
-            onChange = { vib?.vibrateTick(); vm.setShuffle(frame.id, it) }
+    val tapActions = buildList {
+        add("Open Living Widgets" to LivingFrameTapAction.OPEN_PREVIEW)
+        add("Open a tool" to LivingFrameTapAction.OPEN_TOOL)
+        if (frame.isSlideshow) add("Next photo" to LivingFrameTapAction.NEXT_FRAME)
+        if (frame.isAnimated) add("Pause or play" to LivingFrameTapAction.PAUSE_PLAY)
+        add("Do nothing" to LivingFrameTapAction.NOTHING)
+    }
+    val effectiveTap = when {
+        frame.tapAction == LivingFrameTapAction.NEXT_FRAME && !frame.isSlideshow ->
+            LivingFrameTapAction.OPEN_PREVIEW
+        frame.tapAction == LivingFrameTapAction.PAUSE_PLAY && !frame.isAnimated ->
+            LivingFrameTapAction.OPEN_PREVIEW
+        else -> frame.tapAction
+    }
+    SettingBlock("When tapped") {
+        ChoiceChips(
+            options = tapActions,
+            selected = tapActions.firstOrNull { it.second == effectiveTap },
+            label = { it.first },
+            onSelect = { vib?.vibrateTick(); vm.setTapAction(frame.id, it.second) }
         )
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("Next photo", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                Text(
-                    if (nextIn != null) "In $nextIn" else "Starts once it's on your home screen",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            ToolzOutlinedExpressiveButton(onClick = { vib?.vibrateClick(); vm.skipSlide(frame.id) }) {
-                Icon(Icons.Rounded.SkipNext, null, Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("Skip")
-            }
+        if (frame.tapAction == LivingFrameTapAction.OPEN_TOOL) {
+            ToolChips(
+                selectedRoute = frame.tapTargetRoute,
+                onSelect = { vib?.vibrateTick(); vm.setTapTarget(frame.id, it) }
+            )
         }
     }
 }
-
-// ── Look ──────────────────────────────────────────────────────────────────────────────
 
 @Composable
 private fun ToolChips(selectedRoute: String?, onSelect: (String) -> Unit) {
@@ -381,9 +442,7 @@ private fun ToolChips(selectedRoute: String?, onSelect: (String) -> Unit) {
                         overflow = TextOverflow.Ellipsis
                     )
                 },
-                leadingIcon = {
-                    Icon(tool.icon, null, Modifier.size(18.dp))
-                },
+                leadingIcon = { Icon(tool.icon, null, Modifier.size(18.dp)) },
                 colors = FilterChipDefaults.filterChipColors(
                     selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
                     selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer,
@@ -394,233 +453,17 @@ private fun ToolChips(selectedRoute: String?, onSelect: (String) -> Unit) {
     }
 }
 
-@Composable
-internal fun LookPanel(frame: LivingFrame, vm: LivingFramesViewModel) {
-    val vib = LocalVibrationManager.current
-    val tapActions = buildList {
-        add("Living Widgets" to LivingFrameTapAction.OPEN_PREVIEW)
-        add("Open a tool" to LivingFrameTapAction.OPEN_TOOL)
-        if (frame.isSlideshow) add("Next photo" to LivingFrameTapAction.NEXT_FRAME)
-        if (frame.isAnimated) add("Pause / play" to LivingFrameTapAction.PAUSE_PLAY)
-        add("Nothing" to LivingFrameTapAction.NOTHING)
-    }
-    val selectedTool = LivingFrameTools.byRoute(frame.tapTargetRoute)
-    val selectedToolLabel = selectedTool?.let { stringResource(it.titleRes) } ?: "a Toolz tool"
-    // A slideshow can become a still/photo through old metadata. The widget
-    // already falls back to opening Living Widgets for that stale action, so
-    // show the same effective choice here instead of no selected chip.
-    val effectiveTap = when {
-        frame.tapAction == LivingFrameTapAction.NEXT_FRAME && !frame.isSlideshow ->
-            LivingFrameTapAction.OPEN_PREVIEW
-        frame.tapAction == LivingFrameTapAction.PAUSE_PLAY && !frame.isAnimated ->
-            LivingFrameTapAction.OPEN_PREVIEW
-        else -> frame.tapAction
-    }
-    PanelCard {
-        SettingBlock("Framing") {
-            ChoiceChips(
-                options = listOf(LivingFrameFit.FILL, LivingFrameFit.FIT),
-                selected = frame.fit,
-                label = { if (it == LivingFrameFit.FILL) "Fill" else "Fit" },
-                onSelect = { vib?.vibrateTick(); vm.setFit(frame.id, it) }
-            )
-            Text(
-                if (frame.fit == LivingFrameFit.FILL) "Crops from the centre so the widget is always full."
-                else "Shows the whole picture; empty space stays transparent.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        SettingBlock("Corners", "${frame.cornerRadiusDp} dp") {
-            StyledSlider(
-                value = frame.cornerRadiusDp.toFloat(), range = 0f..40f, steps = 39,
-                onChange = { vm.setCorner(frame.id, it.roundToInt()) }
-            )
-        }
-        SettingBlock("Opacity", "${(frame.opacity * 100).roundToInt()}%") {
-            StyledSlider(
-                value = frame.opacity, range = 0.4f..1f, steps = 0,
-                onChange = { vm.setOpacity(frame.id, it) }
-            )
-        }
-        SwitchRow(
-            title = "Show name",
-            subtitle = "A small label at the bottom of the widget.",
-            checked = frame.showCaption,
-            onChange = { vib?.vibrateTick(); vm.setShowCaption(frame.id, it) }
-        )
-        SettingBlock("When tapped") {
-            ChoiceChips(
-                options = tapActions,
-                selected = tapActions.firstOrNull { it.second == effectiveTap },
-                label = { it.first },
-                onSelect = { vib?.vibrateTick(); vm.setTapAction(frame.id, it.second) }
-            )
-            if (frame.tapAction == LivingFrameTapAction.OPEN_TOOL) {
-                Text(
-                    "Opens $selectedToolLabel directly. The widget stays on your home screen.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                ToolChips(
-                    selectedRoute = frame.tapTargetRoute,
-                    onSelect = { vib?.vibrateTick(); vm.setTapTarget(frame.id, it) }
-                )
-                Text(
-                    "Scroll the row to see every tool.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            } else if (frame.tapAction == LivingFrameTapAction.OPEN_PREVIEW) {
-                Text(
-                    "Opens Living Widgets, where you can edit this set or add another copy.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            } else if (frame.tapAction == LivingFrameTapAction.PAUSE_PLAY) {
-                Text(
-                    "Freezes the exact frame on screen; tap again to continue from there. " +
-                            "The animation must fit in the widget's memory budget — very long loops " +
-                            "open Living Widgets instead.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-    }
-}
+// ── Placed widgets ───────────────────────────────────────────────────────
 
-// ── Widget (placement) ────────────────────────────────────────────────────────────────────
-
+/** Only rendered when at least one copy is on the home screen. */
 @Composable
-internal fun WidgetPanel(
-    frame: LivingFrame,
+internal fun PlacedWidgetsPanel(
     placed: List<PlacedWidget>,
-    onPin: () -> Unit,
-    onRefresh: (Int) -> Unit,
-    onDelete: () -> Unit
+    onRefresh: (Int) -> Unit
 ) {
     PanelCard {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            SettingHeader(
-                "On your home screen",
-                if (placed.isEmpty()) null else "${placed.size}"
-            )
-            if (placed.isEmpty()) {
-                Text(
-                    "Not placed yet. Add it and it renders to the exact size you give it.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            } else {
-                placed.forEach { PlacedRow(it, onRefresh) }
-            }
-            ToolzExpressiveButton(onClick = onPin, modifier = Modifier.fillMaxWidth()) {
-                Text(if (placed.isEmpty()) "Add to home screen" else "Add another", fontWeight = FontWeight.SemiBold)
-            }
-            Text(
-                "Each copy can show a different set; the launcher's configuration screen asks which one. Some launchers pause widget animations in battery saver, and a few don't animate collection widgets at all.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                "Animations stream one frame at a time at the resolution you chose, so long clips stay sharp. If a widget stays blank, lower Resolution in Motion or remove and re-add it.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        ToolzOutlinedExpressiveButton(
-            onClick = onDelete,
-            modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
-        ) {
-            Icon(Icons.Rounded.Delete, null, Modifier.size(18.dp))
-            Spacer(Modifier.width(8.dp))
-            Text("Delete “${frame.name}”", maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-    }
-}
-
-@Composable
-internal fun StoragePanel(
-    storage: LivingFramesStorage?,
-    loadFailed: Boolean,
-    onRetry: () -> Unit,
-    onCleanup: () -> Unit
-) {
-    PanelCard {
-        SettingHeader(
-            "Storage",
-            storage?.let {
-                "${LivingFramesRepository.formatBytes(it.usedBytes)} / " +
-                        LivingFramesRepository.formatBytes(it.quotaBytes)
-            }
-        )
-        if (loadFailed) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(SquircleShape)
-                    .background(MaterialTheme.colorScheme.errorContainer)
-                    .padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(Icons.Rounded.Warning, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onErrorContainer)
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    "The library file couldn't be read. Imported files were kept.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-            ToolzOutlinedExpressiveButton(onClick = onRetry, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Rounded.Refresh, null, Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("Try loading again")
-            }
-        }
-        val s = storage
-        if (s == null) {
-            Text(
-                "Checking storage…",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        } else {
-            LinearProgressIndicator(
-                progress = { s.fraction },
-                modifier = Modifier.fillMaxWidth()
-            )
-            Text(
-                "${s.setCount} set${if (s.setCount == 1) "" else "s"} · " +
-                        "${LivingFramesRepository.formatBytes(s.freeBytes)} free on this device",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            if (s.orphanBytes > 0L) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "${s.orphanDirs.size} unused folder${if (s.orphanDirs.size == 1) "" else "s"} " +
-                                "(${LivingFramesRepository.formatBytes(s.orphanBytes)})",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f)
-                    )
-                    ToolzOutlinedExpressiveButton(onClick = onCleanup) { Text("Clean up") }
-                }
-            }
-        }
-        Text(
-            "Long clips are streamed one frame at a time, so the launcher's memory limit " +
-                    "doesn't shrink them. Animations can hold up to " +
-                    "${LivingFramesRepository.MAX_CLIP_MS / 1000} s (capped at " +
-                    "${LivingFramesRepository.MAX_FRAMES} frames) and slideshows up to " +
-                    "${LivingFramesRepository.MAX_SLIDES} photos. Imports keep at least " +
-                    "${LivingFramesRepository.formatBytes(LivingFramesRepository.MIN_FREE_BYTES)} free.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        SettingHeader("On your home screen", "${placed.size}")
+        placed.forEach { PlacedRow(it, onRefresh) }
     }
 }
 
@@ -638,7 +481,7 @@ private fun PlacedRow(w: PlacedWidget, onRefresh: (Int) -> Unit) {
     ) {
         Box(
             Modifier
-                .size(40.dp)
+                .size(38.dp)
                 .clip(CircleShape)
                 .background(
                     if (failed) MaterialTheme.colorScheme.errorContainer
@@ -648,53 +491,105 @@ private fun PlacedRow(w: PlacedWidget, onRefresh: (Int) -> Unit) {
         ) {
             Icon(
                 if (failed) Icons.Rounded.Warning else Icons.Rounded.Widgets, null,
-                Modifier.size(20.dp),
-                tint = if (failed) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSecondaryContainer
+                Modifier.size(19.dp),
+                tint = if (failed) MaterialTheme.colorScheme.onErrorContainer
+                else MaterialTheme.colorScheme.onSecondaryContainer
             )
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text("${w.cells} widget", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Text(w.cells, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
             Text(
                 renderSummary(w),
                 style = MaterialTheme.typography.bodySmall,
-                color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                color = if (failed) MaterialTheme.colorScheme.error
+                else MaterialTheme.colorScheme.onSurfaceVariant
             )
-            val note = reductionNote(info)
-            if (note != null) {
-                Text(note, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (info?.reduced == true && !failed) {
+                Text(
+                    "Optimized to fit your launcher",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
-        IconButton(onClick = { onRefresh(w.widgetId) }) { Icon(Icons.Rounded.Refresh, "Re-render widget") }
+        IconButton(onClick = { onRefresh(w.widgetId) }) {
+            Icon(Icons.Rounded.Refresh, "Refresh widget")
+        }
     }
 }
 
 private fun renderSummary(w: PlacedWidget): String {
-    val i = w.info ?: return "Waiting for the launcher…"
-    i.error?.let { return it }
-    val mb = i.bytes / 1_048_576f
-    val frames = if (i.frames == 1) "1 image" else "${i.frames} frames"
-    val delivery = when {
-        i.streamed -> "streamed"
-        i.frames == 1 -> "still"
-        else -> "single update"
-    }
-    val speed = if (kotlin.math.abs(i.speed - 1f) > 0.001f) {
-        " · ${LivingFrameSpeed.label(i.speed)}"
-    } else {
-        ""
-    }
-    val bytes = if (!i.streamed && i.bytes > 0) " · %.1f MB".format(mb) else ""
+    val i = w.info ?: return "Waiting for your launcher…"
+    // Launcher exceptions are technical and often truncated. Keep them in the
+    // widget diagnostics; show an actionable sentence here instead.
+    if (i.error != null) return "Couldn't draw here. Tap refresh, or add it again."
+    val kind = if (i.frames == 1) "Still" else "${i.fps} fps"
     val next = w.nextSlideIn?.let { " · next in $it" } ?: ""
-    return "$frames · $delivery · ${i.widthPx}×${i.heightPx} px · ${i.fps} fps$speed$bytes$next"
+    return "$kind · ${i.widthPx}×${i.heightPx} px$next"
 }
 
-private fun reductionNote(i: com.frerox.toolz.widget.livingframes.LivingFramesWidgetHelper.WidgetInfo?): String? {
-    if (i == null || i.error != null || !i.reduced) return null
-    val parts = buildList {
-        if (i.scalePct in 1..99) add("${i.scalePct}% size")
-        if (i.rgb565) add("16-bit colour")
-        if (i.step > 1) add("every ${i.step}. frame")
+// ── Storage ──────────────────────────────────────────────────────────────
+
+@Composable
+internal fun StoragePanel(storage: LivingFramesStorage, onCleanup: () -> Unit) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    PanelCard {
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "Storage",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    "${LivingFramesRepository.formatBytes(storage.usedBytes)} used · " +
+                        "${storage.setCount} set${if (storage.setCount == 1) "" else "s"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            TextButton(onClick = { expanded = !expanded }) {
+                Text(if (expanded) "Hide" else "Manage")
+                Icon(
+                    if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                    null,
+                    Modifier.size(18.dp)
+                )
+            }
+        }
+        AnimatedVisibility(
+            visible = expanded,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut()
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                LinearProgressIndicator(
+                    progress = { storage.fraction },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    "${LivingFramesRepository.formatBytes(storage.freeBytes)} free on this device",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (storage.orphanBytes > 0L) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "${storage.orphanDirs.size} unused folder" +
+                                "${if (storage.orphanDirs.size == 1) "" else "s"} " +
+                                "(${LivingFramesRepository.formatBytes(storage.orphanBytes)})",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(onClick = onCleanup) { Text("Clean up") }
+                    }
+                }
+            }
+        }
     }
-    return "Trimmed to fit the launcher's memory limit: ${parts.joinToString(", ")}."
 }

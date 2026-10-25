@@ -1093,7 +1093,16 @@ object LivingFramesWidgetHelper {
         val p = context.getSharedPreferences(PIN_PREFS, Context.MODE_PRIVATE)
         val id = p.getString("id", null)
         val at = p.getLong("at", 0L)
-        if (id == null || System.currentTimeMillis() - at > PIN_TTL_MS) null else id
+        val stale = id == null || at <= 0L ||
+            System.currentTimeMillis() - at > PIN_TTL_MS
+        if (stale) {
+            // Do not leave an expired request around: a later pin callback
+            // without its own frame id could otherwise attach the wrong set.
+            if (id != null || at != 0L) clearPendingPin(context)
+            null
+        } else {
+            id
+        }
     } catch (_: Exception) {
         null
     }
