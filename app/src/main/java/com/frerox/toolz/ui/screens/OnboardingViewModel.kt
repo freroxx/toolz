@@ -18,6 +18,7 @@
 package com.frerox.toolz.ui.screens
 
 import android.content.Context
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.ai.AiSettingsManager
@@ -28,6 +29,7 @@ import com.frerox.toolz.data.update.UpdateManager
 import com.frerox.toolz.util.shizuku.ShizukuHelper
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -159,67 +161,100 @@ class OnboardingViewModel @Inject constructor(
         }
     }
 
-    fun finishOnboarding(onFinish: () -> Unit) {
+    private var finishing = false
+
+    fun finishOnboarding() {
+        // One-shot: the Ready step can be tapped twice while settings are still
+        // being written.
+        if (finishing) return
+        finishing = true
         viewModelScope.launch {
-            val s = uiState.value
-            settingsRepository.setUserName(s.name)
-            settingsRepository.setThemeMode(s.themeMode)
-            settingsRepository.setDynamicColor(s.dynamicColor)
-            settingsRepository.setBackgroundGradientEnabled(s.backgroundGradient)
-            settingsRepository.setPerformanceMode(s.performanceMode)
-            settingsRepository.setNotificationsEnabled(s.notificationsEnabled)
-            settingsRepository.setBackgroundNotificationsEnabled(s.backgroundNotificationsEnabled)
-            settingsRepository.setNotificationVaultEnabled(s.vaultEnabled)
-            settingsRepository.setWhisperNotificationsEnabled(s.whisperNotificationsEnabled)
-            // Preferences step
-            settingsRepository.setOfflineModeEnabled(s.offlineMode)
-            settingsRepository.setAutoOfflineEnabled(s.autoOffline)
-            settingsRepository.setOfflinePopupEnabled(s.offlinePopup)
-            settingsRepository.setAiSearchChatEnabled(s.aiSearchChat)
-            settingsRepository.setClipboardAiEnabled(s.clipboardAi)
-            settingsRepository.setAiClipboardMonitoringEnabled(s.aiClipboardMonitoring)
-            settingsRepository.setPdfAiToolsEnabled(s.pdfAiTools)
-            settingsRepository.setNotepadAiToolsEnabled(s.notepadAiTools)
-            settingsRepository.setMusicAiEnabled(s.musicAi)
-            settingsRepository.setHapticFeedback(s.hapticFeedback)
-            settingsRepository.setShowRecentTools(s.showRecentTools)
-            settingsRepository.setShowQuickNotes(s.showQuickNotes)
-            settingsRepository.setShowDashboardStats(s.showDashboardStats)
-            settingsRepository.setShowToolzPill(s.showToolzPill)
-            settingsRepository.setNewsEnabled(s.newsEnabled)
-            settingsRepository.setNewsNotificationsEnabled(s.newsNotifications)
-            // Language step — applied here (not on tap) so switching language
-            // mid-onboarding can't recreate the activity and lose pager progress.
-            settingsRepository.setAppLanguage(s.appLanguage)
             try {
-                androidx.appcompat.app.AppCompatDelegate.setApplicationLocales(
-                    androidx.core.os.LocaleListCompat.forLanguageTags(s.appLanguage)
-                )
-            } catch (_: Exception) { }
-            // App Skin step
-            settingsRepository.setAppIconPresetId(s.iconPresetId)
-            settingsRepository.setAppIconShape(s.iconShape)
-            settingsRepository.setAppIconAdaptTheme(s.iconAdaptTheme)
-            settingsRepository.setAppIconFollowDynamic(s.iconFollowDynamic)
-            settingsRepository.setActiveSkinId(s.activeSkinId)
-            // The launcher tile follows the picked icon — previously onboarding
-            // saved the preset but never switched the alias, so the icon "did nothing".
-            try { launcherIconManager.apply(s.iconPresetId, s.iconShape) } catch (_: Exception) { }
-            
-            if (s.groqApiKey.isNotBlank()) {
-                aiSettingsManager.setApiKey(s.groqApiKey, "Groq")
-                aiSettingsManager.setAiProvider("Groq")
+                val s = uiState.value
+                settingsRepository.setUserName(s.name)
+                settingsRepository.setThemeMode(s.themeMode)
+                settingsRepository.setDynamicColor(s.dynamicColor)
+                settingsRepository.setBackgroundGradientEnabled(s.backgroundGradient)
+                settingsRepository.setPerformanceMode(s.performanceMode)
+                settingsRepository.setNotificationsEnabled(s.notificationsEnabled)
+                settingsRepository.setBackgroundNotificationsEnabled(s.backgroundNotificationsEnabled)
+                settingsRepository.setNotificationVaultEnabled(s.vaultEnabled)
+                settingsRepository.setWhisperNotificationsEnabled(s.whisperNotificationsEnabled)
+                // Preferences step
+                settingsRepository.setOfflineModeEnabled(s.offlineMode)
+                settingsRepository.setAutoOfflineEnabled(s.autoOffline)
+                settingsRepository.setOfflinePopupEnabled(s.offlinePopup)
+                settingsRepository.setAiSearchChatEnabled(s.aiSearchChat)
+                settingsRepository.setClipboardAiEnabled(s.clipboardAi)
+                settingsRepository.setAiClipboardMonitoringEnabled(s.aiClipboardMonitoring)
+                settingsRepository.setPdfAiToolsEnabled(s.pdfAiTools)
+                settingsRepository.setNotepadAiToolsEnabled(s.notepadAiTools)
+                settingsRepository.setMusicAiEnabled(s.musicAi)
+                settingsRepository.setHapticFeedback(s.hapticFeedback)
+                settingsRepository.setShowRecentTools(s.showRecentTools)
+                settingsRepository.setShowQuickNotes(s.showQuickNotes)
+                settingsRepository.setShowDashboardStats(s.showDashboardStats)
+                settingsRepository.setShowToolzPill(s.showToolzPill)
+                settingsRepository.setNewsEnabled(s.newsEnabled)
+                settingsRepository.setNewsNotificationsEnabled(s.newsNotifications)
+                // Language step — stored now, applied below once completion is
+                // already persisted. Switching language mid-onboarding must not
+                // recreate the Activity and lose pager progress.
+                settingsRepository.setAppLanguage(s.appLanguage)
+                // App Skin step
+                settingsRepository.setAppIconPresetId(s.iconPresetId)
+                settingsRepository.setAppIconShape(s.iconShape)
+                settingsRepository.setAppIconAdaptTheme(s.iconAdaptTheme)
+                settingsRepository.setAppIconFollowDynamic(s.iconFollowDynamic)
+                settingsRepository.setActiveSkinId(s.activeSkinId)
+                // The launcher tile follows the picked icon — previously onboarding
+                // saved the preset but never switched the alias, so the icon "did nothing".
+                try { launcherIconManager.apply(s.iconPresetId, s.iconShape) } catch (_: Exception) { }
+
+                if (s.groqApiKey.isNotBlank()) {
+                    aiSettingsManager.setApiKey(s.groqApiKey, "Groq")
+                    aiSettingsManager.setAiProvider("Groq")
+                }
+
+                // Persist completion BEFORE applying the locale. setApplicationLocales
+                // can recreate the Activity; the rebuilt NavHost must already see
+                // completed=true, and MainActivity owns the navigation.
+                settingsRepository.setOnboardingCompleted(true)
+
+                try {
+                    androidx.appcompat.app.AppCompatDelegate.setApplicationLocales(
+                        androidx.core.os.LocaleListCompat.forLanguageTags(s.appLanguage)
+                    )
+                } catch (e: Exception) {
+                    Log.w(TAG, "Could not apply app locale", e)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Never let a DataStore/IO failure crash the process. Allow the
+                // user to retry instead of leaving the button permanently inert.
+                finishing = false
+                Log.e(TAG, "Failed to finish onboarding", e)
             }
-            
-            settingsRepository.setOnboardingCompleted(true)
-            onFinish()
         }
     }
 
-    fun skipOnboarding(onFinish: () -> Unit) {
+    fun skipOnboarding() {
+        if (finishing) return
+        finishing = true
         viewModelScope.launch {
-            settingsRepository.setOnboardingCompleted(true)
-            onFinish()
+            try {
+                settingsRepository.setOnboardingCompleted(true)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                finishing = false
+                Log.e(TAG, "Failed to skip onboarding", e)
+            }
         }
+    }
+
+    private companion object {
+        const val TAG = "OnboardingViewModel"
     }
 }

@@ -45,28 +45,14 @@
 }
 
 # ------------------------------------------------------------------------------
-# 3. GOOGLE AI (GEMINI) SDK & MLKIT
+# 3. ML KIT & NATIVE RUNTIMES
 # ------------------------------------------------------------------------------
-
-# Google AI (Gemini) SDK
--keep class com.google.ai.client.generativeai.** { *; }
--keep interface com.google.ai.client.generativeai.** { *; }
--dontwarn com.google.ai.client.generativeai.**
 
 # Native runtimes (ORT) & JNI
 # ------------------------------------------------------------------------------
 -keepclasseswithmembernames,includedescriptorclasses class * {
     native <methods>;
 }
-
-# ------------------------------------------------------------------------------
-# Preserve Gemini's internal Part and Content serialization (fixes "Cannot serialize abstract class")
--keep class com.google.ai.client.generativeai.type.Part { *; }
--keep class com.google.ai.client.generativeai.type.TextPart { *; }
--keep class com.google.ai.client.generativeai.type.BlobPart { *; }
--keep class com.google.ai.client.generativeai.type.FileDataPart { *; }
--keep class com.google.ai.client.generativeai.type.FunctionCallPart { *; }
--keep class com.google.ai.client.generativeai.type.FunctionResponsePart { *; }
 
 # ------------------------------------------------------------------------------
 # 4. DAGGER HILT & VIEWMODELS
@@ -146,8 +132,11 @@
 
 # FFmpeg & YouTube-DL
 -keep class com.arthenica.ffmpegkit.** { *; }
--keep class com.yaedd.youtubedl_android.** { *; }
--keep class com.junkfood.youtubedl_android.** { *; }
+# Actual package of io.github.junkfood02.youtubedl-android. The previous
+# com.yaedd/com.junkfood entries were typos, so R8 renamed YoutubeDL and its
+# getInstance() method, breaking the reflective init in ToolzApplication.
+-keep class com.yausername.youtubedl_android.** { *; }
+-keep interface com.yausername.youtubedl_android.DownloadProgressCallback { *; }
 
 # Shizuku API
 -keep class dev.rikka.shizuku.** { *; }

@@ -53,7 +53,6 @@ onnxruntime = "1.30.0"
 workRuntime = "2.12.0"
 hiltWork = "1.4.0"
 androidxHiltCompiler = "1.4.0"
-generativeai = "0.9.0"
 securityCrypto = "1.1.0"
 ffmpegKit = "6.1.7"
 youtubedlAndroid = "0.18.1"
@@ -146,7 +145,6 @@ onnxruntime-android = { group = "com.microsoft.onnxruntime", name = "onnxruntime
 androidx-work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "workRuntime" }
 androidx-hilt-work = { group = "androidx.hilt", name = "hilt-work", version.ref = "hiltWork" }
 androidx-hilt-compiler = { group = "androidx.hilt", name = "hilt-compiler", version.ref = "androidxHiltCompiler" }
-generativeai = { group = "com.google.ai.client.generativeai", name = "generativeai", version.ref = "generativeai" }
 androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
 sqlcipher = { group = "net.zetetic", name = "sqlcipher-android", version.ref = "sqlcipher" }
 sqlite-framework = { group = "androidx.sqlite", name = "sqlite", version.ref = "sqlite" }

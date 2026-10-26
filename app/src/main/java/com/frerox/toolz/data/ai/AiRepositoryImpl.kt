@@ -22,8 +22,6 @@ import android.util.Base64
 import android.util.Log
 import com.frerox.toolz.data.search.SearchResult
 import com.frerox.toolz.data.search.WebSearchRepository
-import com.google.ai.client.generativeai.GenerativeModel
-import com.google.ai.client.generativeai.type.content
 import com.squareup.moshi.FromJson
 import com.squareup.moshi.Json
 import com.squareup.moshi.JsonReader
@@ -31,6 +29,7 @@ import com.squareup.moshi.JsonWriter
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.ToJson
 import com.squareup.moshi.Types
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
@@ -46,6 +45,15 @@ private const val OPEN_ROUTER_REFERER = "https://github.com/frerox/toolz"
 private const val OPEN_ROUTER_TITLE = "Toolz AI"
 private const val MAX_API_ATTEMPTS = 3
 private const val RETRY_BASE_DELAY_MS = 600L
+
+/**
+ * Gemini's OpenAI-compatible surface. We deliberately call it with the same
+ * OkHttp/Retrofit stack as the other providers instead of the abandoned
+ * com.google.ai.client.generativeai SDK, whose Ktor 2 bytecode cannot link
+ * against Ktor 3 (NoClassDefFoundError: io/ktor/client/plugins/HttpTimeout).
+ */
+private const val GEMINI_OPENAI_COMPAT_URL =
+    "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 
 // ─────────────────────────────────────────────────────────────
 //  Request Models
@@ -559,8 +567,14 @@ class AiRepositoryImpl @Inject constructor(
                     Result.success(it.getOrThrow().copy(text = cleaned, sources = usedSourcesJson))
                 } else it
             })
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             emit(Result.failure(e))
+        } catch (e: Throwable) {
+            if (e is VirtualMachineError) throw e
+            Log.e(TAG, "sendMessage failed with a non-Exception error", e)
+            emit(Result.failure(Exception("AI provider unavailable in this build (${e::class.java.simpleName}).")))
         }
     }
 
@@ -617,8 +631,16 @@ class AiRepositoryImpl @Inject constructor(
                     persistFallback = false,
                 )
                 result.map { it.text }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Result.failure(e)
+            } catch (e: Throwable) {
+                // LinkageError / NoClassDefFoundError are Errors, not Exceptions.
+                // A broken optional SDK must never take down the process.
+                if (e is VirtualMachineError) throw e
+                Log.e(TAG, "testConnection failed with a non-Exception error for ${config.provider}", e)
+                Result.failure(Exception("${config.provider} is unavailable in this build (${e::class.java.simpleName})."))
             }
         )
     }
@@ -809,6 +831,8 @@ class AiRepositoryImpl @Inject constructor(
                     Log.i(TAG, "Auto-recovered $canonical: now using $currentModel")
                 }
                 return result
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 lastError = e
                 val recoverable = isModelNotFound(e) || isRateLimited(e)
@@ -819,6 +843,15 @@ class AiRepositoryImpl @Inject constructor(
                     return Result.failure(friendlyError(canonical, currentModel, e))
                 }
                 // else: try next candidate model
+            } catch (e: Throwable) {
+                // NoClassDefFoundError / LinkageError from an optional SDK are
+                // Errors, so the Exception branch above never sees them.
+                if (e is VirtualMachineError) throw e
+                lastError = e
+                Log.e(TAG, "Provider $canonical failed with a non-Exception error", e)
+                return Result.failure(
+                    Exception("$canonical is unavailable in this build (${e::class.java.simpleName}). Try another provider.")
+                )
             }
         }
         return Result.failure(lastError?.let { friendlyError(canonical, modelName, it) }
@@ -846,7 +879,9 @@ class AiRepositoryImpl @Inject constructor(
         searchEnabled: Boolean,
         systemPromptOverride: String?
     ): Result<ChatRepository.ChatResponseChunk> = when (AiSettingsHelper.canonicalProvider(provider)) {
-        "Gemini" -> callGemini(apiKey, modelName, prompt, history, image, searchEnabled, systemPromptOverride)
+        // Gemini goes through its OpenAI-compatible surface so it shares the
+        // same OkHttp/Retrofit stack, retries and error mapping as the rest.
+        "Gemini",
         "ChatGPT",
         "Groq",
         "DeepSeek",
@@ -855,54 +890,6 @@ class AiRepositoryImpl @Inject constructor(
         "OpenCode Go" -> callOpenAiCompatible(provider, apiKey, modelName, prompt, history, image, searchEnabled, systemPromptOverride)
         "Claude" -> callClaude(apiKey, modelName, prompt, history, image, searchEnabled, systemPromptOverride)
         else -> Result.failure(Exception("Unknown provider: $provider"))
-    }
-
-    private suspend fun callGemini(
-        apiKey: String,
-        model: String,
-        prompt: String,
-        history: List<AiMessage>,
-        image: Bitmap?,
-        searchEnabled: Boolean,
-        systemPromptOverride: String?
-    ): Result<ChatRepository.ChatResponseChunk> {
-        var lastError: Exception? = null
-        repeat(MAX_API_ATTEMPTS) { attempt ->
-            try {
-                val generativeModel = GenerativeModel(modelName = model, apiKey = apiKey, systemInstruction = systemPromptOverride?.let { content { text(it) } } ?: content { text(systemPrompt) })
-                val effectivePrompt = if (searchEnabled) {
-                    "Toolz AI. Web search context provided. Prompt: $prompt"
-                } else prompt.ifBlank { if (image != null) "Describe image" else "Help me" }
-
-                return if (image != null) {
-                    val text = generativeModel.generateContent(content { image(image); text(effectivePrompt) }).text ?: "No response"
-                    Result.success(ChatRepository.ChatResponseChunk(cleanResponseText(text)))
-                } else {
-                    // Merge consecutive messages of same role for Gemini
-                    val mergedHistory = mutableListOf<AiMessage>()
-                    history.forEach { msg ->
-                        val last = mergedHistory.lastOrNull()
-                        if (last != null && last.isUser == msg.isUser) {
-                            mergedHistory[mergedHistory.size - 1] = last.copy(text = last.text + "\n\n" + msg.text)
-                        } else {
-                            mergedHistory += msg
-                        }
-                    }
-                    val chat = generativeModel.startChat(mergedHistory.map { content(role = if (it.isUser) "user" else "model") { text(it.text) } })
-                    val text = chat.sendMessage(effectivePrompt).text ?: "No response"
-                    Result.success(ChatRepository.ChatResponseChunk(cleanResponseText(text)))
-                }
-            } catch (e: Exception) {
-                lastError = e as? Exception ?: Exception(e.message)
-                if (isModelNotFound(e)) throw e // let callProvider migrate models
-                if (attempt < MAX_API_ATTEMPTS - 1 && (isRateLimited(e) || isTransient(e))) {
-                    delay(RETRY_BASE_DELAY_MS * (1L shl attempt))
-                } else if (attempt == MAX_API_ATTEMPTS - 1) {
-                    throw e
-                } else throw e
-            }
-        }
-        throw lastError ?: Exception("Gemini call failed")
     }
 
     private fun isTransient(e: Throwable): Boolean {
@@ -936,8 +923,16 @@ class AiRepositoryImpl @Inject constructor(
         searchEnabled: Boolean,
         systemPromptOverride: String?
     ): Result<ChatRepository.ChatResponseChunk> {
-        val url = AiSettingsHelper.getChatCompletionUrl(provider)?.takeIf { it.isNotBlank() }
-            ?: return Result.failure(Exception("No URL for $provider"))
+        val canonical = AiSettingsHelper.canonicalProvider(provider)
+        // Gemini's native SDK is gone; use its OpenAI-compatible endpoint.
+        // Resolve it here (not via the remote catalog) so a catalog entry with
+        // a null chatCompletionUrl cannot silently disable the provider.
+        val url = if (canonical == "Gemini") {
+            GEMINI_OPENAI_COMPAT_URL
+        } else {
+            AiSettingsHelper.getChatCompletionUrl(canonical)?.takeIf { it.isNotBlank() }
+                ?: return Result.failure(Exception("No URL for $canonical"))
+        }
         val messages = mutableListOf<OpenAiMessage>()
         messages += OpenAiMessage("system", MessageContent.Text(systemPromptOverride ?: systemPrompt))
 
@@ -961,7 +956,6 @@ class AiRepositoryImpl @Inject constructor(
         } else MessageContent.Text(prompt)
         messages += OpenAiMessage("user", userContent)
 
-        val canonical = AiSettingsHelper.canonicalProvider(provider)
         val response = callChatCompletionWithRetry(
             provider = canonical,
             url = url,

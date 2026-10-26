@@ -93,7 +93,7 @@
             android:windowSoftInputMode="adjustResize"
             android:supportsPictureInPicture="true"
             android:hardwareAccelerated="true"
-            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation">
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|locale|layoutDirection">
             <meta-data
                 android:name="android.app.shortcuts"
                 android:resource="@xml/shortcuts" />

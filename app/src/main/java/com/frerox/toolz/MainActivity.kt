@@ -65,7 +65,10 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.core.content.IntentCompat
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -344,7 +347,10 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
             val loadingMessage by loadingViewModel.loadingMessage.collectAsState()
             val loadingProgress by loadingViewModel.loadingProgress.collectAsState()
 
-            val onboardingCompleted by settingsRepository.onboardingCompleted.collectAsState(initial = true)
+            // null = DataStore has not answered yet. Rendering a NavHost with a
+            // guessed value caused the graph to be rebuilt under an in-flight
+            // navigate() (IllegalStateException on onboarding finish).
+            val onboardingCompleted by settingsRepository.onboardingCompleted.collectAsState(initial = null)
 
             var offlineOverlayVisible by remember { mutableStateOf(false) }
             var offlineOverlayReady by remember { mutableStateOf(false) }
@@ -476,17 +482,20 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
                                 onDispose { shakeDetector.stop() }
                             }
 
-                            ToolzNavHost(
-                                navController = navController,
-                                settingsRepository = settingsRepository,
-                                aiSettingsManager = aiSettingsManager,
-                                pdfViewModel = pdfViewModel,
-                                performanceMode = performanceMode,
-                                backgroundGradientEnabled = backgroundGradientEnabled,
-                                incomingIntent = incomingIntent,
-                                incomingIntentVersion = incomingIntentVersion,
-                                onboardingCompleted = onboardingCompleted
-                            )
+                            val onboarded = onboardingCompleted
+                            if (onboarded != null) {
+                                ToolzNavHost(
+                                    navController = navController,
+                                    settingsRepository = settingsRepository,
+                                    aiSettingsManager = aiSettingsManager,
+                                    pdfViewModel = pdfViewModel,
+                                    performanceMode = performanceMode,
+                                    backgroundGradientEnabled = backgroundGradientEnabled,
+                                    incomingIntent = incomingIntent,
+                                    incomingIntentVersion = incomingIntentVersion,
+                                    onboardingCompleted = onboarded
+                                )
+                            }
 
                             UpdateOverlay(
                                 settingsRepository = settingsRepository,
@@ -1133,6 +1142,11 @@ fun ToolzNavHost(
 ) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
+    // Freeze the value used to build the graph. startDestination is part of the
+    // graph's remember key; letting it flip after composition replaces the
+    // graph (and the back stack) while navigation may be in flight.
+    val startOnboarded = remember { onboardingCompleted }
+    val lifecycleOwner = LocalLifecycleOwner.current
     var pendingExternalRoute by remember { mutableStateOf<String?>(null) }
     var pendingIsShortcut by remember { mutableStateOf(false) }
     var pendingNewsId by remember { mutableStateOf<String?>(null) }
@@ -1302,9 +1316,26 @@ fun ToolzNavHost(
         )
     }
 
+    // Single, lifecycle-aware exit from onboarding. Navigation runs here (not
+    // from the onboarding ViewModel's scope) so we always use the controller of
+    // the current composition, even after AppCompat recreates the Activity for
+    // a locale change. repeatOnLifecycle also avoids navigating on a destroyed
+    // host — the exact cause of the reported IllegalStateException.
+    LaunchedEffect(onboardingCompleted, currentRoute, lifecycleOwner) {
+        if (!onboardingCompleted || currentRoute != "onboarding") return@LaunchedEffect
+        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            if (navController.currentDestination?.route == "onboarding") {
+                navController.navigate(Screen.Dashboard.route) {
+                    popUpTo("onboarding") { inclusive = true }
+                    launchSingleTop = true
+                }
+            }
+        }
+    }
+
     NavHost(
         navController = navController,
-        startDestination = if (onboardingCompleted) Screen.Dashboard.route else "onboarding",
+        startDestination = if (startOnboarded) Screen.Dashboard.route else "onboarding",
         enterTransition = {
             slideInHorizontally(
                 animationSpec = tween(350),
@@ -1331,13 +1362,7 @@ fun ToolzNavHost(
         }
     ) {
         composable("onboarding") {
-            OnboardingScreen(
-                onFinish = {
-                    navController.navigate(Screen.Dashboard.route) {
-                        popUpTo("onboarding") { inclusive = true }
-                    }
-                }
-            )
+            OnboardingScreen()
         }
 
         composable(Screen.Dashboard.route) {

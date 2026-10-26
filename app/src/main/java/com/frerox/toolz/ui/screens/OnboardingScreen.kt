@@ -202,8 +202,7 @@ private val ExpressiveSpringIntSize = spring<androidx.compose.ui.unit.IntSize>(d
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun OnboardingScreen(
-    viewModel: OnboardingViewModel = hiltViewModel(),
-    onFinish: () -> Unit
+    viewModel: OnboardingViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
@@ -412,7 +411,7 @@ fun OnboardingScreen(
                                 onComplete = {
                                     vibrationManager?.vibrateSuccess()
                                     isFinishing = true
-                                    viewModel.finishOnboarding(onFinish)
+                                    viewModel.finishOnboarding()
                                 }
                             )
                         }
@@ -471,7 +470,7 @@ fun OnboardingScreen(
             setupScore = setupScore,
             onConfirm = {
                 showSkipDialog = false
-                viewModel.skipOnboarding(onFinish)
+                viewModel.skipOnboarding()
             },
             onDismiss = { showSkipDialog = false }
         )
