@@ -31,7 +31,7 @@
 
 ## ✨ Why Toolz?
 
-Toolz replaces a folder full of single-purpose apps with one fast, private, and deeply integrated utility library for Android.
+Toolz replaces a folder full of single-purpose apps with one fast, private, customisable and deeply integrated utility library for Android.
 
 | | |
 |---|---|
