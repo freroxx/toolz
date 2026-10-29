@@ -10,168 +10,1180 @@
 package com.frerox.toolz.ui.screens.clipboard
 
 import android.app.Application
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.provider.OpenableColumns
+import androidx.core.content.FileProvider
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.ToolzForegroundTracker
-import com.frerox.toolz.data.ai.ChatRepository
+import com.frerox.toolz.data.clipboard.ClipAiState
+import com.frerox.toolz.data.clipboard.ClipboardAiProcessor
+import com.frerox.toolz.data.clipboard.ClipboardAttachment
+import com.frerox.toolz.data.clipboard.ClipboardBlobStore
 import com.frerox.toolz.data.clipboard.ClipboardCaptureProcessor
 import com.frerox.toolz.data.clipboard.ClipboardClassifier
 import com.frerox.toolz.data.clipboard.ClipboardDao
 import com.frerox.toolz.data.clipboard.ClipboardEntry
+import com.frerox.toolz.data.clipboard.ClipboardFilter
 import com.frerox.toolz.data.clipboard.ClipboardGate
+import com.frerox.toolz.data.clipboard.ClipboardPayload
+import com.frerox.toolz.data.clipboard.ClipboardPayloadItem
+import com.frerox.toolz.data.clipboard.ClipboardRetentionManager
+import com.frerox.toolz.data.clipboard.ClipboardType
+import com.frerox.toolz.data.clipboard.ClipSensitivityReason
+import com.frerox.toolz.data.developer.DevToolId
+import com.frerox.toolz.data.developer.FakeClipboardSandbox
+import com.frerox.toolz.data.developer.SpoofGate
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.service.ClipboardService
 import com.frerox.toolz.util.shizuku.ShizukuHelper
+import com.frerox.toolz.util.shizuku.ShizukuShellExecutor
 import com.frerox.toolz.worker.ClipboardCleanupWorker
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import android.content.ClipboardManager as AndroidClipboardManager
-import java.util.*
+import java.util.Calendar
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 
+/** Date buckets used by the history list. Labels are resolved in the UI. */
+enum class ClipboardDateGroup { PINNED, TODAY, YESTERDAY, OLDER }
+
 data class ClipboardGroup(
-    val label: String,
-    val entries: List<ClipboardEntry>
+    val group: ClipboardDateGroup,
+    val entries: List<ClipboardEntry>,
 )
+
+data class ClipboardSettings(
+    val monitoring: Boolean = true,
+    val aiEnabled: Boolean = true,
+    val autoAi: Boolean = false,
+    val retentionDays: Int = 7,
+    val excludeSensitive: Boolean = false,
+    val onboardingSeen: Boolean = false,
+    val biometricLock: Boolean = true,
+    val itemQuotaMb: Int = 25,
+    val totalQuotaMb: Int = 250,
+    val maxEntries: Int = 500,
+    val backupWarningSeen: Boolean = false,
+    val offline: Boolean = false,
+)
+
+data class ClipboardGateInfo(
+    val status: ClipboardGate.Status = ClipboardGate.Status.SETUP_REQUIRED,
+    val capabilities: ClipboardGate.Capabilities = ClipboardGate.Capabilities(),
+)
+
+data class ClipboardUiState(
+    val entries: List<ClipboardEntry> = emptyList(),
+    val trashed: List<ClipboardEntry> = emptyList(),
+    val visibleEntries: List<ClipboardEntry> = emptyList(),
+    val attachmentsByClip: Map<Int, List<ClipboardAttachment>> = emptyMap(),
+    val filter: ClipboardFilter = ClipboardFilter.ALL,
+    val query: String = "",
+    val showTrash: Boolean = false,
+    val selection: Set<Int> = emptySet(),
+    val revealedIds: Set<Int> = emptySet(),
+    val aiRunningIds: Set<Int> = emptySet(),
+    val busy: Boolean = false,
+    val aiConfigured: Boolean = false,
+    val gate: ClipboardGateInfo = ClipboardGateInfo(),
+    val settings: ClipboardSettings = ClipboardSettings(),
+    val stats: ClipboardRetentionManager.Stats = ClipboardRetentionManager.Stats(),
+    val sandboxActive: Boolean = false,
+) {
+    val isSelectionMode: Boolean get() = selection.isNotEmpty()
+    val canCaptureInBackground: Boolean get() = gate.capabilities.backgroundCapable
+    val showSetupBanner: Boolean
+        get() = settings.monitoring && !gate.capabilities.backgroundCapable &&
+            gate.status != ClipboardGate.Status.PAUSED
+}
+
+enum class ClipboardMessage {
+    SAVED,
+    BUMPED,
+    EMPTY,
+    SENSITIVE_SKIPPED,
+    TOO_LARGE,
+    QUOTA,
+    FAILED,
+    COPIED,
+    SELECTION_COPIED,
+    SHARED,
+    PINNED,
+    UNPINNED,
+    LOCKED,
+    UNLOCKED,
+    MARKED_SENSITIVE,
+    MARKED_NOT_SENSITIVE,
+    DELETED,
+    DELETED_FOREVER,
+    RESTORED,
+    TRASH_EMPTY,
+    CLEARED,
+    AI_DONE,
+    AI_SENSITIVE,
+    AI_DISABLED,
+    AI_NOT_CONFIGURED,
+    AI_FAILED,
+    ONBOARDING_DONE,
+    APP_OP_GRANTED,
+    APP_OP_FAILED,
+    APP_OP_REVOKED,
+    SHIZUKU_GRANTED,
+    SHIZUKU_DENIED,
+    SHIZUKU_NOT_RUNNING,
+    ALREADY_AUTHORIZED,
+    SANDBOX,
+    ATTACHMENT_FAILED,
+    NOTHING_TO_COPY,
+}
+
+sealed interface ClipboardEvent {
+    data class Message(
+        val type: ClipboardMessage,
+        val count: Int = 0,
+        val detail: String? = null,
+    ) : ClipboardEvent
+
+    data class Share(val intent: Intent) : ClipboardEvent
+}
 
 @HiltViewModel
 class ClipboardViewModel @Inject constructor(
     private val application: Application,
     private val clipboardDao: ClipboardDao,
-    private val aiRepository: ChatRepository,
     private val settingsRepository: SettingsRepository,
-    private val shizukuExecutor: com.frerox.toolz.util.shizuku.ShizukuShellExecutor,
+    private val shizukuExecutor: ShizukuShellExecutor,
     private val captureProcessor: ClipboardCaptureProcessor,
-    // DEV-SPOOF: gates the RAM-only fake clip history when the sandbox is on.
-    private val gate: com.frerox.toolz.data.developer.SpoofGate,
-    val classifier: ClipboardClassifier
+    private val aiProcessor: ClipboardAiProcessor,
+    private val retentionManager: ClipboardRetentionManager,
+    private val blobStore: ClipboardBlobStore,
+    private val gate: SpoofGate,
+    val classifier: ClipboardClassifier,
 ) : AndroidViewModel(application) {
 
-    /** Cheap synchronous sandbox check for the guards below. */
     val clipboardSandboxActive: Boolean
-        get() = gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.CLIPBOARD)
+        get() = gate.sandboxed(DevToolId.CLIPBOARD)
 
-    /**
-     * DEV-SPOOF: sandboxed → the list is 30 RAM-only fixtures and the real
-     * Room table is neither read nor written while the flag is on. The fake
-     * state flow is a live combine source so RAM mutations (delete/pin/clear)
-     * repaint without any real storage activity.
-     */
-    val entries: StateFlow<List<ClipboardEntry>> = combine(
-        clipboardDao.getAllEntries(),
-        gate.active(com.frerox.toolz.data.developer.DevToolId.CLIPBOARD),
-        com.frerox.toolz.data.developer.FakeClipboardSandbox.entries(),
+    // ── History sources ───────────────────────────────────────────────────
+
+    private val realEntries = clipboardDao.getAllEntries()
+    private val realTrashed = clipboardDao.getTrashedEntries()
+    private val realAttachments = clipboardDao.getAllAttachments()
+    private val sandboxFlow = gate.active(DevToolId.CLIPBOARD)
+
+    private val activeEntries: Flow<List<ClipboardEntry>> = combine(
+        realEntries,
+        sandboxFlow,
+        FakeClipboardSandbox.entries(),
     ) { real, spoofed, fake ->
-        if (spoofed) fake else real
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        if (spoofed) fake.filter { it.deletedAt == null } else real
+    }
 
-    val offlineModeEnabled = settingsRepository.offlineModeEnabled
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    private val trashedEntries: Flow<List<ClipboardEntry>> = combine(
+        realTrashed,
+        sandboxFlow,
+        FakeClipboardSandbox.entries(),
+    ) { real, spoofed, fake ->
+        if (spoofed) fake.filter { it.deletedAt != null } else real
+    }
 
-    // Revamp prefs
-    val monitoringEnabled = settingsRepository.clipboardMonitoringEnabled
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
-    val clipboardAiEnabled = settingsRepository.clipboardAiEnabled
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
-    val autoAiEnabled = settingsRepository.aiClipboardMonitoringEnabled
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
-    val retentionDays = settingsRepository.clipboardRetentionDays
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 7)
-    val excludeSensitive = settingsRepository.clipboardExcludeSensitive
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    private val attachmentMap: Flow<Map<Int, List<ClipboardAttachment>>> = combine(
+        realAttachments,
+        sandboxFlow,
+    ) { attachments, spoofed ->
+        if (spoofed) emptyMap() else attachments.groupBy { it.clipId }
+    }
 
-    /** Master AI visibility: master toggle ON and not offline. Auto-AI needs autoAiEnabled too. */
-    val canShowAi: StateFlow<Boolean> = combine(clipboardAiEnabled, offlineModeEnabled) { master, offline ->
-        master && !offline
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+    private data class HistorySnapshot(
+        val entries: List<ClipboardEntry>,
+        val trashed: List<ClipboardEntry>,
+        val attachments: Map<Int, List<ClipboardAttachment>>,
+    )
 
-    private val _gateStatus = MutableStateFlow(ClipboardGate.Status.SETUP_REQUIRED)
-    val gateStatus = _gateStatus.asStateFlow()
+    private val history: Flow<HistorySnapshot> = combine(
+        activeEntries,
+        trashedEntries,
+        attachmentMap,
+    ) { entries, trashed, attachments ->
+        HistorySnapshot(entries, trashed, attachments)
+    }
 
-    private val _shizukuAuthorized = MutableStateFlow(ShizukuHelper.isAuthorized())
-    val shizukuAuthorized = _shizukuAuthorized.asStateFlow()
+    // ── Settings ──────────────────────────────────────────────────────────
 
-    private val _accessibilityEnabled = MutableStateFlow(false)
-    val accessibilityEnabled = _accessibilityEnabled.asStateFlow()
+    private data class SettingsA(
+        val monitoring: Boolean,
+        val ai: Boolean,
+        val autoAi: Boolean,
+        val retention: Int,
+    )
 
-    private val _isSummarizing = MutableStateFlow<Int?>(null)
-    val isSummarizing = _isSummarizing.asStateFlow()
+    private data class SettingsB(
+        val exclude: Boolean,
+        val onboarding: Boolean,
+        val biometric: Boolean,
+        val itemQuota: Int,
+        val totalQuota: Int,
+    )
 
-    private val _searchQuery = MutableStateFlow("")
-    val searchQuery = _searchQuery.asStateFlow()
+    private data class SettingsC(
+        val maxEntries: Int,
+        val backupWarning: Boolean,
+        val offline: Boolean,
+    )
 
-    private val _events = MutableSharedFlow<String>(extraBufferCapacity = 8)
-    val events = _events.asSharedFlow()
+    private val settingsA = combine(
+        settingsRepository.clipboardMonitoringEnabled,
+        settingsRepository.clipboardAiEnabled,
+        settingsRepository.aiClipboardMonitoringEnabled,
+        settingsRepository.clipboardRetentionDays,
+    ) { monitoring, ai, autoAi, retention ->
+        SettingsA(monitoring, ai, autoAi, retention)
+    }
 
-    private var lastDeleted: ClipboardEntry? = null
+    private val settingsB = combine(
+        settingsRepository.clipboardExcludeSensitive,
+        settingsRepository.clipboardOnboardingSeen,
+        settingsRepository.clipboardBiometricLock,
+        settingsRepository.clipboardItemQuotaMb,
+        settingsRepository.clipboardTotalQuotaMb,
+    ) { exclude, onboarding, biometric, itemQuota, totalQuota ->
+        SettingsB(exclude, onboarding, biometric, itemQuota, totalQuota)
+    }
 
-    /** Plain local filter — no network, no AI. */
-    val filteredEntries = combine(entries, _searchQuery) { allEntries, query ->
-        if (query.isBlank()) allEntries
-        else allEntries.filter { it.content.contains(query, ignoreCase = true) }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    private val settingsC = combine(
+        settingsRepository.clipboardMaxEntries,
+        settingsRepository.clipboardBackupWarningSeen,
+        settingsRepository.offlineModeEnabled,
+    ) { maxEntries, backupWarning, offline ->
+        SettingsC(maxEntries, backupWarning, offline)
+    }
+
+    private val settingsState: Flow<ClipboardSettings> = combine(
+        settingsA,
+        settingsB,
+        settingsC,
+    ) { a, b, c ->
+        ClipboardSettings(
+            monitoring = a.monitoring,
+            aiEnabled = a.ai,
+            autoAi = a.autoAi,
+            retentionDays = a.retention,
+            excludeSensitive = b.exclude,
+            onboardingSeen = b.onboarding,
+            biometricLock = b.biometric,
+            itemQuotaMb = b.itemQuota,
+            totalQuotaMb = b.totalQuota,
+            maxEntries = c.maxEntries,
+            backupWarningSeen = c.backupWarning,
+            offline = c.offline,
+        )
+    }
+
+    // ── Mutable UI state ──────────────────────────────────────────────────
+
+    private val _gateInfo = MutableStateFlow(ClipboardGateInfo())
+    private val _stats = MutableStateFlow(ClipboardRetentionManager.Stats())
+
+    private data class Extras(
+        val query: String = "",
+        val filter: ClipboardFilter = ClipboardFilter.ALL,
+        val showTrash: Boolean = false,
+        val selection: Set<Int> = emptySet(),
+        val revealed: Set<Int> = emptySet(),
+        val aiRunning: Set<Int> = emptySet(),
+        val busy: Boolean = false,
+        val aiConfigured: Boolean = false,
+    )
+
+    private val _extras = MutableStateFlow(Extras())
+
+    private val _events = Channel<ClipboardEvent>(Channel.BUFFERED)
+    val events = _events.receiveAsFlow()
+
+    private var lastDeletedIds: List<Int> = emptyList()
+    private var wasSandboxed = false
+    private val manualCaptureInFlight = AtomicBoolean(false)
+
+    val uiState: StateFlow<ClipboardUiState> = combine(
+        history,
+        settingsState,
+        _gateInfo,
+        _stats,
+        _extras,
+    ) { snapshot, settings, gateInfo, stats, extras ->
+        val source = if (extras.showTrash) snapshot.trashed else snapshot.entries
+        val visibleIds = source.mapTo(HashSet()) { it.id }
+        val selection = extras.selection intersect visibleIds
+        val filtered = filterEntries(
+            entries = source,
+            attachments = snapshot.attachments,
+            query = extras.query,
+            filter = extras.filter,
+            revealed = extras.revealed,
+        )
+        ClipboardUiState(
+            entries = snapshot.entries,
+            trashed = snapshot.trashed,
+            visibleEntries = filtered,
+            attachmentsByClip = snapshot.attachments,
+            filter = extras.filter,
+            query = extras.query,
+            showTrash = extras.showTrash,
+            selection = selection,
+            revealedIds = extras.revealed,
+            aiRunningIds = extras.aiRunning,
+            busy = extras.busy,
+            aiConfigured = extras.aiConfigured,
+            gate = gateInfo,
+            settings = settings,
+            stats = stats,
+            sandboxActive = clipboardSandboxActive,
+        )
+    }.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5_000),
+        ClipboardUiState(),
+    )
 
     init {
         ClipboardCleanupWorker.schedule(application)
-        // Wait for the real persisted prefs before touching the service —
-        // reading .value straight away races DataStore and kills the service.
         viewModelScope.launch {
-            val monitoring = settingsRepository.clipboardMonitoringEnabled.first()
-            if (!monitoring &&
-                (ShizukuHelper.isAuthorized() || ClipboardGate.isToolzAccessibilityEnabled(application))
-            ) {
-                // Heal: a previous build defaulted the toggle OFF, which silently
-                // disabled capture even with Shizuku/accessibility ready.
-                settingsRepository.setClipboardMonitoringEnabled(true)
+            settingsState.collect { settings ->
+                syncGate(settings)
             }
-            refreshGate()
-            ensureServiceState()
         }
-        // DEV-SPOOF: live switch — entering the sandbox resets the fixtures and
-        // pretends the capture gate is live (Shizuku) without hooking anything
-        // real; leaving restores the true gate evaluation.
         viewModelScope.launch {
-            gate.active(com.frerox.toolz.data.developer.DevToolId.CLIPBOARD).collect { spoofed ->
-                if (spoofed) {
-                    com.frerox.toolz.data.developer.FakeClipboardSandbox.reset()
-                    _gateStatus.value = ClipboardGate.Status.ACTIVE_SHIZUKU
-                    android.util.Log.w("DevSpoof", "Clipboard sandbox active — 30 RAM clips, capture simulated")
+            sandboxFlow.collect { spoofed ->
+                if (spoofed && !wasSandboxed) {
+                    FakeClipboardSandbox.reset()
                 }
+                wasSandboxed = spoofed
+                refreshGate()
+                refreshStats()
+            }
+        }
+        viewModelScope.launch {
+            refreshStats()
+            _extras.update { it.copy(aiConfigured = aiProcessor.isConfigured()) }
+        }
+    }
+
+    // ── Gate / service lifecycle ──────────────────────────────────────────
+
+    private suspend fun syncGate(settings: ClipboardSettings) {
+        val status = if (clipboardSandboxActive) {
+            ClipboardGate.Status.ACTIVE_SHIZUKU
+        } else {
+            ClipboardGate.evaluate(
+                application,
+                monitoringEnabled = settings.monitoring,
+                onboardingSeen = settings.onboardingSeen,
+            )
+        }
+        val capabilities = if (clipboardSandboxActive) {
+            ClipboardGate.Capabilities(
+                shizukuInstalled = true,
+                shizukuRunning = true,
+                shizukuAuthorized = true,
+                onboardingSeen = true,
+            )
+        } else {
+            ClipboardGate.capabilities(application, settings.onboardingSeen)
+        }
+        _gateInfo.value = ClipboardGateInfo(status, capabilities)
+        applyServiceState(settings.monitoring, status)
+    }
+
+    fun refreshGate() {
+        viewModelScope.launch {
+            syncGate(settingsState.first())
+        }
+    }
+
+    private fun applyServiceState(monitoring: Boolean, status: ClipboardGate.Status) {
+        if (clipboardSandboxActive) {
+            ClipboardService.stop(application)
+            return
+        }
+        val shouldRun = monitoring &&
+            (status == ClipboardGate.Status.ACTIVE_SHIZUKU ||
+                status == ClipboardGate.Status.ACTIVE_APP_OP)
+        if (shouldRun) {
+            ClipboardService.startIfNeeded(application)
+        } else {
+            ClipboardService.stop(application)
+        }
+    }
+
+    fun onScreenResumed() {
+        refreshGate()
+        refreshStats()
+        refreshClipboard(notify = false)
+    }
+
+    fun refreshStats() {
+        viewModelScope.launch {
+            if (clipboardSandboxActive) {
+                val fake = FakeClipboardSandbox.entries().value
+                val settings = settingsState.first()
+                _stats.value = ClipboardRetentionManager.Stats(
+                    activeCount = fake.count { it.deletedAt == null },
+                    trashedCount = fake.count { it.deletedAt != null },
+                    sensitiveCount = fake.count { it.isSensitive && it.deletedAt == null },
+                    attachmentBytes = 0,
+                    blobBytes = 0,
+                    itemQuotaMb = settings.itemQuotaMb,
+                    totalQuotaMb = settings.totalQuotaMb,
+                    maxEntries = settings.maxEntries,
+                )
+            } else {
+                _stats.value = retentionManager.stats()
+            }
+            _extras.update { it.copy(aiConfigured = aiProcessor.isConfigured()) }
+        }
+    }
+
+    // ── Onboarding / setup ────────────────────────────────────────────────
+
+    fun completeOnboarding() {
+        viewModelScope.launch {
+            settingsRepository.setClipboardOnboardingSeen(true)
+            _events.send(ClipboardEvent.Message(ClipboardMessage.ONBOARDING_DONE))
+            refreshGate()
+        }
+    }
+
+    fun resetOnboarding() {
+        viewModelScope.launch {
+            settingsRepository.setClipboardOnboardingSeen(false)
+            refreshGate()
+        }
+    }
+
+    fun requestShizukuAuthorization() {
+        if (ShizukuHelper.isAuthorized()) {
+            viewModelScope.launch {
+                _events.send(ClipboardEvent.Message(ClipboardMessage.ALREADY_AUTHORIZED))
+                refreshGate()
+            }
+            return
+        }
+        if (!ShizukuHelper.isRunning()) {
+            viewModelScope.launch {
+                _events.send(ClipboardEvent.Message(ClipboardMessage.SHIZUKU_NOT_RUNNING))
+            }
+            return
+        }
+        ShizukuHelper.requestAuthorization { granted ->
+            viewModelScope.launch {
+                _events.send(
+                    ClipboardEvent.Message(
+                        if (granted) ClipboardMessage.SHIZUKU_GRANTED
+                        else ClipboardMessage.SHIZUKU_DENIED,
+                    ),
+                )
                 refreshGate()
             }
         }
     }
 
-    private fun computeGate(monitoring: Boolean): ClipboardGate.Status {
-        _shizukuAuthorized.value = ShizukuHelper.isAuthorized()
-        _accessibilityEnabled.value = ClipboardGate.isToolzAccessibilityEnabled(application)
-        return ClipboardGate.evaluate(application, monitoring)
+    fun grantClipboardAppOp() {
+        viewModelScope.launch {
+            val result = shizukuExecutor.grantClipboardAppOp()
+            _events.send(
+                ClipboardEvent.Message(
+                    if (result.isSuccess) ClipboardMessage.APP_OP_GRANTED
+                    else ClipboardMessage.APP_OP_FAILED,
+                    detail = result.combinedOutput.takeIf { it.isNotBlank() },
+                ),
+            )
+            refreshGate()
+        }
     }
 
-    fun refreshGate() {
-        // DEV-SPOOF: sandboxed → the gate pretends to be live while nothing is
-        // actually hooked.
-        _gateStatus.value =
-            if (clipboardSandboxActive) ClipboardGate.Status.ACTIVE_SHIZUKU
-            else computeGate(monitoringEnabled.value)
+    fun revokeClipboardAppOp() {
+        viewModelScope.launch {
+            val result = shizukuExecutor.revokeClipboardAppOp()
+            _events.send(
+                ClipboardEvent.Message(
+                    if (result.isSuccess) ClipboardMessage.APP_OP_REVOKED
+                    else ClipboardMessage.APP_OP_FAILED,
+                    detail = result.combinedOutput.takeIf { it.isNotBlank() },
+                ),
+            )
+            refreshGate()
+        }
     }
 
-    // ── Settings passthrough ──────────────────────────────────────────────
+    fun shizukuInstallIntent(): Intent = ClipboardGate.shizukuInstallIntent()
+
+    fun appDetailsIntent(): Intent = ClipboardGate.appDetailsIntent(application)
+
+    // ── Search / filters / selection ──────────────────────────────────────
+
+    fun onSearchQueryChanged(query: String) {
+        _extras.update { it.copy(query = query) }
+    }
+
+    fun setFilter(filter: ClipboardFilter) {
+        _extras.update { it.copy(filter = filter) }
+    }
+
+    fun setShowTrash(show: Boolean) {
+        _extras.update { it.copy(showTrash = show, selection = emptySet()) }
+    }
+
+    fun toggleSelection(id: Int) {
+        _extras.update { extras ->
+            val next = extras.selection.toMutableSet()
+            if (!next.add(id)) next.remove(id)
+            extras.copy(selection = next)
+        }
+    }
+
+    fun selectAll() {
+        val ids = uiState.value.visibleEntries.mapTo(LinkedHashSet()) { it.id }
+        _extras.update { it.copy(selection = ids) }
+    }
+
+    fun clearSelection() {
+        _extras.update { it.copy(selection = emptySet()) }
+    }
+
+    fun markRevealed(id: Int) {
+        _extras.update { it.copy(revealed = it.revealed + id) }
+    }
+
+    fun hideRevealed(id: Int) {
+        _extras.update { it.copy(revealed = it.revealed - id) }
+    }
+
+    // ── Mutations ─────────────────────────────────────────────────────────
+
+    fun togglePin(entry: ClipboardEntry) {
+        val pinned = !entry.isPinned
+        if (clipboardSandboxActive) {
+            FakeClipboardSandbox.togglePin(entry.id)
+        } else {
+            viewModelScope.launch {
+                clipboardDao.setPinned(entry.id, pinned)
+                refreshStats()
+            }
+        }
+        viewModelScope.launch {
+            _events.send(
+                ClipboardEvent.Message(
+                    if (pinned) ClipboardMessage.PINNED else ClipboardMessage.UNPINNED,
+                ),
+            )
+        }
+    }
+
+    fun setLocked(entry: ClipboardEntry, locked: Boolean) {
+        if (clipboardSandboxActive) {
+            FakeClipboardSandbox.setLocked(entry.id, locked)
+            viewModelScope.launch {
+                _events.send(
+                    ClipboardEvent.Message(
+                        if (locked) ClipboardMessage.LOCKED else ClipboardMessage.UNLOCKED,
+                    ),
+                )
+            }
+            return
+        }
+        viewModelScope.launch {
+            if (locked) {
+                clipboardDao.updateSensitivity(
+                    id = entry.id,
+                    sensitive = true,
+                    reason = entry.sensitivityReason ?: ClipSensitivityReason.MANUAL,
+                    vaultMatch = entry.passwordVaultMatch,
+                    locked = true,
+                )
+                clipboardDao.setExpiresAt(entry.id, null)
+                clipboardDao.clearAiDetails(entry.id, ClipAiState.SKIPPED_SENSITIVE)
+            } else {
+                val keepSensitive = entry.passwordVaultMatch ||
+                    (entry.sensitivityReason != null &&
+                        entry.sensitivityReason != ClipSensitivityReason.MANUAL)
+                clipboardDao.updateSensitivity(
+                    id = entry.id,
+                    sensitive = keepSensitive,
+                    reason = if (keepSensitive) entry.sensitivityReason else null,
+                    vaultMatch = entry.passwordVaultMatch,
+                    locked = false,
+                )
+                if (!keepSensitive) {
+                    clipboardDao.updateAiState(entry.id, ClipAiState.IDLE, null)
+                }
+            }
+            _extras.update { it.copy(revealed = it.revealed - entry.id) }
+            refreshStats()
+            _events.send(
+                ClipboardEvent.Message(
+                    if (locked) ClipboardMessage.LOCKED else ClipboardMessage.UNLOCKED,
+                ),
+            )
+        }
+    }
+
+    fun setSensitive(entry: ClipboardEntry, sensitive: Boolean) {
+        if (entry.passwordVaultMatch) {
+            // Password Vault matches are always sensitive and cannot be
+            // downgraded from the clipboard UI.
+            return
+        }
+        if (clipboardSandboxActive) {
+            viewModelScope.launch {
+                _events.send(ClipboardEvent.Message(ClipboardMessage.SANDBOX))
+            }
+            return
+        }
+        viewModelScope.launch {
+            if (sensitive) {
+                clipboardDao.updateSensitivity(
+                    id = entry.id,
+                    sensitive = true,
+                    reason = entry.sensitivityReason ?: ClipSensitivityReason.MANUAL,
+                    vaultMatch = false,
+                    locked = entry.isLocked,
+                )
+                clipboardDao.setExpiresAt(entry.id, null)
+                clipboardDao.clearAiDetails(entry.id, ClipAiState.SKIPPED_SENSITIVE)
+            } else {
+                clipboardDao.updateSensitivity(
+                    id = entry.id,
+                    sensitive = false,
+                    reason = null,
+                    vaultMatch = false,
+                    locked = entry.isLocked,
+                )
+                if (!entry.isLocked) {
+                    clipboardDao.updateAiState(entry.id, ClipAiState.IDLE, null)
+                }
+            }
+            _extras.update { it.copy(revealed = it.revealed - entry.id) }
+            refreshStats()
+            _events.send(
+                ClipboardEvent.Message(
+                    if (sensitive) ClipboardMessage.MARKED_SENSITIVE
+                    else ClipboardMessage.MARKED_NOT_SENSITIVE,
+                ),
+            )
+        }
+    }
+
+    fun deleteEntry(entry: ClipboardEntry) {
+        if (clipboardSandboxActive) {
+            lastDeletedIds = listOf(entry.id)
+            FakeClipboardSandbox.softDelete(entry.id)
+            viewModelScope.launch {
+                _events.send(ClipboardEvent.Message(ClipboardMessage.DELETED, count = 1))
+            }
+            return
+        }
+        viewModelScope.launch {
+            lastDeletedIds = listOf(entry.id)
+            clipboardDao.softDelete(entry.id, System.currentTimeMillis())
+            refreshStats()
+            _events.send(ClipboardEvent.Message(ClipboardMessage.DELETED, count = 1))
+        }
+    }
+
+    fun deleteSelected() {
+        val ids = uiState.value.selection.toList()
+        if (ids.isEmpty()) return
+        clearSelection()
+        if (clipboardSandboxActive) {
+            lastDeletedIds = ids
+            ids.forEach(FakeClipboardSandbox::softDelete)
+            viewModelScope.launch {
+                _events.send(ClipboardEvent.Message(ClipboardMessage.DELETED, count = ids.size))
+            }
+            return
+        }
+        viewModelScope.launch {
+            lastDeletedIds = ids
+            clipboardDao.softDeleteMany(ids, System.currentTimeMillis())
+            refreshStats()
+            _events.send(ClipboardEvent.Message(ClipboardMessage.DELETED, count = ids.size))
+        }
+    }
+
+    fun undoDelete() {
+        val ids = lastDeletedIds
+        if (ids.isEmpty()) return
+        lastDeletedIds = emptyList()
+        if (clipboardSandboxActive) {
+            ids.forEach(FakeClipboardSandbox::restore)
+            viewModelScope.launch {
+                _events.send(ClipboardEvent.Message(ClipboardMessage.RESTORED, count = ids.size))
+            }
+            return
+        }
+        viewModelScope.launch {
+            clipboardDao.restoreMany(ids)
+            refreshStats()
+            _events.send(ClipboardEvent.Message(ClipboardMessage.RESTORED, count = ids.size))
+        }
+    }
+
+    fun restoreEntry(entry: ClipboardEntry) {
+        if (clipboardSandboxActive) {
+            FakeClipboardSandbox.restore(entry.id)
+            viewModelScope.launch {
+                _events.send(ClipboardEvent.Message(ClipboardMessage.RESTORED, count = 1))
+            }
+            return
+        }
+        viewModelScope.launch {
+            clipboardDao.restore(entry.id)
+            refreshStats()
+            _events.send(ClipboardEvent.Message(ClipboardMessage.RESTORED, count = 1))
+        }
+    }
+
+    fun restoreSelected() {
+        val ids = uiState.value.selection.toList()
+        if (ids.isEmpty()) return
+        clearSelection()
+        if (clipboardSandboxActive) {
+            ids.forEach(FakeClipboardSandbox::restore)
+            return
+        }
+        viewModelScope.launch {
+            clipboardDao.restoreMany(ids)
+            refreshStats()
+            _events.send(ClipboardEvent.Message(ClipboardMessage.RESTORED, count = ids.size))
+        }
+    }
+
+    fun deleteSelectedForever() {
+        val ids = uiState.value.selection.toList()
+        if (ids.isEmpty()) return
+        clearSelection()
+        if (clipboardSandboxActive) {
+            ids.forEach(FakeClipboardSandbox::delete)
+            viewModelScope.launch {
+                _events.send(
+                    ClipboardEvent.Message(ClipboardMessage.DELETED_FOREVER, count = ids.size),
+                )
+            }
+            return
+        }
+        viewModelScope.launch {
+            ids.forEach { retentionManager.deleteNow(it) }
+            refreshStats()
+            _events.send(
+                ClipboardEvent.Message(ClipboardMessage.DELETED_FOREVER, count = ids.size),
+            )
+        }
+    }
+
+    fun deleteForever(entry: ClipboardEntry) {
+        if (clipboardSandboxActive) {
+            FakeClipboardSandbox.delete(entry.id)
+            viewModelScope.launch {
+                _events.send(ClipboardEvent.Message(ClipboardMessage.DELETED_FOREVER, count = 1))
+            }
+            return
+        }
+        viewModelScope.launch {
+            retentionManager.deleteNow(entry.id)
+            refreshStats()
+            _events.send(ClipboardEvent.Message(ClipboardMessage.DELETED_FOREVER, count = 1))
+        }
+    }
+
+    fun emptyTrash() {
+        if (clipboardSandboxActive) {
+            FakeClipboardSandbox.emptyTrash()
+            viewModelScope.launch {
+                _events.send(ClipboardEvent.Message(ClipboardMessage.TRASH_EMPTY))
+            }
+            return
+        }
+        viewModelScope.launch {
+            retentionManager.emptyTrash()
+            refreshStats()
+            _events.send(ClipboardEvent.Message(ClipboardMessage.TRASH_EMPTY))
+        }
+    }
+
+    fun clearAll() {
+        if (clipboardSandboxActive) {
+            FakeClipboardSandbox.clearUnpinned()
+            viewModelScope.launch {
+                _events.send(ClipboardEvent.Message(ClipboardMessage.CLEARED))
+            }
+            return
+        }
+        viewModelScope.launch {
+            retentionManager.clearAllUnpinned()
+            refreshStats()
+            _events.send(ClipboardEvent.Message(ClipboardMessage.CLEARED))
+        }
+    }
+
+    // ── AI ────────────────────────────────────────────────────────────────
+
+    fun runAi(entry: ClipboardEntry) {
+        if (entry.isSensitive || entry.isLocked) {
+            viewModelScope.launch {
+                _events.send(ClipboardEvent.Message(ClipboardMessage.AI_SENSITIVE))
+            }
+            return
+        }
+        if (!uiState.value.settings.aiEnabled || uiState.value.settings.offline) {
+            viewModelScope.launch {
+                _events.send(ClipboardEvent.Message(ClipboardMessage.AI_DISABLED))
+            }
+            return
+        }
+        if (!aiProcessor.isConfigured()) {
+            viewModelScope.launch {
+                _events.send(ClipboardEvent.Message(ClipboardMessage.AI_NOT_CONFIGURED))
+            }
+            return
+        }
+        if (clipboardSandboxActive) {
+            FakeClipboardSandbox.setAiResult(entry.id, entry.summary, entry.type)
+            viewModelScope.launch {
+                _events.send(ClipboardEvent.Message(ClipboardMessage.SANDBOX))
+            }
+            return
+        }
+        viewModelScope.launch {
+            _extras.update { it.copy(aiRunning = it.aiRunning + entry.id) }
+            val result = aiProcessor.process(entry.id, automatic = false)
+            _extras.update { it.copy(aiRunning = it.aiRunning - entry.id) }
+            _events.send(
+                ClipboardEvent.Message(
+                    when {
+                        result.success -> ClipboardMessage.AI_DONE
+                        result.error == "sensitive" -> ClipboardMessage.AI_SENSITIVE
+                        result.error == "disabled" -> ClipboardMessage.AI_DISABLED
+                        result.error == "not_configured" -> ClipboardMessage.AI_NOT_CONFIGURED
+                        else -> ClipboardMessage.AI_FAILED
+                    },
+                    detail = result.error,
+                ),
+            )
+            refreshStats()
+        }
+    }
+
+    fun runAiSelected() {
+        val ids = uiState.value.selection.toList()
+        if (ids.isEmpty()) return
+        clearSelection()
+        ids.forEach { id ->
+            uiState.value.entries.firstOrNull { it.id == id }?.let(::runAi)
+        }
+    }
+
+    // ── Capture ───────────────────────────────────────────────────────────
+
+    fun pasteCurrent() = refreshClipboard(notify = true)
+
+    fun refreshClipboard(notify: Boolean) {
+        if (clipboardSandboxActive) {
+            if (notify) {
+                viewModelScope.launch {
+                    _events.send(ClipboardEvent.Message(ClipboardMessage.SANDBOX))
+                }
+            }
+            return
+        }
+        if (!ToolzForegroundTracker.isForeground.value) {
+            if (notify) {
+                viewModelScope.launch {
+                    _events.send(ClipboardEvent.Message(ClipboardMessage.EMPTY))
+                }
+            }
+            return
+        }
+        // One manual capture at a time; rapid button taps should not enqueue
+        // duplicate reads or flash the busy state.
+        if (!manualCaptureInFlight.compareAndSet(false, true)) return
+        viewModelScope.launch {
+            _extras.update { it.copy(busy = true) }
+            try {
+                val exclude = settingsState.first().excludeSensitive
+                val shizukuText = if (ShizukuHelper.isAuthorized()) {
+                    try {
+                        shizukuExecutor.getClipboardText()
+                    } catch (e: Exception) {
+                        android.util.Log.w(
+                            "ClipboardViewModel",
+                            "Shizuku clipboard read failed: ${e.message}",
+                        )
+                        null
+                    }
+                } else {
+                    null
+                }
+                if (!shizukuText.isNullOrBlank()) {
+                    val result = captureProcessor.processText(shizukuText, "MANUAL", exclude)
+                    emitOutcome(result)
+                    if (result == ClipboardCaptureProcessor.Outcome.INSERTED) {
+                        aiProcessor.processQueued(1)
+                    }
+                } else {
+                    // `cmd clipboard get` can be unavailable on some ROMs.
+                    // Toolz is foreground here, so read the clipboard directly.
+                    val payload = readSystemClipboard()
+                    if (payload == null) {
+                        if (notify) emit(ClipboardMessage.EMPTY)
+                    } else {
+                        val result = captureProcessor.process(payload, exclude)
+                        emitOutcome(result.outcome)
+                        if (result.outcome == ClipboardCaptureProcessor.Outcome.INSERTED) {
+                            aiProcessor.processQueued(1)
+                        }
+                    }
+                }
+                refreshStats()
+            } catch (e: Exception) {
+                if (notify) emit(ClipboardMessage.FAILED, detail = e.message)
+            } finally {
+                _extras.update { it.copy(busy = false) }
+                manualCaptureInFlight.set(false)
+            }
+        }
+    }
+
+    private fun readSystemClipboard(): ClipboardPayload? {
+        return try {
+            val manager = application.getSystemService(Context.CLIPBOARD_SERVICE)
+                as? ClipboardManager ?: return null
+            val clip = manager.primaryClip ?: return null
+            if (clip.itemCount == 0) return null
+            val description = clip.description
+            val items = buildList {
+                for (index in 0 until clip.itemCount) {
+                    val item = clip.getItemAt(index)
+                    add(
+                        ClipboardPayloadItem(
+                            text = item.text?.toString(),
+                            html = item.htmlText,
+                            uri = item.uri,
+                            mimeType = description?.getMimeType(index),
+                        ),
+                    )
+                }
+            }
+            if (items.all { it.text.isNullOrBlank() && it.uri == null }) return null
+            ClipboardPayload(items = items, source = "MANUAL")
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private suspend fun emitOutcome(outcome: ClipboardCaptureProcessor.Outcome) {
+        when (outcome) {
+            ClipboardCaptureProcessor.Outcome.INSERTED -> emit(ClipboardMessage.SAVED)
+            ClipboardCaptureProcessor.Outcome.BUMPED -> emit(ClipboardMessage.BUMPED)
+            ClipboardCaptureProcessor.Outcome.IGNORED_BLANK -> emit(ClipboardMessage.EMPTY)
+            ClipboardCaptureProcessor.Outcome.IGNORED_SENSITIVE ->
+                emit(ClipboardMessage.SENSITIVE_SKIPPED)
+            ClipboardCaptureProcessor.Outcome.IGNORED_TOO_LARGE ->
+                emit(ClipboardMessage.TOO_LARGE)
+            ClipboardCaptureProcessor.Outcome.IGNORED_QUOTA -> emit(ClipboardMessage.QUOTA)
+            ClipboardCaptureProcessor.Outcome.FAILED -> emit(ClipboardMessage.FAILED)
+        }
+    }
+
+    private suspend fun emit(type: ClipboardMessage, detail: String? = null) {
+        _events.send(ClipboardEvent.Message(type, detail = detail))
+    }
+
+    // ── Copy / share / open ───────────────────────────────────────────────
+
+    fun copyEntry(entry: ClipboardEntry) {
+        viewModelScope.launch {
+            val attachments = uiState.value.attachmentsByClip[entry.id].orEmpty()
+            if (copyToSystemClipboard(entry, attachments)) {
+                _events.send(ClipboardEvent.Message(ClipboardMessage.COPIED))
+            } else {
+                _events.send(ClipboardEvent.Message(ClipboardMessage.NOTHING_TO_COPY))
+            }
+        }
+    }
+
+    fun copySelected() {
+        val state = uiState.value
+        val ids = state.selection
+        if (ids.isEmpty()) return
+        // Locked clips stay out of bulk copy until individually unlocked.
+        val selected = state.entries.filter {
+            it.id in ids && it.deletedAt == null &&
+                (!it.isLocked || it.id in state.revealedIds)
+        }
+        val text = selected
+            .sortedByDescending { it.timestamp }
+            .mapNotNull { it.content.takeIf { value -> value.isNotBlank() } }
+            .joinToString("\n\n")
+        clearSelection()
+        if (text.isBlank()) {
+            viewModelScope.launch {
+                _events.send(ClipboardEvent.Message(ClipboardMessage.NOTHING_TO_COPY))
+            }
+            return
+        }
+        val manager = application.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        manager.setPrimaryClip(ClipData.newPlainText("Toolz", text))
+        viewModelScope.launch {
+            _events.send(ClipboardEvent.Message(ClipboardMessage.SELECTION_COPIED, count = selected.size))
+        }
+    }
+
+    private suspend fun copyToSystemClipboard(
+        entry: ClipboardEntry,
+        attachments: List<ClipboardAttachment>,
+    ): Boolean {
+        val manager = application.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val uris = stageAttachments(attachments)
+        val text = entry.content
+        val html = entry.htmlContent
+        if (text.isBlank() && uris.isEmpty()) return false
+
+        val clip = if (text.isNotBlank()) {
+            if (!html.isNullOrBlank()) {
+                ClipData.newHtmlText("Toolz", text, html)
+            } else {
+                ClipData.newPlainText("Toolz", text)
+            }
+        } else {
+            ClipData.newUri(application.contentResolver, "Toolz", uris.first())
+        }
+        val firstUriIndex = if (text.isNotBlank()) 0 else 1
+        uris.drop(firstUriIndex).forEach { uri ->
+            clip.addItem(ClipData.Item(uri))
+        }
+        manager.setPrimaryClip(clip)
+        return true
+    }
+
+    fun shareEntry(entry: ClipboardEntry) {
+        viewModelScope.launch {
+            val attachments = uiState.value.attachmentsByClip[entry.id].orEmpty()
+            val intent = buildShareIntent(entry, attachments)
+            _events.send(ClipboardEvent.Share(intent))
+        }
+    }
+
+    private suspend fun buildShareIntent(
+        entry: ClipboardEntry,
+        attachments: List<ClipboardAttachment>,
+    ): Intent {
+        val uris = stageAttachments(attachments)
+        val text = entry.content
+        return if (uris.size > 1) {
+            Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+                type = attachments.firstOrNull()?.mimeType ?: entry.mimeType ?: "*/*"
+                putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
+                if (text.isNotBlank()) putExtra(Intent.EXTRA_TEXT, text)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+        } else if (uris.size == 1) {
+            Intent(Intent.ACTION_SEND).apply {
+                type = attachments.firstOrNull()?.mimeType ?: entry.mimeType ?: "*/*"
+                putExtra(Intent.EXTRA_STREAM, uris.first())
+                if (text.isNotBlank()) putExtra(Intent.EXTRA_TEXT, text)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+        } else {
+            Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, text)
+            }
+        }
+    }
+
+    private suspend fun stageAttachments(
+        attachments: List<ClipboardAttachment>,
+    ): List<Uri> = attachments.mapNotNull { attachment ->
+        val file = blobStore.copyToShareCache(attachment.blobId, attachment.fileName)
+        if (file == null) {
+            null
+        } else {
+            try {
+                FileProvider.getUriForFile(
+                    application,
+                    "${application.packageName}.fileprovider",
+                    file,
+                )
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
+
+    suspend fun loadAttachmentBytes(attachment: ClipboardAttachment): ByteArray? =
+        blobStore.readBytes(attachment.blobId)
+
+    suspend fun loadAttachmentBitmap(
+        attachment: ClipboardAttachment,
+        maxDimension: Int = 512,
+    ): android.graphics.Bitmap? = blobStore.bitmap(attachment.blobId, maxDimension)
+
+    suspend fun openAttachment(attachment: ClipboardAttachment): Intent? {
+        val file = blobStore.copyToShareCache(attachment.blobId, attachment.fileName)
+            ?: return null
+        val uri = try {
+            FileProvider.getUriForFile(
+                application,
+                "${application.packageName}.fileprovider",
+                file,
+            )
+        } catch (_: Exception) {
+            return null
+        }
+        val mime = attachment.mimeType ?: "*/*"
+        return Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, mime)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+    }
+
+    fun attachmentFileName(uri: Uri): String? = try {
+        application.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (index >= 0 && cursor.moveToFirst()) cursor.getString(index) else null
+        }
+    } catch (_: Exception) {
+        null
+    }
+
+    // ── Settings ──────────────────────────────────────────────────────────
 
     fun setMonitoringEnabled(enabled: Boolean) {
-        // DEV-SPOOF: sandboxed → the capture pipeline stays simulated.
         if (clipboardSandboxActive) {
-            viewModelScope.launch { _events.emit("Sandbox: capture monitoring is simulated") }
+            viewModelScope.launch {
+                _events.send(ClipboardEvent.Message(ClipboardMessage.SANDBOX))
+            }
             return
         }
         viewModelScope.launch {
             settingsRepository.setClipboardMonitoringEnabled(enabled)
-            // Compute with the explicit value — the StateFlow hasn't re-emitted yet.
-            _gateStatus.value = computeGate(enabled)
-            applyServiceState(enabled, _gateStatus.value)
+            refreshGate()
         }
     }
 
@@ -187,6 +1199,8 @@ class ClipboardViewModel @Inject constructor(
         viewModelScope.launch {
             settingsRepository.setClipboardRetentionDays(days)
             ClipboardCleanupWorker.schedule(application)
+            retentionManager.enforceAll()
+            refreshStats()
         }
     }
 
@@ -194,238 +1208,139 @@ class ClipboardViewModel @Inject constructor(
         viewModelScope.launch { settingsRepository.setClipboardExcludeSensitive(enabled) }
     }
 
-    // ── Search ────────────────────────────────────────────────────────────
-
-    fun onSearchQueryChanged(query: String) {
-        _searchQuery.value = query
+    fun setBiometricLock(enabled: Boolean) {
+        viewModelScope.launch { settingsRepository.setClipboardBiometricLock(enabled) }
     }
 
-    // ── Grouping ──────────────────────────────────────────────────────────
+    fun setItemQuotaMb(mb: Int) {
+        viewModelScope.launch {
+            settingsRepository.setClipboardItemQuotaMb(mb)
+            refreshStats()
+        }
+    }
 
-    fun groupedEntries(allEntries: List<ClipboardEntry>): List<ClipboardGroup> {
-        val pinned = allEntries.filter { it.isPinned }
-        val unpinned = allEntries.filter { !it.isPinned }
+    fun setTotalQuotaMb(mb: Int) {
+        viewModelScope.launch {
+            settingsRepository.setClipboardTotalQuotaMb(mb)
+            retentionManager.enforceAll()
+            refreshStats()
+        }
+    }
 
-        val today = Calendar.getInstance().apply {
+    fun setMaxEntries(count: Int) {
+        viewModelScope.launch {
+            settingsRepository.setClipboardMaxEntries(count)
+            retentionManager.enforceAll()
+            refreshStats()
+        }
+    }
+
+    fun markBackupWarningSeen() {
+        viewModelScope.launch { settingsRepository.setClipboardBackupWarningSeen(true) }
+    }
+
+    // ── Grouping helpers ──────────────────────────────────────────────────
+
+    fun groupedEntries(entries: List<ClipboardEntry>): List<ClipboardGroup> {
+        val pinned = entries.filter { it.isPinned }
+        val unpinned = entries.filterNot { it.isPinned }
+        val startOfToday = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, 0)
             set(Calendar.MINUTE, 0)
             set(Calendar.SECOND, 0)
             set(Calendar.MILLISECOND, 0)
+        }
+        val today = startOfToday.timeInMillis
+        val yesterday = (startOfToday.clone() as Calendar).apply {
+            add(Calendar.DAY_OF_YEAR, -1)
         }.timeInMillis
-
-        val yesterday = today - 24 * 60 * 60 * 1000L
-
         val todayItems = unpinned.filter { it.timestamp >= today }
         val yesterdayItems = unpinned.filter { it.timestamp in yesterday until today }
         val olderItems = unpinned.filter { it.timestamp < yesterday }
-
         return buildList {
-            if (pinned.isNotEmpty()) add(ClipboardGroup("Pinned", pinned))
-            if (todayItems.isNotEmpty()) add(ClipboardGroup("Today", todayItems))
-            if (yesterdayItems.isNotEmpty()) add(ClipboardGroup("Yesterday", yesterdayItems))
-            if (olderItems.isNotEmpty()) add(ClipboardGroup("Older", olderItems))
-        }
-    }
-
-    // ── Mutations ─────────────────────────────────────────────────────────
-
-    fun deleteEntry(entry: ClipboardEntry) {
-        // DEV-SPOOF: sandboxed → the fixture list mutates in RAM, Room untouched.
-        if (clipboardSandboxActive) {
-            lastDeleted = entry // keeps the undo snackbar working inside the sandbox
-            com.frerox.toolz.data.developer.FakeClipboardSandbox.delete(entry.id)
-            return
-        }
-        viewModelScope.launch {
-            lastDeleted = entry
-            clipboardDao.delete(entry)
-            _events.emit("deleted")
-        }
-    }
-
-    fun undoDelete() {
-        viewModelScope.launch {
-            if (clipboardSandboxActive) {
-                lastDeleted?.let { com.frerox.toolz.data.developer.FakeClipboardSandbox.insert(it) }
-                lastDeleted = null
-                return@launch
+            if (pinned.isNotEmpty()) add(ClipboardGroup(ClipboardDateGroup.PINNED, pinned))
+            if (todayItems.isNotEmpty()) add(ClipboardGroup(ClipboardDateGroup.TODAY, todayItems))
+            if (yesterdayItems.isNotEmpty()) {
+                add(ClipboardGroup(ClipboardDateGroup.YESTERDAY, yesterdayItems))
             }
-            val cached = lastDeleted ?: return@launch
-            lastDeleted = null
-            clipboardDao.insert(
-                cached.copy(id = 0, timestamp = System.currentTimeMillis()),
+            if (olderItems.isNotEmpty()) add(ClipboardGroup(ClipboardDateGroup.OLDER, olderItems))
+        }
+    }
+
+    private fun filterEntries(
+        entries: List<ClipboardEntry>,
+        attachments: Map<Int, List<ClipboardAttachment>>,
+        query: String,
+        filter: ClipboardFilter,
+        revealed: Set<Int>,
+    ): List<ClipboardEntry> {
+        val normalized = query.trim()
+        return entries.filter { entry ->
+            matchesFilter(entry, attachments[entry.id].orEmpty(), filter) &&
+                (normalized.isBlank() ||
+                    matchesQuery(entry, attachments[entry.id].orEmpty(), normalized, revealed))
+        }
+    }
+
+    private fun matchesFilter(
+        entry: ClipboardEntry,
+        attachments: List<ClipboardAttachment>,
+        filter: ClipboardFilter,
+    ): Boolean {
+        val type = entry.type.uppercase()
+        val hasImage = attachments.any { it.mimeType?.startsWith("image/") == true } ||
+            type == ClipboardType.IMAGE
+        return when (filter) {
+            ClipboardFilter.ALL -> true
+            ClipboardFilter.TEXT -> entry.isTextLike &&
+                type !in setOf(
+                    ClipboardType.LINK,
+                    ClipboardType.URL,
+                    ClipboardType.SOCIAL,
+                    ClipboardType.CODE,
+                    ClipboardType.OTP,
+                    ClipboardType.CARD,
+                    ClipboardType.SECRET,
+                )
+            ClipboardFilter.LINKS -> type in setOf(
+                ClipboardType.LINK,
+                ClipboardType.URL,
+                ClipboardType.SOCIAL,
             )
+            ClipboardFilter.CODE -> type == ClipboardType.CODE
+            ClipboardFilter.OTP -> type == ClipboardType.OTP
+            ClipboardFilter.IMAGES -> hasImage
+            ClipboardFilter.FILES -> type in setOf(ClipboardType.FILE, ClipboardType.MULTI) ||
+                (attachments.isNotEmpty() && !hasImage)
+            ClipboardFilter.PINNED -> entry.isPinned
+            ClipboardFilter.SENSITIVE -> entry.isSensitive || entry.isLocked
         }
     }
 
-    fun togglePin(id: Int) {
-        // DEV-SPOOF: sandboxed → pin flips live on the fixture list only.
-        if (clipboardSandboxActive) {
-            com.frerox.toolz.data.developer.FakeClipboardSandbox.togglePin(id)
-            return
-        }
-        viewModelScope.launch { clipboardDao.togglePin(id) }
-    }
-
-    fun clearAll() {
-        // DEV-SPOOF: sandboxed → unpinned fixtures vanish (they're RAM-only).
-        if (clipboardSandboxActive) {
-            com.frerox.toolz.data.developer.FakeClipboardSandbox.clearUnpinned()
-            return
-        }
-        viewModelScope.launch { clipboardDao.clearAllUnpinned() }
-    }
-
-    fun summarizeEntry(entry: ClipboardEntry) {
-        // DEV-SPOOF: sandboxed → no AI provider call; fixtures ship pre-annotated.
-        if (clipboardSandboxActive) {
-            viewModelScope.launch { _events.emit("Sandbox: AI summarization is simulated") }
-            return
-        }
-        if (!clipboardAiEnabled.value) return
-        viewModelScope.launch {
-            _isSummarizing.value = entry.id
-            try {
-                val prompt = """
-                    Classify this clipboard content and provide a punchy 1-sentence summary (max 15 words).
-                    You can use standard categories (TEXT, URL, SOCIAL, PHONE, OTP, EMAIL, MATHS, PERSONAL, CODE, ADDRESS, CRYPTO, TODO, RECIPE, FLIGHT, EVENT, QUOTE)
-                    or CREATE A NEW ONE if it fits better.
-                    Keep category names uppercase and single-word.
-
-                    Content: ${entry.content.take(1500)}
-
-                    Respond in JSON format: {"category": "CATEGORY_NAME", "summary": "Short summary"}
-                """.trimIndent()
-
-                aiRepository.getChatResponse(prompt, emptyList(), null, "openai/gpt-oss-20b").collect { result ->
-                    result.onSuccess { chunk ->
-                        val response = chunk.text
-                        val category = Regex("\"category\":\\s*\"([^\"]+)\"").find(response)?.groupValues?.get(1) ?: entry.type
-                        val summary = Regex("\"summary\":\\s*\"([^\"]+)\"").find(response)?.groupValues?.get(1) ?: ""
-                        clipboardDao.updateAiDetails(entry.id, summary, category)
-                    }
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            } finally {
-                _isSummarizing.value = null
+    private fun matchesQuery(
+        entry: ClipboardEntry,
+        attachments: List<ClipboardAttachment>,
+        query: String,
+        revealed: Set<Int>,
+    ): Boolean {
+        val contentVisible = (!entry.isSensitive && !entry.isLocked) || entry.id in revealed
+        if (contentVisible) {
+            if (entry.content.contains(query, ignoreCase = true)) return true
+            if (entry.summary?.contains(query, ignoreCase = true) == true) return true
+            if (attachments.any { it.fileName?.contains(query, ignoreCase = true) == true }) {
+                return true
             }
         }
+        if (entry.type.contains(query, ignoreCase = true)) return true
+        return entry.sourceApp?.contains(query, ignoreCase = true) == true
     }
 
-    fun categorizeAllWithAi() {
-        // Kept for API compat — just re-reads the system clipboard.
-        refreshClipboard()
-    }
+    /** True when the clip is safe to display without a biometric check. */
+    fun isRevealable(entry: ClipboardEntry): Boolean =
+        !entry.isLocked || entry.id in uiState.value.revealedIds
 
-    // ── Capture ───────────────────────────────────────────────────────────
-
-    private fun isAppInForeground(): Boolean {
-        return ToolzForegroundTracker.isForeground.value
-    }
-
-    /**
-     * Manual "Paste current" — always allowed while the screen is visible
-     * (foreground read is permitted by Android). Emits a user message.
-     */
-    fun pasteCurrent() {
-        viewModelScope.launch {
-            try {
-                if (ShizukuHelper.isAuthorized()) {
-                    val text = shizukuExecutor.getClipboardText()
-                    val outcome = captureProcessor.processText(
-                        text, "manual-shizuku", excludeSensitive.value,
-                    )
-                    emitOutcome(outcome)
-                    return@launch
-                }
-                if (!isAppInForeground()) {
-                    _events.emit("open_app_to_paste")
-                    return@launch
-                }
-                try {
-                    val cm = application.getSystemService(Context.CLIPBOARD_SERVICE) as AndroidClipboardManager
-                    val clip = cm.primaryClip
-                    if (clip == null || clip.itemCount == 0) {
-                        _events.emit("clipboard_empty")
-                        return@launch
-                    }
-                    val item = clip.getItemAt(0)
-                    if (item.uri != null && item.text == null && item.htmlText == null) {
-                        _events.emit("non_text_clip")
-                        return@launch
-                    }
-                    val text = item.coerceToText(application)?.toString()
-                    val outcome = captureProcessor.processText(
-                        text, "manual", excludeSensitive.value,
-                    )
-                    emitOutcome(outcome)
-                } catch (_: SecurityException) {
-                    _events.emit("clipboard_denied")
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
-    }
-
-    private suspend fun emitOutcome(outcome: ClipboardCaptureProcessor.Outcome) {
-        when (outcome) {
-            ClipboardCaptureProcessor.Outcome.INSERTED -> _events.emit("saved")
-            ClipboardCaptureProcessor.Outcome.BUMPED -> _events.emit("bumped")
-            ClipboardCaptureProcessor.Outcome.IGNORED_SENSITIVE -> _events.emit("sensitive_skipped")
-            ClipboardCaptureProcessor.Outcome.IGNORED_BLANK -> _events.emit("clipboard_empty")
-        }
-    }
-
-    fun refreshClipboard() {
-        // DEV-SPOOF: sandboxed → the device clipboard is never read.
-        if (clipboardSandboxActive) {
-            viewModelScope.launch { _events.emit("Sandbox: clipboard capture is simulated") }
-            return
-        }
-        refreshGate()
-        viewModelScope.launch {
-            try {
-                if (ShizukuHelper.isAuthorized()) {
-                    val text = shizukuExecutor.getClipboardText()
-                    if (text != null) {
-                        captureProcessor.processText(text, "foreground-shizuku", excludeSensitive.value)
-                    }
-                    return@launch
-                }
-                if (isAppInForeground()) {
-                    try {
-                        val cm = application.getSystemService(Context.CLIPBOARD_SERVICE) as AndroidClipboardManager
-                        val clip = cm.primaryClip
-                        if (clip != null && clip.itemCount > 0) {
-                            val item = clip.getItemAt(0)
-                            if (item.uri == null || item.text != null || item.htmlText != null) {
-                                val text = item.coerceToText(application)?.toString()
-                                captureProcessor.processText(text, "foreground", excludeSensitive.value)
-                            }
-                        }
-                    } catch (_: Exception) {
-                    }
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
-    }
-
-    fun ensureServiceState() {
-        applyServiceState(monitoringEnabled.value, _gateStatus.value)
-    }
-
-    private fun applyServiceState(monitoring: Boolean, status: ClipboardGate.Status) {
-        // PAUSED — clipboard tool is under development. Never start the service;
-        // always stop it if it is still running from a previous build.
-        // To re-enable: restore the gate check + ClipboardService.startIfNeeded().
-        try {
-            application.stopService(Intent(application, ClipboardService::class.java))
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+    companion object {
+        const val CLIPBOARD_LABEL = "Toolz"
+        val AI_IDLE_STATES = setOf(null, ClipAiState.IDLE, ClipAiState.DISABLED)
     }
 }

@@ -44,6 +44,7 @@ import androidx.compose.material.icons.automirrored.rounded.StickyNote2
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -85,7 +86,9 @@ import kotlinx.coroutines.launch
 fun QRGeneratorScreen(
     viewModel: QRViewModel,
     onBack: () -> Unit,
-    onNavigateToScanner: () -> Unit
+    onNavigateToScanner: () -> Unit,
+    initialText: String? = null,
+    onInitialTextConsumed: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val vibrationManager = LocalVibrationManager.current
@@ -128,6 +131,16 @@ fun QRGeneratorScreen(
 
     LaunchedEffect(Unit) {
         viewModel.checkClipboard(context)
+    }
+
+    var initialTextConsumed by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(initialText) {
+        val text = initialText?.trim().orEmpty()
+        if (!initialTextConsumed && text.isNotEmpty()) {
+            viewModel.updateInputText(text)
+            initialTextConsumed = true
+            onInitialTextConsumed()
+        }
     }
 
     // Brightness Control

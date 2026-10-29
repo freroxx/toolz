@@ -1153,6 +1153,9 @@ fun ToolzNavHost(
     var launchedFromShortcut by remember { mutableStateOf(MainActivity.isShortcutIntent(incomingIntent)) }
     var showShortcutExitDialog by remember { mutableStateOf(false) }
     val context = LocalContext.current
+    // One-shot bridge for Clipboard → Notepad/Todo/QR/Encrypter. The target
+    // screen consumes the value and clears it so it is never replayed.
+    var clipboardIntegrationText by remember { mutableStateOf<String?>(null) }
 
     // Reset shortcut flag when returning to dashboard/onboarding
     LaunchedEffect(currentRoute) {
@@ -1606,7 +1609,12 @@ fun ToolzNavHost(
             CaffeinateScreen(onNavigateBack = { toolOnBack() })
         }
         composable(Screen.Todo.route) {
-            TodoScreen(viewModel = hiltViewModel(), onNavigateBack = { toolOnBack() })
+            TodoScreen(
+                viewModel = hiltViewModel(),
+                onNavigateBack = { toolOnBack() },
+                initialText = clipboardIntegrationText,
+                onInitialTextConsumed = { clipboardIntegrationText = null },
+            )
         }
         composable(Screen.Calendar.route) {
             CalendarScreen(viewModel = hiltViewModel())
@@ -1714,7 +1722,9 @@ fun ToolzNavHost(
                     navController.navigate(Screen.Scanner.route) {
                         popUpTo(Screen.QrGenerator.route) { inclusive = true }
                     }
-                }
+                },
+                initialText = clipboardIntegrationText,
+                onInitialTextConsumed = { clipboardIntegrationText = null },
             )
         }
         composable(Screen.LightMeter.route) {
@@ -1784,6 +1794,8 @@ fun ToolzNavHost(
             SmartEncrypterScreen(
                 initialUri = initialUri,
                 mode = mode,
+                initialText = clipboardIntegrationText,
+                onInitialTextConsumed = { clipboardIntegrationText = null },
                 onBack = { toolOnBack() }
             )
         }
@@ -1848,7 +1860,9 @@ fun ToolzNavHost(
                         }
                     }
                 },
-                initialNoteId = initialNoteId
+                initialNoteId = initialNoteId,
+                initialText = clipboardIntegrationText,
+                onInitialTextConsumed = { clipboardIntegrationText = null },
             )
         }
         composable(Screen.BatteryInfo.route) {
@@ -1899,7 +1913,28 @@ fun ToolzNavHost(
             NotificationVaultScreen(onNavigateBack = { toolOnBack() })
         }
         composable(Screen.Clipboard.route) {
-            ClipboardScreen(viewModel = hiltViewModel(), onBack = { toolOnBack() })
+            ClipboardScreen(
+                viewModel = hiltViewModel(),
+                onBack = { toolOnBack() },
+                onOpenNotepad = { text ->
+                    clipboardIntegrationText = text
+                    navController.navigate(Screen.Notepad.route) { launchSingleTop = true }
+                },
+                onCreateTask = { text ->
+                    clipboardIntegrationText = text
+                    navController.navigate(Screen.Todo.route) { launchSingleTop = true }
+                },
+                onShowQr = { text ->
+                    clipboardIntegrationText = text
+                    navController.navigate(Screen.QrGenerator.route) { launchSingleTop = true }
+                },
+                onEncrypt = { text ->
+                    clipboardIntegrationText = text
+                    navController.navigate(Screen.SmartEncrypter.createRoute(mode = "encrypt")) {
+                        launchSingleTop = true
+                    }
+                },
+            )
         }
         // P3 single entry: both legacy routes map to NetworkSuiteScreen (PowerSuite retired)
         composable(Screen.NetworkPowerSuite.route) {

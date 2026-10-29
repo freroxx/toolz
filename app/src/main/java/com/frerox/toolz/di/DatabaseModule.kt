@@ -431,6 +431,70 @@ object DatabaseModule {
         }
     }
 
+    // Clipboard rebuild 66->67: additive rich-clip fields, trash/expiry,
+    // sensitive/lock model, AI state machine and the attachment metadata table.
+    // No existing column is rewritten and no row is dropped; legacy clips keep
+    // their content and become non-sensitive/unlocked until reclassified.
+    internal val MIGRATION_66_67 = object : Migration(66, 67) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE clipboard_entries ADD COLUMN contentHashSha256 TEXT")
+            db.execSQL("ALTER TABLE clipboard_entries ADD COLUMN htmlContent TEXT")
+            db.execSQL("ALTER TABLE clipboard_entries ADD COLUMN mimeType TEXT")
+            db.execSQL("ALTER TABLE clipboard_entries ADD COLUMN sizeBytes INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE clipboard_entries ADD COLUMN attachmentCount INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE clipboard_entries ADD COLUMN isSensitive INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE clipboard_entries ADD COLUMN sensitivityReason TEXT")
+            db.execSQL("ALTER TABLE clipboard_entries ADD COLUMN isLocked INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE clipboard_entries ADD COLUMN passwordVaultMatch INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE clipboard_entries ADD COLUMN metadataJson TEXT")
+            db.execSQL("ALTER TABLE clipboard_entries ADD COLUMN deletedAt INTEGER")
+            db.execSQL("ALTER TABLE clipboard_entries ADD COLUMN expiresAt INTEGER")
+            db.execSQL("ALTER TABLE clipboard_entries ADD COLUMN aiState TEXT")
+            db.execSQL("ALTER TABLE clipboard_entries ADD COLUMN aiError TEXT")
+            db.execSQL(
+                "UPDATE clipboard_entries SET aiState = CASE WHEN isAiProcessed = 1 THEN 'DONE' ELSE 'IDLE' END",
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_clipboard_entries_contentHashSha256` " +
+                    "ON `clipboard_entries` (`contentHashSha256`)",
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_clipboard_entries_timestamp` " +
+                    "ON `clipboard_entries` (`timestamp`)",
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_clipboard_entries_deletedAt` " +
+                    "ON `clipboard_entries` (`deletedAt`)",
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_clipboard_entries_isPinned` " +
+                    "ON `clipboard_entries` (`isPinned`)",
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_clipboard_entries_isSensitive` " +
+                    "ON `clipboard_entries` (`isSensitive`)",
+            )
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `clipboard_attachments` (" +
+                    "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                    "`clipId` INTEGER NOT NULL, `blobId` TEXT NOT NULL, " +
+                    "`fileName` TEXT, `mimeType` TEXT, " +
+                    "`sizeBytes` INTEGER NOT NULL, `position` INTEGER NOT NULL, " +
+                    "`width` INTEGER, `height` INTEGER, " +
+                    "FOREIGN KEY(`clipId`) REFERENCES `clipboard_entries`(`id`) " +
+                    "ON UPDATE NO ACTION ON DELETE CASCADE)",
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_clipboard_attachments_clipId` " +
+                    "ON `clipboard_attachments` (`clipId`)",
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_clipboard_attachments_blobId` " +
+                    "ON `clipboard_attachments` (`blobId`)",
+            )
+        }
+    }
+
     @Provides
     @Singleton
     fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase {
@@ -452,7 +516,7 @@ object DatabaseModule {
         .openHelperFactory(factory)
         // V2-FIX (reviewwhisper.md) H-10: explicit migrations only — every version bump
         // must ship one (see AppDatabase comment).
-        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56, MIGRATION_56_57, MIGRATION_57_58, MIGRATION_58_59, MIGRATION_59_60, MIGRATION_60_61, MIGRATION_61_62, MIGRATION_62_63, MIGRATION_63_64, MIGRATION_64_65, MIGRATION_65_66)
+        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56, MIGRATION_56_57, MIGRATION_57_58, MIGRATION_58_59, MIGRATION_59_60, MIGRATION_60_61, MIGRATION_61_62, MIGRATION_62_63, MIGRATION_63_64, MIGRATION_64_65, MIGRATION_65_66, MIGRATION_66_67)
         .fallbackToDestructiveMigrationOnDowngrade()
         // NOTE: Add explicit Migration objects here when schema changes. Schemas are now
         // EXPORTED to app/schemas (H-10 fix) so diffs are reviewable — never re-introduce
@@ -516,7 +580,7 @@ object DatabaseModule {
                 // Fresh builder avoids leaking the first helper's connection.
                 return Room.databaseBuilder(context, AppDatabase::class.java, dbName)
                     .openHelperFactory(factory)
-        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56, MIGRATION_56_57, MIGRATION_57_58, MIGRATION_58_59, MIGRATION_59_60, MIGRATION_60_61, MIGRATION_61_62, MIGRATION_62_63, MIGRATION_63_64, MIGRATION_64_65, MIGRATION_65_66)
+        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56, MIGRATION_56_57, MIGRATION_57_58, MIGRATION_58_59, MIGRATION_59_60, MIGRATION_60_61, MIGRATION_61_62, MIGRATION_62_63, MIGRATION_63_64, MIGRATION_64_65, MIGRATION_65_66, MIGRATION_66_67)
                     .fallbackToDestructiveMigrationOnDowngrade()
                     .build()
             }

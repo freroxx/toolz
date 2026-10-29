@@ -13,10 +13,67 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import com.frerox.toolz.data.clipboard.ClipboardGate
+import com.frerox.toolz.data.settings.SettingsRepository
+import com.frerox.toolz.worker.ClipboardCleanupWorker
+import dagger.hilt.EntryPoint
+import dagger.hilt.InstallIn
+import dagger.hilt.android.EntryPointAccessors
+import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
+/**
+ * Restores clipboard monitoring after boot/update only when the user has
+ * completed onboarding, left monitoring enabled, and a privileged read path
+ * is actually available. Never starts a zombie foreground service.
+ */
 class ClipboardBootReceiver : BroadcastReceiver() {
+
+    @EntryPoint
+    @InstallIn(SingletonComponent::class)
+    interface BootEntryPoint {
+        fun settingsRepository(): SettingsRepository
+    }
+
     override fun onReceive(context: Context, intent: Intent) {
-        // PAUSED — clipboard tool is under development. Do not start the service.
-        // To re-enable: call ClipboardService.startIfNeeded(context.applicationContext).
+        val action = intent.action ?: return
+        if (action !in SUPPORTED_ACTIONS) return
+        val appContext = context.applicationContext
+        ClipboardCleanupWorker.schedule(appContext)
+
+        val pending = goAsync()
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            try {
+                val repository = EntryPointAccessors.fromApplication(
+                    appContext,
+                    BootEntryPoint::class.java,
+                ).settingsRepository()
+                val monitoring = repository.clipboardMonitoringEnabled.first()
+                val seen = repository.clipboardOnboardingSeen.first()
+                if (!monitoring || !seen) return@launch
+                val capabilities = ClipboardGate.capabilities(appContext, seen)
+                if (capabilities.backgroundCapable) {
+                    ClipboardService.startIfNeeded(appContext)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Boot restore failed: ${e.message}")
+            } finally {
+                pending.finish()
+            }
+        }
+    }
+
+    private companion object {
+        const val TAG = "ClipboardBootReceiver"
+        val SUPPORTED_ACTIONS = setOf(
+            Intent.ACTION_BOOT_COMPLETED,
+            Intent.ACTION_LOCKED_BOOT_COMPLETED,
+            Intent.ACTION_MY_PACKAGE_REPLACED,
+            Intent.ACTION_USER_PRESENT,
+        )
     }
 }

@@ -17,30 +17,40 @@
 
 package com.frerox.toolz.service
 
+import android.graphics.Color
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
 import com.frerox.toolz.ui.components.ClipboardPopup
 import com.frerox.toolz.ui.theme.ToolzTheme
 import dagger.hilt.android.AndroidEntryPoint
 
+/**
+ * Transparent host for the quick clipboard switcher. Uses [AppCompatActivity]
+ * so locked clips can show a BiometricPrompt.
+ */
 @AndroidEntryPoint
-class ClipboardPopupActivity : ComponentActivity() {
+class ClipboardPopupActivity : AppCompatActivity() {
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
         WindowCompat.setDecorFitsSystemWindows(window, false)
-        window.statusBarColor = android.graphics.Color.TRANSPARENT
-        window.navigationBarColor = android.graphics.Color.TRANSPARENT
+        window.statusBarColor = Color.TRANSPARENT
+        window.navigationBarColor = Color.TRANSPARENT
+        window.setDimAmount(0f)
 
         setContent {
             ToolzTheme {
                 ClipboardPopup(
                     onDismiss = { finish() },
-                    onManageHistory = { finish() }
+                    onManageHistory = { finish() },
                 )
             }
         }
+    }
+
+    companion object {
+        const val EXTRA_SOURCE = "extra_source"
     }
 }

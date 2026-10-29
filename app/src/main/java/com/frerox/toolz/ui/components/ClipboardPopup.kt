@@ -9,153 +9,392 @@
 
 package com.frerox.toolz.ui.components
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.automirrored.rounded.ArrowForward
+import androidx.compose.material.icons.automirrored.rounded.InsertDriveFile
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.ContentPaste
+import androidx.compose.material.icons.rounded.Image
+import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.PushPin
+import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.fragment.app.FragmentActivity
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.MainActivity
+import com.frerox.toolz.R
+import com.frerox.toolz.data.clipboard.ClipboardEntry
+import com.frerox.toolz.data.clipboard.ClipboardType
+import com.frerox.toolz.ui.screens.clipboard.ClipboardEvent
+import com.frerox.toolz.ui.screens.clipboard.ClipboardMessage
 import com.frerox.toolz.ui.screens.clipboard.ClipboardViewModel
+import com.frerox.toolz.util.security.BiometricPromptUtils
 
 /**
- * Quick switcher launched from the QS tile: the 5 most recent clips,
- * tap to copy back to the system clipboard, plus paste-current + open history.
+ * Floating quick switcher launched from the QS tile. Shows the most recent
+ * clips, masks sensitive content, and supports image/file clips. Locked clips
+ * require biometric confirmation before they can be copied.
  */
 @Composable
 fun ClipboardPopup(
     onDismiss: () -> Unit,
     onManageHistory: () -> Unit,
-    viewModel: ClipboardViewModel = hiltViewModel()
+    viewModel: ClipboardViewModel = hiltViewModel(),
 ) {
     val context = LocalContext.current
-    val entries by viewModel.entries.collectAsStateWithLifecycle()
-    val recent = remember(entries) { entries.take(5) }
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val recent = remember(state.entries) { state.entries.take(6) }
     val haptic = rememberToolzHapticFeedback()
+    // Opening the popup captures the current clipboard too. Only dismiss on
+    // SAVED/BUMPED/EMPTY when the user explicitly pressed "Paste current".
+    var awaitingPaste by remember { mutableStateOf(false) }
 
-    // Capture anything new while the popup is visible (foreground read allowed).
-    LaunchedEffect(Unit) { viewModel.refreshClipboard() }
-
-    fun copy(text: String) {
-        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        cm.setPrimaryClip(ClipData.newPlainText("Toolz", text))
-        haptic.success()
+    LaunchedEffect(Unit) {
+        viewModel.refreshClipboard(notify = false)
     }
 
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Box(
-            Modifier.fillMaxSize()
-                .clickable(onClick = onDismiss),
+    LaunchedEffect(Unit) {
+        viewModel.events.collect { event ->
+            if (event is ClipboardEvent.Message) {
+                val dismiss = when (event.type) {
+                    ClipboardMessage.COPIED,
+                    ClipboardMessage.NOTHING_TO_COPY,
+                    ClipboardMessage.SENSITIVE_SKIPPED,
+                    ClipboardMessage.TOO_LARGE,
+                    ClipboardMessage.QUOTA,
+                    ClipboardMessage.FAILED,
+                    -> true
+                    ClipboardMessage.SAVED,
+                    ClipboardMessage.BUMPED,
+                    ClipboardMessage.EMPTY,
+                    -> awaitingPaste
+                    else -> false
+                }
+                if (dismiss) onDismiss()
+            }
+        }
+    }
+
+    fun copy(entry: ClipboardEntry) {
+        if (!entry.isLocked) {
+            viewModel.copyEntry(entry)
+            return
+        }
+        if (!state.settings.biometricLock) {
+            viewModel.copyEntry(entry)
+            return
+        }
+        val activity = context.findFragmentActivity()
+        if (activity == null || !BiometricPromptUtils.canAuthenticate(activity)) {
+            openHistory(context)
+            onDismiss()
+            return
+        }
+        BiometricPromptUtils.showBiometricPrompt(
+            activity = activity,
+            title = R.string.st_ClipboardPopup_unlock_title,
+            subtitle = R.string.st_ClipboardPopup_unlock_subtitle,
+            onSuccess = {
+                haptic.success()
+                viewModel.copyEntry(entry)
+            },
+            onError = { _, _ -> },
         )
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f))
+            .clickable(onClick = onDismiss),
+        contentAlignment = Alignment.Center,
+    ) {
         ExpressiveCard(
             onClick = {},
-            modifier = Modifier.width(360.dp).padding(16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 32.dp),
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            shape = RoundedCornerShape(32.dp),
         ) {
-            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.primaryContainer) {
-                        Icon(Icons.Rounded.ContentPaste, null, Modifier.padding(10.dp).size(20.dp), tint = MaterialTheme.colorScheme.primary)
+            Column(
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                    ) {
+                        Icon(
+                            Icons.Rounded.ContentPaste,
+                            contentDescription = null,
+                            modifier = Modifier
+                                .padding(10.dp)
+                                .size(20.dp),
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
                     }
                     Column(Modifier.weight(1f)) {
-                        Text("Clipboard", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         Text(
-                            if (recent.isEmpty()) "No clips yet" else "${entries.size} clips • tap to copy",
+                            text = stringResource(R.string.st_ClipboardPopup_title),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Black,
+                        )
+                        Text(
+                            text = if (recent.isEmpty()) {
+                                stringResource(R.string.st_ClipboardPopup_empty_subtitle)
+                            } else {
+                                pluralStringResource(
+                                    R.plurals.st_ClipboardPopup_subtitle,
+                                    state.entries.size,
+                                    state.entries.size,
+                                )
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Rounded.Close, null, Modifier.size(18.dp))
+                    IconButton(
+                        onClick = {
+                            haptic.click()
+                            onDismiss()
+                        },
+                        modifier = Modifier.size(32.dp),
+                    ) {
+                        Icon(
+                            Icons.Rounded.Close,
+                            contentDescription = stringResource(R.string.st_ClipboardPopup_close),
+                            modifier = Modifier.size(18.dp),
+                        )
                     }
                 }
 
                 if (recent.isEmpty()) {
                     Text(
-                        "Copy something, then reopen — or paste the current clip.",
+                        text = stringResource(R.string.st_ClipboardPopup_empty_body),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Button(
-                        onClick = { viewModel.pasteCurrent() },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Icon(Icons.Rounded.ContentPaste, null, Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Paste current")
-                    }
                 } else {
                     LazyColumn(
-                        modifier = Modifier.heightIn(max = 280.dp),
+                        modifier = Modifier.heightIn(max = 340.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         items(recent, key = { it.id }) { entry ->
-                            Surface(
-                                onClick = { copy(entry.content); onDismiss() },
-                                shape = RoundedCornerShape(16.dp),
-                                color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Row(
-                                    Modifier.padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                ) {
-                                    Column(Modifier.weight(1f)) {
-                                        Text(
-                                            entry.content,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            maxLines = 2,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                        Text(
-                                            entry.type.lowercase().replaceFirstChar { c -> c.uppercase() },
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                    if (entry.isPinned) {
-                                        Icon(Icons.Rounded.PushPin, null, Modifier.size(15.dp), tint = MaterialTheme.colorScheme.primary)
-                                    }
-                                    Icon(Icons.Rounded.ContentCopy, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                            }
+                            PopupClipRow(
+                                entry = entry,
+                                revealed = entry.id in state.revealedIds,
+                                maskedPreview = viewModel.classifier.maskPreview(entry.content, 2),
+                                onCopy = {
+                                    haptic.click()
+                                    copy(entry)
+                                },
+                            )
                         }
                     }
+                }
+
+                Button(
+                    onClick = {
+                        haptic.click()
+                        awaitingPaste = true
+                        viewModel.pasteCurrent()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(
+                        Icons.Rounded.ContentPaste,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.st_ClipboardPopup_paste_current))
                 }
 
                 OutlinedButton(
                     onClick = {
                         haptic.click()
-                        val intent = Intent(context, MainActivity::class.java).apply {
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                            putExtra("navigate_to", "clipboard")
-                        }
-                        context.startActivity(intent)
+                        openHistory(context)
                         onManageHistory()
                     },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text("Open full history", fontWeight = FontWeight.Bold)
+                    Text(
+                        text = stringResource(R.string.st_ClipboardPopup_open_history),
+                        fontWeight = FontWeight.Bold,
+                    )
                     Spacer(Modifier.width(6.dp))
-                    Icon(Icons.Rounded.ArrowForward, null, Modifier.size(16.dp))
+                    Icon(
+                        Icons.AutoMirrored.Rounded.ArrowForward,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                    )
                 }
             }
         }
     }
+}
+
+@Composable
+private fun PopupClipRow(
+    entry: ClipboardEntry,
+    revealed: Boolean,
+    maskedPreview: String,
+    onCopy: () -> Unit,
+) {
+    val masked = (entry.isSensitive || entry.isLocked) && !revealed
+    val isImage = entry.type == ClipboardType.IMAGE
+    val isFile = entry.type == ClipboardType.FILE
+    Surface(
+        onClick = onCopy,
+        shape = RoundedCornerShape(18.dp),
+        color = if (entry.isSensitive || entry.isLocked) {
+            MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerHighest
+        },
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Icon(
+                when {
+                    entry.isLocked -> Icons.Rounded.Lock
+                    isImage -> Icons.Rounded.Image
+                    isFile -> Icons.AutoMirrored.Rounded.InsertDriveFile
+                    else -> Icons.Rounded.ContentCopy
+                },
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = if (entry.isSensitive || entry.isLocked) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = popupPreview(entry, masked, maskedPreview),
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = stringResource(
+                        when {
+                            entry.isLocked -> R.string.st_ClipboardPopup_locked
+                            isImage -> R.string.st_ClipboardScreen_type_image
+                            isFile -> R.string.st_ClipboardScreen_type_file
+                            entry.type == ClipboardType.MULTI ->
+                                R.string.st_ClipboardScreen_type_multi
+                            entry.type == ClipboardType.OTP ->
+                                R.string.st_ClipboardScreen_type_otp
+                            else -> R.string.st_ClipboardScreen_type_text
+                        },
+                    ),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (entry.isPinned) {
+                Icon(
+                    Icons.Rounded.PushPin,
+                    contentDescription = stringResource(R.string.st_ClipboardScreen_badge_pinned),
+                    modifier = Modifier.size(15.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
+            Icon(
+                Icons.Rounded.ContentCopy,
+                contentDescription = stringResource(R.string.st_ClipboardScreen_action_copy),
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun popupPreview(entry: ClipboardEntry, masked: Boolean, maskedPreview: String): String {
+    val content = entry.content
+    val imageLabel = stringResource(R.string.st_ClipboardScreen_attachment_image)
+    val fileLabel = stringResource(R.string.st_ClipboardScreen_attachment_file)
+    val multiLabel = pluralStringResource(
+        R.plurals.st_ClipboardScreen_multi_items,
+        entry.attachmentCount.coerceAtLeast(1),
+        entry.attachmentCount.coerceAtLeast(1),
+    )
+    return when {
+        // Locked clips stay fully redacted until this popup reveals them.
+        // Sensitive-only clips use the classifier's partial mask instead.
+        masked && entry.isLocked -> "••••••••"
+        masked -> maskedPreview
+        entry.type == ClipboardType.IMAGE -> imageLabel
+        entry.type == ClipboardType.FILE -> content.ifBlank { fileLabel }
+        entry.type == ClipboardType.MULTI -> content.ifBlank { multiLabel }
+        content.isBlank() -> entry.summary.orEmpty()
+        else -> content
+    }
+}
+
+private fun openHistory(context: Context) {
+    val intent = Intent(context, MainActivity::class.java).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        putExtra("navigate_to", "clipboard")
+    }
+    runCatching { context.startActivity(intent) }
+}
+
+private tailrec fun Context.findFragmentActivity(): FragmentActivity? = when (this) {
+    is FragmentActivity -> this
+    is ContextWrapper -> baseContext.findFragmentActivity()
+    else -> null
 }

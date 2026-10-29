@@ -17,21 +17,71 @@
 
 package com.frerox.toolz.data.clipboard
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "clipboard_entries")
+/**
+ * One clipboard capture.
+ *
+ * Backwards compatibility rules:
+ *  - Every new column has a default and the 66 → 67 migration is additive.
+ *  - [contentHash] (Int) is the legacy dedup key. New captures use
+ *    [contentHashSha256] and still write the legacy hash so old rows dedupe.
+ *  - [sourceApp] is the real package name for new captures. Legacy rows used
+ *    this column for the capture source; [source] is now the capture source.
+ *  - [deletedAt] turns deletes into a restorable trash action.
+ *  - Sensitive/locked/pinned rows are exempt from every automatic cleanup.
+ */
+@Entity(
+    tableName = "clipboard_entries",
+    indices = [
+        Index("contentHashSha256"),
+        Index("timestamp"),
+        Index("deletedAt"),
+        Index("isPinned"),
+        Index("isSensitive"),
+    ],
+)
 data class ClipboardEntry(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
     val content: String,
     val timestamp: Long = System.currentTimeMillis(),
-    var type: String = "TEXT", // TEXT, URL, COLOR, PHONE, OTP, EMAIL, MATHS, PERSONAL, CODE, ADDRESS
+    val type: String = ClipboardType.TEXT,
     val isPinned: Boolean = false,
     val previewUrl: String? = null,
     val sourceApp: String? = null,
     val summary: String? = null,
     val isAiProcessed: Boolean = false,
-    // Revamp v59: dedup hash + capture source (SHIZUKU / FOREGROUND / MANUAL / TILE).
+    /** Legacy Java-style hash kept for old dedup rows. */
     val contentHash: Int = 0,
-    val source: String? = null
-)
+    /** Capture path: SHIZUKU, FOREGROUND, MANUAL, SHARE, PROCESS_TEXT, POPUP, TILE. */
+    val source: String? = null,
+    /** SHA-256 over text + HTML + attachment hashes. */
+    val contentHashSha256: String? = null,
+    val htmlContent: String? = null,
+    val mimeType: String? = null,
+    @ColumnInfo(defaultValue = "0") val sizeBytes: Long = 0L,
+    @ColumnInfo(defaultValue = "0") val attachmentCount: Int = 0,
+    @ColumnInfo(defaultValue = "0") val isSensitive: Boolean = false,
+    val sensitivityReason: String? = null,
+    @ColumnInfo(defaultValue = "0") val isLocked: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val passwordVaultMatch: Boolean = false,
+    val metadataJson: String? = null,
+    val deletedAt: Long? = null,
+    val expiresAt: Long? = null,
+    /** AI state: null/IDLE, QUEUED, RUNNING, DONE, FAILED, SKIPPED_SENSITIVE, DISABLED. */
+    val aiState: String? = null,
+    val aiError: String? = null,
+) {
+    /** Sensitive, locked and pinned clips are never auto-deleted. */
+    val isCleanupExempt: Boolean
+        get() = isPinned || isSensitive || isLocked
+
+    val isTextLike: Boolean
+        get() = type !in setOf(ClipboardType.IMAGE, ClipboardType.FILE, ClipboardType.MULTI)
+
+    val isTrashed: Boolean
+        get() = deletedAt != null
+}

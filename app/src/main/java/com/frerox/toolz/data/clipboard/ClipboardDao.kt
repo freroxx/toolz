@@ -17,14 +17,48 @@
 
 package com.frerox.toolz.data.clipboard
 
-import androidx.room.*
+import androidx.room.Dao
+import androidx.room.Delete
+import androidx.room.Insert
+import androidx.room.OnConflictStrategy
+import androidx.room.Query
+import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface ClipboardDao {
 
-    @Query("SELECT * FROM clipboard_entries ORDER BY isPinned DESC, timestamp DESC")
+    // ── Active history ────────────────────────────────────────────────────
+
+    @Query("SELECT * FROM clipboard_entries WHERE deletedAt IS NULL ORDER BY isPinned DESC, timestamp DESC")
     fun getAllEntries(): Flow<List<ClipboardEntry>>
+
+    @Query("SELECT * FROM clipboard_entries WHERE deletedAt IS NOT NULL ORDER BY deletedAt DESC")
+    fun getTrashedEntries(): Flow<List<ClipboardEntry>>
+
+    @Query("SELECT * FROM clipboard_entries ORDER BY timestamp DESC")
+    fun getAllEntriesIncludingTrash(): Flow<List<ClipboardEntry>>
+
+    @Query("SELECT * FROM clipboard_entries ORDER BY timestamp DESC")
+    suspend fun getAllEntriesSync(): List<ClipboardEntry>
+
+    @Query("SELECT * FROM clipboard_entries WHERE deletedAt IS NULL ORDER BY timestamp DESC LIMIT 1")
+    suspend fun getLatestEntry(): ClipboardEntry?
+
+    @Query("SELECT * FROM clipboard_entries WHERE id = :id")
+    suspend fun getEntryById(id: Int): ClipboardEntry?
+
+    @Query("SELECT * FROM clipboard_entries WHERE deletedAt IS NULL AND contentHashSha256 = :hash ORDER BY timestamp DESC LIMIT 1")
+    suspend fun getBySha256(hash: String): ClipboardEntry?
+
+    @Query("SELECT * FROM clipboard_entries WHERE contentHashSha256 = :hash ORDER BY timestamp DESC LIMIT 1")
+    suspend fun getBySha256Any(hash: String): ClipboardEntry?
+
+    @Query("SELECT * FROM clipboard_entries WHERE deletedAt IS NULL AND contentHash = :hash ORDER BY timestamp DESC LIMIT 1")
+    suspend fun getByContentHash(hash: Int): ClipboardEntry?
+
+    @Query("SELECT * FROM clipboard_entries WHERE contentHash = :hash ORDER BY timestamp DESC LIMIT 1")
+    suspend fun getByContentHashAny(hash: Int): ClipboardEntry?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(entry: ClipboardEntry): Long
@@ -35,41 +69,127 @@ interface ClipboardDao {
     @Delete
     suspend fun delete(entry: ClipboardEntry)
 
+    @Query("DELETE FROM clipboard_entries WHERE id = :id")
+    suspend fun deleteById(id: Int)
+
     @Query("UPDATE clipboard_entries SET isPinned = NOT isPinned WHERE id = :id")
     suspend fun togglePin(id: Int)
 
-    @Query("DELETE FROM clipboard_entries WHERE timestamp < :timestamp AND isPinned = 0")
+    @Query("UPDATE clipboard_entries SET isPinned = :pinned WHERE id = :id")
+    suspend fun setPinned(id: Int, pinned: Boolean)
+
+    @Query("UPDATE clipboard_entries SET timestamp = :timestamp, source = :source, sourceApp = COALESCE(:sourceApp, sourceApp) WHERE id = :id")
+    suspend fun bumpEntry(id: Int, timestamp: Long, source: String?, sourceApp: String?)
+
+    @Query("UPDATE clipboard_entries SET summary = :summary, type = :type, isAiProcessed = 1, aiState = 'DONE', aiError = NULL WHERE id = :id")
+    suspend fun updateAiDetails(id: Int, summary: String?, type: String)
+
+    @Query("UPDATE clipboard_entries SET aiState = :state, aiError = :error WHERE id = :id")
+    suspend fun updateAiState(id: Int, state: String?, error: String?)
+
+    /** Drops any AI summary and marks the clip as permanently ineligible. */
+    @Query("UPDATE clipboard_entries SET summary = NULL, isAiProcessed = 0, aiState = :state, aiError = NULL WHERE id = :id")
+    suspend fun clearAiDetails(id: Int, state: String?)
+
+    @Query("UPDATE clipboard_entries SET isSensitive = :sensitive, sensitivityReason = :reason, passwordVaultMatch = :vaultMatch, isLocked = :locked WHERE id = :id")
+    suspend fun updateSensitivity(id: Int, sensitive: Boolean, reason: String?, vaultMatch: Boolean, locked: Boolean)
+
+    @Query("UPDATE clipboard_entries SET isLocked = :locked WHERE id = :id")
+    suspend fun setLocked(id: Int, locked: Boolean)
+
+    @Query("UPDATE clipboard_entries SET expiresAt = :expiresAt WHERE id = :id")
+    suspend fun setExpiresAt(id: Int, expiresAt: Long?)
+
+    @Query("SELECT * FROM clipboard_entries WHERE isAiProcessed = 0 AND deletedAt IS NULL AND isSensitive = 0 AND isLocked = 0 AND type NOT IN ('IMAGE', 'FILE', 'MULTI') ORDER BY timestamp DESC")
+    suspend fun getUnprocessedEntries(): List<ClipboardEntry>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertEntries(entries: List<ClipboardEntry>)
+
+    // ── Trash / retention ─────────────────────────────────────────────────
+
+    @Query("UPDATE clipboard_entries SET deletedAt = :timestamp WHERE id = :id")
+    suspend fun softDelete(id: Int, timestamp: Long)
+
+    @Query("UPDATE clipboard_entries SET deletedAt = :timestamp WHERE id IN (:ids) AND deletedAt IS NULL")
+    suspend fun softDeleteMany(ids: List<Int>, timestamp: Long)
+
+    @Query("UPDATE clipboard_entries SET deletedAt = NULL WHERE id = :id")
+    suspend fun restore(id: Int)
+
+    @Query("UPDATE clipboard_entries SET deletedAt = NULL WHERE id IN (:ids)")
+    suspend fun restoreMany(ids: List<Int>)
+
+    @Query("DELETE FROM clipboard_entries WHERE deletedAt IS NOT NULL AND deletedAt < :timestamp")
+    suspend fun deleteTrashedBefore(timestamp: Long): Int
+
+    @Query("DELETE FROM clipboard_entries WHERE deletedAt IS NOT NULL")
+    suspend fun emptyTrash(): Int
+
+    /** Auto-cleanup never touches pinned, sensitive or locked clips. */
+    @Query("DELETE FROM clipboard_entries WHERE deletedAt IS NULL AND isPinned = 0 AND isSensitive = 0 AND isLocked = 0 AND timestamp < :timestamp")
     suspend fun deleteOlderThan(timestamp: Long)
+
+    /** Expiry is only ever set on non-sensitive clips; enforce it defensively anyway. */
+    @Query("DELETE FROM clipboard_entries WHERE deletedAt IS NULL AND isPinned = 0 AND isSensitive = 0 AND isLocked = 0 AND expiresAt IS NOT NULL AND expiresAt < :now")
+    suspend fun deleteExpired(now: Long): Int
+
+    @Query("SELECT COUNT(*) FROM clipboard_entries WHERE deletedAt IS NULL AND isPinned = 0 AND isSensitive = 0 AND isLocked = 0 AND attachmentCount > 0")
+    suspend fun getEligibleAttachmentEntryCount(): Int
+
+    @Query("SELECT COUNT(*) FROM clipboard_entries WHERE deletedAt IS NULL AND isPinned = 0 AND isSensitive = 0 AND isLocked = 0")
+    suspend fun getEligibleEntryCount(): Int
+
+    @Query("DELETE FROM clipboard_entries WHERE id IN (SELECT id FROM clipboard_entries WHERE deletedAt IS NULL AND isPinned = 0 AND isSensitive = 0 AND isLocked = 0 ORDER BY timestamp ASC LIMIT :count)")
+    suspend fun deleteOldestEligible(count: Int)
+
+    @Query("SELECT * FROM clipboard_entries WHERE deletedAt IS NULL AND isPinned = 0 AND isSensitive = 0 AND isLocked = 0 AND attachmentCount > 0 ORDER BY timestamp ASC LIMIT 1")
+    suspend fun getOldestEligibleWithAttachments(): ClipboardEntry?
+
+    @Query("UPDATE clipboard_entries SET deletedAt = :timestamp WHERE deletedAt IS NULL AND isPinned = 0")
+    suspend fun clearAllUnpinned(timestamp: Long)
 
     @Query("SELECT COUNT(*) FROM clipboard_entries")
     suspend fun getEntryCount(): Int
 
-    @Query("DELETE FROM clipboard_entries WHERE id IN (SELECT id FROM clipboard_entries WHERE isPinned = 0 ORDER BY timestamp ASC LIMIT :count)")
-    suspend fun deleteOldestUnpinned(count: Int)
+    @Query("SELECT COUNT(*) FROM clipboard_entries WHERE deletedAt IS NULL")
+    suspend fun getActiveEntryCount(): Int
 
-    @Query("DELETE FROM clipboard_entries WHERE isPinned = 0")
-    suspend fun clearAllUnpinned()
+    @Query("SELECT COUNT(*) FROM clipboard_entries WHERE deletedAt IS NOT NULL")
+    suspend fun getTrashedEntryCount(): Int
 
-    @Query("SELECT * FROM clipboard_entries ORDER BY timestamp DESC LIMIT 1")
-    suspend fun getLatestEntry(): ClipboardEntry?
+    @Query("SELECT COUNT(*) FROM clipboard_entries WHERE deletedAt IS NULL AND isSensitive = 1")
+    suspend fun getSensitiveEntryCount(): Int
 
-    @Query("SELECT * FROM clipboard_entries WHERE id = :id")
-    suspend fun getEntryById(id: Int): ClipboardEntry?
+    // ── Attachments ───────────────────────────────────────────────────────
 
-    @Query("UPDATE clipboard_entries SET timestamp = :timestamp WHERE id = :id")
-    suspend fun updateTimestamp(id: Int, timestamp: Long)
+    @Query("SELECT * FROM clipboard_attachments ORDER BY clipId ASC, position ASC")
+    fun getAllAttachments(): Flow<List<ClipboardAttachment>>
 
-    @Query("SELECT * FROM clipboard_entries WHERE contentHash = :hash ORDER BY timestamp DESC LIMIT 1")
-    suspend fun getByContentHash(hash: Int): ClipboardEntry?
+    @Query("SELECT * FROM clipboard_attachments WHERE clipId = :clipId ORDER BY position ASC")
+    fun getAttachmentsForClip(clipId: Int): Flow<List<ClipboardAttachment>>
 
-    @Query("UPDATE clipboard_entries SET summary = :summary, type = :type, isAiProcessed = 1 WHERE id = :id")
-    suspend fun updateAiDetails(id: Int, summary: String?, type: String)
+    @Query("SELECT * FROM clipboard_attachments WHERE clipId = :clipId ORDER BY position ASC")
+    suspend fun getAttachmentsForClipSync(clipId: Int): List<ClipboardAttachment>
 
-    @Query("SELECT * FROM clipboard_entries WHERE isAiProcessed = 0 ORDER BY timestamp DESC")
-    suspend fun getUnprocessedEntries(): List<ClipboardEntry>
-    @Query("SELECT * FROM clipboard_entries")
-    suspend fun getAllEntriesSync(): List<ClipboardEntry>
+    @Query("SELECT * FROM clipboard_attachments")
+    suspend fun getAllAttachmentsSync(): List<ClipboardAttachment>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertEntries(entries: List<ClipboardEntry>)
+    suspend fun insertAttachment(attachment: ClipboardAttachment): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAttachments(attachments: List<ClipboardAttachment>)
+
+    @Query("DELETE FROM clipboard_attachments WHERE clipId = :clipId")
+    suspend fun deleteAttachmentsForClip(clipId: Int)
+
+    @Query("SELECT DISTINCT blobId FROM clipboard_attachments")
+    suspend fun getReferencedBlobIds(): List<String>
+
+    @Query("SELECT COUNT(*) FROM clipboard_attachments WHERE blobId = :blobId")
+    suspend fun countBlobReferences(blobId: String): Int
+
+    @Query("SELECT SUM(sizeBytes) FROM clipboard_attachments")
+    suspend fun getAttachmentBytes(): Long?
 }

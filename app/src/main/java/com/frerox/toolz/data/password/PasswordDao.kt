@@ -62,6 +62,10 @@ interface PasswordDao {
     @Query("SELECT COUNT(*) FROM passwords")
     suspend fun getPasswordCount(): Int
 
+    /** Exact full-password match used by clipboard sensitivity detection. */
+    @Query("SELECT COUNT(*) FROM passwords WHERE password = :password")
+    suspend fun countByPassword(password: String): Int
+
     @Query("SELECT * FROM passwords")
     suspend fun getAllPasswordsSync(): List<PasswordEntity>
 

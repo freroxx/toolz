@@ -51,6 +51,7 @@ import androidx.compose.material.icons.automirrored.rounded.TextSnippet
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -98,6 +99,8 @@ fun SmartEncrypterScreen(
     onBack: () -> Unit,
     initialUri: String? = null,
     mode: String? = null,
+    initialText: String? = null,
+    onInitialTextConsumed: () -> Unit = {},
     viewModel: SmartEncrypterViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -122,6 +125,15 @@ fun SmartEncrypterScreen(
             } catch (e: Exception) {
                 e.printStackTrace()
             }
+        }
+    }
+    var initialTextConsumed by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(initialText) {
+        val text = initialText?.trim().orEmpty()
+        if (!initialTextConsumed && text.isNotEmpty()) {
+            initialTextConsumed = true
+            viewModel.onInputChanged(text)
+            onInitialTextConsumed()
         }
     }
     val vibrationManager = LocalVibrationManager.current

@@ -650,12 +650,18 @@ class SettingsRepository @Inject constructor(
     // AI Clipboard Monitoring
     private val AI_CLIPBOARD_MONITORING = booleanPreferencesKey("ai_clipboard_monitoring")
 
-    // Clipboard — revamp: hard requirement (Shizuku OR Accessibility), retention, sensitive filter,
-    // master AI kill-switch (hides even opt-in AI UI when OFF; default ON).
+    // Clipboard — revamp: Shizuku/app-op capture, retention, sensitive filter,
+    // master AI kill-switch, onboarding, biometric lock and storage quotas.
     private val CLIPBOARD_MONITORING_ENABLED = booleanPreferencesKey("clipboard_monitoring_enabled")
     private val CLIPBOARD_AI_ENABLED = booleanPreferencesKey("clipboard_ai_enabled")
     private val CLIPBOARD_RETENTION_DAYS = intPreferencesKey("clipboard_retention_days")
     private val CLIPBOARD_EXCLUDE_SENSITIVE = booleanPreferencesKey("clipboard_exclude_sensitive")
+    private val CLIPBOARD_ONBOARDING_SEEN = booleanPreferencesKey("clipboard_onboarding_seen")
+    private val CLIPBOARD_BIOMETRIC_LOCK = booleanPreferencesKey("clipboard_biometric_lock")
+    private val CLIPBOARD_ITEM_QUOTA_MB = intPreferencesKey("clipboard_item_quota_mb")
+    private val CLIPBOARD_TOTAL_QUOTA_MB = intPreferencesKey("clipboard_total_quota_mb")
+    private val CLIPBOARD_MAX_ENTRIES = intPreferencesKey("clipboard_max_entries")
+    private val CLIPBOARD_BACKUP_WARNING_SEEN = booleanPreferencesKey("clipboard_backup_warning_seen")
 
     // Crypto Settings
     private val CRYPTO_LAST_ALGORITHM = stringPreferencesKey("crypto_last_algorithm")
@@ -1178,6 +1184,22 @@ class SettingsRepository @Inject constructor(
         dataStore.data.map { it[CLIPBOARD_RETENTION_DAYS] ?: 7 }
     val clipboardExcludeSensitive: Flow<Boolean> =
         dataStore.data.map { it[CLIPBOARD_EXCLUDE_SENSITIVE] ?: false }
+    val clipboardOnboardingSeen: Flow<Boolean> =
+        dataStore.data.map { it[CLIPBOARD_ONBOARDING_SEEN] ?: false }
+    /** Biometric confirmation before revealing/copying a locked clip. Default on. */
+    val clipboardBiometricLock: Flow<Boolean> =
+        dataStore.data.map { it[CLIPBOARD_BIOMETRIC_LOCK] ?: true }
+    /** Max size of a single clip including attachments. Default 25 MB. */
+    val clipboardItemQuotaMb: Flow<Int> =
+        dataStore.data.map { (it[CLIPBOARD_ITEM_QUOTA_MB] ?: 25).coerceIn(1, 200) }
+    /** Max total size of the encrypted attachment store. Default 250 MB. */
+    val clipboardTotalQuotaMb: Flow<Int> =
+        dataStore.data.map { (it[CLIPBOARD_TOTAL_QUOTA_MB] ?: 250).coerceIn(25, 5_000) }
+    /** Soft cap on non-exempt clips. Default 500. */
+    val clipboardMaxEntries: Flow<Int> =
+        dataStore.data.map { (it[CLIPBOARD_MAX_ENTRIES] ?: 500).coerceIn(50, 5_000) }
+    val clipboardBackupWarningSeen: Flow<Boolean> =
+        dataStore.data.map { it[CLIPBOARD_BACKUP_WARNING_SEEN] ?: false }
 
     val lastCryptoAlgorithm: Flow<String?> = dataStore.data.map { it[CRYPTO_LAST_ALGORITHM] }
 
@@ -1883,6 +1905,30 @@ class SettingsRepository @Inject constructor(
 
     suspend fun setClipboardExcludeSensitive(enabled: Boolean) {
         dataStore.edit { it[CLIPBOARD_EXCLUDE_SENSITIVE] = enabled }
+    }
+
+    suspend fun setClipboardOnboardingSeen(seen: Boolean) {
+        dataStore.edit { it[CLIPBOARD_ONBOARDING_SEEN] = seen }
+    }
+
+    suspend fun setClipboardBiometricLock(enabled: Boolean) {
+        dataStore.edit { it[CLIPBOARD_BIOMETRIC_LOCK] = enabled }
+    }
+
+    suspend fun setClipboardItemQuotaMb(mb: Int) {
+        dataStore.edit { it[CLIPBOARD_ITEM_QUOTA_MB] = mb.coerceIn(1, 200) }
+    }
+
+    suspend fun setClipboardTotalQuotaMb(mb: Int) {
+        dataStore.edit { it[CLIPBOARD_TOTAL_QUOTA_MB] = mb.coerceIn(25, 5_000) }
+    }
+
+    suspend fun setClipboardMaxEntries(count: Int) {
+        dataStore.edit { it[CLIPBOARD_MAX_ENTRIES] = count.coerceIn(50, 5_000) }
+    }
+
+    suspend fun setClipboardBackupWarningSeen(seen: Boolean) {
+        dataStore.edit { it[CLIPBOARD_BACKUP_WARNING_SEEN] = seen }
     }
 
     suspend fun setLastCryptoAlgorithm(algorithm: String) {

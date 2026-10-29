@@ -30,7 +30,12 @@ import com.frerox.toolz.data.ai.AiMessage
 import com.frerox.toolz.data.ai.AiSettingsManager
 import com.frerox.toolz.data.catalog.CatalogSearchEntry
 import com.frerox.toolz.data.calendar.EventEntry
+import com.frerox.toolz.data.clipboard.BlobRef
+import com.frerox.toolz.data.clipboard.ClipboardAttachment
+import com.frerox.toolz.data.clipboard.ClipboardBlobStore
 import com.frerox.toolz.data.clipboard.ClipboardEntry
+import com.frerox.toolz.data.clipboard.ClipboardHashAttachment
+import com.frerox.toolz.data.clipboard.ClipboardHashing
 import com.frerox.toolz.data.crypto.CryptoHistoryEntry
 import com.frerox.toolz.data.focus.AppLimit
 import com.frerox.toolz.data.focus.CaffeinateApp
@@ -76,10 +81,13 @@ class LocalBackupManager @Inject constructor(
     private val database: AppDatabase,
     private val aiSettingsManager: AiSettingsManager,
     private val moshi: Moshi,
+    // Clipboard v2: decrypts blobs for export and re-encrypts them on restore.
+    private val clipboardBlobStore: ClipboardBlobStore,
     // T-P0-03 (additive): TASKS restore must reschedule (alarms don't survive export).
     private val taskScheduler: com.frerox.toolz.util.TaskAlarmScheduler
 ) {
     private val manifestAdapter = moshi.adapter(ToolzBackupManifest::class.java)
+    private val clipboardV2Adapter = moshi.adapter(ClipboardBackupV2::class.java)
     private val stringMapAdapter = moshi.adapter<Map<String, String>>(
         Types.newParameterizedType(Map::class.java, String::class.java, String::class.java)
     )
@@ -286,7 +294,7 @@ class LocalBackupManager @Inject constructor(
         }
         if (items.contains(BackupItem.CLIPBOARD)) {
             _progress.value = context.getString(R.string.st_Backup_Progress_Clipboard)
-            addTextEntry(zip, "data/clipboard.json", listAdapter<ClipboardEntry>().toJson(database.clipboardDao().getAllEntriesSync()), entryHashes)
+            exportClipboardV2(zip, entryHashes)
         }
         if (items.contains(BackupItem.STEPS)) {
             _progress.value = context.getString(R.string.st_Backup_Progress_Steps)
@@ -313,6 +321,94 @@ class LocalBackupManager @Inject constructor(
             addTextEntry(zip, "data/playlists.json", listAdapter<Playlist>().toJson(database.musicDao().getAllPlaylistsSync()), entryHashes)
         }
         _progress.value = context.getString(R.string.st_Backup_Progress_Finalizing)
+    }
+
+    /**
+     * Clipboard v2: every clip (active + trash) plus every attachment. Blob
+     * bytes are decrypted into the archive so the backup is portable across
+     * devices; restore re-encrypts them under the destination device's key.
+     */
+    private suspend fun exportClipboardV2(
+        zip: ZipOutputStream,
+        entryHashes: MutableMap<String, String>,
+    ) {
+        val clips = database.clipboardDao().getAllEntriesSync()
+        val attachmentsByClip = database.clipboardDao().getAllAttachmentsSync()
+            .groupBy { it.clipId }
+        // Blobs are content-addressed, so several clips can point at the same
+        // bytes. ZipOutputStream rejects duplicate entry names: write each blob
+        // once and let all referencing attachments share the same path.
+        val writtenBlobPaths = mutableSetOf<String>()
+        var exportedAttachments = 0
+
+        val backupClips = clips.map { entry ->
+            val attachments = attachmentsByClip[entry.id].orEmpty().map { attachment ->
+                val bytes = try {
+                    clipboardBlobStore.readBytes(attachment.blobId)
+                } catch (_: Exception) {
+                    null
+                }
+                val path = if (bytes != null && bytes.isNotEmpty()) {
+                    val blobPath = "$CLIPBOARD_BLOB_PREFIX${attachment.blobId}.bin"
+                    if (writtenBlobPaths.add(blobPath)) {
+                        addBytesEntry(zip, blobPath, bytes, entryHashes)
+                    }
+                    exportedAttachments++
+                    blobPath
+                } else {
+                    null
+                }
+                ClipboardBackupAttachmentV2(
+                    blobId = attachment.blobId,
+                    blobPath = path,
+                    fileName = attachment.fileName,
+                    mimeType = attachment.mimeType,
+                    sizeBytes = attachment.sizeBytes,
+                    position = attachment.position,
+                    width = attachment.width,
+                    height = attachment.height,
+                )
+            }
+            ClipboardBackupClipV2(
+                content = entry.content,
+                timestamp = entry.timestamp,
+                type = entry.type,
+                isPinned = entry.isPinned,
+                previewUrl = entry.previewUrl,
+                sourceApp = entry.sourceApp,
+                summary = entry.summary,
+                isAiProcessed = entry.isAiProcessed,
+                contentHash = entry.contentHash,
+                source = entry.source,
+                contentHashSha256 = entry.contentHashSha256,
+                htmlContent = entry.htmlContent,
+                mimeType = entry.mimeType,
+                sizeBytes = entry.sizeBytes,
+                attachmentCount = entry.attachmentCount,
+                isSensitive = entry.isSensitive,
+                sensitivityReason = entry.sensitivityReason,
+                isLocked = entry.isLocked,
+                passwordVaultMatch = entry.passwordVaultMatch,
+                metadataJson = entry.metadataJson,
+                deletedAt = entry.deletedAt,
+                expiresAt = entry.expiresAt,
+                aiState = entry.aiState,
+                aiError = entry.aiError,
+                attachments = attachments,
+            )
+        }
+
+        val payload = ClipboardBackupV2(
+            version = 2,
+            encryption = "none",
+            exportedAtMillis = System.currentTimeMillis(),
+            clips = backupClips,
+        )
+        addTextEntry(zip, "data/clipboard_v2.json", clipboardV2Adapter.toJson(payload), entryHashes)
+        android.util.Log.i(
+            "LocalBackupManager",
+            "Clipboard backup: ${backupClips.size} clips, $exportedAttachments attachments",
+        )
     }
 
     suspend fun importReusableBackup(
@@ -357,6 +453,9 @@ class LocalBackupManager @Inject constructor(
                         aiSettingsManager.importPortableSettings(stringMapAdapter.fromJson(json).orEmpty())
                         restoredEntries++
                     }
+                    // Clipboard v2 blobs are consumed by data/clipboard_v2.json.
+                    // Never parse them as JSON or restore them as loose files.
+                    entry.name.startsWith("data/clipboard_blobs/") -> Unit
                     entry.name.startsWith("data/") -> {
                         if (restoreDatabaseItem(zipFile, entry, itemsToRestore)) {
                             restoredEntries++
@@ -568,8 +667,12 @@ class LocalBackupManager @Inject constructor(
                 database.eventDao().insertEvents(listAdapter<EventEntry>().fromJson(json).orEmpty())
                 true
             } else false
+            "data/clipboard_v2.json" -> if (itemsToRestore.contains(BackupItem.CLIPBOARD)) {
+                restoreClipboardV2(zipFile, json)
+                true
+            } else false
             "data/clipboard.json" -> if (itemsToRestore.contains(BackupItem.CLIPBOARD)) {
-                database.clipboardDao().insertEntries(listAdapter<ClipboardEntry>().fromJson(json).orEmpty())
+                restoreLegacyClipboard(json)
                 true
             } else false
             "data/steps.json" -> if (itemsToRestore.contains(BackupItem.STEPS)) {
@@ -615,6 +718,189 @@ class LocalBackupManager @Inject constructor(
         }
     }
 
+    // ── Clipboard restore ─────────────────────────────────────────────────
+
+    /**
+     * Restore a v2 clipboard payload. Merge-by-hash: clips already present in
+     * the live or trashed history are skipped, so restoring the same archive
+     * twice never duplicates rows. Attachment bytes are read from the archive
+     * and re-encrypted under this device's key before the clip is inserted.
+     */
+    private suspend fun restoreClipboardV2(zipFile: ZipFile, json: String) {
+        val payload = try {
+            clipboardV2Adapter.fromJson(json)
+        } catch (e: Exception) {
+            android.util.Log.w("LocalBackupManager", "Skipping invalid clipboard v2 payload", e)
+            null
+        } ?: return
+
+        payload.clips.forEach { clip ->
+            val stagedBlobs = mutableListOf<BlobRef>()
+            var insertedClipId: Int? = null
+            var committed = false
+            try {
+                val storedAttachments = mutableListOf<Pair<ClipboardBackupAttachmentV2, BlobRef>>()
+                clip.attachments
+                    .filter { it.blobPath?.startsWith(CLIPBOARD_BLOB_PREFIX) == true }
+                    .sortedBy { it.position }
+                    .forEach { attachment ->
+                        val path = attachment.blobPath ?: return@forEach
+                        // Stream through the blob store's bounded reader instead
+                        // of loading an arbitrarily large zip entry into memory.
+                        val blob = try {
+                            zipFile.getEntry(path)?.let { entry ->
+                                zipFile.getInputStream(entry).use { input ->
+                                    clipboardBlobStore.put(input, protectForStaging = true)
+                                }
+                            }
+                        } catch (_: Exception) {
+                            null
+                        }
+                        if (blob != null) {
+                            storedAttachments += attachment to blob
+                            stagedBlobs += blob
+                        }
+                    }
+
+                // Attachment-only clips whose bytes are all missing would be
+                // restored as empty, unopenable cards. Skip them instead.
+                if (storedAttachments.isEmpty() &&
+                    clip.content.isBlank() &&
+                    clip.attachments.any { it.blobPath?.startsWith(CLIPBOARD_BLOB_PREFIX) == true }
+                ) {
+                    android.util.Log.w(
+                        "LocalBackupManager",
+                        "Skipping clipboard clip with no restorable attachments",
+                    )
+                    return@forEach
+                }
+
+                val hash = clip.contentHashSha256?.takeIf { it.isNotBlank() }
+                    ?: ClipboardHashing.contentHash(
+                        content = clip.content,
+                        html = clip.htmlContent,
+                        attachments = storedAttachments.map { (attachment, blob) ->
+                            ClipboardHashAttachment(blob.id, attachment.fileName, attachment.mimeType)
+                        },
+                    )
+                if (database.clipboardDao().getBySha256Any(hash) != null) {
+                    // The same clip (or an identical attachment set) already
+                    // exists. Drop only blobs that nothing else references.
+                    return@forEach
+                }
+
+                val legacyHash = clip.contentHash.takeIf { it != 0 } ?: clip.content.hashCode()
+                val contentBytes = clip.content.toByteArray(Charsets.UTF_8).size.toLong()
+                val restoredAttachmentBytes = storedAttachments.sumOf { it.second.sizeBytes }
+                val entry = ClipboardEntry(
+                    content = clip.content,
+                    timestamp = clip.timestamp,
+                    type = clip.type,
+                    isPinned = clip.isPinned,
+                    previewUrl = clip.previewUrl,
+                    sourceApp = clip.sourceApp,
+                    summary = clip.summary,
+                    isAiProcessed = clip.isAiProcessed,
+                    contentHash = legacyHash,
+                    source = clip.source,
+                    contentHashSha256 = hash,
+                    htmlContent = clip.htmlContent,
+                    mimeType = clip.mimeType,
+                    // Use the bytes actually restored; archived size fields may
+                    // be stale or refer to an attachment that failed to import.
+                    sizeBytes = contentBytes + restoredAttachmentBytes,
+                    attachmentCount = storedAttachments.size,
+                    isSensitive = clip.isSensitive,
+                    sensitivityReason = clip.sensitivityReason,
+                    isLocked = clip.isLocked,
+                    passwordVaultMatch = clip.passwordVaultMatch,
+                    metadataJson = clip.metadataJson,
+                    deletedAt = clip.deletedAt,
+                    expiresAt = clip.expiresAt,
+                    aiState = clip.aiState,
+                    aiError = clip.aiError,
+                )
+                val clipId = database.clipboardDao().insert(entry).toInt()
+                insertedClipId = clipId
+                if (storedAttachments.isNotEmpty()) {
+                    database.clipboardDao().insertAttachments(
+                        storedAttachments.mapIndexed { index, (attachment, blob) ->
+                            ClipboardAttachment(
+                                clipId = clipId,
+                                blobId = blob.id,
+                                fileName = attachment.fileName,
+                                mimeType = attachment.mimeType,
+                                sizeBytes = blob.sizeBytes,
+                                position = if (attachment.position > 0) attachment.position else index,
+                                width = attachment.width,
+                                height = attachment.height,
+                            )
+                        },
+                    )
+                }
+                committed = true
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.w("LocalBackupManager", "Skipping clipboard clip during restore", e)
+            } finally {
+                // Release staging protection before rollback so the blobs we
+                // just wrote can actually be deleted when unreferenced.
+                clipboardBlobStore.releaseStaged(stagedBlobs.map { it.id })
+                if (!committed) {
+                    insertedClipId?.let { id ->
+                        runCatching {
+                            database.clipboardDao().deleteAttachmentsForClip(id)
+                            database.clipboardDao().deleteById(id)
+                        }
+                    }
+                    stagedBlobs.forEach { blob ->
+                        clipboardBlobStore.deleteIfUnreferenced(blob.id)
+                    }
+                }
+            }
+        }
+        android.util.Log.i(
+            "LocalBackupManager",
+            "Clipboard restore: ${payload.clips.size} clips processed",
+        )
+    }
+
+    /**
+     * Legacy `data/clipboard.json` (pre-v2 backups). Rows are merged by their
+     * stored hash, or recomputed for very old exports that predate hashing.
+     */
+    private suspend fun restoreLegacyClipboard(json: String) {
+        val incoming = try {
+            listAdapter<ClipboardEntry>().fromJson(json).orEmpty()
+        } catch (e: Exception) {
+            android.util.Log.w("LocalBackupManager", "Skipping invalid legacy clipboard payload", e)
+            emptyList()
+        }
+        incoming.forEach { entry ->
+            try {
+                val hash = entry.contentHashSha256?.takeIf { it.isNotBlank() }
+                    ?: ClipboardHashing.contentHash(entry.content, entry.htmlContent)
+                val duplicate = database.clipboardDao().getBySha256Any(hash) != null ||
+                    (entry.contentHash != 0 &&
+                        database.clipboardDao().getByContentHashAny(entry.contentHash) != null)
+                if (!duplicate) {
+                    // Legacy archives never carried attachment bytes, so any
+                    // attachmentCount in the JSON would point at missing rows.
+                    database.clipboardDao().insert(
+                        entry.copy(
+                            id = 0,
+                            contentHashSha256 = hash,
+                            attachmentCount = 0,
+                        ),
+                    )
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("LocalBackupManager", "Skipping legacy clipboard row", e)
+            }
+        }
+    }
+
     private fun checkpointDatabase() {
         database.openHelper.writableDatabase.query("PRAGMA wal_checkpoint(FULL)").use { }
     }
@@ -652,6 +938,18 @@ class LocalBackupManager @Inject constructor(
         }
         zip.closeEntry()
         entryHashes[path] = digest.digest().toHex()
+    }
+
+    private fun addBytesEntry(
+        zip: ZipOutputStream,
+        path: String,
+        bytes: ByteArray,
+        entryHashes: MutableMap<String, String>
+    ) {
+        zip.putNextEntry(ZipEntry(path))
+        zip.write(bytes)
+        zip.closeEntry()
+        entryHashes[path] = MessageDigest.getInstance("SHA-256").digest(bytes).toHex()
     }
 
     private fun addTextEntry(
@@ -764,6 +1062,7 @@ class LocalBackupManager @Inject constructor(
     companion object {
         const val PAYLOAD_FORMAT_VERSION = 1
         const val DATABASE_NAME = "toolz_db"
+        private const val CLIPBOARD_BLOB_PREFIX = "data/clipboard_blobs/"
 
         // V3-FIX (H-11): whisper_key_trust.xml removed — TOFU key-trust anchors are
         // device-local now; the ESP ciphertext (whisper_key_trust_enc.xml, added to this

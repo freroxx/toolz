@@ -164,6 +164,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.frerox.toolz.data.todo.SubTask
 import com.frerox.toolz.data.todo.TaskEntry
+import com.frerox.toolz.data.todo.TaskPriority
 import com.frerox.toolz.util.CalendarUtils
 import com.frerox.toolz.util.ScheduleOutcome
 import android.app.AlarmManager
@@ -325,6 +326,8 @@ private val mediumSpring = spring<Float>(
 @Composable
 fun TodoScreen(
     onNavigateBack: (() -> Unit)? = null,
+    initialText: String? = null,
+    onInitialTextConsumed: () -> Unit = {},
     viewModel: TodoViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -334,6 +337,21 @@ fun TodoScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val vibrationManager = LocalVibrationManager.current
     val context = LocalContext.current
+
+    var initialTextConsumed by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(initialText) {
+        val text = initialText?.trim().orEmpty()
+        if (!initialTextConsumed && text.isNotEmpty()) {
+            initialTextConsumed = true
+            viewModel.addTask(
+                title = text.lineSequence().firstOrNull()?.trim()?.take(120).orEmpty(),
+                description = text,
+                category = "Personal",
+                priority = TaskPriority.MEDIUM,
+            )
+            onInitialTextConsumed()
+        }
+    }
 
     var selectedFilter by rememberSaveable { mutableStateOf(TaskFilter.ALL) }
     var selectedTaskForEdit by remember { mutableStateOf<TaskEntry?>(null) }

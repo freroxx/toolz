@@ -43,6 +43,7 @@ import com.frerox.toolz.data.focus.AppLimitDao
 import com.frerox.toolz.data.focus.CaffeinateApp
 import com.frerox.toolz.data.focus.CaffeinateDao
 import com.frerox.toolz.data.clipboard.ClipboardEntry
+import com.frerox.toolz.data.clipboard.ClipboardAttachment
 import com.frerox.toolz.data.clipboard.ClipboardDao
 import com.frerox.toolz.data.todo.TaskEntry
 import com.frerox.toolz.data.todo.TaskDao
@@ -102,6 +103,7 @@ import com.frerox.toolz.data.purgeshot.PurgeShotEntity
         AppLimit::class,
         CaffeinateApp::class,
         ClipboardEntry::class,
+        ClipboardAttachment::class,
         TaskEntry::class,
         AiChat::class,
         AiMessage::class,
@@ -172,7 +174,11 @@ import com.frerox.toolz.data.purgeshot.PurgeShotEntity
     // the user's OWN sent plaintext (Keystore AES, bound to the message id) so a
     // sent v3 frame stays readable after process death — v3 ratchet frames cannot
     // be re-opened by their sender. Account-keyed; wiped on account deletion.
-    version = 66,
+    // Clipboard rebuild (67): clipboard_entries gains rich content fields
+    // (html/mime/size/attachments), the sensitive/locked model, trash/expiry and
+    // the AI state machine; clipboard_attachments stores content-addressed,
+    // encrypted blob metadata. Purely additive — existing clips survive.
+    version = 67,
     // H-10 FIX (reviewwhisper.md): schemas are now exported to app/schemas (see
     // build.gradle.kts room.schemaLocation). Every future bump MUST ship a Migration —
     // the DatabaseModule comment documents this contract too.

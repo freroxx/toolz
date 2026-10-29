@@ -241,6 +241,26 @@ class ShizukuShellExecutor @Inject constructor(
             null
         }
     }
+
+    /**
+     * Grants Toolz the `android:read_clipboard` app-op through the Shizuku shell.
+     * This is the fallback for ROMs where `cmd clipboard get` is unavailable.
+     */
+    suspend fun grantClipboardAppOp(): ShellCommandResult = executeForResult(
+        "appops set ${context.packageName} READ_CLIPBOARD allow",
+    )
+
+    suspend fun revokeClipboardAppOp(): ShellCommandResult = executeForResult(
+        "appops set ${context.packageName} READ_CLIPBOARD default",
+    )
+
+    /** Shell-side verification (the app-side check lives in ClipboardGate). */
+    suspend fun isClipboardAppOpAllowed(): Boolean {
+        val result = executeForResult("appops get ${context.packageName} READ_CLIPBOARD")
+        if (!result.isSuccess) return false
+        val output = result.stdout.lowercase()
+        return output.contains("allow") && !output.contains("ignore") && !output.contains("deny")
+    }
 }
 
 sealed class ShellOutput {

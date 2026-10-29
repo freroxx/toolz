@@ -472,6 +472,8 @@ fun NotepadScreen(
     onViewPdf     : (String, Int) -> Unit,
     onOpenAiAssistant: () -> Unit = {},
     initialNoteId : Int? = null,
+    initialText   : String? = null,
+    onInitialTextConsumed: () -> Unit = {},
     musicViewModel: MusicPlayerViewModel = hiltViewModel(),
 ) {
     val notes           by viewModel.notes.collectAsStateWithLifecycle()
@@ -622,6 +624,23 @@ fun NotepadScreen(
         if (!initialNoteConsumed && initialNoteId != null) {
             viewedNoteId = initialNoteId
             initialNoteConsumed = true
+        }
+    }
+
+    // Integration: "Save to Notepad" from Clipboard creates one note with the
+    // clip content. Runs once per incoming text, never on recomposition.
+    var initialTextConsumed by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(initialText) {
+        val text = initialText?.trim().orEmpty()
+        if (!initialTextConsumed && text.isNotEmpty()) {
+            initialTextConsumed = true
+            viewModel.addNote(
+                title = text.lineSequence().firstOrNull()?.trim()?.take(80).orEmpty(),
+                content = text,
+                color = 0,
+                onInserted = { id -> pendingAutoColorIds.add(id) },
+            )
+            onInitialTextConsumed()
         }
     }
     // Only clear when the DB has loaded (non-empty at some point) and the

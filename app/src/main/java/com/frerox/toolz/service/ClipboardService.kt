@@ -9,325 +9,335 @@
 
 package com.frerox.toolz.service
 
-import android.app.*
+import android.app.Notification
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.frerox.toolz.MainActivity
 import com.frerox.toolz.R
-import com.frerox.toolz.ToolzApplication
-import com.frerox.toolz.ToolzForegroundTracker
-import com.frerox.toolz.data.ai.ChatRepository
+import com.frerox.toolz.data.clipboard.ClipboardAiProcessor
 import com.frerox.toolz.data.clipboard.ClipboardCaptureProcessor
-import com.frerox.toolz.data.clipboard.ClipboardClassifier
-import com.frerox.toolz.data.clipboard.ClipboardDao
 import com.frerox.toolz.data.clipboard.ClipboardGate
+import com.frerox.toolz.data.clipboard.ClipboardPayload
+import com.frerox.toolz.data.clipboard.ClipboardPayloadItem
+import com.frerox.toolz.data.clipboard.ClipboardRetentionManager
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.util.NotificationHelper
 import com.frerox.toolz.util.shizuku.ShizukuHelper
+import com.frerox.toolz.util.shizuku.ShizukuShellExecutor
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import java.security.MessageDigest
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 
 private const val TAG = "ClipboardService"
 
+/**
+ * Foreground clipboard watcher.
+ *
+ * Android 10+ blocks background clipboard reads for ordinary apps. Toolz only
+ * runs this service when a privileged read path is actually available:
+ *
+ *  - Shizuku authorized → `cmd clipboard get` through the shell user service.
+ *  - `READ_CLIPBOARD` app-op granted → standard [ClipboardManager] reads.
+ *
+ * Otherwise the service stops and the UI falls back to manual capture, the QS
+ * tile, the popup, share targets and `ACTION_PROCESS_TEXT`. No fake promises.
+ */
 @AndroidEntryPoint
 class ClipboardService : Service() {
 
-    @Inject lateinit var clipboardDao: ClipboardDao
-    @Inject lateinit var classifier: ClipboardClassifier
     @Inject lateinit var captureProcessor: ClipboardCaptureProcessor
-    @Inject lateinit var aiRepository: ChatRepository
+    @Inject lateinit var aiProcessor: ClipboardAiProcessor
+    @Inject lateinit var retentionManager: ClipboardRetentionManager
     @Inject lateinit var settingsRepository: SettingsRepository
-    @Inject lateinit var shizukuExecutor: com.frerox.toolz.util.shizuku.ShizukuShellExecutor
+    @Inject lateinit var shizukuExecutor: ShizukuShellExecutor
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private var clipboardManager: ClipboardManager? = null
-    private var isAiMonitoringEnabled = false
-    private var monitoringEnabled = true
-    private var excludeSensitive = false
-    private var gateStatus: ClipboardGate.Status = ClipboardGate.Status.SETUP_REQUIRED
 
-    /**
-     * Clipboard change listener — fires for system-wide copy events.
-     *
-     * Android 10+ only delivers readable clips when:
-     *  - Shizuku path (ADB shell, no focus requirement), or
-     *  - app is in foreground (tracked via ToolzForegroundTracker).
-     * Otherwise the event is honestly ignored; the accessibility service
-     * re-triggers a check when Toolz regains focus.
-     */
+    private var clipboardManager: ClipboardManager? = null
+    @Volatile private var monitoringEnabled = true
+    @Volatile private var excludeSensitive = false
+    @Volatile private var onboardingSeen = false
+    @Volatile private var gateStatus: ClipboardGate.Status = ClipboardGate.Status.SETUP_REQUIRED
+    @Volatile private var lastFingerprint: String? = null
+    private val capturing = AtomicBoolean(false)
+    @Volatile private var foregroundStarted = false
+    @Volatile private var manualCaptureRequested = false
+    @Volatile private var settingsCollectorStarted = false
+
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
         serviceScope.launch {
             if (!monitoringEnabled) return@launch
-            if (gateStatus == ClipboardGate.Status.SETUP_REQUIRED ||
-                gateStatus == ClipboardGate.Status.PAUSED
-            ) return@launch
-            if (ShizukuHelper.isAuthorized()) {
-                readClipboardViaShizuku("listener")
-            } else if (ToolzForegroundTracker.isForeground.value ||
-                ToolzApplication.isFocused.value
-            ) {
-                readClipboardViaStandardApi()
-            }
-        }
-    }
-
-    private suspend fun readClipboardViaShizuku(source: String) {
-        try {
-            val text = shizukuExecutor.getClipboardText() ?: return
-            processClipboardText(text, "shizuku-$source")
-        } catch (e: Exception) {
-            Log.e(TAG, "Shizuku clipboard read failed", e)
-        }
-    }
-
-    private fun readClipboardViaStandardApi(source: String = "foreground") {
-        try {
-            val clip = clipboardManager?.primaryClip ?: return
-            if (clip.itemCount == 0) return
-            // Skip non-text clips gracefully (images, intents, html) — V1 stores text only.
-            val item = clip.getItemAt(0) ?: return
-            if (item.uri != null && item.text == null && item.htmlText == null) {
-                Log.d(TAG, "Skipping non-text clip (uri)")
-                return
-            }
-            val text = item.coerceToText(this@ClipboardService)?.toString() ?: return
-            serviceScope.launch { processClipboardText(text, source) }
-        } catch (e: Exception) {
-            Log.w(TAG, "Standard clipboard read denied or failed: ${e.message}")
-        }
-    }
-
-    /**
-     * Called by AccessibilityService or onStartCommand when app gains focus.
-     */
-    fun checkClipboard() {
-        serviceScope.launch {
-            if (!monitoringEnabled) return@launch
-            if (ShizukuHelper.isAuthorized()) {
-                readClipboardViaShizuku("check")
-            } else {
-                readClipboardViaStandardApi("check")
-            }
-        }
-    }
-
-    private fun processClipboardText(text: String, source: String) {
-        if (text.isBlank()) return
-        serviceScope.launch {
-            try {
-                val outcome = captureProcessor.processText(text, source, excludeSensitive)
-                if (outcome == ClipboardCaptureProcessor.Outcome.IGNORED_SENSITIVE) {
-                    Log.d(TAG, "Sensitive clip excluded by preference")
-                    return@launch
-                }
-                if (outcome == ClipboardCaptureProcessor.Outcome.IGNORED_BLANK) return@launch
-                Log.d(TAG, "Clipboard captured ($outcome) via $source")
-                enforceRetention()
-
-                // Queue AI enrichment only when BOTH toggles allow it.
-                val latest = clipboardDao.getLatestEntry() ?: return@launch
-                maybeProcessWithAi(latest.id, latest.content, latest.type)
-            } catch (e: Exception) {
-                Log.e(TAG, "Error processing clipboard change", e)
-            }
-        }
-    }
-
-    private suspend fun enforceRetention() {
-        try {
-            val retention = settingsRepository.clipboardRetentionDays.first()
-            if (retention > 0) {
-                val expiry = System.currentTimeMillis() - retention * 24L * 60 * 60 * 1000
-                clipboardDao.deleteOlderThan(expiry)
-            }
-            val count = clipboardDao.getEntryCount()
-            if (count > MAX_ENTRIES) {
-                clipboardDao.deleteOldestUnpinned(count - MAX_ENTRIES)
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Retention enforcement failed", e)
-        }
-    }
-
-    private suspend fun canAutoAi(): Boolean {
-        if (!isAiMonitoringEnabled) return false
-        return try {
-            if (!settingsRepository.clipboardAiEnabled.first()) return false
-            if (settingsRepository.offlineModeEnabled.first()) return false
-            true
-        } catch (_: Exception) {
-            false
-        }
-    }
-
-    private fun maybeProcessWithAi(id: Int, text: String, currentType: String) {
-        serviceScope.launch {
-            if (!canAutoAi()) return@launch
-            processWithAi(id, text, currentType)
-        }
-    }
-
-    private suspend fun processWithAi(id: Int, text: String, currentType: String) {
-        try {
-            val prompt = """
-                Classify this clipboard content. Be smart and specific.
-                You can use standard categories (TEXT, URL, PHONE, EMAIL, MATHS, CODE, ADDRESS, CRYPTO, TODO)
-                or CREATE A NEW ONE if it fits better (e.g., RECIPE, FLIGHT, PACKAGE, EVENT, QUOTE, etc.).
-                Keep category names uppercase and single-word if possible.
-
-                Current guess: $currentType
-
-                If the text is over 30 words or contains complex info, provide a punchy 1-sentence summary (max 15 words).
-                If it's short, summary should be null.
-
-                Content: ${text.take(2000)}
-
-                Respond ONLY in JSON format: {"category": "CATEGORY_NAME", "summary": "optional summary string or null"}
-            """.trimIndent()
-
-            aiRepository.getChatResponse(prompt, emptyList(), null, "openai/gpt-oss-120b").collect { result ->
-                result.onSuccess { responseChunk ->
-                    try {
-                        val response = responseChunk.text
-                        val category = Regex("\"category\":\\s*\"([^\"]+)\"").find(response)?.groupValues?.get(1) ?: currentType
-                        val rawSummary = Regex("\"summary\":\\s*\"([^\"]+)\"").find(response)?.groupValues?.get(1)
-                        val summary = if (rawSummary == "null" || rawSummary.isNullOrBlank()) null else rawSummary
-
-                        clipboardDao.updateAiDetails(id, summary, category)
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error parsing AI response", e)
-                        val entry = clipboardDao.getEntryById(id)
-                        entry?.let { clipboardDao.update(it.copy(isAiProcessed = true)) }
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "AI Background processing failed", e)
+            if (!backgroundCapable()) return@launch
+            captureCurrentClipboard(source = "LISTENER")
         }
     }
 
     override fun onCreate() {
         super.onCreate()
-        Log.d(TAG, "Service creating")
         NotificationHelper.createAllChannels(this)
-
         try {
-            val notification = createNotification()
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(NotificationHelper.ID_CLIPBOARD, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-            } else {
-                startForeground(NotificationHelper.ID_CLIPBOARD, notification)
-            }
+            startForegroundCompat(createNotification())
+            foregroundStarted = true
         } catch (e: Exception) {
-            // Android 12+ ForegroundServiceStartNotAllowedException when started from
-            // background without exemption — stop honestly instead of crash-looping.
-            Log.w(TAG, "Could not start foreground: ${e.message}")
+            // Android 12+ can reject a background FGS start. Stop honestly
+            // instead of crash-looping; the UI will show the fallback banner.
+            Log.w(TAG, "Could not start foreground service: ${e.message}")
             stopSelf()
             return
         }
 
-        clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
         clipboardManager?.addPrimaryClipChangedListener(clipListener)
 
+        serviceScope.launch { watchLoop() }
+    }
+
+    private fun startSettingsCollector() {
+        if (settingsCollectorStarted) return
+        settingsCollectorStarted = true
         serviceScope.launch {
             combine(
                 settingsRepository.clipboardMonitoringEnabled,
-                settingsRepository.aiClipboardMonitoringEnabled,
                 settingsRepository.clipboardExcludeSensitive,
-            ) { monitoring, aiAuto, exclude ->
-                Triple(monitoring, aiAuto, exclude)
-            }.collect { (monitoring, aiAuto, exclude) ->
-                monitoringEnabled = monitoring
-                isAiMonitoringEnabled = aiAuto
-                excludeSensitive = exclude
-                gateStatus = ClipboardGate.evaluate(this@ClipboardService, monitoring)
-                updateNotification()
-                if (!monitoring || gateStatus == ClipboardGate.Status.SETUP_REQUIRED) {
-                    Log.d(TAG, "Monitoring gated: enabled=$monitoring status=$gateStatus — listener idle")
+                settingsRepository.clipboardOnboardingSeen,
+            ) { monitoring, exclude, seen -> Triple(monitoring, exclude, seen) }
+                .collect { (monitoring, exclude, seen) ->
+                    monitoringEnabled = monitoring
+                    excludeSensitive = exclude
+                    onboardingSeen = seen
+                    gateStatus = ClipboardGate.evaluate(
+                        context = this@ClipboardService,
+                        monitoringEnabled = monitoring,
+                        onboardingSeen = seen,
+                    )
+                    updateNotification()
+                    if (!monitoring || !backgroundCapable()) {
+                        if (manualCaptureRequested) return@collect
+                        Log.d(TAG, "Clipboard gate not background-capable: $gateStatus")
+                        stopSelf()
+                    }
                 }
-                if (!monitoring) {
-                    // Honest stop: no requirement met, release the foreground service.
-                    stopSelf()
-                }
-            }
-        }
-
-        startBackfillLoop()
-    }
-
-    private fun updateNotification() {
-        try {
-            val manager = getSystemService(NotificationManager::class.java) ?: return
-            manager.notify(NotificationHelper.ID_CLIPBOARD, createNotification())
-        } catch (_: Exception) {
         }
     }
+
+    private fun backgroundCapable(): Boolean =
+        gateStatus == ClipboardGate.Status.ACTIVE_SHIZUKU ||
+            gateStatus == ClipboardGate.Status.ACTIVE_APP_OP
 
     /**
-     * Light backfill (15 min) for Shizuku mode only — the listener handles the
-     * common case; polling exists as a safety net for binder disconnects.
-     * No polling without Shizuku (would just fail behind the background ban).
-     * AI reprocessing runs only when both AI toggles allow it.
+     * Primary path: system listener. Safety net: a light poll that runs every
+     * 5s while interactive and every 45s with the screen off. Polling is
+     * skipped when the listener already captured the exact same payload.
      */
-    private fun startBackfillLoop() {
-        serviceScope.launch {
-            while (isActive) {
-                try {
-                    if (monitoringEnabled && ShizukuHelper.isAuthorized()) {
-                        readClipboardViaShizuku("backfill")
-                    }
-                    if (canAutoAi()) {
-                        val unprocessed = clipboardDao.getUnprocessedEntries()
-                        unprocessed.take(1).forEach { entry ->
-                            processWithAi(entry.id, entry.content, entry.type)
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Backfill failed", e)
+    private suspend fun watchLoop() {
+        while (serviceScope.isActive) {
+            try {
+                if (monitoringEnabled && backgroundCapable()) {
+                    captureCurrentClipboard(source = "POLL")
+                    if (aiProcessor.canAutoProcess()) aiProcessor.processQueued(1)
                 }
-                delay(15 * 60 * 1000L)
+            } catch (e: Exception) {
+                Log.w(TAG, "Clipboard poll failed: ${e.message}")
             }
+            delay(if (isInteractive()) POLL_INTERVAL_MS else SCREEN_OFF_INTERVAL_MS)
         }
+    }
+
+    private fun isInteractive(): Boolean = try {
+        (getSystemService(Context.POWER_SERVICE) as? PowerManager)?.isInteractive ?: true
+    } catch (_: Exception) {
+        true
+    }
+
+    private suspend fun captureCurrentClipboard(source: String) {
+        if (!capturing.compareAndSet(false, true)) return
+        try {
+            val shizukuText = if (ShizukuHelper.isAuthorized()) {
+                try {
+                    shizukuExecutor.getClipboardText()
+                } catch (e: Exception) {
+                    // Shizuku can die between authorization check and call, or
+                    // the ROM may reject `cmd clipboard get`. Never let that
+                    // skip the standard-read fallback.
+                    Log.w(TAG, "Shizuku clipboard read failed: ${e.message}")
+                    null
+                }
+            } else {
+                null
+            }
+            if (!shizukuText.isNullOrBlank()) {
+                val fingerprint = fingerprint(shizukuText)
+                if (shouldProcess(fingerprint)) {
+                    val outcome = captureProcessor.processText(
+                        raw = shizukuText,
+                        source = source,
+                        excludeSensitive = excludeSensitive,
+                    )
+                    handleOutcome(outcome, fingerprint)
+                }
+                return
+            }
+            // Shizuku unavailable or `cmd clipboard get` unsupported on this
+            // ROM: use the standard read. A granted app-op makes this work in
+            // the background; otherwise it still works while Toolz is focused.
+            val payload = readSystemClipboard(source) ?: return
+            val fingerprint = fingerprint(payload)
+            if (!shouldProcess(fingerprint)) return
+            val result = captureProcessor.process(payload, excludeSensitive)
+            handleOutcome(result.outcome, fingerprint)
+        } catch (e: Exception) {
+            Log.w(TAG, "Clipboard capture failed: ${e.message}")
+        } finally {
+            capturing.set(false)
+        }
+    }
+
+    private fun shouldProcess(fingerprint: String): Boolean =
+        fingerprint != lastFingerprint
+
+    private suspend fun handleOutcome(
+        outcome: ClipboardCaptureProcessor.Outcome,
+        fingerprint: String,
+    ) {
+        if (outcome == ClipboardCaptureProcessor.Outcome.FAILED) return
+        lastFingerprint = fingerprint
+        if (outcome == ClipboardCaptureProcessor.Outcome.INSERTED ||
+            outcome == ClipboardCaptureProcessor.Outcome.BUMPED
+        ) {
+            retentionManager.enforceAfterCapture()
+            if (aiProcessor.canAutoProcess()) aiProcessor.processQueued(1)
+        }
+    }
+
+    private fun readSystemClipboard(source: String): ClipboardPayload? {
+        return try {
+            val manager = clipboardManager ?: return null
+            val clip = manager.primaryClip ?: return null
+            if (clip.itemCount == 0) return null
+            val description = clip.description
+            val items = buildList {
+                for (index in 0 until clip.itemCount) {
+                    val item = clip.getItemAt(index) ?: continue
+                    add(
+                        ClipboardPayloadItem(
+                            text = item.text?.toString(),
+                            html = item.htmlText,
+                            uri = item.uri,
+                            mimeType = description?.getMimeType(index),
+                        ),
+                    )
+                }
+            }
+            if (items.all { it.text.isNullOrBlank() && it.uri == null }) return null
+            ClipboardPayload(
+                items = items,
+                label = description?.label?.toString(),
+                source = source,
+                isSensitiveExtra = description?.extras
+                    ?.getBoolean("android.content.extra.IS_SENSITIVE", false) ?: false,
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Standard clipboard read denied: ${e.message}")
+            null
+        }
+    }
+
+    private fun fingerprint(text: String): String = sha256("text:$text")
+
+    private fun fingerprint(payload: ClipboardPayload): String = sha256(
+        buildString {
+            payload.items.forEach { item ->
+                append(item.text.orEmpty())
+                append('\u0000')
+                append(item.html.orEmpty())
+                append('\u0000')
+                append(item.uri?.toString().orEmpty())
+                append('\u0001')
+            }
+        },
+    )
+
+    private fun sha256(value: String): String = try {
+        MessageDigest.getInstance("SHA-256")
+            .digest(value.toByteArray())
+            .joinToString("") { "%02x".format(it) }
+    } catch (_: Exception) {
+        value.hashCode().toString()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_CHECK_CLIPBOARD) manualCaptureRequested = true
+        startSettingsCollector()
         when (intent?.action) {
             ACTION_PAUSE -> {
                 serviceScope.launch {
                     settingsRepository.setClipboardMonitoringEnabled(false)
+                    stopSelf()
                 }
-                stopSelf()
                 return START_NOT_STICKY
+            }
+            ACTION_RESUME -> {
+                serviceScope.launch {
+                    settingsRepository.setClipboardMonitoringEnabled(true)
+                    refreshGate()
+                }
+                return START_STICKY
             }
             ACTION_CHECK_CLIPBOARD -> {
                 val externalText = intent.getStringExtra(EXTRA_CLIPBOARD_TEXT)
-                if (externalText != null) {
-                    processClipboardText(externalText, "accessibility")
-                } else {
-                    checkClipboard()
+                serviceScope.launch {
+                    try {
+                        if (externalText != null) {
+                            val outcome = captureProcessor.processText(
+                                raw = externalText,
+                                source = intent.getStringExtra(EXTRA_SOURCE) ?: "EXTERNAL",
+                                excludeSensitive = excludeSensitive,
+                            )
+                            handleOutcome(outcome, fingerprint(externalText))
+                        } else {
+                            captureCurrentClipboard(source = "MANUAL")
+                        }
+                    } finally {
+                        manualCaptureRequested = false
+                        refreshGate()
+                    }
                 }
                 return START_STICKY
             }
         }
-        // Default start: verify gate, otherwise stop (don't linger as zombie FGS).
-        serviceScope.launch {
-            val enabled = settingsRepository.clipboardMonitoringEnabled.first()
-            val status = ClipboardGate.evaluate(this@ClipboardService, enabled)
-            if (!enabled || status == ClipboardGate.Status.SETUP_REQUIRED) {
-                Log.d(TAG, "Start requested but gate=$status enabled=$enabled — stopping")
-                stopSelf()
-            }
-        }
+        serviceScope.launch { refreshGate() }
         return START_STICKY
+    }
+
+    private suspend fun refreshGate() {
+        val monitoring = settingsRepository.clipboardMonitoringEnabled.first()
+        val seen = settingsRepository.clipboardOnboardingSeen.first()
+        excludeSensitive = settingsRepository.clipboardExcludeSensitive.first()
+        monitoringEnabled = monitoring
+        onboardingSeen = seen
+        gateStatus = ClipboardGate.evaluate(this, monitoring, seen)
+        updateNotification()
+        if (!manualCaptureRequested && (!monitoring || !backgroundCapable())) stopSelf()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -338,37 +348,83 @@ class ClipboardService : Service() {
         super.onDestroy()
     }
 
+    private fun startForegroundCompat(notification: Notification) {
+        // `specialUse` only exists on Android 14+. On Android 12–13 the
+        // two-argument call is the safe path and the manifest type is ignored.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(
+                NotificationHelper.ID_CLIPBOARD,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
+            )
+        } else {
+            startForeground(NotificationHelper.ID_CLIPBOARD, notification)
+        }
+    }
+
+    private fun updateNotification() {
+        if (!foregroundStarted) return
+        try {
+            val manager = getSystemService(NotificationManager::class.java) ?: return
+            manager.notify(NotificationHelper.ID_CLIPBOARD, createNotification())
+        } catch (_: Exception) {
+        }
+    }
+
     private fun createNotification(): Notification {
         val openIntent = Intent(this, MainActivity::class.java).apply {
             putExtra("navigate_to", "clipboard")
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
         val openPi = PendingIntent.getActivity(
-            this, 7001, openIntent,
+            this,
+            7001,
+            openIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        val pauseIntent = Intent(this, ClipboardService::class.java).apply { action = ACTION_PAUSE }
-        val pausePi = PendingIntent.getService(
-            this, 7002, pauseIntent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-        )
-        val (title, text) = when {
-            !monitoringEnabled -> "Clipboard paused" to "Tap to reopen history"
-            gateStatus == ClipboardGate.Status.ACTIVE_SHIZUKU -> "Clipboard watching" to "Via Shizuku • tap to open"
-            gateStatus == ClipboardGate.Status.ACTIVE_ACCESSIBILITY -> "Clipboard watching" to "Via accessibility • tap to open"
-            else -> "Clipboard setup needed" to "Requires Shizuku or accessibility"
+        val toggleIntent = Intent(this, ClipboardService::class.java).apply {
+            action = if (monitoringEnabled) ACTION_PAUSE else ACTION_RESUME
         }
+        val togglePi = PendingIntent.getService(
+            this,
+            7002,
+            toggleIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+
+        val title = when {
+            !monitoringEnabled -> getString(R.string.st_ClipboardService_paused_title)
+            gateStatus == ClipboardGate.Status.ACTIVE_SHIZUKU ->
+                getString(R.string.st_ClipboardService_watching_title)
+            gateStatus == ClipboardGate.Status.ACTIVE_APP_OP ->
+                getString(R.string.st_ClipboardService_watching_title)
+            else -> getString(R.string.st_ClipboardService_setup_title)
+        }
+        val text = when {
+            !monitoringEnabled -> getString(R.string.st_ClipboardService_paused_body)
+            gateStatus == ClipboardGate.Status.ACTIVE_SHIZUKU ->
+                getString(R.string.st_ClipboardService_watching_shizuku)
+            gateStatus == ClipboardGate.Status.ACTIVE_APP_OP ->
+                getString(R.string.st_ClipboardService_watching_appop)
+            else -> getString(R.string.st_ClipboardService_setup_body)
+        }
+        val toggleLabel = if (monitoringEnabled) {
+            getString(R.string.st_ClipboardService_action_pause)
+        } else {
+            getString(R.string.st_ClipboardService_action_resume)
+        }
+
         return NotificationHelper.baseBuilder(
             this,
             NotificationHelper.CHANNEL_CLIPBOARD,
-            showLargeIcon = false
+            showLargeIcon = false,
         )
             .setContentTitle(title)
             .setContentText(text)
             .setSmallIcon(R.drawable.ic_stat_toolz)
             .setContentIntent(openPi)
-            .addAction(R.drawable.ic_clipboard, "Open", openPi)
-            .addAction(R.drawable.ic_clipboard, "Pause", pausePi)
+            .addAction(R.drawable.ic_clipboard, getString(R.string.st_ClipboardService_action_open), openPi)
+            .addAction(R.drawable.ic_clipboard, toggleLabel, togglePi)
             .setOngoing(true)
             .setSilent(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
@@ -379,17 +435,18 @@ class ClipboardService : Service() {
     companion object {
         const val ACTION_CHECK_CLIPBOARD = "com.frerox.toolz.action.CHECK_CLIPBOARD"
         const val ACTION_PAUSE = "com.frerox.toolz.action.CLIPBOARD_PAUSE"
+        const val ACTION_RESUME = "com.frerox.toolz.action.CLIPBOARD_RESUME"
         const val EXTRA_CLIPBOARD_TEXT = "extra_clipboard_text"
-        const val MAX_ENTRIES = 500
+        const val EXTRA_SOURCE = "extra_source"
+
+        private const val POLL_INTERVAL_MS = 5_000L
+        private const val SCREEN_OFF_INTERVAL_MS = 45_000L
 
         fun startIfNeeded(context: Context) {
             try {
-                val intent = Intent(context, ClipboardService::class.java)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    context.startForegroundService(intent)
-                } else {
-                    context.startService(intent)
-                }
+                context.startForegroundService(
+                    Intent(context, ClipboardService::class.java),
+                )
             } catch (e: Exception) {
                 Log.w(TAG, "startIfNeeded failed: ${e.message}")
             }
@@ -399,6 +456,18 @@ class ClipboardService : Service() {
             try {
                 context.stopService(Intent(context, ClipboardService::class.java))
             } catch (_: Exception) {
+            }
+        }
+
+        fun requestCapture(context: Context, source: String = "TILE") {
+            try {
+                val intent = Intent(context, ClipboardService::class.java).apply {
+                    action = ACTION_CHECK_CLIPBOARD
+                    putExtra(EXTRA_SOURCE, source)
+                }
+                context.startForegroundService(intent)
+            } catch (e: Exception) {
+                Log.w(TAG, "requestCapture failed: ${e.message}")
             }
         }
     }

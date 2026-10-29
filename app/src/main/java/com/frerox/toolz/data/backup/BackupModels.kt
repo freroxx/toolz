@@ -84,3 +84,64 @@ data class BackupImportResult(
     // T-P0-03 (additive): future task alarms re-scheduled after TASKS restore.
     val rescheduledTaskAlarms: Int = 0
 )
+
+// ── Clipboard backup v2 ─────────────────────────────────────────────────────
+
+/**
+ * Portable clipboard payload. The archive is intentionally plaintext for now
+ * (`encryption = "none"`) so users can recover their own data; a future code
+ * change can switch this to an encrypted container without changing the DTO.
+ *
+ * Attachments are stored as decrypted bytes under
+ * `data/clipboard_blobs/<sha256>.bin`, then re-encrypted with the local
+ * Keystore-backed key on restore.
+ */
+@JsonClass(generateAdapter = true)
+data class ClipboardBackupV2(
+    val version: Int = 2,
+    val encryption: String = "none",
+    val exportedAtMillis: Long = System.currentTimeMillis(),
+    val clips: List<ClipboardBackupClipV2> = emptyList(),
+)
+
+@JsonClass(generateAdapter = true)
+data class ClipboardBackupClipV2(
+    val content: String,
+    val timestamp: Long,
+    val type: String,
+    val isPinned: Boolean = false,
+    val previewUrl: String? = null,
+    val sourceApp: String? = null,
+    val summary: String? = null,
+    val isAiProcessed: Boolean = false,
+    val contentHash: Int = 0,
+    val source: String? = null,
+    val contentHashSha256: String? = null,
+    val htmlContent: String? = null,
+    val mimeType: String? = null,
+    val sizeBytes: Long = 0L,
+    val attachmentCount: Int = 0,
+    val isSensitive: Boolean = false,
+    val sensitivityReason: String? = null,
+    val isLocked: Boolean = false,
+    val passwordVaultMatch: Boolean = false,
+    val metadataJson: String? = null,
+    val deletedAt: Long? = null,
+    val expiresAt: Long? = null,
+    val aiState: String? = null,
+    val aiError: String? = null,
+    val attachments: List<ClipboardBackupAttachmentV2> = emptyList(),
+)
+
+@JsonClass(generateAdapter = true)
+data class ClipboardBackupAttachmentV2(
+    val blobId: String,
+    /** Zip entry with decrypted bytes, or null when the blob was unreadable. */
+    val blobPath: String? = null,
+    val fileName: String? = null,
+    val mimeType: String? = null,
+    val sizeBytes: Long = 0L,
+    val position: Int = 0,
+    val width: Int? = null,
+    val height: Int? = null,
+)
