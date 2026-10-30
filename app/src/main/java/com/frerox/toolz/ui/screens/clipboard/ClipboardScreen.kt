@@ -55,6 +55,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.InsertDriveFile
@@ -226,8 +227,8 @@ fun ClipboardScreen(
         detailId?.let { id -> state.entries.firstOrNull { it.id == id } ?: state.trashed.firstOrNull { it.id == id } }
     }
 
-    LaunchedEffect(state.settings.onboardingSeen) {
-        if (!state.settings.onboardingSeen) showOnboarding = true
+    LaunchedEffect(state.loaded, state.settings.onboardingSeen) {
+        if (state.loaded && !state.settings.onboardingSeen) showOnboarding = true
     }
 
     LaunchedEffect(Unit) {
@@ -362,7 +363,14 @@ fun ClipboardScreen(
                                 ),
                             )
                         }
-                        if (!state.showTrash && state.settings.aiEnabled) {
+                        if (!state.showTrash && state.settings.aiEnabled &&
+                            state.visibleEntries.any { candidate ->
+                                candidate.id in state.selection &&
+                                    candidate.isTextLike &&
+                                    !candidate.isSensitive &&
+                                    !candidate.isLocked
+                            }
+                        ) {
                             IconButton(
                                 onClick = {
                                     haptic.click()
@@ -538,6 +546,9 @@ fun ClipboardScreen(
             )
 
             when {
+                !state.loaded -> {
+                    LoadingState()
+                }
                 state.visibleEntries.isEmpty() && state.query.isNotBlank() -> {
                     EmptyState(
                         icon = Icons.Rounded.Search,
@@ -858,6 +869,9 @@ private fun ClipboardCard(
         if (dismissState.currentValue == SwipeToDismissBoxValue.EndToStart) {
             haptic.tick()
             onDelete()
+            // If the row survives (delete failed or the list is slow to
+            // update), snap it back so it never stays stuck off-screen.
+            dismissState.reset()
         }
     }
 
@@ -976,6 +990,22 @@ private fun ClipboardCard(
                                 MaterialTheme.colorScheme.onSurface
                             },
                         )
+                        if (aiRunning && !masked) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(14.dp),
+                                    strokeWidth = 1.5.dp,
+                                )
+                                Text(
+                                    text = stringResource(R.string.st_ClipboardScreen_ai_running),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
                         if (aiEnabled && !masked && !entry.summary.isNullOrBlank()) {
                             Row(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -1077,18 +1107,11 @@ private fun ClipboardCard(
                                 )
                             }
                             IconButton(onClick = { haptic.click(); onCopy() }) {
-                                if (aiRunning) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(18.dp),
-                                        strokeWidth = 2.dp,
-                                    )
-                                } else {
-                                    Icon(
-                                        Icons.Rounded.ContentCopy,
-                                        contentDescription = stringResource(R.string.st_ClipboardScreen_action_copy),
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
+                                Icon(
+                                    Icons.Rounded.ContentCopy,
+                                    contentDescription = stringResource(R.string.st_ClipboardScreen_action_copy),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
                             }
                         }
                     }
@@ -1372,7 +1395,9 @@ private fun ClipDetailSheet(
                 }
             }
 
-            if (state.settings.aiEnabled && !entry.isSensitive && !entry.isLocked) {
+            if (state.settings.aiEnabled && entry.isTextLike &&
+                !entry.isSensitive && !entry.isLocked
+            ) {
                 item {
                     AiSection(
                         entry = entry,
@@ -1458,7 +1483,7 @@ private fun ClipDetailSheet(
                             onClick = onToggleLock,
                         )
                     }
-                    if (!entry.passwordVaultMatch) {
+                    if (!entry.passwordVaultMatch && !entry.isLocked) {
                         ActionTile(
                             icon = if (entry.isSensitive) Icons.Rounded.Shield else Icons.Rounded.Security,
                             label = stringResource(
@@ -1772,6 +1797,7 @@ private fun OnboardingSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 24.dp)
                 .padding(bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -2130,6 +2156,7 @@ private fun StatusSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 36.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -2361,6 +2388,25 @@ private fun InfoBanner(
 }
 
 @Composable
+private fun LoadingState() {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        CircularProgressIndicator()
+        Spacer(Modifier.height(16.dp))
+        Text(
+            text = stringResource(R.string.st_ClipboardScreen_loading),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
 private fun EmptyState(icon: ImageVector, title: String, body: String) {
     Column(
         modifier = Modifier
@@ -2503,8 +2549,24 @@ private fun sourceLabel(entry: ClipboardEntry): String {
     return if (source.contains('.')) source.substringAfterLast('.') else source
 }
 
+private val LINK_IN_TEXT_REGEX = Regex(
+    "(https?://|www\\.)[^\\s<>\"']+",
+    RegexOption.IGNORE_CASE,
+)
+
 private fun openLink(context: Context, content: String) {
-    val uri = runCatching { Uri.parse(content.trim()) }.getOrNull() ?: return
+    // Only ever launch http/https. A clip can contain arbitrary text or a
+    // malicious scheme (intent:, file:, javascript:), so normalize bare
+    // www. links and extract the first real URL from mixed text.
+    val candidate = LINK_IN_TEXT_REGEX.find(content.trim())?.value?.trimEnd('.', ',', ')', ']', '}')
+        ?: return
+    val normalized = if (candidate.startsWith("www.", ignoreCase = true)) {
+        "https://$candidate"
+    } else {
+        candidate
+    }
+    val uri = runCatching { Uri.parse(normalized) }.getOrNull() ?: return
+    if (uri.scheme?.lowercase() !in setOf("http", "https")) return
     val intent = Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     runCatching { context.startActivity(intent) }.onFailure {
         Toast.makeText(context, R.string.st_ClipboardScreen_message_open_failed, Toast.LENGTH_SHORT).show()
@@ -2545,6 +2607,7 @@ private fun messageText(context: Context, event: ClipboardEvent.Message): String
         ClipboardMessage.CLEARED -> context.getString(R.string.st_ClipboardScreen_message_cleared)
         ClipboardMessage.AI_DONE -> context.getString(R.string.st_ClipboardScreen_message_ai_done)
         ClipboardMessage.AI_SENSITIVE -> context.getString(R.string.st_ClipboardScreen_message_ai_sensitive)
+        ClipboardMessage.AI_TEXT_ONLY -> context.getString(R.string.st_ClipboardScreen_message_ai_text_only)
         ClipboardMessage.AI_DISABLED -> context.getString(R.string.st_ClipboardScreen_message_ai_disabled)
         ClipboardMessage.AI_NOT_CONFIGURED -> context.getString(R.string.st_ClipboardScreen_message_ai_not_configured)
         ClipboardMessage.AI_FAILED -> context.getString(R.string.st_ClipboardScreen_message_ai_failed)

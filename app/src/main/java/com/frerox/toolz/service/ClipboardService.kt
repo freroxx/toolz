@@ -29,7 +29,6 @@ import com.frerox.toolz.data.clipboard.ClipboardCaptureProcessor
 import com.frerox.toolz.data.clipboard.ClipboardGate
 import com.frerox.toolz.data.clipboard.ClipboardPayload
 import com.frerox.toolz.data.clipboard.ClipboardPayloadItem
-import com.frerox.toolz.data.clipboard.ClipboardRetentionManager
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.util.NotificationHelper
 import com.frerox.toolz.util.shizuku.ShizukuHelper
@@ -44,8 +43,9 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.security.MessageDigest
-import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 
 private const val TAG = "ClipboardService"
@@ -67,7 +67,6 @@ class ClipboardService : Service() {
 
     @Inject lateinit var captureProcessor: ClipboardCaptureProcessor
     @Inject lateinit var aiProcessor: ClipboardAiProcessor
-    @Inject lateinit var retentionManager: ClipboardRetentionManager
     @Inject lateinit var settingsRepository: SettingsRepository
     @Inject lateinit var shizukuExecutor: ShizukuShellExecutor
 
@@ -79,7 +78,7 @@ class ClipboardService : Service() {
     @Volatile private var onboardingSeen = false
     @Volatile private var gateStatus: ClipboardGate.Status = ClipboardGate.Status.SETUP_REQUIRED
     @Volatile private var lastFingerprint: String? = null
-    private val capturing = AtomicBoolean(false)
+    private val captureMutex = Mutex()
     @Volatile private var foregroundStarted = false
     @Volatile private var manualCaptureRequested = false
     @Volatile private var settingsCollectorStarted = false
@@ -122,6 +121,10 @@ class ClipboardService : Service() {
                 settingsRepository.clipboardOnboardingSeen,
             ) { monitoring, exclude, seen -> Triple(monitoring, exclude, seen) }
                 .collect { (monitoring, exclude, seen) ->
+                    // Changing the sensitivity filter must force the next poll
+                    // to re-evaluate the current clip: the fingerprint may be
+                    // the same but the capture decision is now different.
+                    if (excludeSensitive != exclude) lastFingerprint = null
                     monitoringEnabled = monitoring
                     excludeSensitive = exclude
                     onboardingSeen = seen
@@ -169,47 +172,55 @@ class ClipboardService : Service() {
         true
     }
 
-    private suspend fun captureCurrentClipboard(source: String) {
-        if (!capturing.compareAndSet(false, true)) return
+    /**
+     * Capture the current clipboard.
+     *
+     * Listener/poll captures use [Mutex.tryLock] so overlapping events are
+     * coalesced instead of queueing. A user-initiated manual capture passes
+     * `force = true` and waits for any in-flight read to finish, because
+     * silently dropping the explicit action would look like a bug.
+     */
+    private suspend fun captureCurrentClipboard(source: String, force: Boolean = false) {
+        if (force) {
+            captureMutex.lock()
+        } else if (!captureMutex.tryLock()) {
+            return
+        }
         try {
-            val shizukuText = if (ShizukuHelper.isAuthorized()) {
-                try {
-                    shizukuExecutor.getClipboardText()
-                } catch (e: Exception) {
-                    // Shizuku can die between authorization check and call, or
-                    // the ROM may reject `cmd clipboard get`. Never let that
-                    // skip the standard-read fallback.
-                    Log.w(TAG, "Shizuku clipboard read failed: ${e.message}")
-                    null
-                }
-            } else {
-                null
-            }
-            if (!shizukuText.isNullOrBlank()) {
-                val fingerprint = fingerprint(shizukuText)
-                if (shouldProcess(fingerprint)) {
-                    val outcome = captureProcessor.processText(
-                        raw = shizukuText,
-                        source = source,
-                        excludeSensitive = excludeSensitive,
-                    )
-                    handleOutcome(outcome, fingerprint)
-                }
-                return
-            }
-            // Shizuku unavailable or `cmd clipboard get` unsupported on this
-            // ROM: use the standard read. A granted app-op makes this work in
-            // the background; otherwise it still works while Toolz is focused.
-            val payload = readSystemClipboard(source) ?: return
+            // Rich reads preserve HTML, URIs, images and multi-item clips.
+            // Shizuku only returns plain text, so the standard read is tried
+            // first and Shizuku is the fallback when that read is denied.
+            val payload = readSystemClipboard(source) ?: readShizukuPayload(source) ?: return
             val fingerprint = fingerprint(payload)
-            if (!shouldProcess(fingerprint)) return
+            // A manual capture must retry even when the fingerprint matches
+            // the last capture. The previous attempt may have been ignored by
+            // the sensitivity filter or rejected by a quota, and the user
+            // explicitly asked to save the current clipboard.
+            if (!force && !shouldProcess(fingerprint)) return
             val result = captureProcessor.process(payload, excludeSensitive)
             handleOutcome(result.outcome, fingerprint)
         } catch (e: Exception) {
             Log.w(TAG, "Clipboard capture failed: ${e.message}")
         } finally {
-            capturing.set(false)
+            captureMutex.unlock()
         }
+    }
+
+    private suspend fun readShizukuPayload(source: String): ClipboardPayload? {
+        if (!ShizukuHelper.isAuthorized()) return null
+        val text = try {
+            shizukuExecutor.getClipboardText()
+        } catch (e: Exception) {
+            // Shizuku can die between the authorization check and the call,
+            // or the ROM may reject `cmd clipboard get`.
+            Log.w(TAG, "Shizuku clipboard read failed: ${e.message}")
+            null
+        }
+        if (text.isNullOrBlank()) return null
+        return ClipboardPayload(
+            items = listOf(ClipboardPayloadItem(text = text)),
+            source = source,
+        )
     }
 
     private fun shouldProcess(fingerprint: String): Boolean =
@@ -221,10 +232,11 @@ class ClipboardService : Service() {
     ) {
         if (outcome == ClipboardCaptureProcessor.Outcome.FAILED) return
         lastFingerprint = fingerprint
+        // The capture processor already enforces retention after inserting a
+        // clip. Running it again here doubled the DB work on every capture.
         if (outcome == ClipboardCaptureProcessor.Outcome.INSERTED ||
             outcome == ClipboardCaptureProcessor.Outcome.BUMPED
         ) {
-            retentionManager.enforceAfterCapture()
             if (aiProcessor.canAutoProcess()) aiProcessor.processQueued(1)
         }
     }
@@ -248,7 +260,14 @@ class ClipboardService : Service() {
                     )
                 }
             }
-            if (items.all { it.text.isNullOrBlank() && it.uri == null }) return null
+            if (items.all { item ->
+                    item.text.isNullOrBlank() &&
+                        item.html.isNullOrBlank() &&
+                        item.uri == null
+                }
+            ) {
+                return null
+            }
             ClipboardPayload(
                 items = items,
                 label = description?.label?.toString(),
@@ -262,16 +281,23 @@ class ClipboardService : Service() {
         }
     }
 
-    private fun fingerprint(text: String): String = sha256("text:$text")
-
     private fun fingerprint(payload: ClipboardPayload): String = sha256(
         buildString {
+            // Sensitivity and MIME affect both the capture decision and the
+            // stored classification, so they are part of the identity. Without
+            // them the same text re-copied as sensitive could be skipped.
+            append(if (payload.isSensitiveExtra) "sensitive" else "normal")
+            append('\u0002')
+            append(payload.label.orEmpty())
+            append('\u0002')
             payload.items.forEach { item ->
                 append(item.text.orEmpty())
                 append('\u0000')
                 append(item.html.orEmpty())
                 append('\u0000')
                 append(item.uri?.toString().orEmpty())
+                append('\u0000')
+                append(item.mimeType.orEmpty())
                 append('\u0001')
             }
         },
@@ -308,14 +334,24 @@ class ClipboardService : Service() {
                 serviceScope.launch {
                     try {
                         if (externalText != null) {
-                            val outcome = captureProcessor.processText(
-                                raw = externalText,
-                                source = intent.getStringExtra(EXTRA_SOURCE) ?: "EXTERNAL",
-                                excludeSensitive = excludeSensitive,
-                            )
-                            handleOutcome(outcome, fingerprint(externalText))
+                            // Build a real payload so external text uses the
+                            // exact same fingerprint path as listener/poll
+                            // captures. Otherwise the next poll re-inserts it.
+                            // Hold the same mutex as listener/poll captures so
+                            // an external insert cannot race a clipboard read.
+                            captureMutex.withLock {
+                                val payload = ClipboardPayload(
+                                    items = listOf(ClipboardPayloadItem(text = externalText)),
+                                    source = intent.getStringExtra(EXTRA_SOURCE) ?: "EXTERNAL",
+                                )
+                                val fingerprint = fingerprint(payload)
+                                if (shouldProcess(fingerprint)) {
+                                    val result = captureProcessor.process(payload, excludeSensitive)
+                                    handleOutcome(result.outcome, fingerprint)
+                                }
+                            }
                         } else {
-                            captureCurrentClipboard(source = "MANUAL")
+                            captureCurrentClipboard(source = "MANUAL", force = true)
                         }
                     } finally {
                         manualCaptureRequested = false

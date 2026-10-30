@@ -182,11 +182,16 @@ class ClipboardShareActivity : AppCompatActivity() {
         }
 
         if (items.isEmpty()) return null
+        val descriptionSensitive = source.clipData?.description?.extras
+            ?.getBoolean(EXTRA_IS_SENSITIVE, false) ?: false
         return ClipboardPayload(
             items = items.values.toList(),
             label = source.clipData?.description?.label?.toString(),
             source = if (isProcessText) "PROCESS_TEXT" else "SHARE",
-            isSensitiveExtra = source.getBooleanExtra(EXTRA_IS_SENSITIVE, false),
+            // Sensitive content is normally flagged on the ClipDescription
+            // extras; some senders also copy it onto the intent extras.
+            isSensitiveExtra = source.getBooleanExtra(EXTRA_IS_SENSITIVE, false) ||
+                descriptionSensitive,
         )
     }
 

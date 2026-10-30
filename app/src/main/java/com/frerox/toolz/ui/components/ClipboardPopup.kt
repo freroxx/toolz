@@ -15,16 +15,19 @@ import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -39,6 +42,7 @@ import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.PushPin
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -94,6 +98,16 @@ fun ClipboardPopup(
         viewModel.refreshClipboard(notify = false)
     }
 
+    // Safety net: if a manual capture finishes without emitting a result
+    // (for example because a silent refresh won the race), never leave the
+    // paste button stuck in a spinner state.
+    LaunchedEffect(awaitingPaste, state.busy) {
+        if (awaitingPaste && !state.busy) {
+            kotlinx.coroutines.delay(8_000)
+            if (!state.busy) awaitingPaste = false
+        }
+    }
+
     LaunchedEffect(Unit) {
         viewModel.events.collect { event ->
             if (event is ClipboardEvent.Message) {
@@ -108,6 +122,7 @@ fun ClipboardPopup(
                     ClipboardMessage.SAVED,
                     ClipboardMessage.BUMPED,
                     ClipboardMessage.EMPTY,
+                    ClipboardMessage.SANDBOX,
                     -> awaitingPaste
                     else -> false
                 }
@@ -143,24 +158,31 @@ fun ClipboardPopup(
         )
     }
 
-    Box(
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f))
-            .clickable(onClick = onDismiss),
+            .clickable(onClick = onDismiss)
+            .windowInsetsPadding(WindowInsets.safeDrawing),
         contentAlignment = Alignment.Center,
     ) {
+        // Keep the card inside the safe area and let the clip list shrink on
+        // small/landscape screens instead of pushing the action buttons off
+        // the bottom of the display.
+        val compact = maxHeight < 520.dp
+        val listMaxHeight = (maxHeight - if (compact) 250.dp else 320.dp)
+            .coerceIn(72.dp, 340.dp)
         ExpressiveCard(
             onClick = {},
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 32.dp),
+                .padding(horizontal = 16.dp, vertical = if (compact) 8.dp else 32.dp),
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             shape = RoundedCornerShape(32.dp),
         ) {
             Column(
-                modifier = Modifier.padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.padding(if (compact) 14.dp else 18.dp),
+                verticalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 12.dp),
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -186,10 +208,11 @@ fun ClipboardPopup(
                             fontWeight = FontWeight.Black,
                         )
                         Text(
-                            text = if (recent.isEmpty()) {
-                                stringResource(R.string.st_ClipboardPopup_empty_subtitle)
-                            } else {
-                                pluralStringResource(
+                            text = when {
+                                !state.loaded -> stringResource(R.string.st_ClipboardScreen_loading)
+                                recent.isEmpty() ->
+                                    stringResource(R.string.st_ClipboardPopup_empty_subtitle)
+                                else -> pluralStringResource(
                                     R.plurals.st_ClipboardPopup_subtitle,
                                     state.entries.size,
                                     state.entries.size,
@@ -214,27 +237,43 @@ fun ClipboardPopup(
                     }
                 }
 
-                if (recent.isEmpty()) {
-                    Text(
-                        text = stringResource(R.string.st_ClipboardPopup_empty_body),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.heightIn(max = 340.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        items(recent, key = { it.id }) { entry ->
-                            PopupClipRow(
-                                entry = entry,
-                                revealed = entry.id in state.revealedIds,
-                                maskedPreview = viewModel.classifier.maskPreview(entry.content, 2),
-                                onCopy = {
-                                    haptic.click()
-                                    copy(entry)
-                                },
+                when {
+                    !state.loaded -> {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 18.dp),
+                            horizontalArrangement = Arrangement.Center,
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                strokeWidth = 2.dp,
                             )
+                        }
+                    }
+                    recent.isEmpty() -> {
+                        Text(
+                            text = stringResource(R.string.st_ClipboardPopup_empty_body),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    else -> {
+                        LazyColumn(
+                            modifier = Modifier.heightIn(max = listMaxHeight),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            items(recent, key = { it.id }) { entry ->
+                                PopupClipRow(
+                                    entry = entry,
+                                    revealed = entry.id in state.revealedIds,
+                                    maskedPreview = viewModel.classifier.maskPreview(entry.content, 2),
+                                    onCopy = {
+                                        haptic.click()
+                                        copy(entry)
+                                    },
+                                )
+                            }
                         }
                     }
                 }
@@ -245,13 +284,22 @@ fun ClipboardPopup(
                         awaitingPaste = true
                         viewModel.pasteCurrent()
                     },
+                    enabled = state.loaded && !state.busy && !awaitingPaste,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Icon(
-                        Icons.Rounded.ContentPaste,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
+                    if (state.busy || awaitingPaste) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        Icon(
+                            Icons.Rounded.ContentPaste,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
                     Spacer(Modifier.width(8.dp))
                     Text(stringResource(R.string.st_ClipboardPopup_paste_current))
                 }

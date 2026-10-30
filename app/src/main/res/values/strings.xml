@@ -4951,6 +4951,7 @@
     <string name="st_ClipboardScreen_detail_meta">Details</string>
     <string name="st_ClipboardScreen_empty">Empty</string>
     <string name="st_ClipboardScreen_empty_body">Copy text, links, codes, images, or files and they will show up here.</string>
+    <string name="st_ClipboardScreen_loading">Loading your clips…</string>
     <string name="st_ClipboardScreen_empty_title">No clips yet</string>
     <string name="st_ClipboardScreen_empty_trash_body">Deleted clips stay here for 30 days before they are removed.</string>
     <string name="st_ClipboardScreen_empty_trash_confirm_body">This permanently removes every clip in the trash.</string>
@@ -4973,6 +4974,7 @@
     <string name="st_ClipboardScreen_message_ai_failed">AI request failed.</string>
     <string name="st_ClipboardScreen_message_ai_not_configured">Configure an AI provider first.</string>
     <string name="st_ClipboardScreen_message_ai_sensitive">Sensitive clips are never sent to AI.</string>
+    <string name="st_ClipboardScreen_message_ai_text_only">AI works only on text clips. Images, files and multi-item clips are skipped.</string>
     <string name="st_ClipboardScreen_message_already_authorized">Shizuku is already authorized.</string>
     <string name="st_ClipboardScreen_message_appop_failed">Couldn’t change clipboard access.</string>
     <string name="st_ClipboardScreen_message_appop_granted">Clipboard access granted.</string>

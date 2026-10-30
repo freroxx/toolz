@@ -4842,6 +4842,7 @@
     <string name="st_ClipboardScreen_detail_meta">Detalhes</string>
     <string name="st_ClipboardScreen_empty">Vazio</string>
     <string name="st_ClipboardScreen_empty_body">Copie texto, links, códigos, imagens ou arquivos e eles aparecerão aqui.</string>
+    <string name="st_ClipboardScreen_loading">Carregando seus clipes…</string>
     <string name="st_ClipboardScreen_empty_title">Ainda não há clips</string>
     <string name="st_ClipboardScreen_empty_trash_body">Os clips excluídos ficam aqui por 30 dias antes de serem removidos.</string>
     <string name="st_ClipboardScreen_empty_trash_confirm_body">Isso remove permanentemente todos os clips da lixeira.</string>
@@ -4864,6 +4865,7 @@
     <string name="st_ClipboardScreen_message_ai_failed">Falha na solicitação de IA.</string>
     <string name="st_ClipboardScreen_message_ai_not_configured">Configure um provedor de IA primeiro.</string>
     <string name="st_ClipboardScreen_message_ai_sensitive">Clips sensíveis nunca são enviados para a IA.</string>
+    <string name="st_ClipboardScreen_message_ai_text_only">A IA só funciona com clips de texto. Imagens, arquivos e clips com vários itens são ignorados.</string>
     <string name="st_ClipboardScreen_message_already_authorized">O Shizuku já está autorizado.</string>
     <string name="st_ClipboardScreen_message_appop_failed">Não foi possível alterar o acesso à área de transferência.</string>
     <string name="st_ClipboardScreen_message_appop_granted">Acesso à área de transferência concedido.</string>

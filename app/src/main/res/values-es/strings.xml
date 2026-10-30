@@ -4872,6 +4872,7 @@
     <string name="st_ClipboardScreen_detail_meta">Detalles</string>
     <string name="st_ClipboardScreen_empty">Vacío</string>
     <string name="st_ClipboardScreen_empty_body">Copia texto, enlaces, códigos, imágenes o archivos y aparecerán aquí.</string>
+    <string name="st_ClipboardScreen_loading">Cargando tus clips…</string>
     <string name="st_ClipboardScreen_empty_title">Aún no hay clips</string>
     <string name="st_ClipboardScreen_empty_trash_body">Los clips eliminados permanecen aquí 30 días antes de borrarse.</string>
     <string name="st_ClipboardScreen_empty_trash_confirm_body">Esto elimina permanentemente todos los clips de la papelera.</string>
@@ -4894,6 +4895,7 @@
     <string name="st_ClipboardScreen_message_ai_failed">Error en la solicitud de IA.</string>
     <string name="st_ClipboardScreen_message_ai_not_configured">Configura primero un proveedor de IA.</string>
     <string name="st_ClipboardScreen_message_ai_sensitive">Los clips sensibles nunca se envían a la IA.</string>
+    <string name="st_ClipboardScreen_message_ai_text_only">La IA solo funciona con clips de texto. Las imágenes, los archivos y los clips con varios elementos se omiten.</string>
     <string name="st_ClipboardScreen_message_already_authorized">Shizuku ya está autorizado.</string>
     <string name="st_ClipboardScreen_message_appop_failed">No se pudo cambiar el acceso al portapapeles.</string>
     <string name="st_ClipboardScreen_message_appop_granted">Acceso al portapapeles concedido.</string>

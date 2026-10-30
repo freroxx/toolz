@@ -100,6 +100,19 @@ interface ClipboardDao {
     @Query("UPDATE clipboard_entries SET expiresAt = :expiresAt WHERE id = :id")
     suspend fun setExpiresAt(id: Int, expiresAt: Long?)
 
+    /**
+     * Recomputes expiry for every non-sensitive clip after the retention
+     * preference changes. Without this an old clip keeps the expiry it was
+     * created with, so increasing retention from 7 to 30 days would still
+     * delete it on day 7.
+     */
+    @Query(
+        "UPDATE clipboard_entries SET expiresAt = " +
+            "CASE WHEN :retentionMs > 0 THEN timestamp + :retentionMs ELSE NULL END " +
+            "WHERE deletedAt IS NULL AND isSensitive = 0 AND isLocked = 0",
+    )
+    suspend fun recomputeExpiry(retentionMs: Long)
+
     @Query("SELECT * FROM clipboard_entries WHERE isAiProcessed = 0 AND deletedAt IS NULL AND isSensitive = 0 AND isLocked = 0 AND type NOT IN ('IMAGE', 'FILE', 'MULTI') ORDER BY timestamp DESC")
     suspend fun getUnprocessedEntries(): List<ClipboardEntry>
 

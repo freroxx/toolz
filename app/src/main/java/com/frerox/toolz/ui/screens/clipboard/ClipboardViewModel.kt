@@ -56,8 +56,9 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import org.json.JSONObject
 import java.util.Calendar
-import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 
 /** Date buckets used by the history list. Labels are resolved in the UI. */
@@ -105,11 +106,13 @@ data class ClipboardUiState(
     val settings: ClipboardSettings = ClipboardSettings(),
     val stats: ClipboardRetentionManager.Stats = ClipboardRetentionManager.Stats(),
     val sandboxActive: Boolean = false,
+    /** False until the first real settings/history snapshot has arrived. */
+    val loaded: Boolean = false,
 ) {
     val isSelectionMode: Boolean get() = selection.isNotEmpty()
     val canCaptureInBackground: Boolean get() = gate.capabilities.backgroundCapable
     val showSetupBanner: Boolean
-        get() = settings.monitoring && !gate.capabilities.backgroundCapable &&
+        get() = loaded && settings.monitoring && !gate.capabilities.backgroundCapable &&
             gate.status != ClipboardGate.Status.PAUSED
 }
 
@@ -137,6 +140,7 @@ enum class ClipboardMessage {
     CLEARED,
     AI_DONE,
     AI_SENSITIVE,
+    AI_TEXT_ONLY,
     AI_DISABLED,
     AI_NOT_CONFIGURED,
     AI_FAILED,
@@ -309,6 +313,7 @@ class ClipboardViewModel @Inject constructor(
         val aiRunning: Set<Int> = emptySet(),
         val busy: Boolean = false,
         val aiConfigured: Boolean = false,
+        val loaded: Boolean = false,
     )
 
     private val _extras = MutableStateFlow(Extras())
@@ -318,7 +323,7 @@ class ClipboardViewModel @Inject constructor(
 
     private var lastDeletedIds: List<Int> = emptyList()
     private var wasSandboxed = false
-    private val manualCaptureInFlight = AtomicBoolean(false)
+    private val manualCaptureMutex = Mutex()
 
     val uiState: StateFlow<ClipboardUiState> = combine(
         history,
@@ -354,6 +359,7 @@ class ClipboardViewModel @Inject constructor(
             settings = settings,
             stats = stats,
             sandboxActive = clipboardSandboxActive,
+            loaded = extras.loaded,
         )
     }.stateIn(
         viewModelScope,
@@ -379,8 +385,26 @@ class ClipboardViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
-            refreshStats()
-            _extras.update { it.copy(aiConfigured = aiProcessor.isConfigured()) }
+            // Wait for the real settings and history before showing onboarding,
+            // the setup banner or an empty state. Without this the screen
+            // briefly renders defaults (onboarding unseen, setup required,
+            // zero clips) and visibly flashes before the data arrives.
+            try {
+                settingsState.first()
+                history.first()
+                refreshStatsNow()
+            } catch (e: Exception) {
+                // A transient DB/settings failure must never leave the screen
+                // stuck on the loading state forever.
+                android.util.Log.w("ClipboardViewModel", "Initial clipboard load failed", e)
+            } finally {
+                _extras.update {
+                    it.copy(
+                        aiConfigured = runCatching { aiProcessor.isConfigured() }.getOrDefault(false),
+                        loaded = true,
+                    )
+                }
+            }
         }
     }
 
@@ -438,25 +462,27 @@ class ClipboardViewModel @Inject constructor(
     }
 
     fun refreshStats() {
-        viewModelScope.launch {
-            if (clipboardSandboxActive) {
-                val fake = FakeClipboardSandbox.entries().value
-                val settings = settingsState.first()
-                _stats.value = ClipboardRetentionManager.Stats(
-                    activeCount = fake.count { it.deletedAt == null },
-                    trashedCount = fake.count { it.deletedAt != null },
-                    sensitiveCount = fake.count { it.isSensitive && it.deletedAt == null },
-                    attachmentBytes = 0,
-                    blobBytes = 0,
-                    itemQuotaMb = settings.itemQuotaMb,
-                    totalQuotaMb = settings.totalQuotaMb,
-                    maxEntries = settings.maxEntries,
-                )
-            } else {
-                _stats.value = retentionManager.stats()
-            }
-            _extras.update { it.copy(aiConfigured = aiProcessor.isConfigured()) }
+        viewModelScope.launch { refreshStatsNow() }
+    }
+
+    private suspend fun refreshStatsNow() {
+        if (clipboardSandboxActive) {
+            val fake = FakeClipboardSandbox.entries().value
+            val settings = settingsState.first()
+            _stats.value = ClipboardRetentionManager.Stats(
+                activeCount = fake.count { it.deletedAt == null },
+                trashedCount = fake.count { it.deletedAt != null },
+                sensitiveCount = fake.count { it.isSensitive && it.deletedAt == null },
+                attachmentBytes = 0,
+                blobBytes = 0,
+                itemQuotaMb = settings.itemQuotaMb,
+                totalQuotaMb = settings.totalQuotaMb,
+                maxEntries = settings.maxEntries,
+            )
+        } else {
+            _stats.value = retentionManager.stats()
         }
+        _extras.update { it.copy(aiConfigured = aiProcessor.isConfigured()) }
     }
 
     // ── Onboarding / setup ────────────────────────────────────────────────
@@ -630,6 +656,10 @@ class ClipboardViewModel @Inject constructor(
                     locked = false,
                 )
                 if (!keepSensitive) {
+                    // Unlocking can clear sensitivity. Put the clip back on
+                    // the normal retention schedule instead of keeping the
+                    // "never expires" expiry that locking applied.
+                    clipboardDao.setExpiresAt(entry.id, expiryFor(entry.timestamp))
                     clipboardDao.updateAiState(entry.id, ClipAiState.IDLE, null)
                 }
             }
@@ -647,6 +677,12 @@ class ClipboardViewModel @Inject constructor(
         if (entry.passwordVaultMatch) {
             // Password Vault matches are always sensitive and cannot be
             // downgraded from the clipboard UI.
+            return
+        }
+        if (!sensitive && entry.isLocked) {
+            // Locked clips must always remain sensitive. Unlocking is a
+            // separate, explicit action so this can never create a locked but
+            // non-sensitive row.
             return
         }
         if (clipboardSandboxActive) {
@@ -675,6 +711,8 @@ class ClipboardViewModel @Inject constructor(
                     locked = entry.isLocked,
                 )
                 if (!entry.isLocked) {
+                    // Removing sensitivity re-enables retention for this clip.
+                    clipboardDao.setExpiresAt(entry.id, expiryFor(entry.timestamp))
                     clipboardDao.updateAiState(entry.id, ClipAiState.IDLE, null)
                 }
             }
@@ -765,6 +803,9 @@ class ClipboardViewModel @Inject constructor(
         clearSelection()
         if (clipboardSandboxActive) {
             ids.forEach(FakeClipboardSandbox::restore)
+            viewModelScope.launch {
+                _events.send(ClipboardEvent.Message(ClipboardMessage.RESTORED, count = ids.size))
+            }
             return
         }
         viewModelScope.launch {
@@ -850,6 +891,12 @@ class ClipboardViewModel @Inject constructor(
             }
             return
         }
+        if (!entry.isTextLike) {
+            viewModelScope.launch {
+                _events.send(ClipboardEvent.Message(ClipboardMessage.AI_TEXT_ONLY))
+            }
+            return
+        }
         if (!uiState.value.settings.aiEnabled || uiState.value.settings.offline) {
             viewModelScope.launch {
                 _events.send(ClipboardEvent.Message(ClipboardMessage.AI_DISABLED))
@@ -890,11 +937,79 @@ class ClipboardViewModel @Inject constructor(
     }
 
     fun runAiSelected() {
-        val ids = uiState.value.selection.toList()
+        val state = uiState.value
+        val ids = state.selection
         if (ids.isEmpty()) return
+        // Validate availability before clearing the selection so a disabled or
+        // unconfigured provider does not silently throw the selection away.
+        if (!state.settings.aiEnabled || state.settings.offline) {
+            viewModelScope.launch {
+                _events.send(ClipboardEvent.Message(ClipboardMessage.AI_DISABLED))
+            }
+            return
+        }
+        if (!state.aiConfigured) {
+            viewModelScope.launch {
+                _events.send(ClipboardEvent.Message(ClipboardMessage.AI_NOT_CONFIGURED))
+            }
+            return
+        }
+        val selected = state.visibleEntries.filter { it.id in ids }
+        // AI is only ever sent text-like, non-sensitive clips. Attachments,
+        // images and locked rows are silently excluded from the batch.
+        val targets = selected.filter { it.isTextLike && !it.isSensitive && !it.isLocked }
+        if (targets.isEmpty()) {
+            // Tell the user why nothing was eligible. An all-sensitive
+            // selection should not be reported as "text only".
+            val message = if (selected.any { it.isSensitive || it.isLocked }) {
+                ClipboardMessage.AI_SENSITIVE
+            } else {
+                ClipboardMessage.AI_TEXT_ONLY
+            }
+            viewModelScope.launch { _events.send(ClipboardEvent.Message(message)) }
+            return
+        }
         clearSelection()
-        ids.forEach { id ->
-            uiState.value.entries.firstOrNull { it.id == id }?.let(::runAi)
+        when {
+            clipboardSandboxActive -> viewModelScope.launch {
+                targets.forEach { FakeClipboardSandbox.setAiResult(it.id, it.summary, it.type) }
+                _events.send(ClipboardEvent.Message(ClipboardMessage.SANDBOX))
+            }
+            else -> viewModelScope.launch {
+                val runningIds = targets.mapTo(LinkedHashSet()) { it.id }
+                _extras.update { it.copy(aiRunning = it.aiRunning + runningIds) }
+                var success = 0
+                var sensitive = 0
+                var failed = 0
+                var lastError: String? = null
+                try {
+                    for (entry in targets) {
+                        val result = aiProcessor.process(entry.id, automatic = false)
+                        when {
+                            result.success -> success++
+                            result.error == "sensitive" -> sensitive++
+                            else -> {
+                                failed++
+                                lastError = result.error
+                            }
+                        }
+                    }
+                } finally {
+                    _extras.update { it.copy(aiRunning = it.aiRunning - runningIds) }
+                }
+                refreshStats()
+                _events.send(
+                    ClipboardEvent.Message(
+                        when {
+                            success > 0 -> ClipboardMessage.AI_DONE
+                            sensitive > 0 && failed == 0 -> ClipboardMessage.AI_SENSITIVE
+                            else -> ClipboardMessage.AI_FAILED
+                        },
+                        count = success,
+                        detail = lastError,
+                    ),
+                )
+            }
         }
     }
 
@@ -919,44 +1034,29 @@ class ClipboardViewModel @Inject constructor(
             }
             return
         }
-        // One manual capture at a time; rapid button taps should not enqueue
-        // duplicate reads or flash the busy state.
-        if (!manualCaptureInFlight.compareAndSet(false, true)) return
+        // Silent refreshes are coalesced while a capture is already running.
+        // An explicit paste waits its turn: dropping it would leave the popup
+        // spinner spinning forever because no result event would ever arrive.
+        if (!notify && !manualCaptureMutex.tryLock()) return
         viewModelScope.launch {
+            if (notify) manualCaptureMutex.lock()
             _extras.update { it.copy(busy = true) }
             try {
                 val exclude = settingsState.first().excludeSensitive
-                val shizukuText = if (ShizukuHelper.isAuthorized()) {
-                    try {
-                        shizukuExecutor.getClipboardText()
-                    } catch (e: Exception) {
-                        android.util.Log.w(
-                            "ClipboardViewModel",
-                            "Shizuku clipboard read failed: ${e.message}",
-                        )
-                        null
-                    }
+                // Prefer the rich system clipboard while Toolz is foreground:
+                // it preserves HTML, URIs, images and multi-item clips. Shizuku
+                // only exposes plain text, so it is strictly a fallback for
+                // ROMs that deny the direct read.
+                val payload = readSystemClipboard() ?: readShizukuPayload()
+                if (payload == null) {
+                    if (notify) emit(ClipboardMessage.EMPTY)
                 } else {
-                    null
-                }
-                if (!shizukuText.isNullOrBlank()) {
-                    val result = captureProcessor.processText(shizukuText, "MANUAL", exclude)
-                    emitOutcome(result)
-                    if (result == ClipboardCaptureProcessor.Outcome.INSERTED) {
+                    val result = captureProcessor.process(payload, exclude)
+                    // Silent refreshes (screen resume, popup open) must not
+                    // produce snackbars/toasts for an unchanged clipboard.
+                    if (notify) emitOutcome(result.outcome)
+                    if (result.outcome == ClipboardCaptureProcessor.Outcome.INSERTED) {
                         aiProcessor.processQueued(1)
-                    }
-                } else {
-                    // `cmd clipboard get` can be unavailable on some ROMs.
-                    // Toolz is foreground here, so read the clipboard directly.
-                    val payload = readSystemClipboard()
-                    if (payload == null) {
-                        if (notify) emit(ClipboardMessage.EMPTY)
-                    } else {
-                        val result = captureProcessor.process(payload, exclude)
-                        emitOutcome(result.outcome)
-                        if (result.outcome == ClipboardCaptureProcessor.Outcome.INSERTED) {
-                            aiProcessor.processQueued(1)
-                        }
                     }
                 }
                 refreshStats()
@@ -964,9 +1064,27 @@ class ClipboardViewModel @Inject constructor(
                 if (notify) emit(ClipboardMessage.FAILED, detail = e.message)
             } finally {
                 _extras.update { it.copy(busy = false) }
-                manualCaptureInFlight.set(false)
+                manualCaptureMutex.unlock()
             }
         }
+    }
+
+    private suspend fun readShizukuPayload(): ClipboardPayload? {
+        if (!ShizukuHelper.isAuthorized()) return null
+        val text = try {
+            shizukuExecutor.getClipboardText()
+        } catch (e: Exception) {
+            android.util.Log.w(
+                "ClipboardViewModel",
+                "Shizuku clipboard read failed: ${e.message}",
+            )
+            null
+        }
+        if (text.isNullOrBlank()) return null
+        return ClipboardPayload(
+            items = listOf(ClipboardPayloadItem(text = text)),
+            source = "MANUAL",
+        )
     }
 
     private fun readSystemClipboard(): ClipboardPayload? {
@@ -978,7 +1096,7 @@ class ClipboardViewModel @Inject constructor(
             val description = clip.description
             val items = buildList {
                 for (index in 0 until clip.itemCount) {
-                    val item = clip.getItemAt(index)
+                    val item = clip.getItemAt(index) ?: continue
                     add(
                         ClipboardPayloadItem(
                             text = item.text?.toString(),
@@ -989,8 +1107,21 @@ class ClipboardViewModel @Inject constructor(
                     )
                 }
             }
-            if (items.all { it.text.isNullOrBlank() && it.uri == null }) return null
-            ClipboardPayload(items = items, source = "MANUAL")
+            if (items.all { item ->
+                    item.text.isNullOrBlank() &&
+                        item.html.isNullOrBlank() &&
+                        item.uri == null
+                }
+            ) {
+                return null
+            }
+            ClipboardPayload(
+                items = items,
+                label = description?.label?.toString(),
+                source = "MANUAL",
+                isSensitiveExtra = description?.extras
+                    ?.getBoolean("android.content.extra.IS_SENSITIVE", false) ?: false,
+            )
         } catch (_: Exception) {
             null
         }
@@ -1031,26 +1162,73 @@ class ClipboardViewModel @Inject constructor(
         val state = uiState.value
         val ids = state.selection
         if (ids.isEmpty()) return
-        // Locked clips stay out of bulk copy until individually unlocked.
-        val selected = state.entries.filter {
-            it.id in ids && it.deletedAt == null &&
-                (!it.isLocked || it.id in state.revealedIds)
+        // Copy only what is actually visible and selected. Locked clips stay
+        // out of bulk copy until individually revealed.
+        val selected = state.visibleEntries.filter {
+            it.id in ids && (!it.isLocked || it.id in state.revealedIds)
         }
-        val text = selected
+        val texts = selected
             .sortedByDescending { it.timestamp }
-            .mapNotNull { it.content.takeIf { value -> value.isNotBlank() } }
-            .joinToString("\n\n")
-        clearSelection()
-        if (text.isBlank()) {
+            .mapNotNull { entry ->
+                textForClipboard(entry, state.attachmentsByClip[entry.id].orEmpty())
+            }
+        if (texts.isEmpty()) {
+            // Keep the selection so the user can adjust it instead of losing
+            // everything just because attachment-only clips were suppressed.
             viewModelScope.launch {
                 _events.send(ClipboardEvent.Message(ClipboardMessage.NOTHING_TO_COPY))
             }
             return
         }
         val manager = application.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        manager.setPrimaryClip(ClipData.newPlainText("Toolz", text))
+        manager.setPrimaryClip(ClipData.newPlainText(CLIPBOARD_LABEL, texts.joinToString("\n\n")))
+        clearSelection()
         viewModelScope.launch {
-            _events.send(ClipboardEvent.Message(ClipboardMessage.SELECTION_COPIED, count = selected.size))
+            _events.send(
+                ClipboardEvent.Message(
+                    ClipboardMessage.SELECTION_COPIED,
+                    count = texts.size,
+                ),
+            )
+        }
+    }
+
+    /**
+     * Text that is safe and meaningful to put on the clipboard.
+     *
+     * Image/file clips store a filename or a `[image]`/`[file]` placeholder in
+     * [ClipboardEntry.content] so the history row has something to show. That
+     * placeholder must never be copied or shared as if it were real text.
+     */
+    private fun textForClipboard(
+        entry: ClipboardEntry,
+        attachments: List<ClipboardAttachment>,
+    ): String? {
+        if (entry.content.isBlank()) return null
+        if (entry.isTextLike) return entry.content
+        val hasText = entry.metadataJson?.let { raw ->
+            runCatching { JSONObject(raw).optBoolean("hasText", false) }.getOrNull()
+        }
+        if (hasText == true) return entry.content
+        if (hasText == false) return null
+        // Legacy rows predate the metadata flag. Drop known placeholders and
+        // bare attachment names, but keep genuine text stored in a MULTI clip.
+        if (entry.content == "[image]" || entry.content == "[file]") return null
+        if (attachments.any { it.fileName == entry.content }) return null
+        return entry.content
+    }
+
+    private fun shareMimeType(
+        entry: ClipboardEntry,
+        attachments: List<ClipboardAttachment>,
+    ): String {
+        val mimes = attachments
+            .mapNotNull { it.mimeType?.takeIf(String::isNotBlank) }
+            .distinct()
+        return when {
+            mimes.size == 1 -> mimes.first()
+            mimes.size > 1 -> "*/*"
+            else -> entry.mimeType?.takeIf(String::isNotBlank) ?: "*/*"
         }
     }
 
@@ -1060,21 +1238,20 @@ class ClipboardViewModel @Inject constructor(
     ): Boolean {
         val manager = application.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         val uris = stageAttachments(attachments)
-        val text = entry.content
-        val html = entry.htmlContent
-        if (text.isBlank() && uris.isEmpty()) return false
+        val text = textForClipboard(entry, attachments)
+        val html = entry.htmlContent?.takeIf { !text.isNullOrBlank() && it.isNotBlank() }
+        if (text.isNullOrBlank() && uris.isEmpty()) return false
 
-        val clip = if (text.isNotBlank()) {
-            if (!html.isNullOrBlank()) {
-                ClipData.newHtmlText("Toolz", text, html)
-            } else {
-                ClipData.newPlainText("Toolz", text)
-            }
-        } else {
-            ClipData.newUri(application.contentResolver, "Toolz", uris.first())
+        val clip = when {
+            !text.isNullOrBlank() && !html.isNullOrBlank() ->
+                ClipData.newHtmlText(CLIPBOARD_LABEL, text, html)
+            !text.isNullOrBlank() ->
+                ClipData.newPlainText(CLIPBOARD_LABEL, text)
+            else ->
+                ClipData.newUri(application.contentResolver, CLIPBOARD_LABEL, uris.first())
         }
-        val firstUriIndex = if (text.isNotBlank()) 0 else 1
-        uris.drop(firstUriIndex).forEach { uri ->
+        // A URI-only clip already carries its first URI as the primary item.
+        uris.drop(if (text.isNullOrBlank()) 1 else 0).forEach { uri ->
             clip.addItem(ClipData.Item(uri))
         }
         manager.setPrimaryClip(clip)
@@ -1085,34 +1262,38 @@ class ClipboardViewModel @Inject constructor(
         viewModelScope.launch {
             val attachments = uiState.value.attachmentsByClip[entry.id].orEmpty()
             val intent = buildShareIntent(entry, attachments)
-            _events.send(ClipboardEvent.Share(intent))
+            if (intent == null) {
+                _events.send(ClipboardEvent.Message(ClipboardMessage.NOTHING_TO_COPY))
+            } else {
+                _events.send(ClipboardEvent.Share(intent))
+            }
         }
     }
 
     private suspend fun buildShareIntent(
         entry: ClipboardEntry,
         attachments: List<ClipboardAttachment>,
-    ): Intent {
+    ): Intent? {
         val uris = stageAttachments(attachments)
-        val text = entry.content
-        return if (uris.size > 1) {
-            Intent(Intent.ACTION_SEND_MULTIPLE).apply {
-                type = attachments.firstOrNull()?.mimeType ?: entry.mimeType ?: "*/*"
+        val text = textForClipboard(entry, attachments)
+        if (text.isNullOrBlank() && uris.isEmpty()) return null
+        val mime = shareMimeType(entry, attachments)
+        return when {
+            uris.size > 1 -> Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+                type = mime
                 putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
-                if (text.isNotBlank()) putExtra(Intent.EXTRA_TEXT, text)
+                if (!text.isNullOrBlank()) putExtra(Intent.EXTRA_TEXT, text)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-        } else if (uris.size == 1) {
-            Intent(Intent.ACTION_SEND).apply {
-                type = attachments.firstOrNull()?.mimeType ?: entry.mimeType ?: "*/*"
+            uris.size == 1 -> Intent(Intent.ACTION_SEND).apply {
+                type = mime
                 putExtra(Intent.EXTRA_STREAM, uris.first())
-                if (text.isNotBlank()) putExtra(Intent.EXTRA_TEXT, text)
+                if (!text.isNullOrBlank()) putExtra(Intent.EXTRA_TEXT, text)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-        } else {
-            Intent(Intent.ACTION_SEND).apply {
+            else -> Intent(Intent.ACTION_SEND).apply {
                 type = "text/plain"
-                putExtra(Intent.EXTRA_TEXT, text)
+                putExtra(Intent.EXTRA_TEXT, text.orEmpty())
             }
         }
     }
@@ -1198,6 +1379,10 @@ class ClipboardViewModel @Inject constructor(
     fun setRetentionDays(days: Int) {
         viewModelScope.launch {
             settingsRepository.setClipboardRetentionDays(days)
+            // Recompute expiry for existing non-sensitive clips. Otherwise a
+            // clip created under a 7-day retention would still be deleted on
+            // day 7 after the user raises retention to 30 days.
+            clipboardDao.recomputeExpiry(days.coerceAtLeast(0) * DAY_MS)
             ClipboardCleanupWorker.schedule(application)
             retentionManager.enforceAll()
             refreshStats()
@@ -1339,8 +1524,18 @@ class ClipboardViewModel @Inject constructor(
     fun isRevealable(entry: ClipboardEntry): Boolean =
         !entry.isLocked || entry.id in uiState.value.revealedIds
 
+    /**
+     * Expiry a non-sensitive clip should have under the current retention
+     * preference. `0` days means "never expire".
+     */
+    private fun expiryFor(timestamp: Long): Long? {
+        val days = uiState.value.settings.retentionDays
+        return if (days > 0) timestamp + days * DAY_MS else null
+    }
+
     companion object {
         const val CLIPBOARD_LABEL = "Toolz"
         val AI_IDLE_STATES = setOf(null, ClipAiState.IDLE, ClipAiState.DISABLED)
+        private const val DAY_MS = 24L * 60L * 60L * 1000L
     }
 }

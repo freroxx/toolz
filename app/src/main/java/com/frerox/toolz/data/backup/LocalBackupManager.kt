@@ -31,11 +31,14 @@ import com.frerox.toolz.data.ai.AiSettingsManager
 import com.frerox.toolz.data.catalog.CatalogSearchEntry
 import com.frerox.toolz.data.calendar.EventEntry
 import com.frerox.toolz.data.clipboard.BlobRef
+import com.frerox.toolz.data.clipboard.ClipAiState
+import com.frerox.toolz.data.clipboard.ClipSensitivityReason
 import com.frerox.toolz.data.clipboard.ClipboardAttachment
 import com.frerox.toolz.data.clipboard.ClipboardBlobStore
 import com.frerox.toolz.data.clipboard.ClipboardEntry
 import com.frerox.toolz.data.clipboard.ClipboardHashAttachment
 import com.frerox.toolz.data.clipboard.ClipboardHashing
+import com.frerox.toolz.data.clipboard.ClipboardType
 import com.frerox.toolz.data.crypto.CryptoHistoryEntry
 import com.frerox.toolz.data.focus.AppLimit
 import com.frerox.toolz.data.focus.CaffeinateApp
@@ -762,10 +765,14 @@ class LocalBackupManager @Inject constructor(
                         }
                     }
 
-                // Attachment-only clips whose bytes are all missing would be
+                // Image/file clips whose bytes are all missing would be
                 // restored as empty, unopenable cards. Skip them instead.
+                val requiresAttachment = clip.type in setOf(
+                    ClipboardType.IMAGE,
+                    ClipboardType.FILE,
+                )
                 if (storedAttachments.isEmpty() &&
-                    clip.content.isBlank() &&
+                    (clip.content.isBlank() || requiresAttachment) &&
                     clip.attachments.any { it.blobPath?.startsWith(CLIPBOARD_BLOB_PREFIX) == true }
                 ) {
                     android.util.Log.w(
@@ -775,14 +782,26 @@ class LocalBackupManager @Inject constructor(
                     return@forEach
                 }
 
-                val hash = clip.contentHashSha256?.takeIf { it.isNotBlank() }
-                    ?: ClipboardHashing.contentHash(
-                        content = clip.content,
-                        html = clip.htmlContent,
-                        attachments = storedAttachments.map { (attachment, blob) ->
-                            ClipboardHashAttachment(blob.id, attachment.fileName, attachment.mimeType)
-                        },
-                    )
+                // Always hash the bytes that were actually restored. The
+                // archived hash may predate a fix, or include attachments that
+                // failed to import; using it blindly could create a row whose
+                // hash no longer matches its content and poison future dedupe.
+                val hash = ClipboardHashing.contentHash(
+                    content = clip.content,
+                    html = clip.htmlContent,
+                    attachments = storedAttachments.map { (attachment, blob) ->
+                        ClipboardHashAttachment(blob.id, attachment.fileName, attachment.mimeType)
+                    },
+                )
+                val archivedHash = clip.contentHashSha256?.takeIf { it.isNotBlank() }
+                if (archivedHash != null &&
+                    archivedHash != hash &&
+                    database.clipboardDao().getBySha256Any(archivedHash) != null
+                ) {
+                    // The exact archived clip is already present even though
+                    // its attachment set changed.
+                    return@forEach
+                }
                 if (database.clipboardDao().getBySha256Any(hash) != null) {
                     // The same clip (or an identical attachment set) already
                     // exists. Drop only blobs that nothing else references.
@@ -792,6 +811,10 @@ class LocalBackupManager @Inject constructor(
                 val legacyHash = clip.contentHash.takeIf { it != 0 } ?: clip.content.hashCode()
                 val contentBytes = clip.content.toByteArray(Charsets.UTF_8).size.toLong()
                 val restoredAttachmentBytes = storedAttachments.sumOf { it.second.sizeBytes }
+                // Sensitive and locked rows must never expire and must never
+                // carry an AI result, even when the archive came from a build
+                // that allowed those combinations.
+                val restoredSensitive = clip.isSensitive || clip.isLocked
                 val entry = ClipboardEntry(
                     content = clip.content,
                     timestamp = clip.timestamp,
@@ -799,8 +822,8 @@ class LocalBackupManager @Inject constructor(
                     isPinned = clip.isPinned,
                     previewUrl = clip.previewUrl,
                     sourceApp = clip.sourceApp,
-                    summary = clip.summary,
-                    isAiProcessed = clip.isAiProcessed,
+                    summary = if (restoredSensitive) null else clip.summary,
+                    isAiProcessed = !restoredSensitive && clip.isAiProcessed,
                     contentHash = legacyHash,
                     source = clip.source,
                     contentHashSha256 = hash,
@@ -810,15 +833,16 @@ class LocalBackupManager @Inject constructor(
                     // be stale or refer to an attachment that failed to import.
                     sizeBytes = contentBytes + restoredAttachmentBytes,
                     attachmentCount = storedAttachments.size,
-                    isSensitive = clip.isSensitive,
-                    sensitivityReason = clip.sensitivityReason,
+                    isSensitive = restoredSensitive,
+                    sensitivityReason = clip.sensitivityReason
+                        ?: if (restoredSensitive) ClipSensitivityReason.EXTRA else null,
                     isLocked = clip.isLocked,
                     passwordVaultMatch = clip.passwordVaultMatch,
                     metadataJson = clip.metadataJson,
                     deletedAt = clip.deletedAt,
-                    expiresAt = clip.expiresAt,
-                    aiState = clip.aiState,
-                    aiError = clip.aiError,
+                    expiresAt = if (restoredSensitive) null else clip.expiresAt,
+                    aiState = if (restoredSensitive) ClipAiState.SKIPPED_SENSITIVE else clip.aiState,
+                    aiError = if (restoredSensitive) null else clip.aiError,
                 )
                 val clipId = database.clipboardDao().insert(entry).toInt()
                 insertedClipId = clipId

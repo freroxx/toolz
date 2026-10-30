@@ -35,6 +35,8 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
+import java.nio.ByteBuffer
+import java.nio.charset.CodingErrorAction
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -42,6 +44,22 @@ private const val TAG = "ClipboardCapture"
 private const val MAX_TEXT_CHARS = 100_000
 private const val MAX_TEXT_BYTES = 2L * 1024L * 1024L
 private const val MAX_PASSWORD_LOOKUP_CHARS = 256
+private val TEXT_APPLICATION_MIMES = setOf(
+    "application/json",
+    "application/ld+json",
+    "application/xml",
+    "application/xhtml+xml",
+    "application/javascript",
+    "application/x-javascript",
+    "application/ecmascript",
+    "application/x-yaml",
+    "application/yaml",
+    "application/sql",
+    "application/graphql",
+    "application/x-sh",
+    "application/x-httpd-php",
+    "application/rtf",
+)
 
 /**
  * The single capture pipeline shared by the foreground service, popup, share
@@ -154,7 +172,7 @@ class ClipboardCaptureProcessor @Inject constructor(
             for (item in payload.items) {
                 // Preserve exact text: leading indentation and trailing
                 // newlines are meaningful for code and shell clips.
-                item.text?.takeIf { it.isNotBlank() }?.let { textParts.add(it) }
+                addTextPart(textParts, item.text)
                 if (item.html != null && html == null) html = item.html
                 if (item.mimeType != null && mime == null) mime = item.mimeType
 
@@ -163,14 +181,26 @@ class ClipboardCaptureProcessor @Inject constructor(
                     ?: runCatching { context.contentResolver.getType(uri) }.getOrNull()
                 val fileName = item.fileName ?: queryDisplayName(uri)
                 val isImage = resolvedMime?.startsWith("image/") == true
-                val isPlainText = resolvedMime == null || resolvedMime.startsWith("text/")
+                val isHtml = resolvedMime?.contains("html") == true
+                val isTextMime = resolvedMime == null ||
+                    resolvedMime.startsWith("text/") ||
+                    resolvedMime in TEXT_APPLICATION_MIMES
 
-                if (isPlainText && !isImage) {
-                    // Text-like URI (text/plain, text/html, unknown): read as text when small.
+                if (isTextMime && !isImage) {
+                    // Text-like URI (text/plain, text/html, unknown): read as
+                    // text only when the bytes actually decode as text. An
+                    // unknown MIME is sniffed so binary files never become
+                    // mojibake text rows.
                     val text = readTextUri(uri, MAX_TEXT_BYTES)
                     if (text != null) {
-                        textParts.add(text)
-                        if (resolvedMime?.contains("html") == true && html == null) html = text
+                        if (isHtml) {
+                            // Store raw markup for rich targets, but expose
+                            // readable plain text to search, copy and AI.
+                            if (html == null) html = text
+                            addTextPart(textParts, htmlToPlainText(text))
+                        } else {
+                            addTextPart(textParts, text)
+                        }
                         continue
                     }
                 }
@@ -187,6 +217,9 @@ class ClipboardCaptureProcessor @Inject constructor(
                 if (blob.sizeBytes > itemQuota) {
                     return CaptureResult(Outcome.IGNORED_TOO_LARGE)
                 }
+                // A multi-item clip may repeat the same URI. Content-addressed
+                // blobs are already identical; do not create duplicate rows.
+                if (staged.any { it.blobId == blob.id }) continue
 
                 var width: Int? = null
                 var height: Int? = null
@@ -247,17 +280,25 @@ class ClipboardCaptureProcessor @Inject constructor(
             }
 
             val vaultMatch = detectPasswordVaultMatch(effectiveText)
+            val sensitiveExtra = payload.isSensitiveExtra || payload.items.any { it.isSensitive }
             val classification = if (type in setOf(ClipboardType.IMAGE, ClipboardType.FILE, ClipboardType.MULTI)) {
+                // A vault match on an attachment filename/placeholder must
+                // also mark the clip sensitive: isLocked implies isSensitive.
+                val mediaSensitive = sensitiveExtra || vaultMatch
                 ClipClassification(
                     type = type,
-                    isSensitive = payload.isSensitiveExtra,
-                    reason = if (payload.isSensitiveExtra) ClipSensitivityReason.EXTRA else null,
+                    isSensitive = mediaSensitive,
+                    reason = when {
+                        vaultMatch -> ClipSensitivityReason.PASSWORD_VAULT
+                        sensitiveExtra -> ClipSensitivityReason.EXTRA
+                        else -> null
+                    },
                     passwordVaultMatch = vaultMatch,
                 )
             } else {
                 classifier.classifyDetailed(
                     text = effectiveText,
-                    isSensitiveExtra = payload.isSensitiveExtra,
+                    isSensitiveExtra = sensitiveExtra,
                     passwordVaultMatch = vaultMatch,
                 )
             }
@@ -301,12 +342,14 @@ class ClipboardCaptureProcessor @Inject constructor(
             if (existing != null) {
                 // Same bytes, but the new capture may carry extra sensitivity
                 // (password-manager flag, vault match). Never downgrade flags the
-                // user set manually; only escalate.
-                val mergedSensitive = existing.isSensitive || sensitive
+                // user set manually; only escalate. isLocked always implies
+                // isSensitive, including for legacy inconsistent rows.
                 val mergedVault = existing.passwordVaultMatch || classification.passwordVaultMatch
                 val mergedLocked = existing.isLocked || classification.passwordVaultMatch
+                val mergedSensitive = existing.isSensitive || sensitive || mergedLocked
                 val mergedReason = existing.sensitivityReason
-                    ?: if (mergedSensitive) classification.reason else null
+                    ?: classification.reason
+                    ?: if (mergedLocked) ClipSensitivityReason.PASSWORD_VAULT else null
                 val mergedExpiry = if (mergedSensitive || mergedLocked) null else existing.expiresAt
                 clipboardDao.bumpEntry(
                     id = existing.id,
@@ -376,7 +419,12 @@ class ClipboardCaptureProcessor @Inject constructor(
                 sensitivityReason = classification.reason,
                 isLocked = classification.passwordVaultMatch,
                 passwordVaultMatch = classification.passwordVaultMatch,
-                metadataJson = buildMetadata(payload, staged, itemCount),
+                metadataJson = buildMetadata(
+                    payload = payload,
+                    attachments = staged,
+                    itemCount = itemCount,
+                    hasText = effectiveText.isNotBlank(),
+                ),
                 deletedAt = null,
                 expiresAt = expiresAt,
                 aiState = if (sensitive) ClipAiState.SKIPPED_SENSITIVE else ClipAiState.IDLE,
@@ -459,12 +507,16 @@ class ClipboardCaptureProcessor @Inject constructor(
         payload: ClipboardPayload,
         attachments: List<StagedAttachment>,
         itemCount: Int,
+        hasText: Boolean,
     ): String? = try {
         JSONObject().apply {
             put("source", payload.source)
             payload.sourcePackage?.let { put("sourcePackage", it) }
             payload.label?.let { put("label", it) }
             put("itemCount", itemCount)
+            // Distinguishes genuine text from a filename/placeholder stored
+            // in `content` for image/file clips.
+            put("hasText", hasText)
             if (attachments.isNotEmpty()) {
                 val array = org.json.JSONArray()
                 attachments.forEach { attachment ->
@@ -501,10 +553,43 @@ class ClipboardCaptureProcessor @Inject constructor(
     private fun readTextUri(uri: Uri, maxBytes: Long): String? = try {
         context.contentResolver.openInputStream(uri)?.use { input ->
             val bytes = readLimited(input, maxBytes) ?: return null
-            String(bytes, Charsets.UTF_8)
+            decodeText(bytes)
         }
     } catch (_: Exception) {
         null
+    }
+
+    /**
+     * Decodes UTF-8 only when the bytes look like text. Binary payloads with
+     * NUL bytes or a high share of control characters are rejected so they
+     * are stored as attachments instead of mojibake text rows.
+     */
+    private fun decodeText(bytes: ByteArray): String? {
+        if (bytes.isEmpty()) return ""
+        val sample = bytes.copyOf(minOf(bytes.size, 8 * 1024))
+        if (sample.any { it == 0.toByte() }) return null
+        var controls = 0
+        for (byte in sample) {
+            val value = byte.toInt() and 0xFF
+            if (value < 0x09 || value in 0x0E..0x1F || value == 0x7F) controls++
+        }
+        if (controls * 100 > sample.size * 2) return null
+        return try {
+            Charsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
+                .decode(ByteBuffer.wrap(bytes))
+                .toString()
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /** Adds a text part once; repeated items in a multi-clip must not double it. */
+    private fun addTextPart(parts: MutableList<String>, value: String?) {
+        if (value.isNullOrBlank()) return
+        if (parts.any { it == value }) return
+        parts.add(value)
     }
 
     private fun readBytesLimited(uri: Uri, maxBytes: Long): ByteArray? = try {
