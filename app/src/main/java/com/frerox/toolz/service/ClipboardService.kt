@@ -197,7 +197,10 @@ class ClipboardService : Service() {
             // the sensitivity filter or rejected by a quota, and the user
             // explicitly asked to save the current clipboard.
             if (!force && !shouldProcess(fingerprint)) return
-            val result = captureProcessor.process(payload, excludeSensitive)
+            // Read the preference fresh: the service can capture before the
+            // settings collector has delivered its first value, and a stale
+            // default would store sensitive clips the user asked to discard.
+            val result = captureProcessor.process(payload, currentExcludeSensitive())
             handleOutcome(result.outcome, fingerprint)
         } catch (e: Exception) {
             Log.w(TAG, "Clipboard capture failed: ${e.message}")
@@ -225,6 +228,18 @@ class ClipboardService : Service() {
 
     private fun shouldProcess(fingerprint: String): Boolean =
         fingerprint != lastFingerprint
+
+    /**
+     * Reads the sensitivity filter directly from settings. Falls back to the
+     * last collected value only when the settings store itself fails, so a
+     * transient read error cannot silently change the privacy decision.
+     */
+    private suspend fun currentExcludeSensitive(): Boolean = try {
+        settingsRepository.clipboardExcludeSensitive.first()
+    } catch (e: Exception) {
+        Log.w(TAG, "Could not read clipboard sensitivity preference: ${e.message}")
+        excludeSensitive
+    }
 
     private suspend fun handleOutcome(
         outcome: ClipboardCaptureProcessor.Outcome,
@@ -345,10 +360,12 @@ class ClipboardService : Service() {
                                     source = intent.getStringExtra(EXTRA_SOURCE) ?: "EXTERNAL",
                                 )
                                 val fingerprint = fingerprint(payload)
-                                if (shouldProcess(fingerprint)) {
-                                    val result = captureProcessor.process(payload, excludeSensitive)
-                                    handleOutcome(result.outcome, fingerprint)
-                                }
+                                // External text (share target, ACTION_PROCESS_TEXT,
+                                // QS shortcut) is an explicit user action: always
+                                // process it so re-sharing the same text bumps the
+                                // existing clip instead of being silently ignored.
+                                val result = captureProcessor.process(payload, currentExcludeSensitive())
+                                handleOutcome(result.outcome, fingerprint)
                             }
                         } else {
                             captureCurrentClipboard(source = "MANUAL", force = true)

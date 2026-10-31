@@ -141,12 +141,14 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -158,6 +160,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -165,6 +168,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.R
 import com.frerox.toolz.data.clipboard.ClipAiState
@@ -201,9 +206,25 @@ fun ClipboardScreen(
     onEncrypt: (String) -> Unit = {},
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    // Refresh status, stats and the current clipboard whenever the screen
+    // comes back to the foreground (returning from Shizuku settings, another
+    // app, the share sheet, etc.). Without this the setup banner and counters
+    // could stay stale for the whole session.
+    DisposableEffect(lifecycleOwner, viewModel) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) viewModel.onScreenResumed()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
+    // Modal bottom sheets live in their own window above the Scaffold, so the
+    // regular snackbar host is hidden behind the scrim. Events raised while a
+    // sheet is open are shown by a second host rendered inside that sheet.
+    val sheetSnackbarHostState = remember { SnackbarHostState() }
     val haptic = rememberToolzHapticFeedback()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     // Resolve localized labels through composition so they stay correct across
@@ -227,20 +248,37 @@ fun ClipboardScreen(
         detailId?.let { id -> state.entries.firstOrNull { it.id == id } ?: state.trashed.firstOrNull { it.id == id } }
     }
 
+    val anySheetOpen = showOnboarding || showSettings || showStatus || detailEntry != null
+    val anySheetOpenState by rememberUpdatedState(anySheetOpen)
+    val undoLabelState by rememberUpdatedState(undoLabel)
+    val shareLabelState by rememberUpdatedState(shareLabel)
+    val shareFailedLabelState by rememberUpdatedState(shareFailedLabel)
+
+    fun showTransient(message: String) {
+        val host = if (anySheetOpenState) sheetSnackbarHostState else snackbarHostState
+        scope.launch { host.showSnackbar(message) }
+    }
+
     LaunchedEffect(state.loaded, state.settings.onboardingSeen) {
         if (state.loaded && !state.settings.onboardingSeen) showOnboarding = true
     }
 
+    LaunchedEffect(anySheetOpen) {
+        // A snackbar that outlived its sheet must not reappear in the next one.
+        if (!anySheetOpen) sheetSnackbarHostState.currentSnackbarData?.dismiss()
+    }
+
     LaunchedEffect(Unit) {
         viewModel.events.collect { event ->
+            val host = if (anySheetOpenState) sheetSnackbarHostState else snackbarHostState
             when (event) {
                 is ClipboardEvent.Message -> {
                     val text = messageText(context, event)
                     val undoable = event.type == ClipboardMessage.DELETED
-                    val result = snackbarHostState.showSnackbar(
+                    val result = host.showSnackbar(
                         message = text,
                         actionLabel = if (undoable) {
-                            undoLabel
+                            undoLabelState
                         } else {
                             null
                         },
@@ -254,10 +292,10 @@ fun ClipboardScreen(
                 is ClipboardEvent.Share -> {
                     runCatching {
                         context.startActivity(
-                            Intent.createChooser(event.intent, shareLabel),
+                            Intent.createChooser(event.intent, shareLabelState),
                         )
                     }.onFailure {
-                        snackbarHostState.showSnackbar(shareFailedLabel)
+                        host.showSnackbar(shareFailedLabelState)
                     }
                 }
             }
@@ -276,9 +314,7 @@ fun ClipboardScreen(
         }
         val activity = context.findFragmentActivity()
         if (activity == null || !BiometricPromptUtils.canAuthenticate(activity)) {
-            scope.launch {
-                snackbarHostState.showSnackbar(biometricUnavailableLabel)
-            }
+            showTransient(biometricUnavailableLabel)
             return
         }
         BiometricPromptUtils.showBiometricPrompt(
@@ -290,9 +326,7 @@ fun ClipboardScreen(
                 viewModel.markRevealed(entry.id)
                 action()
             },
-            onError = { _, message ->
-                scope.launch { snackbarHostState.showSnackbar(message.toString()) }
-            },
+            onError = { _, message -> showTransient(message.toString()) },
         )
     }
 
@@ -322,11 +356,18 @@ fun ClipboardScreen(
                                 state.selection.size,
                             )
                         } else {
-                            stringResource(
-                                R.string.st_ClipboardScreen_subtitle,
-                                state.stats.activeCount,
-                                state.stats.sensitiveCount,
-                            )
+                            if (state.showTrash) {
+                                stringResource(
+                                    R.string.st_ClipboardScreen_trash_subtitle,
+                                    state.stats.trashedCount,
+                                )
+                            } else {
+                                stringResource(
+                                    R.string.st_ClipboardScreen_subtitle,
+                                    state.stats.activeCount,
+                                    state.stats.sensitiveCount,
+                                )
+                            }
                         },
                         style = MaterialTheme.typography.labelMedium,
                     )
@@ -491,6 +532,7 @@ fun ClipboardScreen(
             if (!state.isSelectionMode && !state.showTrash) {
                 ExtendedFloatingActionButton(
                     onClick = {
+                        if (state.busy) return@ExtendedFloatingActionButton
                         haptic.click()
                         viewModel.pasteCurrent()
                     },
@@ -545,54 +587,60 @@ fun ClipboardScreen(
                 onFilterChange = viewModel::setFilter,
             )
 
-            when {
-                !state.loaded -> {
-                    LoadingState()
-                }
-                state.visibleEntries.isEmpty() && state.query.isNotBlank() -> {
-                    EmptyState(
-                        icon = Icons.Rounded.Search,
-                        title = stringResource(R.string.st_ClipboardScreen_no_results),
-                        body = stringResource(R.string.st_ClipboardScreen_no_results_body, state.query),
-                    )
-                }
-                state.visibleEntries.isEmpty() && state.showTrash -> {
-                    EmptyState(
-                        icon = Icons.Rounded.Delete,
-                        title = stringResource(R.string.st_ClipboardScreen_empty_trash_title),
-                        body = stringResource(R.string.st_ClipboardScreen_empty_trash_body),
-                    )
-                }
-                state.visibleEntries.isEmpty() -> {
-                    EmptyState(
-                        icon = Icons.Rounded.ContentPaste,
-                        title = stringResource(R.string.st_ClipboardScreen_empty_title),
-                        body = stringResource(R.string.st_ClipboardScreen_empty_body),
-                    )
-                }
-                else -> {
-                    HistoryList(
-                        state = state,
-                        viewModel = viewModel,
-                        onOpen = { entry ->
-                            if (state.isSelectionMode) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+            ) {
+                when {
+                    !state.loaded -> {
+                        LoadingState()
+                    }
+                    state.visibleEntries.isEmpty() && state.query.isNotBlank() -> {
+                        EmptyState(
+                            icon = Icons.Rounded.Search,
+                            title = stringResource(R.string.st_ClipboardScreen_no_results),
+                            body = stringResource(R.string.st_ClipboardScreen_no_results_body, state.query),
+                        )
+                    }
+                    state.visibleEntries.isEmpty() && state.showTrash -> {
+                        EmptyState(
+                            icon = Icons.Rounded.Delete,
+                            title = stringResource(R.string.st_ClipboardScreen_empty_trash_title),
+                            body = stringResource(R.string.st_ClipboardScreen_empty_trash_body),
+                        )
+                    }
+                    state.visibleEntries.isEmpty() -> {
+                        EmptyState(
+                            icon = Icons.Rounded.ContentPaste,
+                            title = stringResource(R.string.st_ClipboardScreen_empty_title),
+                            body = stringResource(R.string.st_ClipboardScreen_empty_body),
+                        )
+                    }
+                    else -> {
+                        HistoryList(
+                            state = state,
+                            viewModel = viewModel,
+                            onOpen = { entry ->
+                                if (state.isSelectionMode) {
+                                    viewModel.toggleSelection(entry.id)
+                                } else {
+                                    detailId = entry.id
+                                }
+                            },
+                            onLongPress = { entry ->
+                                haptic.longClick()
                                 viewModel.toggleSelection(entry.id)
-                            } else {
-                                detailId = entry.id
-                            }
-                        },
-                        onLongPress = { entry ->
-                            haptic.longClick()
-                            viewModel.toggleSelection(entry.id)
-                        },
-                        onCopy = { entry ->
-                            runWithUnlock(entry) { viewModel.copyEntry(entry) }
-                        },
-                        onPin = viewModel::togglePin,
-                        onDelete = viewModel::deleteEntry,
-                        onRestore = viewModel::restoreEntry,
-                        onDeleteForever = viewModel::deleteForever,
-                    )
+                            },
+                            onCopy = { entry ->
+                                runWithUnlock(entry) { viewModel.copyEntry(entry) }
+                            },
+                            onPin = viewModel::togglePin,
+                            onDelete = viewModel::deleteEntry,
+                            onRestore = viewModel::restoreEntry,
+                            onDeleteForever = viewModel::deleteForever,
+                        )
+                    }
                 }
             }
         }
@@ -601,6 +649,7 @@ fun ClipboardScreen(
     if (showOnboarding) {
         OnboardingSheet(
             state = state,
+            feedbackHostState = sheetSnackbarHostState,
             onDismiss = {
                 showOnboarding = false
                 viewModel.completeOnboarding()
@@ -622,6 +671,7 @@ fun ClipboardScreen(
         SettingsSheet(
             state = state,
             viewModel = viewModel,
+            feedbackHostState = sheetSnackbarHostState,
             onDismiss = { showSettings = false },
             onShowStatus = {
                 showSettings = false
@@ -635,6 +685,7 @@ fun ClipboardScreen(
             state = state,
             onDismiss = { showStatus = false },
             viewModel = viewModel,
+            feedbackHostState = sheetSnackbarHostState,
             onOpenAppDetails = {
                 runCatching { context.startActivity(viewModel.appDetailsIntent()) }
             },
@@ -643,21 +694,25 @@ fun ClipboardScreen(
 
     detailEntry?.let { entry ->
         val attachments = state.attachmentsByClip[entry.id].orEmpty()
+        // Tool actions must never receive a `[image]`/`[file]` placeholder or
+        // a bare attachment name as if it were real text.
+        val toolText = viewModel.textForEntry(entry)
         ClipDetailSheet(
             entry = entry,
             attachments = attachments,
             revealed = entry.id in state.revealedIds,
             state = state,
             viewModel = viewModel,
+            feedbackHostState = sheetSnackbarHostState,
             onDismiss = { detailId = null },
             onUnlock = { runWithUnlock(entry) { viewModel.markRevealed(entry.id) } },
             onCopy = { runWithUnlock(entry) { viewModel.copyEntry(entry) } },
             onShare = { runWithUnlock(entry) { viewModel.shareEntry(entry) } },
-            onOpenNotepad = { onOpenNotepad(entry.content) },
-            onCreateTask = { onCreateTask(entry.content) },
-            onShowQr = { onShowQr(entry.content) },
-            onEncrypt = { onEncrypt(entry.content) },
-            onOpenLink = { openLink(context, entry.content) },
+            onOpenNotepad = { toolText?.let(onOpenNotepad) },
+            onCreateTask = { toolText?.let(onCreateTask) },
+            onShowQr = { toolText?.let(onShowQr) },
+            onEncrypt = { toolText?.let(onEncrypt) },
+            onOpenLink = { toolText?.let { openLink(context, it) } },
             onToggleLock = {
                 if (entry.isLocked) {
                     runWithUnlock(entry) { viewModel.setLocked(entry, false) }
@@ -669,10 +724,10 @@ fun ClipboardScreen(
                 scope.launch {
                     val intent = viewModel.openAttachment(attachment)
                     if (intent == null) {
-                        snackbarHostState.showSnackbar(attachmentFailedLabel)
+                        showTransient(attachmentFailedLabel)
                     } else {
                         runCatching { context.startActivity(intent) }.onFailure {
-                            snackbarHostState.showSnackbar(openFailedLabel)
+                            showTransient(openFailedLabel)
                         }
                     }
                 }
@@ -889,9 +944,9 @@ private fun ClipboardCard(
             else -> viewModel.classifier.maskPreview(entry.content, 3)
         }
         entry.type == ClipboardType.IMAGE -> stringResource(R.string.st_ClipboardScreen_attachment_image)
-        entry.type == ClipboardType.FILE -> entry.content.ifBlank {
-            attachments.firstOrNull()?.fileName ?: stringResource(R.string.st_ClipboardScreen_attachment_file)
-        }
+        entry.type == ClipboardType.FILE -> attachments.firstOrNull()?.fileName
+            ?: entry.content.takeIf { it.isNotBlank() && it != "[file]" && it != "[image]" }
+            ?: stringResource(R.string.st_ClipboardScreen_attachment_file)
         entry.type == ClipboardType.MULTI -> pluralStringResource(
             R.plurals.st_ClipboardScreen_multi_items,
             entry.attachmentCount.coerceAtLeast(attachments.size),
@@ -1257,6 +1312,7 @@ private fun ClipDetailSheet(
     revealed: Boolean,
     state: ClipboardUiState,
     viewModel: ClipboardViewModel,
+    feedbackHostState: SnackbarHostState,
     onDismiss: () -> Unit,
     onUnlock: () -> Unit,
     onCopy: () -> Unit,
@@ -1278,6 +1334,7 @@ private fun ClipDetailSheet(
         sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
+        Box(Modifier.fillMaxWidth()) {
         LazyColumn(
             modifier = Modifier.fillMaxWidth(),
             contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 40.dp),
@@ -1403,6 +1460,7 @@ private fun ClipDetailSheet(
                         entry = entry,
                         running = entry.id in state.aiRunningIds,
                         configured = state.aiConfigured,
+                        offline = state.settings.offline,
                         onRun = { viewModel.runAi(entry) },
                     )
                 }
@@ -1582,6 +1640,13 @@ private fun ClipDetailSheet(
                 }
             }
         }
+        SnackbarHost(
+            hostState = feedbackHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(horizontal = 16.dp),
+        )
+        }
     }
 }
 
@@ -1590,6 +1655,7 @@ private fun AiSection(
     entry: ClipboardEntry,
     running: Boolean,
     configured: Boolean,
+    offline: Boolean,
     onRun: () -> Unit,
 ) {
     SectionTitle(stringResource(R.string.st_ClipboardScreen_detail_ai))
@@ -1625,7 +1691,7 @@ private fun AiSection(
                 if (running) {
                     CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                 } else {
-                    TextButton(onClick = onRun, enabled = configured) {
+                    TextButton(onClick = onRun, enabled = configured && !offline) {
                         Text(stringResource(R.string.st_ClipboardScreen_action_ai))
                     }
                 }
@@ -1633,14 +1699,13 @@ private fun AiSection(
             entry.summary?.takeIf { it.isNotBlank() }?.let {
                 Text(text = it, style = MaterialTheme.typography.bodyMedium)
             }
-            entry.aiError?.takeIf { it.isNotBlank() }?.let {
+            if (offline) {
                 Text(
-                    text = it,
+                    text = stringResource(R.string.st_ClipboardScreen_ai_offline),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            }
-            if (!configured) {
+            } else if (!configured) {
                 Text(
                     text = stringResource(R.string.st_ClipboardScreen_ai_not_configured_hint),
                     style = MaterialTheme.typography.bodySmall,
@@ -1782,6 +1847,7 @@ private fun ActionTile(
 @Composable
 private fun OnboardingSheet(
     state: ClipboardUiState,
+    feedbackHostState: SnackbarHostState,
     onDismiss: () -> Unit,
     onAuthorizeShizuku: () -> Unit,
     onGrantAppOp: () -> Unit,
@@ -1794,6 +1860,7 @@ private fun OnboardingSheet(
         sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
+        Box(Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1880,6 +1947,13 @@ private fun OnboardingSheet(
                 }
             }
         }
+        SnackbarHost(
+            hostState = feedbackHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(horizontal = 16.dp),
+        )
+        }
     }
 }
 
@@ -1917,6 +1991,7 @@ private fun OnboardingStep(number: Int, title: String, body: String) {
 private fun SettingsSheet(
     state: ClipboardUiState,
     viewModel: ClipboardViewModel,
+    feedbackHostState: SnackbarHostState,
     onDismiss: () -> Unit,
     onShowStatus: () -> Unit,
 ) {
@@ -1926,6 +2001,7 @@ private fun SettingsSheet(
         sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
+        Box(Modifier.fillMaxWidth()) {
         LazyColumn(
             modifier = Modifier.fillMaxWidth(),
             contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 40.dp),
@@ -2057,6 +2133,13 @@ private fun SettingsSheet(
                 }
             }
         }
+        SnackbarHost(
+            hostState = feedbackHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(horizontal = 16.dp),
+        )
+        }
     }
 }
 
@@ -2142,6 +2225,7 @@ private fun StatusSheet(
     state: ClipboardUiState,
     onDismiss: () -> Unit,
     viewModel: ClipboardViewModel,
+    feedbackHostState: SnackbarHostState,
     onOpenAppDetails: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -2153,6 +2237,7 @@ private fun StatusSheet(
         sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
+        Box(Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -2274,6 +2359,13 @@ private fun StatusSheet(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+        SnackbarHost(
+            hostState = feedbackHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(horizontal = 16.dp),
+        )
         }
     }
 }

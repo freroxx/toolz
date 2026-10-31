@@ -4991,6 +4991,7 @@
     <string name="st_ClipboardScreen_subtitle">%1$d clips · %2$d sensíveis</string>
     <string name="st_ClipboardScreen_title">Área de transferência</string>
     <string name="st_ClipboardScreen_trash_title">Lixeira</string>
+    <string name="st_ClipboardScreen_trash_subtitle">%1$d clips na lixeira</string>
     <string name="st_ClipboardScreen_type_address">Endereço</string>
     <string name="st_ClipboardScreen_type_card">Cartão</string>
     <string name="st_ClipboardScreen_type_code">Código</string>

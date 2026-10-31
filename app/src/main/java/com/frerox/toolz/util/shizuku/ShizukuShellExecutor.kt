@@ -27,13 +27,19 @@ import com.frerox.toolz.util.shizuku.ShizukuUserService
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import rikka.shizuku.Shizuku
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.resume
@@ -43,10 +49,10 @@ import kotlin.coroutines.resumeWithException
 class ShizukuShellExecutor @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
-    private var userService: IUserService? = null
+    @Volatile private var userService: IUserService? = null
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
-            userService = IUserService.Stub.asInterface(binder)
+            userService = if (binder == null) null else IUserService.Stub.asInterface(binder)
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
@@ -54,8 +60,33 @@ class ShizukuShellExecutor @Inject constructor(
         }
     }
 
+    private val serviceArgs by lazy {
+        Shizuku.UserServiceArgs(
+            ComponentName(context.packageName, ShizukuUserService::class.java.name),
+        )
+            .daemon(false)
+            .processNameSuffix("shell_executor")
+    }
+
+    /** Serializes bind attempts so two captures cannot spawn two user services. */
+    private val bindMutex = Mutex()
+
+    /**
+     * Clipboard reads run on a dedicated daemon thread so a wedged system
+     * binder can never block the foreground watcher (or its capture mutex)
+     * forever. A timed-out read is abandoned and the caller proceeds.
+     */
+    private val clipboardReadExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "clipboard-shizuku-read").apply { isDaemon = true }
+    }
+
+    private val binderDeadListener = Shizuku.OnBinderDeadListener {
+        userService = null
+    }
+
     init {
-        // Try to bind if already has permission
+        runCatching { Shizuku.addBinderDeadListener(binderDeadListener) }
+        // Try to bind if already has permission.
         if (isShizukuAvailable()) {
             bindService()
         }
@@ -74,20 +105,25 @@ class ShizukuShellExecutor @Inject constructor(
     private fun bindService() {
         if (isServiceAlive()) return
         userService = null
-        val args = Shizuku.UserServiceArgs(ComponentName(context.packageName, ShizukuUserService::class.java.name))
-            .daemon(false)
-            .processNameSuffix("shell_executor")
-        
         try {
-            Shizuku.bindUserService(args, connection)
+            Shizuku.bindUserService(serviceArgs, connection)
         } catch (e: Exception) {
             e.printStackTrace()
         }
     }
 
+    /**
+     * Actually unbinds the Shizuku user service. The old implementation only
+     * dropped the local reference, leaking the remote process/binding.
+     */
     fun unbindService() {
-        try { userService = null } catch (_: Exception) {}
+        userService = null
+        try {
+            Shizuku.unbindUserService(serviceArgs, connection, true)
+        } catch (_: Exception) {
+        }
     }
+
     private fun isServiceAlive(): Boolean {
         return try {
             userService?.asBinder()?.pingBinder() == true
@@ -96,24 +132,26 @@ class ShizukuShellExecutor @Inject constructor(
         }
     }
 
-    @Volatile private var binding = false
-    suspend fun ensureService(forceRebind: Boolean = false): Boolean {
-        if (!forceRebind && isServiceAlive()) return true
-        if (binding) { repeat(20) { kotlinx.coroutines.delay(100); if (isServiceAlive()) return true }; return false }
-        if (!isShizukuAvailable()) return false
+    /**
+     * Ensures the shell user service is bound. Binding is serialized: two
+     * concurrent clipboard reads used to call `bindUserService` twice and leak
+     * one of the returned service connections.
+     */
+    suspend fun ensureService(forceRebind: Boolean = false): Boolean = bindMutex.withLock {
+        if (!forceRebind && isServiceAlive()) return@withLock true
+        if (!isShizukuAvailable()) return@withLock false
 
         if (forceRebind) {
-            userService = null
+            unbindService()
         }
-        binding = true
-        try { bindService() } finally { binding = false }
+        bindService()
 
-        // Wait up to 2 seconds for binding
-        for (i in 1..20) {
-            if (isServiceAlive()) return true
-            kotlinx.coroutines.delay(100)
+        // Binding is asynchronous. Wait up to 3 seconds for the service.
+        repeat(30) {
+            if (isServiceAlive()) return@withLock true
+            delay(100)
         }
-        return false
+        isServiceAlive()
     }
 
     fun execute(command: String): Flow<ShellOutput> = callbackFlow {
@@ -232,12 +270,23 @@ class ShizukuShellExecutor @Inject constructor(
         }
     }
 
-    suspend fun getClipboardText(): String? = withContext(Dispatchers.IO) {
+    /**
+     * Reads the clipboard through the shell user service with a hard timeout.
+     * The remote binder call is not cancellable, so it runs on a dedicated
+     * daemon thread; a wedged read is abandoned instead of stalling the
+     * foreground watcher forever.
+     */
+    suspend fun getClipboardText(timeoutMs: Long = 4_000): String? = withContext(Dispatchers.IO) {
         if (!ensureService()) return@withContext null
+        val service = userService ?: return@withContext null
         try {
-            userService?.getClipboardText()
+            val future = clipboardReadExecutor.submit<String?> { service.clipboardText }
+            future.get(timeoutMs, TimeUnit.MILLISECONDS)
+        } catch (e: TimeoutException) {
+            android.util.Log.w("ShizukuShellExecutor", "Clipboard read timed out after ${timeoutMs}ms")
+            null
         } catch (e: Exception) {
-            e.printStackTrace()
+            android.util.Log.w("ShizukuShellExecutor", "Clipboard read failed: ${e.message}")
             null
         }
     }

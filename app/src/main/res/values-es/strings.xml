@@ -5021,6 +5021,7 @@
     <string name="st_ClipboardScreen_subtitle">%1$d clips · %2$d sensibles</string>
     <string name="st_ClipboardScreen_title">Portapapeles</string>
     <string name="st_ClipboardScreen_trash_title">Papelera</string>
+    <string name="st_ClipboardScreen_trash_subtitle">%1$d clips en la papelera</string>
     <string name="st_ClipboardScreen_type_address">Dirección</string>
     <string name="st_ClipboardScreen_type_card">Tarjeta</string>
     <string name="st_ClipboardScreen_type_code">Código</string>

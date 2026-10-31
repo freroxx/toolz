@@ -109,12 +109,43 @@ interface ClipboardDao {
     @Query(
         "UPDATE clipboard_entries SET expiresAt = " +
             "CASE WHEN :retentionMs > 0 THEN timestamp + :retentionMs ELSE NULL END " +
-            "WHERE deletedAt IS NULL AND isSensitive = 0 AND isLocked = 0",
+            "WHERE deletedAt IS NULL AND isPinned = 0 AND isSensitive = 0 AND isLocked = 0",
     )
     suspend fun recomputeExpiry(retentionMs: Long)
 
-    @Query("SELECT * FROM clipboard_entries WHERE isAiProcessed = 0 AND deletedAt IS NULL AND isSensitive = 0 AND isLocked = 0 AND type NOT IN ('IMAGE', 'FILE', 'MULTI') ORDER BY timestamp DESC")
+    /**
+     * Clips eligible for automatic AI enrichment. FAILED/RUNNING/DISABLED/
+     * SKIPPED states are deliberately excluded: failures must not be retried
+     * on every poll (that would hammer a broken provider). [requeueStalledAi]
+     * puts them back when the user explicitly re-enables AI.
+     */
+    @Query(
+        "SELECT * FROM clipboard_entries WHERE isAiProcessed = 0 " +
+            "AND deletedAt IS NULL AND isSensitive = 0 AND isLocked = 0 " +
+            "AND type NOT IN ('IMAGE', 'FILE', 'MULTI') " +
+            "AND (aiState IS NULL OR aiState = 'IDLE') ORDER BY timestamp DESC",
+    )
     suspend fun getUnprocessedEntries(): List<ClipboardEntry>
+
+    /** Re-queues clips skipped only because AI was off/unconfigured or failed. */
+    @Query(
+        "UPDATE clipboard_entries SET aiState = 'IDLE', aiError = NULL " +
+            "WHERE isAiProcessed = 0 AND deletedAt IS NULL " +
+            "AND isSensitive = 0 AND isLocked = 0 " +
+            "AND aiState IN ('DISABLED', 'FAILED')",
+    )
+    suspend fun requeueStalledAi()
+
+    /**
+     * Recovers clips left in RUNNING after a process death. Called once per
+     * process when no enrichment is actually in flight, so a crashed AI run
+     * cannot keep a clip stuck forever.
+     */
+    @Query(
+        "UPDATE clipboard_entries SET aiState = 'IDLE', aiError = NULL " +
+            "WHERE isAiProcessed = 0 AND aiState = 'RUNNING'",
+    )
+    suspend fun resetStalledRunningAi()
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertEntries(entries: List<ClipboardEntry>)

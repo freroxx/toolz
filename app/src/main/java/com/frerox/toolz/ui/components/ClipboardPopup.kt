@@ -74,6 +74,7 @@ import com.frerox.toolz.ui.screens.clipboard.ClipboardEvent
 import com.frerox.toolz.ui.screens.clipboard.ClipboardMessage
 import com.frerox.toolz.ui.screens.clipboard.ClipboardViewModel
 import com.frerox.toolz.util.security.BiometricPromptUtils
+import kotlinx.coroutines.flow.first
 
 /**
  * Floating quick switcher launched from the QS tile. Shows the most recent
@@ -94,7 +95,12 @@ fun ClipboardPopup(
     // SAVED/BUMPED/EMPTY when the user explicitly pressed "Paste current".
     var awaitingPaste by remember { mutableStateOf(false) }
 
+    // Wait until the popup is actually resumed: composition runs during
+    // onCreate, before ToolzForegroundTracker flips to true, so refreshing
+    // immediately would silently skip the automatic capture. The explicit
+    // "Paste current" button stays available as a fallback.
     LaunchedEffect(Unit) {
+        com.frerox.toolz.ToolzForegroundTracker.isForeground.first { it }
         viewModel.refreshClipboard(notify = false)
     }
 
@@ -424,10 +430,22 @@ private fun popupPreview(entry: ClipboardEntry, masked: Boolean, maskedPreview: 
         // Locked clips stay fully redacted until this popup reveals them.
         // Sensitive-only clips use the classifier's partial mask instead.
         masked && entry.isLocked -> "••••••••"
-        masked -> maskedPreview
+        // Masked media must not show the classifier's bullet mask: a bullet
+        // blob for an image or file looks like corrupted text. Show the
+        // localized type instead.
+        masked -> when (entry.type) {
+            ClipboardType.IMAGE -> imageLabel
+            ClipboardType.FILE -> fileLabel
+            ClipboardType.MULTI -> multiLabel
+            else -> maskedPreview
+        }
         entry.type == ClipboardType.IMAGE -> imageLabel
-        entry.type == ClipboardType.FILE -> content.ifBlank { fileLabel }
-        entry.type == ClipboardType.MULTI -> content.ifBlank { multiLabel }
+        entry.type == ClipboardType.FILE ->
+            content.takeIf { it.isNotBlank() && it != "[file]" && it != "[image]" }
+                ?: fileLabel
+        entry.type == ClipboardType.MULTI ->
+            content.takeIf { it.isNotBlank() && it != "[file]" && it != "[image]" }
+                ?: multiLabel
         content.isBlank() -> entry.summary.orEmpty()
         else -> content
     }

@@ -17,12 +17,24 @@
 
 package com.frerox.toolz.util.shizuku
 
-import com.frerox.toolz.IUserService
+import android.content.ClipData
+import android.os.IBinder
 import com.frerox.toolz.ICommandCallback
+import com.frerox.toolz.IUserService
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import java.util.concurrent.TimeUnit
 import kotlin.system.exitProcess
 
+/**
+ * Runs as the Shizuku shell user (UID 2000).
+ *
+ * Clipboard reads must not rely on `cmd clipboard get`: AOSP does not ship a
+ * `clipboard` shell command, so on most devices that path returns nothing and
+ * background capture silently does nothing. The primary path below calls the
+ * clipboard service binder directly as the shell UID, which is allowed to read
+ * the clipboard. The shell command remains only as a ROM-specific fallback.
+ */
 class ShizukuUserService : IUserService.Stub() {
     override fun destroy() {
         exitProcess(0)
@@ -78,18 +90,92 @@ class ShizukuUserService : IUserService.Stub() {
         }
     }
 
-    override fun getClipboardText(): String? {
+    override fun getClipboardText(): String? =
+        readClipboardViaBinder() ?: readClipboardViaShellCommand()
+
+    /**
+     * Calls `IClipboard.getPrimaryClip` directly. The method signature has
+     * changed across Android releases, so the arguments are derived from the
+     * reflected parameter types instead of hardcoding one version.
+     */
+    private fun readClipboardViaBinder(): String? = try {
+        val serviceManager = Class.forName("android.os.ServiceManager")
+        val binder = serviceManager
+            .getMethod("getService", String::class.java)
+            .invoke(null, "clipboard") as? IBinder
+        if (binder == null) {
+            null
+        } else {
+            val stub = Class.forName("android.content.IClipboard\$Stub")
+            val clipboard = stub
+                .getMethod("asInterface", IBinder::class.java)
+                .invoke(null, binder)
+            if (clipboard == null) {
+                null
+            } else {
+                val method = clipboard.javaClass.methods
+                    .filter { it.name == "getPrimaryClip" }
+                    .minByOrNull { it.parameterCount }
+                val clip = method?.let { candidate ->
+                    var stringIndex = 0
+                    val args: Array<Any?> = candidate.parameterTypes.map { type ->
+                        when {
+                            // First string is the calling package; later strings
+                            // are attribution tags, which may be null.
+                            type == String::class.java -> {
+                                stringIndex++
+                                if (stringIndex == 1) "com.android.shell" else null
+                            }
+                            type == Int::class.javaPrimitiveType -> 0
+                            type == Boolean::class.javaPrimitiveType -> false
+                            else -> null
+                        }
+                    }.toTypedArray()
+                    candidate.invoke(clipboard, *args) as? ClipData
+                }
+                clip?.let(::clipToText)
+            }
+        }
+    } catch (_: Throwable) {
+        // Hidden API access can be denied on some ROMs; the shell fallback
+        // below still gets a chance.
+        null
+    }
+
+    private fun clipToText(clip: ClipData): String? {
+        if (clip.itemCount == 0) return null
+        val parts = mutableListOf<String>()
+        for (index in 0 until clip.itemCount) {
+            val item = clip.getItemAt(index) ?: continue
+            val text = item.text?.toString()
+            val html = item.htmlText
+            when {
+                !text.isNullOrBlank() -> parts.add(text)
+                !html.isNullOrBlank() -> parts.add(stripHtml(html))
+            }
+        }
+        return parts.joinToString("\n").ifBlank { null }
+    }
+
+    /** ROM-specific fallback; never blocks the caller for more than 3s. */
+    private fun readClipboardViaShellCommand(): String? {
         return try {
-            val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", "cmd clipboard get"))
-            val reader = BufferedReader(InputStreamReader(process.inputStream))
-            val output = reader.readText().trim()
-            process.waitFor()
+            val process = ProcessBuilder("sh", "-c", "cmd clipboard get 2>/dev/null")
+                .redirectErrorStream(true)
+                .start()
+            // Wait before reading so a hanging command can never block the
+            // binder thread forever. The output of `cmd clipboard get` is tiny,
+            // so it cannot fill the pipe buffer before exit.
+            if (!process.waitFor(3, TimeUnit.SECONDS)) {
+                process.destroy()
+                return null
+            }
+            val output = process.inputStream.use { input ->
+                BufferedReader(InputStreamReader(input)).readText().trim()
+            }
+            if (output.isBlank() || output.contains("No primary clip")) return null
 
-            if (output.isBlank()) return null
-            if (output.contains("No primary clip")) return null
-
-            // Collect every "T:<text>" item block; join multi-item clips with newlines.
-            // Format: ClipData { ... ( Item { T:text } ) ( Item { T:more } ) }
+            // Collect every "T:<text>" item block; join multi-item clips.
             val items = mutableListOf<String>()
             var searchFrom = 0
             while (true) {
@@ -106,22 +192,19 @@ class ShizukuUserService : IUserService.Stub() {
                 if (searchFrom >= output.length) break
             }
             if (items.isNotEmpty()) return items.joinToString("\n").ifBlank { null }
-
-            // Fallback: extract between first and last double-quote
-            // Works for simpler output formats on some ROMs
-            if (output.startsWith("ClipData")) {
-                val firstQuote = output.indexOf('"')
-                val lastQuote = output.lastIndexOf('"')
-                if (firstQuote in 0 until lastQuote) {
-                    return output.substring(firstQuote + 1, lastQuote).ifBlank { null }
-                }
-            }
-
-            // Last resort: return raw output if non-blank
-            output.ifBlank { null }
-        } catch (e: Exception) {
-            e.printStackTrace()
+            null
+        } catch (_: Exception) {
             null
         }
+    }
+
+    private fun stripHtml(html: String): String = try {
+        android.text.Html.fromHtml(html, android.text.Html.FROM_HTML_MODE_LEGACY)
+            .toString()
+            .trim()
+    } catch (_: Exception) {
+        html.replace(Regex("<[^>]+>"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
     }
 }

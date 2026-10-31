@@ -5100,6 +5100,7 @@
     <string name="st_ClipboardScreen_subtitle">%1$d clips · %2$d sensitive</string>
     <string name="st_ClipboardScreen_title">Clipboard</string>
     <string name="st_ClipboardScreen_trash_title">Trash</string>
+    <string name="st_ClipboardScreen_trash_subtitle">%1$d clips in trash</string>
     <string name="st_ClipboardScreen_type_address">Address</string>
     <string name="st_ClipboardScreen_type_card">Card</string>
     <string name="st_ClipboardScreen_type_code">Code</string>

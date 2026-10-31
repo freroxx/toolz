@@ -24,6 +24,7 @@ import com.frerox.toolz.data.settings.SettingsRepository
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
+import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -55,6 +56,23 @@ class ClipboardAiProcessor @Inject constructor(
         val type: String? = null,
         val error: String? = null,
     )
+
+    /** Number of enrichment runs currently in flight in this process. */
+    private val activeRuns = AtomicInteger(0)
+
+    /**
+     * Resets rows left in RUNNING by a previous process. Skipped while an
+     * enrichment is actually running so a second ViewModel cannot clobber a
+     * live request.
+     */
+    suspend fun resetStalledRuns() {
+        if (activeRuns.get() != 0) return
+        try {
+            clipboardDao.resetStalledRunningAi()
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not reset stalled AI runs", e)
+        }
+    }
 
     /** Master switch + offline state. */
     suspend fun aiAllowedBySettings(): Boolean = try {
@@ -115,6 +133,7 @@ class ClipboardAiProcessor @Inject constructor(
         val model = aiSettings.getSelectedModel(provider)
         val prompt = buildPrompt(entry.content, entry.type)
 
+        activeRuns.incrementAndGet()
         return try {
             var completed = false
             val response = withTimeoutOrNull(AI_TIMEOUT_MS) {
@@ -159,6 +178,8 @@ class ClipboardAiProcessor @Inject constructor(
             val message = (e.message ?: e.javaClass.simpleName).take(180)
             clipboardDao.updateAiState(entryId, ClipAiState.FAILED, message)
             AiResult(false, error = message)
+        } finally {
+            activeRuns.decrementAndGet()
         }
     }
 

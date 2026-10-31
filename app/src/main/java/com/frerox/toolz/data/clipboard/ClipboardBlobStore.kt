@@ -42,6 +42,7 @@ private const val IV_BYTES = 12
 private const val TAG_BITS = 128
 private const val MAX_ITEM_BYTES = 25L * 1024L * 1024L
 private const val SHARE_CACHE_MAX_AGE_MS = 60L * 60L * 1000L
+private const val TEMP_MAX_AGE_MS = 10L * 60L * 1000L
 
 data class BlobRef(val id: String, val sizeBytes: Long)
 
@@ -112,7 +113,7 @@ class ClipboardBlobStore @Inject constructor(
     ): BlobRef? = withContext(Dispatchers.IO) {
         try {
             val bytes = input.use { readLimited(it, maxBytes) } ?: return@withContext null
-            putBytes(bytes, protectForStaging)
+            putBytes(bytes, maxBytes, protectForStaging)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to store attachment", e)
             null
@@ -121,9 +122,10 @@ class ClipboardBlobStore @Inject constructor(
 
     suspend fun putBytes(
         bytes: ByteArray,
+        maxBytes: Long = MAX_ITEM_BYTES,
         protectForStaging: Boolean = false,
     ): BlobRef? = withContext(Dispatchers.IO) {
-        if (bytes.isEmpty() || bytes.size.toLong() > MAX_ITEM_BYTES) return@withContext null
+        if (bytes.isEmpty() || bytes.size.toLong() > maxBytes) return@withContext null
         val id = ClipboardHashing.sha256(bytes)
         val plainSize = bytes.size.toLong()
         // Protect before the file is visible so a concurrent GC cannot remove
@@ -265,7 +267,16 @@ class ClipboardBlobStore @Inject constructor(
             val protected = stagedSnapshot() + protectedIds
             var removed = 0
             dir.listFiles()?.forEach { file ->
-                if (!file.isFile || !file.name.endsWith(".bin")) return@forEach
+                if (!file.isFile) return@forEach
+                // Abandoned temp files from a failed/cancelled write. A
+                // concurrent putBytes may still be writing one, so only remove
+                // temps that have been idle for a while.
+                if (file.name.endsWith(".tmp")) {
+                    val age = System.currentTimeMillis() - file.lastModified()
+                    if (age > TEMP_MAX_AGE_MS && file.delete()) removed++
+                    return@forEach
+                }
+                if (!file.name.endsWith(".bin")) return@forEach
                 val id = file.name.removeSuffix(".bin")
                 if (id !in referenced && id !in protected) {
                     if (file.delete()) removed++

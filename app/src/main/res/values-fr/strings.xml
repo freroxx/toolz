@@ -4998,6 +4998,7 @@ La plupart des optimisations nécessitent Shizuku pour un accès shell privilég
     <string name="st_ClipboardScreen_subtitle">%1$d clips · %2$d sensibles</string>
     <string name="st_ClipboardScreen_title">Presse-papiers</string>
     <string name="st_ClipboardScreen_trash_title">Corbeille</string>
+    <string name="st_ClipboardScreen_trash_subtitle">%1$d clips dans la corbeille</string>
     <string name="st_ClipboardScreen_type_address">Adresse</string>
     <string name="st_ClipboardScreen_type_card">Carte</string>
     <string name="st_ClipboardScreen_type_code">Code</string>

@@ -323,6 +323,7 @@ class ClipboardViewModel @Inject constructor(
 
     private var lastDeletedIds: List<Int> = emptyList()
     private var wasSandboxed = false
+    private var appOpAutoGrantAttempted = false
     private val manualCaptureMutex = Mutex()
 
     val uiState: StateFlow<ClipboardUiState> = combine(
@@ -357,7 +358,17 @@ class ClipboardViewModel @Inject constructor(
             aiConfigured = extras.aiConfigured,
             gate = gateInfo,
             settings = settings,
-            stats = stats,
+            // Counts always come from the live history snapshot. The stats
+            // row is otherwise only refreshed on explicit actions, which made
+            // it drift after captures made by the background service.
+            stats = stats.copy(
+                activeCount = snapshot.entries.size,
+                trashedCount = snapshot.trashed.size,
+                sensitiveCount = snapshot.entries.count { it.isSensitive || it.isLocked },
+                itemQuotaMb = settings.itemQuotaMb,
+                totalQuotaMb = settings.totalQuotaMb,
+                maxEntries = settings.maxEntries,
+            ),
             sandboxActive = clipboardSandboxActive,
             loaded = extras.loaded,
         )
@@ -372,6 +383,7 @@ class ClipboardViewModel @Inject constructor(
         viewModelScope.launch {
             settingsState.collect { settings ->
                 syncGate(settings)
+                autoGrantAppOpIfNeeded(settings)
             }
         }
         viewModelScope.launch {
@@ -392,6 +404,7 @@ class ClipboardViewModel @Inject constructor(
             try {
                 settingsState.first()
                 history.first()
+                aiProcessor.resetStalledRuns()
                 refreshStatsNow()
             } catch (e: Exception) {
                 // A transient DB/settings failure must never leave the screen
@@ -436,7 +449,26 @@ class ClipboardViewModel @Inject constructor(
 
     fun refreshGate() {
         viewModelScope.launch {
-            syncGate(settingsState.first())
+            val settings = settingsState.first()
+            syncGate(settings)
+            autoGrantAppOpIfNeeded(settings)
+        }
+    }
+
+    /**
+     * Finishes setup for users who authorized Shizuku in an older build (or
+     * from the Shizuku app): the READ_CLIPBOARD app-op is granted once per
+     * process so background reads keep working after an update. Failures stay
+     * silent here; the setup banner and the explicit grant button remain.
+     */
+    private suspend fun autoGrantAppOpIfNeeded(settings: ClipboardSettings) {
+        if (appOpAutoGrantAttempted || clipboardSandboxActive) return
+        if (!settings.onboardingSeen) return
+        val caps = ClipboardGate.capabilities(application, settings.onboardingSeen)
+        if (!caps.shizukuAuthorized || caps.appOpAllowed) return
+        appOpAutoGrantAttempted = true
+        if (ensureClipboardAppOp(notify = false)) {
+            syncGate(settings)
         }
     }
 
@@ -489,8 +521,17 @@ class ClipboardViewModel @Inject constructor(
 
     fun completeOnboarding() {
         viewModelScope.launch {
+            // Close onboarding first. Granting the app-op goes through Shizuku
+            // and can take seconds; keeping the sheet open until it finishes
+            // made setup look frozen.
             settingsRepository.setClipboardOnboardingSeen(true)
             _events.send(ClipboardEvent.Message(ClipboardMessage.ONBOARDING_DONE))
+            refreshGate()
+            // If Shizuku was authorized during onboarding, also grant the
+            // READ_CLIPBOARD app-op. That makes standard ClipboardManager
+            // reads work in the background; the shell binder read is only a
+            // secondary path. A failure is reported but never blocks setup.
+            ensureClipboardAppOp()
             refreshGate()
         }
     }
@@ -506,6 +547,9 @@ class ClipboardViewModel @Inject constructor(
         if (ShizukuHelper.isAuthorized()) {
             viewModelScope.launch {
                 _events.send(ClipboardEvent.Message(ClipboardMessage.ALREADY_AUTHORIZED))
+                // Authorization may have been granted from the Shizuku app
+                // while Toolz was closed; finish the setup automatically.
+                ensureClipboardAppOp()
                 refreshGate()
             }
             return
@@ -524,6 +568,7 @@ class ClipboardViewModel @Inject constructor(
                         else ClipboardMessage.SHIZUKU_DENIED,
                     ),
                 )
+                if (granted) ensureClipboardAppOp()
                 refreshGate()
             }
         }
@@ -531,16 +576,37 @@ class ClipboardViewModel @Inject constructor(
 
     fun grantClipboardAppOp() {
         viewModelScope.launch {
-            val result = shizukuExecutor.grantClipboardAppOp()
-            _events.send(
-                ClipboardEvent.Message(
-                    if (result.isSuccess) ClipboardMessage.APP_OP_GRANTED
-                    else ClipboardMessage.APP_OP_FAILED,
-                    detail = result.combinedOutput.takeIf { it.isNotBlank() },
-                ),
-            )
+            if (!ShizukuHelper.isAuthorized()) {
+                _events.send(ClipboardEvent.Message(ClipboardMessage.APP_OP_FAILED))
+                refreshGate()
+                return@launch
+            }
+            ensureClipboardAppOp()
             refreshGate()
         }
+    }
+
+    /**
+     * Grants the `android:read_clipboard` app-op through Shizuku when needed.
+     *
+     * `appops set` can exit successfully even on ROMs that ignore the op, so
+     * the result is verified through AppOpsManager instead of trusting the
+     * exit code alone. Returns true only when the app-op is actually allowed.
+     */
+    private suspend fun ensureClipboardAppOp(notify: Boolean = true): Boolean {
+        if (ClipboardGate.isClipboardAppOpAllowed(application)) return true
+        if (!ShizukuHelper.isAuthorized()) return false
+        val result = shizukuExecutor.grantClipboardAppOp()
+        val allowed = ClipboardGate.isClipboardAppOpAllowed(application)
+        if (notify) {
+            _events.send(
+                ClipboardEvent.Message(
+                    if (allowed) ClipboardMessage.APP_OP_GRANTED else ClipboardMessage.APP_OP_FAILED,
+                    detail = result.combinedOutput.takeIf { it.isNotBlank() && !allowed },
+                ),
+            )
+        }
+        return allowed
     }
 
     fun revokeClipboardAppOp() {
@@ -1150,11 +1216,17 @@ class ClipboardViewModel @Inject constructor(
     fun copyEntry(entry: ClipboardEntry) {
         viewModelScope.launch {
             val attachments = uiState.value.attachmentsByClip[entry.id].orEmpty()
-            if (copyToSystemClipboard(entry, attachments)) {
-                _events.send(ClipboardEvent.Message(ClipboardMessage.COPIED))
-            } else {
-                _events.send(ClipboardEvent.Message(ClipboardMessage.NOTHING_TO_COPY))
+            val copied = try {
+                copyToSystemClipboard(entry, attachments)
+            } catch (e: Exception) {
+                android.util.Log.w("ClipboardViewModel", "Copy failed", e)
+                false
             }
+            _events.send(
+                ClipboardEvent.Message(
+                    if (copied) ClipboardMessage.COPIED else ClipboardMessage.FAILED,
+                ),
+            )
         }
     }
 
@@ -1180,18 +1252,55 @@ class ClipboardViewModel @Inject constructor(
             }
             return
         }
-        val manager = application.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        manager.setPrimaryClip(ClipData.newPlainText(CLIPBOARD_LABEL, texts.joinToString("\n\n")))
+        // The binder transaction for a clip is ~1 MB. Cap the merged text well
+        // below that so a huge bulk selection cannot crash the app; clips that
+        // do not fit are skipped and only the ones actually copied are counted.
+        val accepted = ArrayList<String>(texts.size)
+        var total = 0
+        for (text in texts) {
+            val extra = if (accepted.isEmpty()) text.length else text.length + 2
+            if (total + extra > MAX_BULK_COPY_CHARS) continue
+            accepted += text
+            total += extra
+        }
+        if (accepted.isEmpty()) {
+            viewModelScope.launch {
+                _events.send(ClipboardEvent.Message(ClipboardMessage.TOO_LARGE))
+            }
+            return
+        }
+        val copied = try {
+            val manager = application.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            manager.setPrimaryClip(ClipData.newPlainText(CLIPBOARD_LABEL, accepted.joinToString("\n\n")))
+            true
+        } catch (e: Exception) {
+            android.util.Log.w("ClipboardViewModel", "Bulk copy failed", e)
+            false
+        }
+        if (!copied) {
+            // Keep the selection so the user can retry with fewer clips.
+            viewModelScope.launch {
+                _events.send(ClipboardEvent.Message(ClipboardMessage.FAILED))
+            }
+            return
+        }
         clearSelection()
         viewModelScope.launch {
             _events.send(
                 ClipboardEvent.Message(
                     ClipboardMessage.SELECTION_COPIED,
-                    count = texts.size,
+                    count = accepted.size,
                 ),
             )
         }
     }
+
+    /**
+     * Text that is meaningful for an external tool (notepad, task, QR,
+     * encrypt, link). Never returns an `[image]`/`[file]` placeholder.
+     */
+    fun textForEntry(entry: ClipboardEntry): String? =
+        textForClipboard(entry, uiState.value.attachmentsByClip[entry.id].orEmpty())
 
     /**
      * Text that is safe and meaningful to put on the clipboard.
@@ -1369,11 +1478,27 @@ class ClipboardViewModel @Inject constructor(
     }
 
     fun setClipboardAiEnabled(enabled: Boolean) {
-        viewModelScope.launch { settingsRepository.setClipboardAiEnabled(enabled) }
+        viewModelScope.launch {
+            settingsRepository.setClipboardAiEnabled(enabled)
+            if (enabled) {
+                // Clips skipped while AI was off become eligible again.
+                clipboardDao.requeueStalledAi()
+                _extras.update { it.copy(aiConfigured = aiProcessor.isConfigured()) }
+                // Start draining the queue immediately; the periodic worker is
+                // only a safety net and can be up to 15 minutes away.
+                aiProcessor.processQueued(2)
+            }
+        }
     }
 
     fun setAutoAiEnabled(enabled: Boolean) {
-        viewModelScope.launch { settingsRepository.setAiClipboardMonitoringEnabled(enabled) }
+        viewModelScope.launch {
+            settingsRepository.setAiClipboardMonitoringEnabled(enabled)
+            if (enabled) {
+                clipboardDao.requeueStalledAi()
+                aiProcessor.processQueued(2)
+            }
+        }
     }
 
     fun setRetentionDays(days: Int) {
@@ -1528,8 +1653,10 @@ class ClipboardViewModel @Inject constructor(
      * Expiry a non-sensitive clip should have under the current retention
      * preference. `0` days means "never expire".
      */
-    private fun expiryFor(timestamp: Long): Long? {
-        val days = uiState.value.settings.retentionDays
+    private suspend fun expiryFor(timestamp: Long): Long? {
+        // Read the live setting instead of the possibly stale uiState snapshot:
+        // unlock/unmark-sensitive can run right after a retention change.
+        val days = settingsState.first().retentionDays
         return if (days > 0) timestamp + days * DAY_MS else null
     }
 
@@ -1537,5 +1664,11 @@ class ClipboardViewModel @Inject constructor(
         const val CLIPBOARD_LABEL = "Toolz"
         val AI_IDLE_STATES = setOf(null, ClipAiState.IDLE, ClipAiState.DISABLED)
         private const val DAY_MS = 24L * 60L * 60L * 1000L
+
+        /**
+         * Safe merged text budget for a bulk copy. The binder limit is ~1 MB;
+         * UTF-16 chars are roughly 2 bytes, so this stays far below it.
+         */
+        private const val MAX_BULK_COPY_CHARS = 400_000
     }
 }

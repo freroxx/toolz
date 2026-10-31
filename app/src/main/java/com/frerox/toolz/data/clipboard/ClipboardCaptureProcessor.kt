@@ -44,6 +44,7 @@ private const val TAG = "ClipboardCapture"
 private const val MAX_TEXT_CHARS = 100_000
 private const val MAX_TEXT_BYTES = 2L * 1024L * 1024L
 private const val MAX_PASSWORD_LOOKUP_CHARS = 256
+private const val DAY_MS = 24L * 60L * 60L * 1000L
 private val TEXT_APPLICATION_MIMES = setOf(
     "application/json",
     "application/ld+json",
@@ -205,13 +206,22 @@ class ClipboardCaptureProcessor @Inject constructor(
                     }
                 }
 
-                val bytes = readBytesLimited(uri, itemQuota)
-                    ?: return CaptureResult(Outcome.IGNORED_TOO_LARGE)
-                if (bytes.isEmpty()) continue
-                if (bytes.size.toLong() > itemQuota) {
-                    return CaptureResult(Outcome.IGNORED_TOO_LARGE)
+                // A revoked/broken content URI must not abort a whole
+                // multi-item clip; only a genuinely oversized item is fatal.
+                val bytes = when (val read = readBytesLimited(uri, itemQuota)) {
+                    is UriRead.Bytes -> read.bytes
+                    UriRead.TooLarge -> return CaptureResult(Outcome.IGNORED_TOO_LARGE)
+                    UriRead.Unreadable -> {
+                        Log.w(TAG, "Skipping unreadable clipboard URI: $uri")
+                        continue
+                    }
                 }
-                val blob = blobStore.putBytes(bytes, protectForStaging = true)
+                if (bytes.isEmpty()) continue
+                val blob = blobStore.putBytes(
+                    bytes,
+                    maxBytes = itemQuota,
+                    protectForStaging = true,
+                )
                     ?: return CaptureResult(Outcome.FAILED)
                 protectedBlobIds.add(blob.id)
                 if (blob.sizeBytes > itemQuota) {
@@ -264,7 +274,12 @@ class ClipboardCaptureProcessor @Inject constructor(
                 return CaptureResult(Outcome.IGNORED_BLANK)
             }
 
-            val itemCount = payload.items.size
+            // Count real content, not raw clip items. Rich-text clips commonly
+            // publish plain text and HTML as two separate items; treating that
+            // as MULTI would disable AI and bulk copy for an ordinary text
+            // clip. textParts is already de-duplicated, and staged holds only
+            // distinct attachments.
+            val itemCount = textParts.size + staged.size
             val type = when {
                 hasImage && hasFile -> ClipboardType.MULTI
                 hasImage && (effectiveText.isNotBlank() || itemCount > 1) -> ClipboardType.MULTI
@@ -279,28 +294,49 @@ class ClipboardCaptureProcessor @Inject constructor(
                 primaryFileName ?: if (hasImage) "[image]" else "[file]"
             }
 
-            val vaultMatch = detectPasswordVaultMatch(effectiveText)
+            // Check each item as well as the joined text: a multi-item clip
+            // joins with newlines, which would otherwise hide a single copied
+            // password from the vault lookup.
+            val vaultMatch = detectPasswordVaultMatch(effectiveText) ||
+                payload.items.any { item ->
+                    val text = item.text
+                    !text.isNullOrBlank() &&
+                        text != effectiveText &&
+                        detectPasswordVaultMatch(text)
+                }
             val sensitiveExtra = payload.isSensitiveExtra || payload.items.any { it.isSensitive }
-            val classification = if (type in setOf(ClipboardType.IMAGE, ClipboardType.FILE, ClipboardType.MULTI)) {
-                // A vault match on an attachment filename/placeholder must
-                // also mark the clip sensitive: isLocked implies isSensitive.
-                val mediaSensitive = sensitiveExtra || vaultMatch
-                ClipClassification(
-                    type = type,
-                    isSensitive = mediaSensitive,
-                    reason = when {
-                        vaultMatch -> ClipSensitivityReason.PASSWORD_VAULT
-                        sensitiveExtra -> ClipSensitivityReason.EXTRA
-                        else -> null
-                    },
-                    passwordVaultMatch = vaultMatch,
-                )
-            } else {
+            // Classify the text even for MULTI/media clips. A password, OTP or
+            // card copied together with an image is still sensitive and must
+            // be masked and excluded from AI.
+            val textClassification = if (effectiveText.isNotBlank()) {
                 classifier.classifyDetailed(
                     text = effectiveText,
                     isSensitiveExtra = sensitiveExtra,
                     passwordVaultMatch = vaultMatch,
                 )
+            } else {
+                null
+            }
+            val classification = if (type in setOf(ClipboardType.IMAGE, ClipboardType.FILE, ClipboardType.MULTI)) {
+                // Keep the media/MULTI type but merge the text classifier's
+                // sensitivity flags. isLocked implies isSensitive.
+                val mediaSensitive = sensitiveExtra ||
+                    vaultMatch ||
+                    textClassification?.isSensitive == true
+                ClipClassification(
+                    type = type,
+                    isSensitive = mediaSensitive,
+                    reason = when {
+                        vaultMatch -> ClipSensitivityReason.PASSWORD_VAULT
+                        textClassification?.reason != null -> textClassification.reason
+                        sensitiveExtra -> ClipSensitivityReason.EXTRA
+                        else -> null
+                    },
+                    passwordVaultMatch = vaultMatch ||
+                        textClassification?.passwordVaultMatch == true,
+                )
+            } else {
+                textClassification ?: ClipClassification(type = type)
             }
             val sensitive = classification.isSensitive
 
@@ -338,6 +374,15 @@ class ClipboardCaptureProcessor @Inject constructor(
                     ClipboardHashAttachment(it.blobId, it.fileName, it.mimeType)
                 },
             )
+            val retentionDays = settingsRepository.clipboardRetentionDays.first()
+            // Re-copying a clip bumps its timestamp, so its expiry must move
+            // with it. Otherwise a 7-day clip re-copied on day 3 still dies on
+            // day 7 instead of surviving another full retention window.
+            val expiresAt = if (!sensitive && retentionDays > 0) {
+                payload.timestamp + retentionDays * DAY_MS
+            } else {
+                null
+            }
             val existing = clipboardDao.getBySha256(hash)
             if (existing != null) {
                 // Same bytes, but the new capture may carry extra sensitivity
@@ -350,7 +395,7 @@ class ClipboardCaptureProcessor @Inject constructor(
                 val mergedReason = existing.sensitivityReason
                     ?: classification.reason
                     ?: if (mergedLocked) ClipSensitivityReason.PASSWORD_VAULT else null
-                val mergedExpiry = if (mergedSensitive || mergedLocked) null else existing.expiresAt
+                val mergedExpiry = if (mergedSensitive || mergedLocked) null else expiresAt
                 clipboardDao.bumpEntry(
                     id = existing.id,
                     timestamp = payload.timestamp,
@@ -390,13 +435,6 @@ class ClipboardCaptureProcessor @Inject constructor(
                     entry = refreshed,
                     sensitive = mergedSensitive,
                 )
-            }
-
-            val retentionDays = settingsRepository.clipboardRetentionDays.first()
-            val expiresAt = if (!sensitive && retentionDays > 0) {
-                payload.timestamp + retentionDays * 24L * 60L * 60L * 1000L
-            } else {
-                null
             }
 
             val entry = ClipboardEntry(
@@ -592,10 +630,24 @@ class ClipboardCaptureProcessor @Inject constructor(
         parts.add(value)
     }
 
-    private fun readBytesLimited(uri: Uri, maxBytes: Long): ByteArray? = try {
-        context.contentResolver.openInputStream(uri)?.use { readLimited(it, maxBytes) }
+    private fun readBytesLimited(uri: Uri, maxBytes: Long): UriRead = try {
+        val input = context.contentResolver.openInputStream(uri)
+        if (input == null) {
+            UriRead.Unreadable
+        } else {
+            input.use { stream ->
+                val bytes = readLimited(stream, maxBytes)
+                if (bytes == null) UriRead.TooLarge else UriRead.Bytes(bytes)
+            }
+        }
     } catch (_: Exception) {
-        null
+        UriRead.Unreadable
+    }
+
+    private sealed class UriRead {
+        class Bytes(val bytes: ByteArray) : UriRead()
+        object TooLarge : UriRead()
+        object Unreadable : UriRead()
     }
 
     /**

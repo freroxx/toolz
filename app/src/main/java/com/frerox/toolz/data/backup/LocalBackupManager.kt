@@ -53,6 +53,7 @@ import com.frerox.toolz.data.pdf.PdfMetadata
 import com.frerox.toolz.data.search.BookmarkEntry
 import com.frerox.toolz.data.search.QuickLinkEntry
 import com.frerox.toolz.data.search.SearchHistoryEntry
+import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.data.steps.StepEntry
 import com.frerox.toolz.data.todo.TaskEntry
 import com.frerox.toolz.util.security.KeyManager
@@ -65,6 +66,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileInputStream
@@ -86,6 +88,8 @@ class LocalBackupManager @Inject constructor(
     private val moshi: Moshi,
     // Clipboard v2: decrypts blobs for export and re-encrypts them on restore.
     private val clipboardBlobStore: ClipboardBlobStore,
+    // Restore honors the user's configured per-item quota.
+    private val settingsRepository: SettingsRepository,
     // T-P0-03 (additive): TASKS restore must reschedule (alarms don't survive export).
     private val taskScheduler: com.frerox.toolz.util.TaskAlarmScheduler
 ) {
@@ -737,6 +741,9 @@ class LocalBackupManager @Inject constructor(
             null
         } ?: return
 
+        val itemQuotaBytes = settingsRepository.clipboardItemQuotaMb.first()
+            .coerceAtLeast(1) * 1024L * 1024L
+
         payload.clips.forEach { clip ->
             val stagedBlobs = mutableListOf<BlobRef>()
             var insertedClipId: Int? = null
@@ -753,7 +760,11 @@ class LocalBackupManager @Inject constructor(
                         val blob = try {
                             zipFile.getEntry(path)?.let { entry ->
                                 zipFile.getInputStream(entry).use { input ->
-                                    clipboardBlobStore.put(input, protectForStaging = true)
+                                    clipboardBlobStore.put(
+                                        input,
+                                        maxBytes = itemQuotaBytes,
+                                        protectForStaging = true,
+                                    )
                                 }
                             }
                         } catch (_: Exception) {
@@ -813,8 +824,11 @@ class LocalBackupManager @Inject constructor(
                 val restoredAttachmentBytes = storedAttachments.sumOf { it.second.sizeBytes }
                 // Sensitive and locked rows must never expire and must never
                 // carry an AI result, even when the archive came from a build
-                // that allowed those combinations.
-                val restoredSensitive = clip.isSensitive || clip.isLocked
+                // that allowed those combinations. A vault match is sensitive
+                // even if an older archive did not persist the flag.
+                val restoredSensitive = clip.isSensitive ||
+                    clip.isLocked ||
+                    clip.passwordVaultMatch
                 val entry = ClipboardEntry(
                     content = clip.content,
                     timestamp = clip.timestamp,
@@ -911,11 +925,27 @@ class LocalBackupManager @Inject constructor(
                 if (!duplicate) {
                     // Legacy archives never carried attachment bytes, so any
                     // attachmentCount in the JSON would point at missing rows.
+                    // Enforce the same sensitive invariants as the v2 path.
+                    val sensitive = entry.isSensitive ||
+                        entry.isLocked ||
+                        entry.passwordVaultMatch
                     database.clipboardDao().insert(
                         entry.copy(
                             id = 0,
                             contentHashSha256 = hash,
                             attachmentCount = 0,
+                            isSensitive = sensitive,
+                            sensitivityReason = entry.sensitivityReason
+                                ?: if (sensitive) ClipSensitivityReason.EXTRA else null,
+                            expiresAt = if (sensitive) null else entry.expiresAt,
+                            summary = if (sensitive) null else entry.summary,
+                            isAiProcessed = !sensitive && entry.isAiProcessed,
+                            aiState = if (sensitive) {
+                                ClipAiState.SKIPPED_SENSITIVE
+                            } else {
+                                entry.aiState
+                            },
+                            aiError = if (sensitive) null else entry.aiError,
                         ),
                     )
                 }

@@ -62,8 +62,12 @@ object ShizukuHelper {
     }
 
     fun requestAuthorization(onResult: (Boolean) -> Unit) {
-        if (!isRunning() || isAuthorized()) {
+        if (!isRunning()) {
             onResult(false)
+            return
+        }
+        if (isAuthorized()) {
+            onResult(true)
             return
         }
         val listener = object : Shizuku.OnRequestPermissionResultListener {

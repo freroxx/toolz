@@ -15,6 +15,7 @@ import android.content.Intent
 import android.util.Log
 import com.frerox.toolz.data.clipboard.ClipboardGate
 import com.frerox.toolz.data.settings.SettingsRepository
+import com.frerox.toolz.worker.ClipboardBootRetryWorker
 import com.frerox.toolz.worker.ClipboardCleanupWorker
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
@@ -58,6 +59,11 @@ class ClipboardBootReceiver : BroadcastReceiver() {
                 val capabilities = ClipboardGate.capabilities(appContext, seen)
                 if (capabilities.backgroundCapable) {
                     ClipboardService.startIfNeeded(appContext)
+                } else {
+                    // Shizuku frequently starts after the boot broadcast.
+                    // Retry in the background instead of giving up for the
+                    // rest of the session.
+                    ClipboardBootRetryWorker.enqueue(appContext)
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Boot restore failed: ${e.message}")

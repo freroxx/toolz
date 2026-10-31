@@ -17,6 +17,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.IntentCompat
 import androidx.lifecycle.lifecycleScope
 import com.frerox.toolz.R
+import com.frerox.toolz.data.clipboard.ClipboardAiProcessor
 import com.frerox.toolz.data.clipboard.ClipboardCaptureProcessor
 import com.frerox.toolz.data.clipboard.ClipboardPayload
 import com.frerox.toolz.data.clipboard.ClipboardPayloadItem
@@ -39,8 +40,11 @@ class ClipboardShareActivity : AppCompatActivity() {
 
     @Inject lateinit var captureProcessor: ClipboardCaptureProcessor
     @Inject lateinit var settingsRepository: SettingsRepository
+    @Inject lateinit var aiProcessor: ClipboardAiProcessor
 
-    private var handled = false
+    /** Payloads that arrived while a previous share was still being saved. */
+    private val pending = ArrayDeque<ClipboardPayload>()
+    private var processing = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -49,15 +53,12 @@ class ClipboardShareActivity : AppCompatActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        // A second share can arrive while the first toast is still visible.
-        // Process it instead of leaving an invisible activity open.
-        handled = false
+        // A second share can arrive while the first is still being saved.
+        // Queue it instead of racing the first coroutine's finish() call.
         handleIntent(intent)
     }
 
     private fun handleIntent(source: Intent) {
-        if (handled) return
-        handled = true
         val payload = try {
             buildPayload(source)
         } catch (e: Exception) {
@@ -65,10 +66,23 @@ class ClipboardShareActivity : AppCompatActivity() {
             null
         }
         if (payload == null) {
-            Toast.makeText(this, R.string.st_ClipboardShare_nothing, Toast.LENGTH_SHORT).show()
-            finish()
+            if (!processing && pending.isEmpty()) {
+                Toast.makeText(this, R.string.st_ClipboardShare_nothing, Toast.LENGTH_SHORT).show()
+                finish()
+            }
             return
         }
+        pending.addLast(payload)
+        if (!processing) processNext()
+    }
+
+    private fun processNext() {
+        val payload = pending.removeFirstOrNull()
+        if (payload == null) {
+            if (!isFinishing) finish()
+            return
+        }
+        processing = true
         lifecycleScope.launch {
             try {
                 val exclude = runCatching {
@@ -81,6 +95,11 @@ class ClipboardShareActivity : AppCompatActivity() {
                 } catch (e: Exception) {
                     android.util.Log.w("ClipboardShare", "Share capture failed", e)
                     null
+                }
+                if (result?.outcome == ClipboardCaptureProcessor.Outcome.INSERTED) {
+                    // Enrich the freshly shared clip immediately instead of
+                    // waiting for the next periodic cleanup pass.
+                    runCatching { aiProcessor.processQueued(1) }
                 }
                 val message = when (result?.outcome) {
                     ClipboardCaptureProcessor.Outcome.INSERTED ->
@@ -100,7 +119,9 @@ class ClipboardShareActivity : AppCompatActivity() {
                 }
                 Toast.makeText(this@ClipboardShareActivity, message, Toast.LENGTH_SHORT).show()
             } finally {
-                finish()
+                processing = false
+                // Drain anything that arrived during the save, then close.
+                processNext()
             }
         }
     }
