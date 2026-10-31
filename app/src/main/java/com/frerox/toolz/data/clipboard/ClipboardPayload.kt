@@ -62,6 +62,18 @@ object ClipAiState {
     const val DISABLED = "DISABLED"
 }
 
+/** Stable capture-source codes stored in [ClipboardEntry.source]. */
+object ClipboardSource {
+    const val MANUAL = "MANUAL"
+    const val LISTENER = "LISTENER"
+    const val POLL = "POLL"
+    const val TILE = "TILE"
+    const val EXTERNAL = "EXTERNAL"
+    const val SCREENSHOT = "SCREENSHOT"
+    const val SHARE = "SHARE"
+    const val PROCESS_TEXT = "PROCESS_TEXT"
+}
+
 enum class ClipboardFilter {
     ALL,
     TEXT,

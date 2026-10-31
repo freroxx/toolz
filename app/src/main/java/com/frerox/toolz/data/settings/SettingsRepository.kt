@@ -222,6 +222,9 @@ class SettingsRepository @Inject constructor(
         /** Cap for persisted/in-memory stopwatch laps (S-P1-02): block beyond this. */
         const val STOPWATCH_MAX_LAPS = 200
 
+        /** Bounded persistence for the screenshot ingestion dedupe set. */
+        private const val SCREENSHOT_DEDUPE_LIMIT = 512
+
         val DEFAULT_POMODORO_QUOTES = """
             "And the universe said I love you because you are love." (The End Poem, Minecraft)
             "It is possible to commit no mistakes and still lose. That is not weakness, that is life." (Captain Picard, Star Trek)
@@ -662,6 +665,9 @@ class SettingsRepository @Inject constructor(
     private val CLIPBOARD_TOTAL_QUOTA_MB = intPreferencesKey("clipboard_total_quota_mb")
     private val CLIPBOARD_MAX_ENTRIES = intPreferencesKey("clipboard_max_entries")
     private val CLIPBOARD_BACKUP_WARNING_SEEN = booleanPreferencesKey("clipboard_backup_warning_seen")
+    private val CLIPBOARD_CAPTURE_SCREENSHOTS = booleanPreferencesKey("clipboard_capture_screenshots")
+    private val CLIPBOARD_INGESTED_SCREENSHOT_URIS =
+        stringSetPreferencesKey("clipboard_ingested_screenshot_uris")
 
     // Crypto Settings
     private val CRYPTO_LAST_ALGORITHM = stringPreferencesKey("crypto_last_algorithm")
@@ -1200,6 +1206,17 @@ class SettingsRepository @Inject constructor(
         dataStore.data.map { (it[CLIPBOARD_MAX_ENTRIES] ?: 500).coerceIn(50, 5_000) }
     val clipboardBackupWarningSeen: Flow<Boolean> =
         dataStore.data.map { it[CLIPBOARD_BACKUP_WARNING_SEEN] ?: false }
+    /** When true, new screenshots are also saved as encrypted clipboard images. */
+    val clipboardCaptureScreenshots: Flow<Boolean> =
+        dataStore.data.map { it[CLIPBOARD_CAPTURE_SCREENSHOTS] ?: true }
+    /**
+     * Screenshot URIs already ingested into clipboard history. A set (not a
+     * single URI) is required because a MediaStore scan returns a window of
+     * recent screenshots; remembering only the newest would reprocess the rest
+     * after every process restart.
+     */
+    val clipboardIngestedScreenshotUris: Flow<Set<String>> =
+        dataStore.data.map { it[CLIPBOARD_INGESTED_SCREENSHOT_URIS].orEmpty() }
 
     val lastCryptoAlgorithm: Flow<String?> = dataStore.data.map { it[CRYPTO_LAST_ALGORITHM] }
 
@@ -1929,6 +1946,28 @@ class SettingsRepository @Inject constructor(
 
     suspend fun setClipboardBackupWarningSeen(seen: Boolean) {
         dataStore.edit { it[CLIPBOARD_BACKUP_WARNING_SEEN] = seen }
+    }
+
+    suspend fun setClipboardCaptureScreenshots(enabled: Boolean) {
+        dataStore.edit { it[CLIPBOARD_CAPTURE_SCREENSHOTS] = enabled }
+    }
+
+    suspend fun addClipboardIngestedScreenshotUri(uri: String) {
+        dataStore.edit { preferences ->
+            val current = preferences[CLIPBOARD_INGESTED_SCREENSHOT_URIS].orEmpty()
+            if (uri in current) return@edit
+            val updated = current + uri
+            // The scan window is 20 images and the poll window is minutes, so
+            // a few hundred entries is far more than enough to dedupe across
+            // restarts while keeping the preferences file small.
+            preferences[CLIPBOARD_INGESTED_SCREENSHOT_URIS] = if (
+                updated.size > SCREENSHOT_DEDUPE_LIMIT
+            ) {
+                updated.drop(updated.size - SCREENSHOT_DEDUPE_LIMIT).toSet()
+            } else {
+                updated
+            }
+        }
     }
 
     suspend fun setLastCryptoAlgorithm(algorithm: String) {

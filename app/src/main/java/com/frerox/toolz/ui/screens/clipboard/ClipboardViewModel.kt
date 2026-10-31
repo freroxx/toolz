@@ -33,6 +33,8 @@ import com.frerox.toolz.data.clipboard.ClipboardGate
 import com.frerox.toolz.data.clipboard.ClipboardPayload
 import com.frerox.toolz.data.clipboard.ClipboardPayloadItem
 import com.frerox.toolz.data.clipboard.ClipboardRetentionManager
+import com.frerox.toolz.data.clipboard.ClipboardScreenshotIngestor
+import com.frerox.toolz.data.clipboard.ClipboardSource
 import com.frerox.toolz.data.clipboard.ClipboardType
 import com.frerox.toolz.data.clipboard.ClipSensitivityReason
 import com.frerox.toolz.data.developer.DevToolId
@@ -82,6 +84,7 @@ data class ClipboardSettings(
     val maxEntries: Int = 500,
     val backupWarningSeen: Boolean = false,
     val offline: Boolean = false,
+    val captureScreenshots: Boolean = true,
 )
 
 data class ClipboardGateInfo(
@@ -120,6 +123,7 @@ enum class ClipboardMessage {
     SAVED,
     BUMPED,
     EMPTY,
+    NOT_FOREGROUND,
     SENSITIVE_SKIPPED,
     TOO_LARGE,
     QUOTA,
@@ -177,6 +181,7 @@ class ClipboardViewModel @Inject constructor(
     private val aiProcessor: ClipboardAiProcessor,
     private val retentionManager: ClipboardRetentionManager,
     private val blobStore: ClipboardBlobStore,
+    private val screenshotIngestor: ClipboardScreenshotIngestor,
     private val gate: SpoofGate,
     val classifier: ClipboardClassifier,
 ) : AndroidViewModel(application) {
@@ -249,6 +254,7 @@ class ClipboardViewModel @Inject constructor(
         val maxEntries: Int,
         val backupWarning: Boolean,
         val offline: Boolean,
+        val captureScreenshots: Boolean,
     )
 
     private val settingsA = combine(
@@ -274,8 +280,9 @@ class ClipboardViewModel @Inject constructor(
         settingsRepository.clipboardMaxEntries,
         settingsRepository.clipboardBackupWarningSeen,
         settingsRepository.offlineModeEnabled,
-    ) { maxEntries, backupWarning, offline ->
-        SettingsC(maxEntries, backupWarning, offline)
+        settingsRepository.clipboardCaptureScreenshots,
+    ) { maxEntries, backupWarning, offline, captureScreenshots ->
+        SettingsC(maxEntries, backupWarning, offline, captureScreenshots)
     }
 
     private val settingsState: Flow<ClipboardSettings> = combine(
@@ -296,6 +303,7 @@ class ClipboardViewModel @Inject constructor(
             maxEntries = c.maxEntries,
             backupWarningSeen = c.backupWarning,
             offline = c.offline,
+            captureScreenshots = c.captureScreenshots,
         )
     }
 
@@ -491,6 +499,18 @@ class ClipboardViewModel @Inject constructor(
         refreshGate()
         refreshStats()
         refreshClipboard(notify = false)
+        // Screenshots never reach the system clipboard on most ROMs. Scan
+        // MediaStore when the screen returns so a capture taken while the
+        // foreground service was stopped still lands in history.
+        viewModelScope.launch {
+            if (clipboardSandboxActive) return@launch
+            try {
+                val ingested = screenshotIngestor.ingestRecentScreenshots(isPoll = true)
+                if (ingested > 0) refreshStatsNow()
+            } catch (e: Exception) {
+                android.util.Log.w("ClipboardViewModel", "Screenshot scan failed", e)
+            }
+        }
     }
 
     fun refreshStats() {
@@ -674,7 +694,11 @@ class ClipboardViewModel @Inject constructor(
             FakeClipboardSandbox.togglePin(entry.id)
         } else {
             viewModelScope.launch {
-                clipboardDao.setPinned(entry.id, pinned)
+                clipboardDao.setPinnedWithExpiry(
+                    id = entry.id,
+                    pinned = pinned,
+                    retentionMs = retentionMsOrZero(),
+                )
                 refreshStats()
             }
         }
@@ -1095,7 +1119,7 @@ class ClipboardViewModel @Inject constructor(
         if (!ToolzForegroundTracker.isForeground.value) {
             if (notify) {
                 viewModelScope.launch {
-                    _events.send(ClipboardEvent.Message(ClipboardMessage.EMPTY))
+                    _events.send(ClipboardEvent.Message(ClipboardMessage.NOT_FOREGROUND))
                 }
             }
             return
@@ -1149,7 +1173,7 @@ class ClipboardViewModel @Inject constructor(
         if (text.isNullOrBlank()) return null
         return ClipboardPayload(
             items = listOf(ClipboardPayloadItem(text = text)),
-            source = "MANUAL",
+            source = ClipboardSource.MANUAL,
         )
     }
 
@@ -1184,7 +1208,7 @@ class ClipboardViewModel @Inject constructor(
             ClipboardPayload(
                 items = items,
                 label = description?.label?.toString(),
-                source = "MANUAL",
+                source = ClipboardSource.MANUAL,
                 isSensitiveExtra = description?.extras
                     ?.getBoolean("android.content.extra.IS_SENSITIVE", false) ?: false,
             )
@@ -1222,6 +1246,20 @@ class ClipboardViewModel @Inject constructor(
                 android.util.Log.w("ClipboardViewModel", "Copy failed", e)
                 false
             }
+            if (copied && !clipboardSandboxActive && entry.deletedAt == null) {
+                // Copying from history is a fresh use of the clip: move it to
+                // the top and extend its retention window instead of letting
+                // it expire on the original schedule.
+                try {
+                    clipboardDao.markCopied(
+                        id = entry.id,
+                        timestamp = System.currentTimeMillis(),
+                        retentionMs = retentionMsOrZero(),
+                    )
+                } catch (e: Exception) {
+                    android.util.Log.w("ClipboardViewModel", "Could not bump copied clip", e)
+                }
+            }
             _events.send(
                 ClipboardEvent.Message(
                     if (copied) ClipboardMessage.COPIED else ClipboardMessage.FAILED,
@@ -1243,6 +1281,7 @@ class ClipboardViewModel @Inject constructor(
             .sortedByDescending { it.timestamp }
             .mapNotNull { entry ->
                 textForClipboard(entry, state.attachmentsByClip[entry.id].orEmpty())
+                    ?.let { text -> entry to text }
             }
         if (texts.isEmpty()) {
             // Keep the selection so the user can adjust it instead of losing
@@ -1255,12 +1294,12 @@ class ClipboardViewModel @Inject constructor(
         // The binder transaction for a clip is ~1 MB. Cap the merged text well
         // below that so a huge bulk selection cannot crash the app; clips that
         // do not fit are skipped and only the ones actually copied are counted.
-        val accepted = ArrayList<String>(texts.size)
+        val accepted = ArrayList<Pair<ClipboardEntry, String>>(texts.size)
         var total = 0
-        for (text in texts) {
+        for ((entry, text) in texts) {
             val extra = if (accepted.isEmpty()) text.length else text.length + 2
             if (total + extra > MAX_BULK_COPY_CHARS) continue
-            accepted += text
+            accepted += entry to text
             total += extra
         }
         if (accepted.isEmpty()) {
@@ -1271,7 +1310,12 @@ class ClipboardViewModel @Inject constructor(
         }
         val copied = try {
             val manager = application.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            manager.setPrimaryClip(ClipData.newPlainText(CLIPBOARD_LABEL, accepted.joinToString("\n\n")))
+            manager.setPrimaryClip(
+                ClipData.newPlainText(
+                    CLIPBOARD_LABEL,
+                    accepted.joinToString("\n\n") { it.second },
+                ),
+            )
             true
         } catch (e: Exception) {
             android.util.Log.w("ClipboardViewModel", "Bulk copy failed", e)
@@ -1286,6 +1330,17 @@ class ClipboardViewModel @Inject constructor(
         }
         clearSelection()
         viewModelScope.launch {
+            if (!clipboardSandboxActive) {
+                try {
+                    clipboardDao.markCopiedMany(
+                        ids = accepted.map { it.first.id },
+                        timestamp = System.currentTimeMillis(),
+                        retentionMs = retentionMsOrZero(),
+                    )
+                } catch (e: Exception) {
+                    android.util.Log.w("ClipboardViewModel", "Could not bump bulk copy", e)
+                }
+            }
             _events.send(
                 ClipboardEvent.Message(
                     ClipboardMessage.SELECTION_COPIED,
@@ -1518,6 +1573,18 @@ class ClipboardViewModel @Inject constructor(
         viewModelScope.launch { settingsRepository.setClipboardExcludeSensitive(enabled) }
     }
 
+    fun setCaptureScreenshots(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setClipboardCaptureScreenshots(enabled)
+            // Turning the feature on should not wait for the next screenshot;
+            // pick up anything captured recently that is still missing.
+            if (enabled) {
+                screenshotIngestor.ingestRecentScreenshots(isPoll = true)
+                refreshStatsNow()
+            }
+        }
+    }
+
     fun setBiometricLock(enabled: Boolean) {
         viewModelScope.launch { settingsRepository.setClipboardBiometricLock(enabled) }
     }
@@ -1650,14 +1717,21 @@ class ClipboardViewModel @Inject constructor(
         !entry.isLocked || entry.id in uiState.value.revealedIds
 
     /**
+     * Retention window in milliseconds; `0` means "never expire". Read live so
+     * a copy/pin right after a settings change uses the new value.
+     */
+    private suspend fun retentionMsOrZero(): Long {
+        val days = settingsState.first().retentionDays
+        return if (days > 0) days * DAY_MS else 0L
+    }
+
+    /**
      * Expiry a non-sensitive clip should have under the current retention
      * preference. `0` days means "never expire".
      */
     private suspend fun expiryFor(timestamp: Long): Long? {
-        // Read the live setting instead of the possibly stale uiState snapshot:
-        // unlock/unmark-sensitive can run right after a retention change.
-        val days = settingsState.first().retentionDays
-        return if (days > 0) timestamp + days * DAY_MS else null
+        val retention = retentionMsOrZero()
+        return if (retention > 0) timestamp + retention else null
     }
 
     companion object {

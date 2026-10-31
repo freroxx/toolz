@@ -101,6 +101,42 @@ interface ClipboardDao {
     suspend fun setExpiresAt(id: Int, expiresAt: Long?)
 
     /**
+     * Bumps a clip when the user copies it again from history. Recency and
+     * retention move together; pinned/sensitive/locked clips keep no expiry.
+     */
+    @Query(
+        "UPDATE clipboard_entries SET timestamp = :timestamp, " +
+            "expiresAt = CASE " +
+            "WHEN :retentionMs > 0 AND isPinned = 0 AND isSensitive = 0 AND isLocked = 0 " +
+            "THEN :timestamp + :retentionMs ELSE NULL END " +
+            "WHERE id = :id",
+    )
+    suspend fun markCopied(id: Int, timestamp: Long, retentionMs: Long)
+
+    /** Same as [markCopied] for a bulk selection, in a single statement. */
+    @Query(
+        "UPDATE clipboard_entries SET timestamp = :timestamp, " +
+            "expiresAt = CASE " +
+            "WHEN :retentionMs > 0 AND isPinned = 0 AND isSensitive = 0 AND isLocked = 0 " +
+            "THEN :timestamp + :retentionMs ELSE NULL END " +
+            "WHERE id IN (:ids)",
+    )
+    suspend fun markCopiedMany(ids: List<Int>, timestamp: Long, retentionMs: Long)
+
+    /**
+     * Pinning makes a clip exempt from expiry; unpinning must restore the
+     * normal retention window instead of leaving it permanent by accident.
+     */
+    @Query(
+        "UPDATE clipboard_entries SET isPinned = :pinned, " +
+            "expiresAt = CASE WHEN :pinned = 1 THEN NULL " +
+            "WHEN :retentionMs > 0 AND isSensitive = 0 AND isLocked = 0 " +
+            "THEN timestamp + :retentionMs ELSE NULL END " +
+            "WHERE id = :id",
+    )
+    suspend fun setPinnedWithExpiry(id: Int, pinned: Boolean, retentionMs: Long)
+
+    /**
      * Recomputes expiry for every non-sensitive clip after the retention
      * preference changes. Without this an old clip keeps the expiry it was
      * created with, so increasing retention from 7 to 30 days would still

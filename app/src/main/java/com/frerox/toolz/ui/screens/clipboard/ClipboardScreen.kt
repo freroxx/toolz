@@ -17,11 +17,14 @@ package com.frerox.toolz.ui.screens.clipboard
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.Build
 import android.text.format.DateUtils
 import android.text.format.Formatter
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
@@ -39,11 +42,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -97,6 +102,7 @@ import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.PushPin
 import androidx.compose.material.icons.rounded.QrCode
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.Restore
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Security
@@ -165,6 +171,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
@@ -177,6 +184,7 @@ import com.frerox.toolz.data.clipboard.ClipboardAttachment
 import com.frerox.toolz.data.clipboard.ClipboardEntry
 import com.frerox.toolz.data.clipboard.ClipboardFilter
 import com.frerox.toolz.data.clipboard.ClipboardGate
+import com.frerox.toolz.data.clipboard.ClipboardSource
 import com.frerox.toolz.data.clipboard.ClipboardType
 import com.frerox.toolz.ui.components.ExpressiveCard
 import com.frerox.toolz.ui.components.ExpressiveFilterChip
@@ -260,7 +268,14 @@ fun ClipboardScreen(
     }
 
     LaunchedEffect(state.loaded, state.settings.onboardingSeen) {
-        if (state.loaded && !state.settings.onboardingSeen) showOnboarding = true
+        if (state.loaded && !state.settings.onboardingSeen) {
+            // Onboarding is the only sheet that may appear on its own. Close
+            // anything else first so two bottom sheets can never stack.
+            showSettings = false
+            showStatus = false
+            detailId = null
+            showOnboarding = true
+        }
     }
 
     LaunchedEffect(anySheetOpen) {
@@ -330,6 +345,17 @@ fun ClipboardScreen(
         )
     }
 
+    // Sheets handle their own back gesture in their own window. This handler
+    // only runs for the history screen, where back should undo one layer of
+    // navigation instead of leaving the whole feature.
+    BackHandler {
+        when {
+            state.isSelectionMode -> viewModel.clearSelection()
+            state.showTrash -> viewModel.setShowTrash(false)
+            else -> onBack()
+        }
+    }
+
     Scaffold(
         modifier = Modifier.toolzBackground(),
         containerColor = Color.Transparent,
@@ -376,7 +402,11 @@ fun ClipboardScreen(
                     IconButton(
                         onClick = {
                             haptic.click()
-                            if (state.isSelectionMode) viewModel.clearSelection() else onBack()
+                            when {
+                                state.isSelectionMode -> viewModel.clearSelection()
+                                state.showTrash -> viewModel.setShowTrash(false)
+                                else -> onBack()
+                            }
                         },
                     ) {
                         Icon(
@@ -393,50 +423,12 @@ fun ClipboardScreen(
                         IconButton(
                             onClick = {
                                 haptic.click()
-                                if (state.showTrash) viewModel.restoreSelected() else viewModel.copySelected()
+                                viewModel.selectAll()
                             },
                         ) {
                             Icon(
-                                if (state.showTrash) Icons.Rounded.Restore else Icons.Rounded.ContentCopy,
-                                contentDescription = stringResource(
-                                    if (state.showTrash) R.string.st_ClipboardScreen_action_restore
-                                    else R.string.st_ClipboardScreen_action_copy,
-                                ),
-                            )
-                        }
-                        if (!state.showTrash && state.settings.aiEnabled &&
-                            state.visibleEntries.any { candidate ->
-                                candidate.id in state.selection &&
-                                    candidate.isTextLike &&
-                                    !candidate.isSensitive &&
-                                    !candidate.isLocked
-                            }
-                        ) {
-                            IconButton(
-                                onClick = {
-                                    haptic.click()
-                                    viewModel.runAiSelected()
-                                },
-                            ) {
-                                Icon(
-                                    Icons.Rounded.AutoAwesome,
-                                    contentDescription = stringResource(R.string.st_ClipboardScreen_action_ai),
-                                )
-                            }
-                        }
-                        IconButton(
-                            onClick = {
-                                haptic.click()
-                                if (state.showTrash) viewModel.deleteSelectedForever()
-                                else viewModel.deleteSelected()
-                            },
-                        ) {
-                            Icon(
-                                if (state.showTrash) Icons.Rounded.DeleteForever else Icons.Rounded.Delete,
-                                contentDescription = stringResource(
-                                    if (state.showTrash) R.string.st_ClipboardScreen_action_delete_forever
-                                    else R.string.st_ClipboardScreen_action_delete,
-                                ),
+                                Icons.Rounded.CheckCircle,
+                                contentDescription = stringResource(R.string.st_ClipboardScreen_action_select_all),
                             )
                         }
                     } else {
@@ -528,6 +520,11 @@ fun ClipboardScreen(
             )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
+        bottomBar = {
+            if (state.isSelectionMode) {
+                SelectionActionBar(state = state, viewModel = viewModel)
+            }
+        },
         floatingActionButton = {
             if (!state.isSelectionMode && !state.showTrash) {
                 ExtendedFloatingActionButton(
@@ -572,13 +569,18 @@ fun ClipboardScreen(
                 )
             }
 
-            if (state.settings.offline) {
+            if (state.settings.offline && state.settings.aiEnabled) {
                 InfoBanner(
                     icon = Icons.Rounded.Info,
                     title = stringResource(R.string.st_ClipboardScreen_ai_offline),
                     color = MaterialTheme.colorScheme.secondary,
                 )
             }
+
+            CaptureStatusStrip(
+                state = state,
+                onClick = { showStatus = true },
+            )
 
             SearchAndFilters(
                 query = state.query,
@@ -601,6 +603,8 @@ fun ClipboardScreen(
                             icon = Icons.Rounded.Search,
                             title = stringResource(R.string.st_ClipboardScreen_no_results),
                             body = stringResource(R.string.st_ClipboardScreen_no_results_body, state.query),
+                            actionLabel = stringResource(R.string.st_ClipboardScreen_action_clear_search),
+                            onAction = { viewModel.onSearchQueryChanged("") },
                         )
                     }
                     state.visibleEntries.isEmpty() && state.showTrash -> {
@@ -608,6 +612,8 @@ fun ClipboardScreen(
                             icon = Icons.Rounded.Delete,
                             title = stringResource(R.string.st_ClipboardScreen_empty_trash_title),
                             body = stringResource(R.string.st_ClipboardScreen_empty_trash_body),
+                            actionLabel = stringResource(R.string.st_ClipboardScreen_action_back_to_history),
+                            onAction = { viewModel.setShowTrash(false) },
                         )
                     }
                     state.visibleEntries.isEmpty() -> {
@@ -615,6 +621,10 @@ fun ClipboardScreen(
                             icon = Icons.Rounded.ContentPaste,
                             title = stringResource(R.string.st_ClipboardScreen_empty_title),
                             body = stringResource(R.string.st_ClipboardScreen_empty_body),
+                            actionLabel = stringResource(R.string.st_ClipboardScreen_action_capture_clipboard),
+                            onAction = { viewModel.pasteCurrent() },
+                            secondaryLabel = stringResource(R.string.st_ClipboardScreen_action_settings),
+                            onSecondaryAction = { showSettings = true },
                         )
                     }
                     else -> {
@@ -701,6 +711,7 @@ fun ClipboardScreen(
             entry = entry,
             attachments = attachments,
             revealed = entry.id in state.revealedIds,
+            toolText = toolText,
             state = state,
             viewModel = viewModel,
             feedbackHostState = sheetSnackbarHostState,
@@ -763,6 +774,75 @@ fun ClipboardScreen(
 }
 
 // ── Search + filters ──────────────────────────────────────────────────────
+
+/**
+ * Compact capture indicator shown above the history. Detail lives in the
+ * status sheet; this strip keeps the user aware when capture is paused or
+ * when screenshot ingestion is off without repeating the setup banner.
+ */
+@Composable
+private fun CaptureStatusStrip(
+    state: ClipboardUiState,
+    onClick: () -> Unit,
+) {
+    if (!state.loaded || state.showTrash || state.isSelectionMode ||
+        state.sandboxActive || state.showSetupBanner
+    ) {
+        return
+    }
+    val status = state.gate.status
+    val paused = !state.settings.monitoring || status == ClipboardGate.Status.PAUSED
+    val active = status == ClipboardGate.Status.ACTIVE_SHIZUKU ||
+        status == ClipboardGate.Status.ACTIVE_APP_OP
+    if (!paused && !active) return
+
+    val label = when {
+        paused -> stringResource(R.string.st_ClipboardScreen_capture_paused)
+        state.settings.captureScreenshots ->
+            stringResource(R.string.st_ClipboardScreen_capture_active_screenshots)
+        else -> stringResource(R.string.st_ClipboardScreen_capture_active_no_screenshots)
+    }
+    val tint = if (paused) {
+        MaterialTheme.colorScheme.tertiary
+    } else {
+        MaterialTheme.colorScheme.primary
+    }
+    Surface(
+        onClick = onClick,
+        shape = CircleShape,
+        color = tint.copy(alpha = 0.1f),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                if (paused) Icons.Rounded.Info else Icons.Rounded.CheckCircle,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = tint,
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                color = tint,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = stringResource(R.string.st_ClipboardScreen_action_status),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = tint,
+            )
+        }
+    }
+}
 
 @Composable
 private fun SearchAndFilters(
@@ -834,6 +914,127 @@ private fun filterLabel(filter: ClipboardFilter): String = stringResource(
 
 // ── History list ──────────────────────────────────────────────────────────
 
+/**
+ * Selection actions live in a bottom bar so the top bar stays uncluttered and
+ * every action has a visible label (important on compact screens and for
+ * accessibility).
+ */
+@Composable
+private fun SelectionActionBar(
+    state: ClipboardUiState,
+    viewModel: ClipboardViewModel,
+) {
+    val haptic = rememberToolzHapticFeedback()
+    val aiEligible = !state.showTrash &&
+        state.settings.aiEnabled &&
+        state.aiConfigured &&
+        !state.settings.offline &&
+        state.visibleEntries.any { candidate ->
+            candidate.id in state.selection &&
+                candidate.isTextLike &&
+                !candidate.isSensitive &&
+                !candidate.isLocked
+        }
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        tonalElevation = 3.dp,
+        shadowElevation = 8.dp,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (state.showTrash) {
+                SelectionAction(
+                    icon = Icons.Rounded.Restore,
+                    label = stringResource(R.string.st_ClipboardScreen_action_restore),
+                    tint = MaterialTheme.colorScheme.primary,
+                    onClick = {
+                        haptic.click()
+                        viewModel.restoreSelected()
+                    },
+                )
+                SelectionAction(
+                    icon = Icons.Rounded.DeleteForever,
+                    label = stringResource(R.string.st_ClipboardScreen_action_delete_forever),
+                    tint = MaterialTheme.colorScheme.error,
+                    onClick = {
+                        haptic.click()
+                        viewModel.deleteSelectedForever()
+                    },
+                )
+            } else {
+                SelectionAction(
+                    icon = Icons.Rounded.ContentCopy,
+                    label = stringResource(R.string.st_ClipboardScreen_action_copy),
+                    tint = MaterialTheme.colorScheme.primary,
+                    onClick = {
+                        haptic.click()
+                        viewModel.copySelected()
+                    },
+                )
+                if (aiEligible) {
+                    SelectionAction(
+                        icon = Icons.Rounded.AutoAwesome,
+                        label = stringResource(R.string.st_ClipboardScreen_action_ai),
+                        tint = MaterialTheme.colorScheme.tertiary,
+                        onClick = {
+                            haptic.click()
+                            viewModel.runAiSelected()
+                        },
+                    )
+                }
+                SelectionAction(
+                    icon = Icons.Rounded.Delete,
+                    label = stringResource(R.string.st_ClipboardScreen_action_delete),
+                    tint = MaterialTheme.colorScheme.error,
+                    onClick = {
+                        haptic.click()
+                        viewModel.deleteSelected()
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RowScope.SelectionAction(
+    icon: ImageVector,
+    label: String,
+    tint: Color,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .weight(1f)
+            .clip(RoundedCornerShape(20.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            modifier = Modifier.size(24.dp),
+            tint = tint,
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            color = tint,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
 @Composable
 private fun HistoryList(
     state: ClipboardUiState,
@@ -880,6 +1081,7 @@ private fun HistoryList(
                     onRestore = { onRestore(entry) },
                     onDeleteForever = { onDeleteForever(entry) },
                     viewModel = viewModel,
+                    modifier = Modifier.animateItem(),
                 )
             }
         }
@@ -914,6 +1116,7 @@ private fun ClipboardCard(
     onRestore: () -> Unit,
     onDeleteForever: () -> Unit,
     viewModel: ClipboardViewModel,
+    modifier: Modifier = Modifier,
 ) {
     val haptic = rememberToolzHapticFeedback()
     val dismissState = rememberSwipeToDismissBoxState(
@@ -931,6 +1134,7 @@ private fun ClipboardCard(
     }
 
     val masked = (entry.isSensitive || entry.isLocked) && !revealed
+    val sourceText = sourceLabel(entry)
     val preview = when {
         // Never leak a file name or text preview while the clip is masked.
         masked -> when (entry.type) {
@@ -968,6 +1172,7 @@ private fun ClipboardCard(
 
     SwipeToDismissBox(
         state = dismissState,
+        modifier = modifier,
         enableDismissFromStartToEnd = false,
         enableDismissFromEndToStart = !selectionMode && !showTrash,
         backgroundContent = {
@@ -1094,6 +1299,7 @@ private fun ClipboardCard(
                             modifier = Modifier.horizontalScroll(rememberScrollState()),
                         ) {
                             MetaPill(typeLabel(entry.type))
+                            if (sourceText.isNotBlank()) MetaPill(sourceText)
                             MetaPill(relativeTime(entry.timestamp))
                             if (entry.isPinned) MetaPill(stringResource(R.string.st_ClipboardScreen_badge_pinned))
                             if (entry.isSensitive || entry.isLocked) {
@@ -1119,7 +1325,13 @@ private fun ClipboardCard(
                                 )
                             }
                             if (entry.expiresAt != null) {
-                                MetaPill(stringResource(R.string.st_ClipboardScreen_badge_expires))
+                                MetaPill(
+                                    text = stringResource(
+                                        R.string.st_ClipboardScreen_expires_on,
+                                        relativeTime(entry.expiresAt),
+                                    ),
+                                    color = MaterialTheme.colorScheme.tertiary,
+                                )
                             }
                         }
                     }
@@ -1185,7 +1397,10 @@ private fun TypeBadge(type: String) {
     ) {
         Icon(
             icon,
-            contentDescription = null,
+            contentDescription = stringResource(
+                R.string.st_ClipboardScreen_badge_type_desc,
+                typeLabel(type),
+            ),
             modifier = Modifier
                 .padding(10.dp)
                 .size(22.dp),
@@ -1310,6 +1525,7 @@ private fun ClipDetailSheet(
     entry: ClipboardEntry,
     attachments: List<ClipboardAttachment>,
     revealed: Boolean,
+    toolText: String?,
     state: ClipboardUiState,
     viewModel: ClipboardViewModel,
     feedbackHostState: SnackbarHostState,
@@ -1328,6 +1544,10 @@ private fun ClipDetailSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val haptic = rememberToolzHapticFeedback()
     val masked = (entry.isSensitive || entry.isLocked) && !revealed
+    val imageAttachments = remember(attachments) {
+        attachments.filter { it.mimeType?.startsWith("image/") == true }
+    }
+    val showTextContent = entry.content.isNotBlank() && (entry.isTextLike || toolText != null)
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1417,22 +1637,51 @@ private fun ClipDetailSheet(
                 }
             }
 
-            item {
-                SectionTitle(stringResource(R.string.st_ClipboardScreen_detail_content))
-                Surface(
-                    shape = RoundedCornerShape(20.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                ) {
-                    SelectionContainer {
-                        Text(
-                            text = if (masked) viewModel.classifier.mask(entry.content) else entry.content,
-                            style = if (entry.type == ClipboardType.CODE) {
-                                MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace)
-                            } else {
-                                MaterialTheme.typography.bodyLarge
-                            },
-                            modifier = Modifier.padding(16.dp),
-                        )
+            if (imageAttachments.isNotEmpty() && !masked) {
+                item {
+                    SectionTitle(stringResource(R.string.st_ClipboardScreen_detail_images))
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        contentPadding = PaddingValues(vertical = 2.dp),
+                    ) {
+                        items(imageAttachments, key = { it.id }) { image ->
+                            Surface(
+                                shape = RoundedCornerShape(18.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                modifier = Modifier
+                                    .width(240.dp)
+                                    .height(170.dp)
+                                    .clickable { onOpenAttachment(image) },
+                            ) {
+                                AttachmentThumbnail(
+                                    attachment = image,
+                                    viewModel = viewModel,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (showTextContent) {
+                item {
+                    SectionTitle(stringResource(R.string.st_ClipboardScreen_detail_content))
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    ) {
+                        SelectionContainer {
+                            Text(
+                                text = if (masked) viewModel.classifier.mask(entry.content) else entry.content,
+                                style = if (entry.type == ClipboardType.CODE) {
+                                    MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace)
+                                } else {
+                                    MaterialTheme.typography.bodyLarge
+                                },
+                                modifier = Modifier.padding(16.dp),
+                            )
+                        }
                     }
                 }
             }
@@ -1492,7 +1741,8 @@ private fun ClipDetailSheet(
                             stringResource(R.string.st_ClipboardScreen_meta_expiry),
                             entry.expiresAt?.let { timestamp ->
                                 stringResource(
-                                    R.string.st_ClipboardScreen_expires_on,
+                                    R.string.st_ClipboardScreen_expires_relative_on,
+                                    relativeTime(timestamp),
                                     android.text.format.DateFormat.getDateFormat(LocalContext.current)
                                         .format(Date(timestamp)),
                                 )
@@ -1553,7 +1803,7 @@ private fun ClipDetailSheet(
                             onClick = { viewModel.setSensitive(entry, !entry.isSensitive) },
                         )
                     }
-                    if (!masked &&
+                    if (!masked && toolText != null &&
                         entry.type in setOf(ClipboardType.LINK, ClipboardType.URL, ClipboardType.SOCIAL)
                     ) {
                         ActionTile(
@@ -1563,7 +1813,7 @@ private fun ClipDetailSheet(
                             onClick = onOpenLink,
                         )
                     }
-                    if (entry.content.isNotBlank() && !masked) {
+                    if (toolText != null && !masked) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             ActionTile(
                                 icon = Icons.AutoMirrored.Rounded.Notes,
@@ -2024,6 +2274,15 @@ private fun SettingsSheet(
             }
             item {
                 SettingSwitchRow(
+                    title = stringResource(R.string.st_ClipboardScreen_settings_screenshots),
+                    body = stringResource(R.string.st_ClipboardScreen_settings_screenshots_desc),
+                    checked = state.settings.captureScreenshots,
+                    enabled = state.settings.monitoring,
+                    onCheckedChange = viewModel::setCaptureScreenshots,
+                )
+            }
+            item {
+                SettingSwitchRow(
                     title = stringResource(R.string.st_ClipboardScreen_settings_ai),
                     body = stringResource(R.string.st_ClipboardScreen_settings_ai_desc),
                     checked = state.settings.aiEnabled,
@@ -2152,6 +2411,8 @@ private fun SettingSwitchRow(
     onCheckedChange: (Boolean) -> Unit,
 ) {
     Surface(
+        onClick = { onCheckedChange(!checked) },
+        enabled = enabled,
         shape = RoundedCornerShape(20.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
     ) {
@@ -2208,10 +2469,18 @@ private fun StepperRow(
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = onDecrease, modifier = Modifier.weight(1f)) {
-                    Text("−")
+                    Icon(
+                        Icons.Rounded.Remove,
+                        contentDescription = stringResource(R.string.st_ClipboardScreen_action_decrease),
+                        modifier = Modifier.size(18.dp),
+                    )
                 }
                 OutlinedButton(onClick = onIncrease, modifier = Modifier.weight(1f)) {
-                    Text("+")
+                    Icon(
+                        Icons.Rounded.Add,
+                        contentDescription = stringResource(R.string.st_ClipboardScreen_action_increase),
+                        modifier = Modifier.size(18.dp),
+                    )
                 }
             }
         }
@@ -2271,6 +2540,10 @@ private fun StatusSheet(
             StatusRow(
                 stringResource(R.string.st_ClipboardScreen_status_monitoring),
                 state.settings.monitoring,
+            )
+            StatusRow(
+                stringResource(R.string.st_ClipboardScreen_status_screenshots),
+                state.settings.captureScreenshots,
             )
             HorizontalDivider()
             StatusRow(
@@ -2499,7 +2772,15 @@ private fun LoadingState() {
 }
 
 @Composable
-private fun EmptyState(icon: ImageVector, title: String, body: String) {
+private fun EmptyState(
+    icon: ImageVector,
+    title: String,
+    body: String,
+    actionLabel: String? = null,
+    onAction: (() -> Unit)? = null,
+    secondaryLabel: String? = null,
+    onSecondaryAction: (() -> Unit)? = null,
+) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -2525,15 +2806,27 @@ private fun EmptyState(icon: ImageVector, title: String, body: String) {
             text = title,
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.Bold,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(6.dp))
         Text(
             text = body,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            textAlign = TextAlign.Center,
         )
+        if (actionLabel != null && onAction != null) {
+            Spacer(Modifier.height(20.dp))
+            Button(onClick = onAction) {
+                Text(actionLabel)
+            }
+        }
+        if (secondaryLabel != null && onSecondaryAction != null) {
+            Spacer(Modifier.height(4.dp))
+            TextButton(onClick = onSecondaryAction) {
+                Text(secondaryLabel)
+            }
+        }
     }
 }
 
@@ -2634,11 +2927,45 @@ private fun relativeTime(timestamp: Long): String = DateUtils.getRelativeTimeSpa
     DateUtils.FORMAT_ABBREV_RELATIVE,
 ).toString()
 
+@Composable
 private fun sourceLabel(entry: ClipboardEntry): String {
-    val source = entry.sourceApp?.takeIf { it.isNotBlank() }
-        ?: entry.source?.takeIf { it.isNotBlank() }
-        ?: return ""
-    return if (source.contains('.')) source.substringAfterLast('.') else source
+    val context = LocalContext.current
+    val sourceApp = entry.sourceApp?.takeIf { it.isNotBlank() }
+    // Real captures currently store only a source code, while legacy rows and
+    // backups may store a package name (or a human-readable app name).
+    val packageLabel = remember(sourceApp) {
+        sourceApp?.takeIf { it.contains('.') }?.let { packageName ->
+            runCatching {
+                val info = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    context.packageManager.getApplicationInfo(
+                        packageName,
+                        PackageManager.ApplicationInfoFlags.of(0L),
+                    )
+                } else {
+                    @Suppress("DEPRECATION")
+                    context.packageManager.getApplicationInfo(packageName, 0)
+                }
+                context.packageManager.getApplicationLabel(info).toString()
+            }.getOrNull()
+        }
+    }
+    if (!packageLabel.isNullOrBlank()) return packageLabel
+    if (!sourceApp.isNullOrBlank() && !sourceApp.contains('.')) return sourceApp
+
+    val rawSource = entry.source?.takeIf { it.isNotBlank() }
+        ?: sourceApp
+        ?: return stringResource(R.string.st_ClipboardScreen_source_unknown)
+    return when (rawSource.uppercase()) {
+        ClipboardSource.MANUAL -> stringResource(R.string.st_ClipboardScreen_source_manual)
+        ClipboardSource.LISTENER -> stringResource(R.string.st_ClipboardScreen_source_listener)
+        ClipboardSource.POLL -> stringResource(R.string.st_ClipboardScreen_source_poll)
+        ClipboardSource.TILE -> stringResource(R.string.st_ClipboardScreen_source_tile)
+        ClipboardSource.EXTERNAL -> stringResource(R.string.st_ClipboardScreen_source_external)
+        ClipboardSource.SCREENSHOT -> stringResource(R.string.st_ClipboardScreen_source_screenshot)
+        ClipboardSource.SHARE -> stringResource(R.string.st_ClipboardScreen_source_share)
+        ClipboardSource.PROCESS_TEXT -> stringResource(R.string.st_ClipboardScreen_source_process_text)
+        else -> if (rawSource.contains('.')) rawSource.substringAfterLast('.') else rawSource
+    }
 }
 
 private val LINK_IN_TEXT_REGEX = Regex(
@@ -2671,6 +2998,7 @@ private fun messageText(context: Context, event: ClipboardEvent.Message): String
         ClipboardMessage.SAVED -> context.getString(R.string.st_ClipboardScreen_message_saved)
         ClipboardMessage.BUMPED -> context.getString(R.string.st_ClipboardScreen_message_bumped)
         ClipboardMessage.EMPTY -> context.getString(R.string.st_ClipboardScreen_message_empty)
+        ClipboardMessage.NOT_FOREGROUND -> context.getString(R.string.st_ClipboardScreen_message_not_foreground)
         ClipboardMessage.SENSITIVE_SKIPPED -> context.getString(R.string.st_ClipboardScreen_message_sensitive_skipped)
         ClipboardMessage.TOO_LARGE -> context.getString(R.string.st_ClipboardScreen_message_too_large)
         ClipboardMessage.QUOTA -> context.getString(R.string.st_ClipboardScreen_message_quota)

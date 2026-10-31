@@ -17,6 +17,7 @@ import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 import com.frerox.toolz.R
+import com.frerox.toolz.data.clipboard.ClipboardSource
 
 /**
  * Quick Settings entry point: opens the floating clipboard switcher. Works even
@@ -44,7 +45,7 @@ class ClipboardTileService : TileService() {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or
                 Intent.FLAG_ACTIVITY_CLEAR_TOP or
                 Intent.FLAG_ACTIVITY_SINGLE_TOP
-            putExtra(ClipboardPopupActivity.EXTRA_SOURCE, "TILE")
+            putExtra(ClipboardPopupActivity.EXTRA_SOURCE, ClipboardSource.TILE)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             val pendingIntent = PendingIntent.getActivity(

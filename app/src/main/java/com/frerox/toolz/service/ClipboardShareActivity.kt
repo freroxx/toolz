@@ -21,6 +21,7 @@ import com.frerox.toolz.data.clipboard.ClipboardAiProcessor
 import com.frerox.toolz.data.clipboard.ClipboardCaptureProcessor
 import com.frerox.toolz.data.clipboard.ClipboardPayload
 import com.frerox.toolz.data.clipboard.ClipboardPayloadItem
+import com.frerox.toolz.data.clipboard.ClipboardSource
 import com.frerox.toolz.data.settings.SettingsRepository
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.first
@@ -208,7 +209,7 @@ class ClipboardShareActivity : AppCompatActivity() {
         return ClipboardPayload(
             items = items.values.toList(),
             label = source.clipData?.description?.label?.toString(),
-            source = if (isProcessText) "PROCESS_TEXT" else "SHARE",
+            source = if (isProcessText) ClipboardSource.PROCESS_TEXT else ClipboardSource.SHARE,
             // Sensitive content is normally flagged on the ClipDescription
             // extras; some senders also copy it onto the intent extras.
             isSensitiveExtra = source.getBooleanExtra(EXTRA_IS_SENSITIVE, false) ||

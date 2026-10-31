@@ -17,9 +17,14 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.database.ContentObserver
+import android.net.Uri
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
+import android.provider.MediaStore
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.frerox.toolz.MainActivity
@@ -29,6 +34,8 @@ import com.frerox.toolz.data.clipboard.ClipboardCaptureProcessor
 import com.frerox.toolz.data.clipboard.ClipboardGate
 import com.frerox.toolz.data.clipboard.ClipboardPayload
 import com.frerox.toolz.data.clipboard.ClipboardPayloadItem
+import com.frerox.toolz.data.clipboard.ClipboardScreenshotIngestor
+import com.frerox.toolz.data.clipboard.ClipboardSource
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.util.NotificationHelper
 import com.frerox.toolz.util.shizuku.ShizukuHelper
@@ -69,6 +76,7 @@ class ClipboardService : Service() {
     @Inject lateinit var aiProcessor: ClipboardAiProcessor
     @Inject lateinit var settingsRepository: SettingsRepository
     @Inject lateinit var shizukuExecutor: ShizukuShellExecutor
+    @Inject lateinit var screenshotIngestor: ClipboardScreenshotIngestor
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -76,18 +84,36 @@ class ClipboardService : Service() {
     @Volatile private var monitoringEnabled = true
     @Volatile private var excludeSensitive = false
     @Volatile private var onboardingSeen = false
+    @Volatile private var captureScreenshots = true
     @Volatile private var gateStatus: ClipboardGate.Status = ClipboardGate.Status.SETUP_REQUIRED
     @Volatile private var lastFingerprint: String? = null
     private val captureMutex = Mutex()
     @Volatile private var foregroundStarted = false
     @Volatile private var manualCaptureRequested = false
     @Volatile private var settingsCollectorStarted = false
+    @Volatile private var lastScreenshotScanAt = 0L
+    private var screenshotObserver: ContentObserver? = null
+
+    /** Combined settings snapshot consumed by the service collector. */
+    private data class ClipboardSettingsSnapshot(
+        val monitoring: Boolean,
+        val excludeSensitive: Boolean,
+        val onboardingSeen: Boolean,
+        val captureScreenshots: Boolean,
+    )
 
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
         serviceScope.launch {
             if (!monitoringEnabled) return@launch
             if (!backgroundCapable()) return@launch
-            captureCurrentClipboard(source = "LISTENER")
+            // Every real copy event must become a capture, including the same
+            // content copied twice. Wait for an in-flight read instead of
+            // dropping the event and never dedupe against the previous one.
+            captureCurrentClipboard(
+                source = ClipboardSource.LISTENER,
+                waitForLock = true,
+                dedupe = false,
+            )
         }
     }
 
@@ -107,8 +133,60 @@ class ClipboardService : Service() {
 
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
         clipboardManager?.addPrimaryClipChangedListener(clipListener)
+        registerScreenshotObserver()
 
         serviceScope.launch { watchLoop() }
+    }
+
+    /**
+     * Watches MediaStore so a new screenshot is copied into clipboard history
+     * even when the screen-capture app never touched the clipboard. This is
+     * deliberately independent of the PurgeShot feature: PurgeShot may be
+     * disabled (or configured to only warn) while the user still wants
+     * screenshots in their clipboard history.
+     */
+    private fun registerScreenshotObserver() {
+        if (screenshotObserver != null) return
+        try {
+            val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+                override fun onChange(selfChange: Boolean, uri: Uri?) {
+                    super.onChange(selfChange, uri)
+                    serviceScope.launch {
+                        // MediaStore usually inserts the row before the bytes
+                        // are fully written; give it a moment to settle.
+                        delay(SCREENSHOT_SETTLE_DELAY_MS)
+                        scanScreenshots(minIntervalMs = 0L, isPoll = false)
+                    }
+                }
+            }
+            contentResolver.registerContentObserver(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                true,
+                observer,
+            )
+            screenshotObserver = observer
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not register screenshot observer: ${e.message}")
+        }
+    }
+
+    /**
+     * Polls MediaStore for recent screenshots. The observer handles the live
+     * case; this covers OEMs that coalesce or skip change notifications and
+     * service restarts. A minimum interval keeps the 5s poll loop cheap.
+     */
+    private suspend fun scanScreenshots(minIntervalMs: Long, isPoll: Boolean) {
+        if (!monitoringEnabled || !captureScreenshots) return
+        if (!PurgeShotDetector.hasMediaPermission(this)) return
+        val now = System.currentTimeMillis()
+        if (minIntervalMs > 0 && now - lastScreenshotScanAt < minIntervalMs) return
+        lastScreenshotScanAt = now
+        try {
+            val ingested = screenshotIngestor.ingestRecentScreenshots(isPoll = isPoll)
+            if (ingested > 0) Log.d(TAG, "Captured $ingested screenshot(s)")
+        } catch (e: Exception) {
+            Log.w(TAG, "Screenshot scan failed: ${e.message}")
+        }
     }
 
     private fun startSettingsCollector() {
@@ -119,8 +197,12 @@ class ClipboardService : Service() {
                 settingsRepository.clipboardMonitoringEnabled,
                 settingsRepository.clipboardExcludeSensitive,
                 settingsRepository.clipboardOnboardingSeen,
-            ) { monitoring, exclude, seen -> Triple(monitoring, exclude, seen) }
-                .collect { (monitoring, exclude, seen) ->
+                settingsRepository.clipboardCaptureScreenshots,
+            ) { monitoring, exclude, seen, screenshots ->
+                ClipboardSettingsSnapshot(monitoring, exclude, seen, screenshots)
+            }
+                .collect { snapshot ->
+                    val (monitoring, exclude, seen, screenshots) = snapshot
                     // Changing the sensitivity filter must force the next poll
                     // to re-evaluate the current clip: the fingerprint may be
                     // the same but the capture decision is now different.
@@ -128,6 +210,7 @@ class ClipboardService : Service() {
                     monitoringEnabled = monitoring
                     excludeSensitive = exclude
                     onboardingSeen = seen
+                    captureScreenshots = screenshots
                     gateStatus = ClipboardGate.evaluate(
                         context = this@ClipboardService,
                         monitoringEnabled = monitoring,
@@ -156,7 +239,11 @@ class ClipboardService : Service() {
         while (serviceScope.isActive) {
             try {
                 if (monitoringEnabled && backgroundCapable()) {
-                    captureCurrentClipboard(source = "POLL")
+                    captureCurrentClipboard(source = ClipboardSource.POLL)
+                    scanScreenshots(
+                        minIntervalMs = SCREENSHOT_POLL_INTERVAL_MS,
+                        isPoll = true,
+                    )
                     if (aiProcessor.canAutoProcess()) aiProcessor.processQueued(1)
                 }
             } catch (e: Exception) {
@@ -175,13 +262,20 @@ class ClipboardService : Service() {
     /**
      * Capture the current clipboard.
      *
-     * Listener/poll captures use [Mutex.tryLock] so overlapping events are
-     * coalesced instead of queueing. A user-initiated manual capture passes
-     * `force = true` and waits for any in-flight read to finish, because
-     * silently dropping the explicit action would look like a bug.
+     * @param waitForLock true for listener/manual captures: wait for an
+     *   in-flight read instead of dropping the event. Polling passes false so
+     *   overlapping passes are coalesced.
+     * @param dedupe false for listener/manual captures. The system fires
+     *   `onPrimaryClipChanged` for every copy, including copying the exact
+     *   same text twice; suppressing that would lose a real user event. The
+     *   capture processor's content dedupe turns it into a BUMP instead.
      */
-    private suspend fun captureCurrentClipboard(source: String, force: Boolean = false) {
-        if (force) {
+    private suspend fun captureCurrentClipboard(
+        source: String,
+        waitForLock: Boolean = false,
+        dedupe: Boolean = true,
+    ) {
+        if (waitForLock) {
             captureMutex.lock()
         } else if (!captureMutex.tryLock()) {
             return
@@ -192,11 +286,10 @@ class ClipboardService : Service() {
             // first and Shizuku is the fallback when that read is denied.
             val payload = readSystemClipboard(source) ?: readShizukuPayload(source) ?: return
             val fingerprint = fingerprint(payload)
-            // A manual capture must retry even when the fingerprint matches
-            // the last capture. The previous attempt may have been ignored by
-            // the sensitivity filter or rejected by a quota, and the user
-            // explicitly asked to save the current clipboard.
-            if (!force && !shouldProcess(fingerprint)) return
+            // A manual/listener capture must retry even when the fingerprint
+            // matches the last capture. The previous attempt may have been
+            // ignored by the sensitivity filter or rejected by a quota.
+            if (dedupe && !shouldProcess(fingerprint)) return
             // Read the preference fresh: the service can capture before the
             // settings collector has delivered its first value, and a stale
             // default would store sensitive clips the user asked to discard.
@@ -357,7 +450,8 @@ class ClipboardService : Service() {
                             captureMutex.withLock {
                                 val payload = ClipboardPayload(
                                     items = listOf(ClipboardPayloadItem(text = externalText)),
-                                    source = intent.getStringExtra(EXTRA_SOURCE) ?: "EXTERNAL",
+                                    source = intent.getStringExtra(EXTRA_SOURCE)
+                                        ?: ClipboardSource.EXTERNAL,
                                 )
                                 val fingerprint = fingerprint(payload)
                                 // External text (share target, ACTION_PROCESS_TEXT,
@@ -368,7 +462,11 @@ class ClipboardService : Service() {
                                 handleOutcome(result.outcome, fingerprint)
                             }
                         } else {
-                            captureCurrentClipboard(source = "MANUAL", force = true)
+                            captureCurrentClipboard(
+                                source = ClipboardSource.MANUAL,
+                                waitForLock = true,
+                                dedupe = false,
+                            )
                         }
                     } finally {
                         manualCaptureRequested = false
@@ -386,6 +484,7 @@ class ClipboardService : Service() {
         val monitoring = settingsRepository.clipboardMonitoringEnabled.first()
         val seen = settingsRepository.clipboardOnboardingSeen.first()
         excludeSensitive = settingsRepository.clipboardExcludeSensitive.first()
+        captureScreenshots = settingsRepository.clipboardCaptureScreenshots.first()
         monitoringEnabled = monitoring
         onboardingSeen = seen
         gateStatus = ClipboardGate.evaluate(this, monitoring, seen)
@@ -397,6 +496,13 @@ class ClipboardService : Service() {
 
     override fun onDestroy() {
         clipboardManager?.removePrimaryClipChangedListener(clipListener)
+        screenshotObserver?.let { observer ->
+            try {
+                contentResolver.unregisterContentObserver(observer)
+            } catch (_: Exception) {
+            }
+        }
+        screenshotObserver = null
         serviceScope.cancel()
         super.onDestroy()
     }
@@ -494,6 +600,10 @@ class ClipboardService : Service() {
 
         private const val POLL_INTERVAL_MS = 5_000L
         private const val SCREEN_OFF_INTERVAL_MS = 45_000L
+        /** Polling interval for screenshot scans; the observer covers the live case. */
+        private const val SCREENSHOT_POLL_INTERVAL_MS = 20_000L
+        /** Give MediaStore a moment to finish writing a screenshot row/bytes. */
+        private const val SCREENSHOT_SETTLE_DELAY_MS = 900L
 
         fun startIfNeeded(context: Context) {
             try {
@@ -512,7 +622,7 @@ class ClipboardService : Service() {
             }
         }
 
-        fun requestCapture(context: Context, source: String = "TILE") {
+        fun requestCapture(context: Context, source: String = ClipboardSource.TILE) {
             try {
                 val intent = Intent(context, ClipboardService::class.java).apply {
                     action = ACTION_CHECK_CLIPBOARD
