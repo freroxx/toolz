@@ -85,6 +85,14 @@ class SettingsRepository @Inject constructor(
     private val PURGESHOT_CUSTOM_PRESETS = stringPreferencesKey("purgeshot_custom_presets")
     private val PURGESHOT_LAST_SCREENSHOT_URI = stringPreferencesKey("purgeshot_last_screenshot_uri")
     private val PURGESHOT_NOTIFICATIONS_ENABLED = booleanPreferencesKey("purgeshot_notifications_enabled")
+    // Screenshots currently waiting for the user's decision. Persisted so the
+    // prompt is never lost when the process dies between detection and the
+    // popup appearing, or when background-activity launch is blocked.
+    private val PURGESHOT_PENDING_PROMPTS = stringPreferencesKey("purgeshot_pending_prompts")
+    // Screenshots the user already resolved (kept/dismissed). Bounded, replaces
+    // the old single-URI "last screenshot" dedupe that silently swallowed
+    // prompts after a failed launch.
+    private val PURGESHOT_RESOLVED_URIS = stringSetPreferencesKey("purgeshot_resolved_uris")
     
     // Timer & Stopwatch Settings
     private val TIMER_KEEP_SCREEN_ON = booleanPreferencesKey("timer_keep_screen_on")
@@ -497,6 +505,8 @@ class SettingsRepository @Inject constructor(
     val purgeShotCustomPresets: Flow<String?> = dataStore.data.map { it[PURGESHOT_CUSTOM_PRESETS] }
     val purgeShotLastScreenshotUri: Flow<String?> = dataStore.data.map { it[PURGESHOT_LAST_SCREENSHOT_URI] }
     val purgeShotNotificationsEnabled: Flow<Boolean> = dataStore.data.map { it[PURGESHOT_NOTIFICATIONS_ENABLED] ?: true }
+    val purgeShotPendingPrompts: Flow<String?> = dataStore.data.map { it[PURGESHOT_PENDING_PROMPTS] }
+    val purgeShotResolvedUris: Flow<Set<String>> = dataStore.data.map { it[PURGESHOT_RESOLVED_URIS] ?: emptySet() }
 
     suspend fun setPurgeShotEnabled(enabled: Boolean) { dataStore.edit { it[PURGESHOT_ENABLED] = enabled } }
     suspend fun setPurgeShotSmartAuto(enabled: Boolean) { dataStore.edit { it[PURGESHOT_SMART_AUTO] = enabled } }
@@ -507,6 +517,23 @@ class SettingsRepository @Inject constructor(
     }
     suspend fun setPurgeShotLastScreenshotUri(uri: String?) {
         dataStore.edit { if (uri == null) it.remove(PURGESHOT_LAST_SCREENSHOT_URI) else it[PURGESHOT_LAST_SCREENSHOT_URI] = uri }
+    }
+    suspend fun setPurgeShotPendingPrompts(json: String?) {
+        dataStore.edit { prefs ->
+            if (json == null || json == "[]") prefs.remove(PURGESHOT_PENDING_PROMPTS)
+            else prefs[PURGESHOT_PENDING_PROMPTS] = json
+        }
+    }
+    suspend fun addPurgeShotResolvedUris(uris: Collection<String>) {
+        if (uris.isEmpty()) return
+        dataStore.edit { prefs ->
+            val merged = LinkedHashSet(prefs[PURGESHOT_RESOLVED_URIS] ?: emptySet())
+            merged.addAll(uris.filter { it.isNotBlank() })
+            // Keep the newest entries only. 100 is far beyond any realistic
+            // burst and keeps DataStore small.
+            prefs[PURGESHOT_RESOLVED_URIS] =
+                if (merged.size > 100) merged.toList().takeLast(100).toSet() else merged
+        }
     }
 
     suspend fun setLiveVpnNotifications(enabled: Boolean) {

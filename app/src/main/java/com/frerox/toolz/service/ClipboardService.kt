@@ -35,6 +35,7 @@ import com.frerox.toolz.data.clipboard.ClipboardGate
 import com.frerox.toolz.data.clipboard.ClipboardPayload
 import com.frerox.toolz.data.clipboard.ClipboardPayloadItem
 import com.frerox.toolz.data.clipboard.ClipboardScreenshotIngestor
+import com.frerox.toolz.data.clipboard.ClipboardSelfCopyGuard
 import com.frerox.toolz.data.clipboard.ClipboardSource
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.util.NotificationHelper
@@ -285,6 +286,13 @@ class ClipboardService : Service() {
             // Shizuku only returns plain text, so the standard read is tried
             // first and Shizuku is the fallback when that read is denied.
             val payload = readSystemClipboard(source) ?: readShizukuPayload(source) ?: return
+            // Writes initiated from the clipboard history already bumped the
+            // entry through markCopied; capturing them again would double-bump
+            // and bulk copy would insert its synthesized aggregate as a clip.
+            if (ClipboardSelfCopyGuard.consume(payload)) {
+                lastFingerprint = fingerprint(payload)
+                return
+            }
             val fingerprint = fingerprint(payload)
             // A manual/listener capture must retry even when the fingerprint
             // matches the last capture. The previous attempt may have been

@@ -3540,6 +3540,8 @@
     <string name="st_PurgeShot_DeleteThisScreenshot">Excluir esta captura?</string>
     <string name="st_PurgeShot_DeleteTheseScreenshots">Excluir estas %1$d capturas?</string>
     <string name="st_PurgeShot_ChooseWhenToDelete">Escolha quando excluir</string>
+    <string name="st_PurgeShot_Notif_Prompt_Single">Nova captura</string>
+    <string name="st_PurgeShot_Notif_Prompt_Multiple">%1$d novas capturas</string>
     <string name="st_PurgeShot_SmartAutoSkipsPopup">Smart Auto pula este pop-up</string>
     <string name="st_PurgeShot_PreviewUnavailable">Pré-visualização indisponível</string>
     <string name="st_PurgeShot_AutoWithTime">Auto: %1$s</string>
@@ -4867,6 +4869,10 @@
     <string name="st_ClipboardScreen_filter_otp">OTP</string>
     <string name="st_ClipboardScreen_filter_pinned">Fixados</string>
     <string name="st_ClipboardScreen_filter_sensitive">Sensíveis</string>
+    <string name="st_ClipboardScreen_filter_count">%1$s · %2$d</string>
+    <string name="st_ClipboardScreen_action_pause_capture">Pausar captura</string>
+    <string name="st_ClipboardScreen_action_resume_capture">Retomar captura</string>
+    <string name="st_ClipboardScreen_copied">Copiado</string>
     <string name="st_ClipboardScreen_filter_text">Texto</string>
     <string name="st_ClipboardScreen_foreground_banner">A captura em segundo plano está desativada. Conclua a configuração para capturar clips automaticamente.</string>
     <string name="st_ClipboardScreen_megabytes">%1$d MB</string>

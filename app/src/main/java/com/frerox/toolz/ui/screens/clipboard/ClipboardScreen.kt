@@ -96,8 +96,10 @@ import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Password
+import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Phone
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.PushPin
 import androidx.compose.material.icons.rounded.QrCode
@@ -195,6 +197,7 @@ import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.components.rememberToolzHapticFeedback
 import com.frerox.toolz.ui.theme.toolzBackground
 import com.frerox.toolz.util.security.BiometricPromptUtils
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Date
 
@@ -485,6 +488,30 @@ fun ClipboardScreen(
                                     },
                                 )
                                 DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            stringResource(
+                                                if (state.settings.monitoring) {
+                                                    R.string.st_ClipboardScreen_action_pause_capture
+                                                } else {
+                                                    R.string.st_ClipboardScreen_action_resume_capture
+                                                },
+                                            ),
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            if (state.settings.monitoring) Icons.Rounded.Pause
+                                            else Icons.Rounded.PlayArrow,
+                                            null,
+                                        )
+                                    },
+                                    onClick = {
+                                        showOverflow = false
+                                        viewModel.setMonitoringEnabled(!state.settings.monitoring)
+                                    },
+                                )
+                                DropdownMenuItem(
                                     text = { Text(stringResource(R.string.st_ClipboardScreen_action_refresh)) },
                                     leadingIcon = { Icon(Icons.Rounded.Refresh, null) },
                                     onClick = {
@@ -585,6 +612,7 @@ fun ClipboardScreen(
             SearchAndFilters(
                 query = state.query,
                 filter = state.filter,
+                counts = state.filterCounts,
                 onQueryChange = viewModel::onSearchQueryChanged,
                 onFilterChange = viewModel::setFilter,
             )
@@ -848,6 +876,7 @@ private fun CaptureStatusStrip(
 private fun SearchAndFilters(
     query: String,
     filter: ClipboardFilter,
+    counts: Map<ClipboardFilter, Int>,
     onQueryChange: (String) -> Unit,
     onFilterChange: (ClipboardFilter) -> Unit,
 ) {
@@ -882,10 +911,20 @@ private fun SearchAndFilters(
             contentPadding = PaddingValues(end = 8.dp),
         ) {
             items(ClipboardFilter.entries) { item ->
+                val count = counts[item] ?: 0
+                val label = filterLabel(item)
                 ExpressiveFilterChip(
                     selected = filter == item,
                     onClick = { onFilterChange(item) },
-                    label = { Text(filterLabel(item)) },
+                    label = {
+                        Text(
+                            if (count > 0) {
+                                stringResource(R.string.st_ClipboardScreen_filter_count, label, count)
+                            } else {
+                                label
+                            },
+                        )
+                    },
                     leadingIcon = if (filter == item) {
                         { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
                     } else {
@@ -1056,7 +1095,11 @@ private fun HistoryList(
         groups.forEach { group ->
             item(key = "header_${group.group.name}") {
                 Text(
-                    text = groupLabel(group.group),
+                    text = stringResource(
+                        R.string.st_ClipboardScreen_filter_count,
+                        groupLabel(group.group),
+                        group.entries.size,
+                    ),
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1133,6 +1176,19 @@ private fun ClipboardCard(
         }
     }
 
+    // Immediate, per-row confirmation even when the global snackbar is hidden
+    // behind a sheet or dismissed by a fast repeat copy. The counter restarts
+    // the timer on every tap so rapid copies always show the full flash.
+    var copyFlashToken by remember(entry.id) { mutableStateOf(0) }
+    val copiedFlash = copyFlashToken > 0
+    LaunchedEffect(copyFlashToken) {
+        if (copyFlashToken > 0) {
+            delay(1_400)
+            copyFlashToken = 0
+        }
+    }
+    val heroImage = attachments.firstOrNull { it.mimeType?.startsWith("image/") == true }
+
     val masked = (entry.isSensitive || entry.isLocked) && !revealed
     val sourceText = sourceLabel(entry)
     val preview = when {
@@ -1161,6 +1217,7 @@ private fun ClipboardCard(
 
     val containerColor by animateColorAsState(
         when {
+            copiedFlash -> MaterialTheme.colorScheme.primaryContainer
             selected -> MaterialTheme.colorScheme.secondaryContainer
             entry.isSensitive || entry.isLocked ->
                 MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f)
@@ -1287,11 +1344,20 @@ private fun ClipboardCard(
                             }
                         }
                         if (attachments.isNotEmpty() && !masked) {
-                            AttachmentStrip(
-                                attachments = attachments,
-                                viewModel = viewModel,
-                                onOpen = onOpen,
-                            )
+                            // The hero preview already shows the first image;
+                            // the strip shows the remaining attachments only.
+                            val stripAttachments = if (heroImage != null) {
+                                attachments.filter { it.id != heroImage.id }
+                            } else {
+                                attachments
+                            }
+                            if (stripAttachments.isNotEmpty()) {
+                                AttachmentStrip(
+                                    attachments = stripAttachments,
+                                    viewModel = viewModel,
+                                    onOpen = onOpen,
+                                )
+                            }
                         }
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1373,17 +1439,78 @@ private fun ClipboardCard(
                                     },
                                 )
                             }
-                            IconButton(onClick = { haptic.click(); onCopy() }) {
+                            IconButton(
+                                onClick = {
+                                    haptic.click()
+                                    copyFlashToken += 1
+                                    onCopy()
+                                },
+                            ) {
                                 Icon(
-                                    Icons.Rounded.ContentCopy,
-                                    contentDescription = stringResource(R.string.st_ClipboardScreen_action_copy),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    if (copiedFlash) Icons.Rounded.CheckCircle
+                                    else Icons.Rounded.ContentCopy,
+                                    contentDescription = stringResource(
+                                        if (copiedFlash) R.string.st_ClipboardScreen_copied
+                                        else R.string.st_ClipboardScreen_action_copy,
+                                    ),
+                                    tint = if (copiedFlash) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
                                 )
                             }
                         }
                     }
                 }
+                if (heroImage != null && !masked) {
+                    ClipHeroPreview(
+                        attachment = heroImage,
+                        viewModel = viewModel,
+                        onOpen = onOpen,
+                    )
+                }
             }
+        }
+    }
+}
+
+@Composable
+private fun ClipHeroPreview(
+    attachment: ClipboardAttachment,
+    viewModel: ClipboardViewModel,
+    onOpen: () -> Unit,
+) {
+    val bitmap by produceState<androidx.compose.ui.graphics.ImageBitmap?>(
+        initialValue = null,
+        key1 = attachment.blobId,
+    ) {
+        value = viewModel.loadAttachmentBitmap(attachment)?.asImageBitmap()
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(160.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+            .clickable(onClick = onOpen),
+        contentAlignment = Alignment.Center,
+    ) {
+        val image = bitmap
+        if (image != null) {
+            Image(
+                bitmap = image,
+                contentDescription = stringResource(R.string.st_ClipboardScreen_attachment_image),
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            Icon(
+                Icons.Rounded.Image,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(36.dp),
+            )
         }
     }
 }

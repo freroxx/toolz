@@ -13,6 +13,7 @@ import android.content.Context
 import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
+import com.frerox.toolz.data.purgeshot.PurgeShotHandler
 import com.frerox.toolz.data.purgeshot.PurgeShotRepository
 import com.frerox.toolz.data.settings.SettingsRepository
 import dagger.hilt.android.AndroidEntryPoint
@@ -109,6 +110,11 @@ class PurgeShotObserverJobService : JobService() {
                 // Restart the Shizuku watcher ...
                 try {
                     (applicationContext as? com.frerox.toolz.ToolzApplication)?.shizukuWatcher?.restartIfNeeded()
+                } catch (_: Exception) {}
+
+                // A previous process may have died with an unresolved prompt.
+                try {
+                    PurgeShotHandler.restorePendingPrompts(applicationContext, settingsRepository)
                 } catch (_: Exception) {}
 
                 var handled = false

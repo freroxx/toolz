@@ -18,6 +18,7 @@ import android.provider.MediaStore
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.frerox.toolz.R
+import com.frerox.toolz.data.purgeshot.PurgeShotHandler
 import com.frerox.toolz.data.purgeshot.PurgeShotRepository
 import com.frerox.toolz.data.settings.SettingsRepository
 import dagger.hilt.android.AndroidEntryPoint
@@ -83,6 +84,11 @@ class PurgeShotService : Service() {
         createChannelIfNeeded()
         registerObserver()
         scope.launch { runCatching { repository.ensureRestoredAndRescheduled() } }
+        // If the process died (or was killed by the OS) after a screenshot was
+        // detected but before the user resolved the prompt, re-arm it now.
+        scope.launch {
+            runCatching { PurgeShotHandler.restorePendingPrompts(this@PurgeShotService, settingsRepository) }
+        }
     }
 
     private fun createChannelIfNeeded() {

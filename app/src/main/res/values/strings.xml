@@ -3649,6 +3649,8 @@
     <string name="st_PurgeShot_DeleteThisScreenshot">Delete this screenshot?</string>
     <string name="st_PurgeShot_DeleteTheseScreenshots">Delete these %1$d screenshots?</string>
     <string name="st_PurgeShot_ChooseWhenToDelete">Choose when to delete</string>
+    <string name="st_PurgeShot_Notif_Prompt_Single">Screenshot captured</string>
+    <string name="st_PurgeShot_Notif_Prompt_Multiple">%1$d screenshots captured</string>
     <string name="st_PurgeShot_SmartAutoSkipsPopup">Smart Auto skips this popup</string>
     <string name="st_PurgeShot_PreviewUnavailable">Preview unavailable</string>
     <string name="st_PurgeShot_AutoWithTime">Auto: %1$s</string>
@@ -4976,6 +4978,10 @@
     <string name="st_ClipboardScreen_filter_otp">OTP</string>
     <string name="st_ClipboardScreen_filter_pinned">Pinned</string>
     <string name="st_ClipboardScreen_filter_sensitive">Sensitive</string>
+    <string name="st_ClipboardScreen_filter_count">%1$s · %2$d</string>
+    <string name="st_ClipboardScreen_action_pause_capture">Pause capture</string>
+    <string name="st_ClipboardScreen_action_resume_capture">Resume capture</string>
+    <string name="st_ClipboardScreen_copied">Copied</string>
     <string name="st_ClipboardScreen_filter_text">Text</string>
     <string name="st_ClipboardScreen_foreground_banner">Background capture is off. Finish setup to capture clips automatically.</string>
     <string name="st_ClipboardScreen_megabytes">%1$d MB</string>

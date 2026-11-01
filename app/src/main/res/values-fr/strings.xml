@@ -3547,6 +3547,8 @@ La plupart des optimisations nécessitent Shizuku pour un accès shell privilég
     <string name="st_PurgeShot_DeleteThisScreenshot">Supprimer cette capture ?</string>
     <string name="st_PurgeShot_DeleteTheseScreenshots">Supprimer ces %1$d captures ?</string>
     <string name="st_PurgeShot_ChooseWhenToDelete">Choisir quand supprimer</string>
+    <string name="st_PurgeShot_Notif_Prompt_Single">Nouvelle capture</string>
+    <string name="st_PurgeShot_Notif_Prompt_Multiple">%1$d nouvelles captures</string>
     <string name="st_PurgeShot_SmartAutoSkipsPopup">Smart Auto ignore ce popup</string>
     <string name="st_PurgeShot_PreviewUnavailable">Aperçu indisponible</string>
     <string name="st_PurgeShot_AutoWithTime">Auto : %1$s</string>
@@ -4874,6 +4876,10 @@ La plupart des optimisations nécessitent Shizuku pour un accès shell privilég
     <string name="st_ClipboardScreen_filter_otp">OTP</string>
     <string name="st_ClipboardScreen_filter_pinned">Épinglés</string>
     <string name="st_ClipboardScreen_filter_sensitive">Sensibles</string>
+    <string name="st_ClipboardScreen_filter_count">%1$s · %2$d</string>
+    <string name="st_ClipboardScreen_action_pause_capture">Suspendre la capture</string>
+    <string name="st_ClipboardScreen_action_resume_capture">Reprendre la capture</string>
+    <string name="st_ClipboardScreen_copied">Copié</string>
     <string name="st_ClipboardScreen_filter_text">Texte</string>
     <string name="st_ClipboardScreen_foreground_banner">La capture en arrière-plan est désactivée. Terminez la configuration pour capturer les clips automatiquement.</string>
     <string name="st_ClipboardScreen_megabytes">%1$d Mo</string>

@@ -42,6 +42,9 @@ object PurgeShotDetector {
     /** How long to wait for MediaStore to settle (IS_PENDING -> 0) after a change notification. */
     const val SETTLE_DELAY_MS = 550L
 
+    /** Extra wait before re-querying when the first attempt sees no screenshot row. */
+    private const val INDEX_RETRY_DELAY_MS = 1_200L
+
     /** A candidate must be newer than "now - this" and not further than 2s in the future (clock skew).
      *  90s tolerates JobScheduler batching, Doze, OEM killers and MediaStore indexing delay
      *  when Toolz isn't in foreground; previously 20s was too tight and missed delayed dispatches
@@ -97,12 +100,13 @@ object PurgeShotDetector {
                         val addedSec = c.getLong(addedIdx)
                         val modSec = c.getLong(modIdx)
                         val takenMs = if (takenIdx != -1) c.getLong(takenIdx) else 0L
-                        val dateAddedMs = when {
-                            takenMs > 0 -> takenMs
-                            addedSec > 0 -> addedSec * 1000
-                            modSec > 0 -> modSec * 1000
-                            else -> System.currentTimeMillis()
-                        }
+                        // Use the newest of DATE_TAKEN / DATE_ADDED / DATE_MODIFIED.
+                        // Preferring DATE_TAKEN alone dropped screenshots on OEMs
+                        // that leave it 0 or stale; preferring DATE_ADDED alone
+                        // dropped screenshots whose row was indexed late but
+                        // whose capture time was correctly recorded.
+                        val dateAddedMs = maxOf(takenMs, addedSec * 1000, modSec * 1000)
+                            .takeIf { it > 0 } ?: System.currentTimeMillis()
                         val rel = if (relIdx != -1) c.getString(relIdx) else null
                         val buck = if (bucketIdx != -1) c.getString(bucketIdx) else null
                         val path = if (dataIdx != -1) c.getString(dataIdx) else null
@@ -124,6 +128,7 @@ object PurgeShotDetector {
                     MediaStore.Files.FileColumns.DISPLAY_NAME,
                     MediaStore.Files.FileColumns.DATE_ADDED,
                     MediaStore.Files.FileColumns.DATE_MODIFIED,
+                    MediaStore.Files.FileColumns.DATE_TAKEN,
                     MediaStore.Files.FileColumns.RELATIVE_PATH,
                     MediaStore.Files.FileColumns.DATA,
                     MediaStore.Files.FileColumns.MEDIA_TYPE
@@ -135,6 +140,7 @@ object PurgeShotDetector {
                     val nameIdx = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME)
                     val addedIdx = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_ADDED)
                     val modIdx = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_MODIFIED)
+                    val takenIdx = c.getColumnIndex(MediaStore.Files.FileColumns.DATE_TAKEN)
                     val relIdx = c.getColumnIndex(MediaStore.Files.FileColumns.RELATIVE_PATH)
                     val dataIdx = c.getColumnIndex(MediaStore.Files.FileColumns.DATA)
                     var count = 0
@@ -146,11 +152,9 @@ object PurgeShotDetector {
                             if (!looksLikeScreenshotName(name, c.getString(relIdx), c.getString(dataIdx))) continue
                             val addedSec = c.getLong(addedIdx)
                             val modSec = c.getLong(modIdx)
-                            val ts = when {
-                                addedSec > 0 -> addedSec * 1000
-                                modSec > 0 -> modSec * 1000
-                                else -> System.currentTimeMillis()
-                            }
+                            val takenMs = if (takenIdx != -1) c.getLong(takenIdx) else 0L
+                            val ts = maxOf(takenMs, addedSec * 1000, modSec * 1000)
+                                .takeIf { it > 0 } ?: System.currentTimeMillis()
                             // Deduplicate against Images results by displayName+ts proximity or exact filePath
                             if (results.any { it.displayName == name && kotlin.math.abs(it.dateAddedMs - ts) < 5000 }) continue
                             val rel = if (relIdx != -1) c.getString(relIdx) else null
@@ -324,66 +328,77 @@ object PurgeShotDetector {
         }
         if (awaitSettle) delay(SETTLE_DELAY_MS)
 
-        val recent = try {
-            queryRecent(context.contentResolver, 8)
-        } catch (e: SecurityException) {
-            Log.w(TAG, "queryRecent SecurityException — missing permission", e)
-            return false
-        } catch (e: Exception) {
-            Log.w(TAG, "queryRecent failed", e)
-            return false
-        }
-        if (recent.isEmpty()) {
-            Log.d(TAG, "no candidate")
-            return false
-        }
-        val freshScreenshots = mutableListOf<PurgeShotService.ScreenshotCandidate>()
-        val seenInThisBatch = mutableSetOf<String>()
-        var staleReason: String? = null
-        for (c in recent) {
-            if (!isFreshEnough(c, isPoll)) {
-                if (staleReason == null) staleReason = "age=${System.currentTimeMillis() - c.dateAddedMs}ms uri=${c.uri} isPoll=$isPoll"
-                continue
-            }
-            if (!looksLikeScreenshot(c)) continue
-            val uriStr = c.uri.toString()
-            val path = c.filePath
-            // Deduplicate within this detection batch by uri or path
-            val dedupKey = path ?: uriStr
-            if (dedupKey in seenInThisBatch) continue
-            if (PurgeShotHandler.isAnyHandled(uriStr, path)) continue
-            if (repository.hasEntry(uriStr)) {
-                PurgeShotHandler.markUriHandled(uriStr)
-                if (path != null) PurgeShotHandler.markUriHandled(path)
-                continue
-            }
-            if (path != null && repository.hasEntryForPath(path)) {
-                PurgeShotHandler.markUriHandled(uriStr)
-                PurgeShotHandler.markUriHandled(path)
-                continue
-            }
-            if (path != null && seenInThisBatch.contains(path)) continue
-            if (seenInThisBatch.contains(uriStr)) continue
-            freshScreenshots.add(c)
-            seenInThisBatch.add(dedupKey)
-            if (path != null) seenInThisBatch.add(path)
-            seenInThisBatch.add(uriStr)
-        }
-        if (freshScreenshots.isEmpty()) {
-            val top = recent.firstOrNull()
-            if (top != null && !isFreshEnough(top, isPoll) && staleReason != null) {
-                Log.d(TAG, "candidate stale, $staleReason")
-            } else if (top != null) {
-                Log.d(TAG, "no screenshot among recent ${recent.size}: ${recent.joinToString { it.displayName }}")
-            }
-            return false
-        }
+        // MediaStore can expose a screenshot row a moment before it is fully
+        // readable / before DATE_ADDED is populated. A single query right after
+        // the content-observer callback therefore sometimes finds nothing and
+        // the prompt never appears. Retry once for live events; polls already
+        // run late enough that a second attempt would just double the work.
+        val attempts = if (isPoll) 1 else 2
+        for (attempt in 0 until attempts) {
+            if (attempt > 0) delay(INDEX_RETRY_DELAY_MS)
 
-        // Hand off in chronological order (oldest to newest)
-        for (candidate in freshScreenshots.reversed()) {
-            PurgeShotHandler.handleNewScreenshot(context, repository, settingsRepository, candidate)
-            Log.i(TAG, "handed off ${candidate.displayName} uri=${candidate.uri}")
+            val recent = try {
+                queryRecent(context.contentResolver, 8)
+            } catch (e: SecurityException) {
+                Log.w(TAG, "queryRecent SecurityException — missing permission", e)
+                return false
+            } catch (e: Exception) {
+                Log.w(TAG, "queryRecent failed", e)
+                return false
+            }
+            if (recent.isEmpty()) {
+                Log.d(TAG, "no candidate (attempt ${attempt + 1}/$attempts)")
+                continue
+            }
+            val freshScreenshots = mutableListOf<PurgeShotService.ScreenshotCandidate>()
+            val seenInThisBatch = mutableSetOf<String>()
+            var staleReason: String? = null
+            for (c in recent) {
+                if (!isFreshEnough(c, isPoll)) {
+                    if (staleReason == null) staleReason = "age=${System.currentTimeMillis() - c.dateAddedMs}ms uri=${c.uri} isPoll=$isPoll"
+                    continue
+                }
+                if (!looksLikeScreenshot(c)) continue
+                val uriStr = c.uri.toString()
+                val path = c.filePath
+                // Deduplicate within this detection batch by uri or path
+                val dedupKey = path ?: uriStr
+                if (dedupKey in seenInThisBatch) continue
+                if (PurgeShotHandler.isAnyHandled(uriStr, path)) continue
+                if (repository.hasEntry(uriStr)) {
+                    PurgeShotHandler.markUriHandled(uriStr)
+                    if (path != null) PurgeShotHandler.markUriHandled(path)
+                    continue
+                }
+                if (path != null && repository.hasEntryForPath(path)) {
+                    PurgeShotHandler.markUriHandled(uriStr)
+                    PurgeShotHandler.markUriHandled(path)
+                    continue
+                }
+                if (path != null && seenInThisBatch.contains(path)) continue
+                if (seenInThisBatch.contains(uriStr)) continue
+                freshScreenshots.add(c)
+                seenInThisBatch.add(dedupKey)
+                if (path != null) seenInThisBatch.add(path)
+                seenInThisBatch.add(uriStr)
+            }
+            if (freshScreenshots.isEmpty()) {
+                val top = recent.firstOrNull()
+                if (top != null && !isFreshEnough(top, isPoll) && staleReason != null) {
+                    Log.d(TAG, "candidate stale, $staleReason (attempt ${attempt + 1}/$attempts)")
+                } else if (top != null) {
+                    Log.d(TAG, "no screenshot among recent ${recent.size}: ${recent.joinToString { it.displayName }} (attempt ${attempt + 1}/$attempts)")
+                }
+                continue
+            }
+
+            // Hand off in chronological order (oldest to newest)
+            for (candidate in freshScreenshots.reversed()) {
+                PurgeShotHandler.handleNewScreenshot(context, repository, settingsRepository, candidate)
+                Log.i(TAG, "handed off ${candidate.displayName} uri=${candidate.uri}")
+            }
+            return true
         }
-        return true
+        return false
     }
 }

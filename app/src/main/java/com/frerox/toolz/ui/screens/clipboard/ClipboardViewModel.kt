@@ -34,6 +34,7 @@ import com.frerox.toolz.data.clipboard.ClipboardPayload
 import com.frerox.toolz.data.clipboard.ClipboardPayloadItem
 import com.frerox.toolz.data.clipboard.ClipboardRetentionManager
 import com.frerox.toolz.data.clipboard.ClipboardScreenshotIngestor
+import com.frerox.toolz.data.clipboard.ClipboardSelfCopyGuard
 import com.frerox.toolz.data.clipboard.ClipboardSource
 import com.frerox.toolz.data.clipboard.ClipboardType
 import com.frerox.toolz.data.clipboard.ClipSensitivityReason
@@ -98,6 +99,8 @@ data class ClipboardUiState(
     val visibleEntries: List<ClipboardEntry> = emptyList(),
     val attachmentsByClip: Map<Int, List<ClipboardAttachment>> = emptyMap(),
     val filter: ClipboardFilter = ClipboardFilter.ALL,
+    /** Number of clips matching each filter (independent of the search query). */
+    val filterCounts: Map<ClipboardFilter, Int> = emptyMap(),
     val query: String = "",
     val showTrash: Boolean = false,
     val selection: Set<Int> = emptySet(),
@@ -334,6 +337,33 @@ class ClipboardViewModel @Inject constructor(
     private var appOpAutoGrantAttempted = false
     private val manualCaptureMutex = Mutex()
 
+    /**
+     * Latest monitoring preference, tracked separately from the UI state so
+     * the listener can gate itself even before the history screen subscribes.
+     */
+    @Volatile
+    private var monitoringEnabled = true
+
+    private val clipboardManager =
+        application.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+
+    /**
+     * Events are queued instead of processed inline: `onPrimaryClipChanged`
+     * runs on the main thread, while reading and persisting a clip is IO. A
+     * single consumer keeps captures ordered and never drops a duplicate copy.
+     */
+    private val foregroundClipEvents = Channel<Unit>(Channel.UNLIMITED)
+
+    private val foregroundClipListener = ClipboardManager.OnPrimaryClipChangedListener {
+        if (!clipboardSandboxActive &&
+            monitoringEnabled &&
+            ToolzForegroundTracker.isForeground.value &&
+            !_gateInfo.value.capabilities.backgroundCapable
+        ) {
+            foregroundClipEvents.trySend(Unit)
+        }
+    }
+
     val uiState: StateFlow<ClipboardUiState> = combine(
         history,
         settingsState,
@@ -351,12 +381,20 @@ class ClipboardViewModel @Inject constructor(
             filter = extras.filter,
             revealed = extras.revealed,
         )
+        // Counts are query-independent so the chips stay stable while typing.
+        // Computed from the visible mode (history vs trash) only.
+        val filterCounts = ClipboardFilter.entries.associateWith { filter ->
+            source.count { entry ->
+                matchesFilter(entry, snapshot.attachments[entry.id].orEmpty(), filter)
+            }
+        }
         ClipboardUiState(
             entries = snapshot.entries,
             trashed = snapshot.trashed,
             visibleEntries = filtered,
             attachmentsByClip = snapshot.attachments,
             filter = extras.filter,
+            filterCounts = filterCounts,
             query = extras.query,
             showTrash = extras.showTrash,
             selection = selection,
@@ -390,6 +428,7 @@ class ClipboardViewModel @Inject constructor(
         ClipboardCleanupWorker.schedule(application)
         viewModelScope.launch {
             settingsState.collect { settings ->
+                monitoringEnabled = settings.monitoring
                 syncGate(settings)
                 autoGrantAppOpIfNeeded(settings)
             }
@@ -427,6 +466,62 @@ class ClipboardViewModel @Inject constructor(
                 }
             }
         }
+        clipboardManager?.addPrimaryClipChangedListener(foregroundClipListener)
+        viewModelScope.launch {
+            for (event in foregroundClipEvents) {
+                try {
+                    captureForegroundClipboard()
+                } catch (e: Exception) {
+                    android.util.Log.w("ClipboardViewModel", "Foreground clipboard capture failed", e)
+                }
+            }
+        }
+    }
+
+    /**
+     * Captures clipboard changes that happen while Toolz is in the foreground
+     * on devices where the service cannot read the clipboard in the
+     * background (no Shizuku / READ_CLIPBOARD app-op). The service handles
+     * events when it is background-capable; this listener is the fallback.
+     */
+    private suspend fun captureForegroundClipboard() {
+        if (clipboardSandboxActive) return
+        if (!monitoringEnabled) return
+        if (!ToolzForegroundTracker.isForeground.value) return
+        if (_gateInfo.value.capabilities.backgroundCapable) return
+
+        val clip = try {
+            clipboardManager?.primaryClip
+        } catch (e: Exception) {
+            android.util.Log.w("ClipboardViewModel", "Clipboard read denied", e)
+            null
+        } ?: return
+        if (clip.itemCount == 0) return
+
+        // Copying a clip from history must only bump it (done by copyEntry /
+        // copySelected), never run through the capture pipeline again.
+        if (ClipboardSelfCopyGuard.consume(clip)) return
+
+        val payload = payloadFromClip(clip, ClipboardSource.LISTENER) ?: return
+        val excludeSensitive = try {
+            settingsState.first().excludeSensitive
+        } catch (_: Exception) {
+            false
+        }
+        val result = captureProcessor.process(payload, excludeSensitive)
+        if (result.outcome == ClipboardCaptureProcessor.Outcome.INSERTED) {
+            aiProcessor.processQueued(1)
+        }
+        refreshStats()
+    }
+
+    override fun onCleared() {
+        try {
+            clipboardManager?.removePrimaryClipChangedListener(foregroundClipListener)
+        } catch (_: Exception) {
+        }
+        foregroundClipEvents.close()
+        super.onCleared()
     }
 
     // ── Gate / service lifecycle ──────────────────────────────────────────
@@ -1179,42 +1274,44 @@ class ClipboardViewModel @Inject constructor(
 
     private fun readSystemClipboard(): ClipboardPayload? {
         return try {
-            val manager = application.getSystemService(Context.CLIPBOARD_SERVICE)
-                as? ClipboardManager ?: return null
-            val clip = manager.primaryClip ?: return null
-            if (clip.itemCount == 0) return null
-            val description = clip.description
-            val items = buildList {
-                for (index in 0 until clip.itemCount) {
-                    val item = clip.getItemAt(index) ?: continue
-                    add(
-                        ClipboardPayloadItem(
-                            text = item.text?.toString(),
-                            html = item.htmlText,
-                            uri = item.uri,
-                            mimeType = description?.getMimeType(index),
-                        ),
-                    )
-                }
-            }
-            if (items.all { item ->
-                    item.text.isNullOrBlank() &&
-                        item.html.isNullOrBlank() &&
-                        item.uri == null
-                }
-            ) {
-                return null
-            }
-            ClipboardPayload(
-                items = items,
-                label = description?.label?.toString(),
-                source = ClipboardSource.MANUAL,
-                isSensitiveExtra = description?.extras
-                    ?.getBoolean("android.content.extra.IS_SENSITIVE", false) ?: false,
-            )
+            clipboardManager?.primaryClip?.let { payloadFromClip(it, ClipboardSource.MANUAL) }
         } catch (_: Exception) {
             null
         }
+    }
+
+    /** Normalizes a system [ClipData] into the shared capture payload model. */
+    private fun payloadFromClip(clip: ClipData, source: String): ClipboardPayload? {
+        if (clip.itemCount == 0) return null
+        val description = clip.description
+        val items = buildList {
+            for (index in 0 until clip.itemCount) {
+                val item = clip.getItemAt(index) ?: continue
+                add(
+                    ClipboardPayloadItem(
+                        text = item.text?.toString(),
+                        html = item.htmlText,
+                        uri = item.uri,
+                        mimeType = description?.getMimeType(index),
+                    ),
+                )
+            }
+        }
+        if (items.all { item ->
+                item.text.isNullOrBlank() &&
+                    item.html.isNullOrBlank() &&
+                    item.uri == null
+            }
+        ) {
+            return null
+        }
+        return ClipboardPayload(
+            items = items,
+            label = description?.label?.toString(),
+            source = source,
+            isSensitiveExtra = description?.extras
+                ?.getBoolean("android.content.extra.IS_SENSITIVE", false) ?: false,
+        )
     }
 
     private suspend fun emitOutcome(outcome: ClipboardCaptureProcessor.Outcome) {
@@ -1310,12 +1407,14 @@ class ClipboardViewModel @Inject constructor(
         }
         val copied = try {
             val manager = application.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            manager.setPrimaryClip(
-                ClipData.newPlainText(
-                    CLIPBOARD_LABEL,
-                    accepted.joinToString("\n\n") { it.second },
-                ),
+            val clip = ClipData.newPlainText(
+                CLIPBOARD_LABEL,
+                accepted.joinToString("\n\n") { it.second },
             )
+            // Capturing our own aggregate would insert a clip the user never
+            // copied; the individual source clips are bumped below instead.
+            ClipboardSelfCopyGuard.noteWrite(clip)
+            manager.setPrimaryClip(clip)
             true
         } catch (e: Exception) {
             android.util.Log.w("ClipboardViewModel", "Bulk copy failed", e)
@@ -1418,6 +1517,9 @@ class ClipboardViewModel @Inject constructor(
         uris.drop(if (text.isNullOrBlank()) 1 else 0).forEach { uri ->
             clip.addItem(ClipData.Item(uri))
         }
+        // This clip already exists in history; markCopy below bumps it. The
+        // listeners must not capture the write as a second clip.
+        ClipboardSelfCopyGuard.noteWrite(clip)
         manager.setPrimaryClip(clip)
         return true
     }
