@@ -3591,6 +3591,16 @@ La plupart des optimisations nécessitent Shizuku pour un accès shell privilég
     <string name="st_PurgeShot_Notif_Scheduled_Single">Capture programmée</string>
     <string name="st_PurgeShot_Notif_Scheduled_Multiple">%1$d captures programmées</string>
     <string name="st_PurgeShot_Notif_Scheduled_Desc">Sera supprimée dans %1$s</string>
+    <string name="st_PurgeShot_Channel_Service_Name">Service PurgeShot</string>
+    <string name="st_PurgeShot_Channel_Service_Desc">Surveille les captures lorsque PurgeShot est actif</string>
+    <string name="st_PurgeShot_Channel_Alerts_Name">Invites PurgeShot</string>
+    <string name="st_PurgeShot_Channel_Alerts_Desc">Vous invite à choisir quand supprimer une nouvelle capture</string>
+    <string name="st_PurgeShot_Popup_Desc">Fenêtre PurgeShot</string>
+    <string name="st_PurgeShot_KeepForever_Desc">Conserver pour toujours</string>
+    <string name="st_PurgeShot_AutoTime_Desc">Délai de suppression automatique</string>
+    <string name="st_PurgeShot_DeleteImmediately_Desc">Supprimer immédiatement</string>
+    <string name="st_PurgeShot_Screenshot_Desc">Capture : %1$s</string>
+    <string name="st_PurgeShot_AutoBadge">AUTO</string>
 
     <!-- Manifest labels (tiles, services) -->
     <string name="st_Manifest_FlashlightTile">Toolz : Lampe torche</string>

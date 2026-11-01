@@ -120,6 +120,10 @@ class ClipboardService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        // Claim capture ownership before anything else so the foreground
+        // listener in ClipboardViewModel does not race a capture while the
+        // service is still starting up.
+        isRunning = true
         NotificationHelper.createAllChannels(this)
         try {
             startForegroundCompat(createNotification())
@@ -503,6 +507,7 @@ class ClipboardService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        isRunning = false
         clipboardManager?.removePrimaryClipChangedListener(clipListener)
         screenshotObserver?.let { observer ->
             try {
@@ -600,6 +605,16 @@ class ClipboardService : Service() {
     }
 
     companion object {
+        /**
+         * True between [onCreate] and [onDestroy]. The clipboard screen uses
+         * this to decide whether it must run its own foreground listener: a
+         * background-capable device whose service failed to start (or was
+         * stopped) would otherwise drop every copy made inside Toolz.
+         */
+        @Volatile
+        var isRunning: Boolean = false
+            private set
+
         const val ACTION_CHECK_CLIPBOARD = "com.frerox.toolz.action.CHECK_CLIPBOARD"
         const val ACTION_PAUSE = "com.frerox.toolz.action.CLIPBOARD_PAUSE"
         const val ACTION_RESUME = "com.frerox.toolz.action.CLIPBOARD_RESUME"

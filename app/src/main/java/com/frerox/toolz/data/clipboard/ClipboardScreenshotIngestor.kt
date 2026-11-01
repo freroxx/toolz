@@ -104,12 +104,19 @@ class ClipboardScreenshotIngestor @Inject constructor(
             when (result.outcome) {
                 ClipboardCaptureProcessor.Outcome.INSERTED,
                 ClipboardCaptureProcessor.Outcome.BUMPED,
-                ClipboardCaptureProcessor.Outcome.IGNORED_SENSITIVE,
                 -> {
                     try {
                         settingsRepository.addClipboardIngestedScreenshotUri(uriString)
                     } catch (_: Exception) {
                     }
+                }
+                ClipboardCaptureProcessor.Outcome.IGNORED_SENSITIVE -> {
+                    // Nothing was stored, so this URI must stay retryable: the
+                    // user may turn the sensitive filter off later, and the
+                    // scan counter must not claim a clip was captured.
+                    forget(uriString)
+                    Log.d(TAG, "Screenshot ${candidate.displayName}: skipped sensitive")
+                    return@withLock null
                 }
                 else -> {
                     // Allow a future scan to retry after the user raises a
@@ -129,7 +136,7 @@ class ClipboardScreenshotIngestor @Inject constructor(
      */
     suspend fun ingestRecentScreenshots(
         isPoll: Boolean = false,
-        limit: Int = 20,
+        limit: Int = 64,
     ): Int {
         if (!isEnabled()) return 0
         val candidates = try {

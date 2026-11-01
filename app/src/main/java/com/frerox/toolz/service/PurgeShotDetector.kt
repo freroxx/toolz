@@ -75,7 +75,7 @@ object PurgeShotDetector {
     private const val SORT = "${MediaStore.Images.Media.DATE_ADDED} DESC, ${MediaStore.Images.Media.DATE_TAKEN} DESC"
 
     /** Queries MediaStore for the most recently inserted images (up to limit). Used to scan for screenshot among recent inserts. */
-    fun queryRecent(resolver: ContentResolver, limit: Int = 8): List<PurgeShotService.ScreenshotCandidate> {
+    fun queryRecent(resolver: ContentResolver, limit: Int = 64): List<PurgeShotService.ScreenshotCandidate> {
         val results = mutableListOf<PurgeShotService.ScreenshotCandidate>()
         try {
             resolver.query(
@@ -338,7 +338,10 @@ object PurgeShotDetector {
             if (attempt > 0) delay(INDEX_RETRY_DELAY_MS)
 
             val recent = try {
-                queryRecent(context.contentResolver, 8)
+                // A burst of photos can push a screenshot out of a tiny window.
+                // Scan a generous slice of recent inserts so detection does not
+                // depend on the screenshot being among the newest handful.
+                queryRecent(context.contentResolver, 64)
             } catch (e: SecurityException) {
                 Log.w(TAG, "queryRecent SecurityException — missing permission", e)
                 return false

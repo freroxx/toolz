@@ -3590,6 +3590,16 @@
     <string name="st_PurgeShot_Notif_Scheduled_Single">Captura programada</string>
     <string name="st_PurgeShot_Notif_Scheduled_Multiple">%1$d capturas programadas</string>
     <string name="st_PurgeShot_Notif_Scheduled_Desc">Se eliminará en %1$s</string>
+    <string name="st_PurgeShot_Channel_Service_Name">Servicio de PurgeShot</string>
+    <string name="st_PurgeShot_Channel_Service_Desc">Supervisa las capturas mientras PurgeShot está activo</string>
+    <string name="st_PurgeShot_Channel_Alerts_Name">Avisos de PurgeShot</string>
+    <string name="st_PurgeShot_Channel_Alerts_Desc">Te pide elegir cuándo se elimina una captura nueva</string>
+    <string name="st_PurgeShot_Popup_Desc">Ventana de PurgeShot</string>
+    <string name="st_PurgeShot_KeepForever_Desc">Conservar siempre</string>
+    <string name="st_PurgeShot_AutoTime_Desc">Tiempo de eliminación automática</string>
+    <string name="st_PurgeShot_DeleteImmediately_Desc">Eliminar ahora</string>
+    <string name="st_PurgeShot_Screenshot_Desc">Captura: %1$s</string>
+    <string name="st_PurgeShot_AutoBadge">AUTO</string>
 
     <!-- Manifest labels (tiles, services) -->
     <string name="st_Manifest_FlashlightTile">Toolz: Linterna</string>

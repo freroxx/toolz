@@ -3584,6 +3584,16 @@
     <string name="st_PurgeShot_Notif_Scheduled_Single">Captura agendada</string>
     <string name="st_PurgeShot_Notif_Scheduled_Multiple">%1$d capturas agendadas</string>
     <string name="st_PurgeShot_Notif_Scheduled_Desc">Será excluída em %1$s</string>
+    <string name="st_PurgeShot_Channel_Service_Name">Serviço do PurgeShot</string>
+    <string name="st_PurgeShot_Channel_Service_Desc">Monitora capturas enquanto o PurgeShot está ativo</string>
+    <string name="st_PurgeShot_Channel_Alerts_Name">Avisos do PurgeShot</string>
+    <string name="st_PurgeShot_Channel_Alerts_Desc">Pede que você escolha quando excluir uma nova captura</string>
+    <string name="st_PurgeShot_Popup_Desc">Janela do PurgeShot</string>
+    <string name="st_PurgeShot_KeepForever_Desc">Manter para sempre</string>
+    <string name="st_PurgeShot_AutoTime_Desc">Tempo de exclusão automática</string>
+    <string name="st_PurgeShot_DeleteImmediately_Desc">Excluir agora</string>
+    <string name="st_PurgeShot_Screenshot_Desc">Captura: %1$s</string>
+    <string name="st_PurgeShot_AutoBadge">AUTO</string>
 
     <!-- Manifest labels (tiles, services) -->
     <string name="st_Manifest_FlashlightTile">Toolz: Lanterna</string>

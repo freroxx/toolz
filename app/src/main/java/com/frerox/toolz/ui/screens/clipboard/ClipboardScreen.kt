@@ -596,7 +596,12 @@ fun ClipboardScreen(
                 )
             }
 
-            if (state.settings.offline && state.settings.aiEnabled) {
+            // Never stack banners: setup/sandbox already explain why capture
+            // needs attention, and an AI-offline row underneath them only
+            // pushes the actual history further down.
+            if (!state.sandboxActive && !state.showSetupBanner &&
+                state.settings.offline && state.settings.aiEnabled
+            ) {
                 InfoBanner(
                     icon = Icons.Rounded.Info,
                     title = stringResource(R.string.st_ClipboardScreen_ai_offline),
@@ -1245,7 +1250,7 @@ private fun ClipboardCard(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .clip(RoundedCornerShape(28.dp))
+                    .clip(RoundedCornerShape(20.dp))
                     .background(background)
                     .padding(end = 22.dp),
                 contentAlignment = Alignment.CenterEnd,
@@ -1267,7 +1272,7 @@ private fun ClipboardCard(
                 onLongPress()
             },
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(28.dp),
+            shape = RoundedCornerShape(20.dp),
             containerColor = containerColor,
             border = if (entry.isSensitive || entry.isLocked) {
                 androidx.compose.foundation.BorderStroke(
@@ -1279,17 +1284,17 @@ private fun ClipboardCard(
             },
         ) {
             Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.Top,
                 ) {
-                    TypeBadge(type = entry.type)
+                    TypeBadge(type = entry.type, compact = true)
                     Column(
                         modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         Text(
                             text = preview.ifBlank { stringResource(R.string.st_ClipboardScreen_empty) },
@@ -1299,7 +1304,7 @@ private fun ClipboardCard(
                                 MaterialTheme.typography.bodyLarge
                             },
                             fontWeight = if (masked) FontWeight.Medium else FontWeight.Normal,
-                            maxLines = if (entry.type == ClipboardType.CODE) 5 else 4,
+                            maxLines = if (entry.type == ClipboardType.CODE) 4 else 3,
                             overflow = TextOverflow.Ellipsis,
                             color = if (masked) {
                                 MaterialTheme.colorScheme.onSurfaceVariant
@@ -1359,47 +1364,11 @@ private fun ClipboardCard(
                                 )
                             }
                         }
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        ) {
-                            MetaPill(typeLabel(entry.type))
-                            if (sourceText.isNotBlank()) MetaPill(sourceText)
-                            MetaPill(relativeTime(entry.timestamp))
-                            if (entry.isPinned) MetaPill(stringResource(R.string.st_ClipboardScreen_badge_pinned))
-                            if (entry.isSensitive || entry.isLocked) {
-                                MetaPill(
-                                    text = if (entry.isLocked) {
-                                        stringResource(R.string.st_ClipboardScreen_badge_locked)
-                                    } else {
-                                        stringResource(R.string.st_ClipboardScreen_badge_sensitive)
-                                    },
-                                    color = MaterialTheme.colorScheme.error,
-                                )
-                            }
-                            if (entry.passwordVaultMatch) {
-                                MetaPill(
-                                    text = stringResource(R.string.st_ClipboardScreen_badge_vault),
-                                    color = MaterialTheme.colorScheme.tertiary,
-                                )
-                            }
-                            if (entry.isAiProcessed && !masked) {
-                                MetaPill(
-                                    text = stringResource(R.string.st_ClipboardScreen_badge_ai),
-                                    color = MaterialTheme.colorScheme.primary,
-                                )
-                            }
-                            if (entry.expiresAt != null) {
-                                MetaPill(
-                                    text = stringResource(
-                                        R.string.st_ClipboardScreen_expires_on,
-                                        relativeTime(entry.expiresAt),
-                                    ),
-                                    color = MaterialTheme.colorScheme.tertiary,
-                                )
-                            }
-                        }
+                        ClipMetaLine(
+                            entry = entry,
+                            sourceText = sourceText,
+                            masked = masked,
+                        )
                     }
                     if (selectionMode) {
                         Checkbox(

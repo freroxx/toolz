@@ -358,7 +358,7 @@ class ClipboardViewModel @Inject constructor(
         if (!clipboardSandboxActive &&
             monitoringEnabled &&
             ToolzForegroundTracker.isForeground.value &&
-            !_gateInfo.value.capabilities.backgroundCapable
+            shouldHandleForegroundCapture()
         ) {
             foregroundClipEvents.trySend(Unit)
         }
@@ -479,6 +479,16 @@ class ClipboardViewModel @Inject constructor(
     }
 
     /**
+     * The screen must run its own listener whenever the service is not
+     * actually running, even if the device reports background capability.
+     * Shizuku/app-op can look available while the foreground service failed
+     * to start or was stopped, and in that window every copy made inside
+     * Toolz would otherwise be lost.
+     */
+    private fun shouldHandleForegroundCapture(): Boolean =
+        !ClipboardService.isRunning || !_gateInfo.value.capabilities.backgroundCapable
+
+    /**
      * Captures clipboard changes that happen while Toolz is in the foreground
      * on devices where the service cannot read the clipboard in the
      * background (no Shizuku / READ_CLIPBOARD app-op). The service handles
@@ -488,7 +498,7 @@ class ClipboardViewModel @Inject constructor(
         if (clipboardSandboxActive) return
         if (!monitoringEnabled) return
         if (!ToolzForegroundTracker.isForeground.value) return
-        if (_gateInfo.value.capabilities.backgroundCapable) return
+        if (!shouldHandleForegroundCapture()) return
 
         val clip = try {
             clipboardManager?.primaryClip

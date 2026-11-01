@@ -1,5 +1,6 @@
 package com.frerox.toolz.data.purgeshot
 
+import android.app.Notification
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
@@ -114,9 +115,10 @@ object PurgeShotHandler {
 
     fun setPopupActive(active: Boolean) {
         _isPopupActive.value = active
-        if (!active) {
-            _activeBatchFlow.value = emptyList()
-        }
+        // The batch is intentionally *not* cleared here. `onDestroy` runs on
+        // configuration changes and activity recreation too; wiping the batch
+        // there made the recreated popup open with nothing to decide. Explicit
+        // resolve/finish paths call [clearActiveBatch] instead.
     }
 
     fun clearActiveBatch() {
@@ -631,10 +633,12 @@ object PurgeShotHandler {
             if (mgr.getNotificationChannel(PurgeShotService.ALERTS_CHANNEL_ID) == null) {
                 val ch = android.app.NotificationChannel(
                     PurgeShotService.ALERTS_CHANNEL_ID,
-                    PurgeShotService.ALERTS_CHANNEL_NAME,
-                    android.app.NotificationManager.IMPORTANCE_DEFAULT
+                    context.getString(R.string.st_PurgeShot_Channel_Alerts_Name),
+                    android.app.NotificationManager.IMPORTANCE_HIGH,
                 ).apply {
-                    description = "Shows confirmation when screenshot deletion is scheduled"
+                    description = context.getString(R.string.st_PurgeShot_Channel_Alerts_Desc)
+                    enableVibration(true)
+                    lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
                     setShowBadge(true)
                 }
                 mgr.createNotificationChannel(ch)

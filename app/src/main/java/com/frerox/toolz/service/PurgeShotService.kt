@@ -50,9 +50,7 @@ class PurgeShotService : Service() {
         const val ACTION_HANDLE_FALLBACK = "com.frerox.toolz.PURGESHOT_HANDLE_FALLBACK"
         private const val NOTIF_ID = 4100
         const val CHANNEL_ID = "purgeshot_channel"
-        const val CHANNEL_NAME = "PurgeShot Service"
-        const val ALERTS_CHANNEL_ID = "purgeshot_alerts_v2"
-        const val ALERTS_CHANNEL_NAME = "PurgeShot Prompts"
+        const val ALERTS_CHANNEL_ID = "purgeshot_alerts_v3"
         private const val OBSERVER_DEBOUNCE_MS = 800L
     }
 
@@ -97,9 +95,11 @@ class PurgeShotService : Service() {
             // 1. Silent low-importance channel for ongoing foreground service
             if (mgr.getNotificationChannel(CHANNEL_ID) == null) {
                 val ch = android.app.NotificationChannel(
-                    CHANNEL_ID, CHANNEL_NAME, android.app.NotificationManager.IMPORTANCE_LOW
+                    CHANNEL_ID,
+                    getString(R.string.st_PurgeShot_Channel_Service_Name),
+                    android.app.NotificationManager.IMPORTANCE_LOW,
                 ).apply {
-                    description = "Monitors screenshots for timed deletion"
+                    description = getString(R.string.st_PurgeShot_Channel_Service_Desc)
                     setShowBadge(false)
                 }
                 mgr.createNotificationChannel(ch)
@@ -107,9 +107,11 @@ class PurgeShotService : Service() {
             // 2. High-importance channel for screenshot prompts, heads-up notifications & popup alerts
             if (mgr.getNotificationChannel(ALERTS_CHANNEL_ID) == null) {
                 val alertCh = android.app.NotificationChannel(
-                    ALERTS_CHANNEL_ID, ALERTS_CHANNEL_NAME, android.app.NotificationManager.IMPORTANCE_HIGH
+                    ALERTS_CHANNEL_ID,
+                    getString(R.string.st_PurgeShot_Channel_Alerts_Name),
+                    android.app.NotificationManager.IMPORTANCE_HIGH,
                 ).apply {
-                    description = "Shows actions and popup when a new screenshot is taken"
+                    description = getString(R.string.st_PurgeShot_Channel_Alerts_Desc)
                     enableVibration(true)
                     lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
                     setShowBadge(true)

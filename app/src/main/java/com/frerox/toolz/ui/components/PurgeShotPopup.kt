@@ -74,12 +74,16 @@ fun PurgeShotPopup(
     val haptic = rememberToolzHapticFeedback()
     val isMultiple = screenshotUris.size > 1
     var dragOffsetY by remember { mutableFloatStateOf(0f) }
+    val popupDescription = stringResource(R.string.st_PurgeShot_Popup_Desc)
+    val keepForeverDescription = stringResource(R.string.st_PurgeShot_KeepForever_Desc)
+    val autoTimeDescription = stringResource(R.string.st_PurgeShot_AutoTime_Desc)
+    val deleteNowDescription = stringResource(R.string.st_PurgeShot_DeleteImmediately_Desc)
 
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black.copy(alpha = 0.52f))
-            .semantics { contentDescription = "PurgeShot popup" },
+            .semantics { contentDescription = popupDescription },
         contentAlignment = Alignment.Center
     ) {
         // Card with vertical drag gesture to dismiss
@@ -213,7 +217,8 @@ fun PurgeShotPopup(
                             userScrollEnabled = false
                         ) {
                             items(visiblePresets) { preset ->
-                                val isAuto = preset.label.equals("Auto", ignoreCase = true)
+                                val isAuto = preset.durationMillis == PurgeShotPreset.AUTO_SENTINEL ||
+                                    preset.label.equals("Auto", ignoreCase = true)
                                 PurgePresetChip(
                                     preset = preset,
                                     isAuto = isAuto,
@@ -235,7 +240,7 @@ fun PurgeShotPopup(
                         ) {
                             ToolzOutlinedExpressiveButton(
                                 onClick = { haptic.tick(); onKeepForever() },
-                                modifier = Modifier.weight(1f).semantics { contentDescription = "Keep forever" },
+                                modifier = Modifier.weight(1f).semantics { contentDescription = keepForeverDescription },
                                 shape = RoundedCornerShape(20.dp),
                                 contentPadding = PaddingValues(vertical = 14.dp)
                             ) {
@@ -254,7 +259,7 @@ fun PurgeShotPopup(
                                 },
                                 shape = RoundedCornerShape(20.dp),
                                 color = MaterialTheme.colorScheme.secondaryContainer,
-                                modifier = Modifier.weight(1f).semantics { contentDescription = "Auto time" }
+                                modifier = Modifier.weight(1f).semantics { contentDescription = autoTimeDescription }
                             ) {
                                 Row(
                                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp),
@@ -280,7 +285,7 @@ fun PurgeShotPopup(
                             Spacer(Modifier.height(10.dp))
                             ToolzExpressiveButton(
                                 onClick = { haptic.success(); onDeleteNow() },
-                                modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Delete immediately" },
+                                modifier = Modifier.fillMaxWidth().semantics { contentDescription = deleteNowDescription },
                                 shape = RoundedCornerShape(20.dp),
                                 contentPadding = PaddingValues(vertical = 14.dp),
                                 colors = ButtonDefaults.buttonColors(
@@ -321,6 +326,7 @@ fun PurgeShotPopup(
 
 @Composable
 private fun SingleThumbnail(uri: Uri?, displayName: String) {
+    val screenshotDescription = stringResource(R.string.st_PurgeShot_Screenshot_Desc, displayName)
     Surface(
         modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp, max = 200.dp),
         shape = RoundedCornerShape(24.dp),
@@ -331,7 +337,7 @@ private fun SingleThumbnail(uri: Uri?, displayName: String) {
             var imageState by remember { mutableStateOf<AsyncImagePainter.State?>(null) }
             AsyncImage(
                 model = uri,
-                contentDescription = "Screenshot: $displayName",
+                contentDescription = screenshotDescription,
                 modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)),
                 contentScale = ContentScale.Crop,
                 onState = { imageState = it }
@@ -446,6 +452,7 @@ private fun PurgePresetChip(
     val icon = iconFor(preset.iconName)
     val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
     val isPressed by interaction.collectIsPressedAsState()
+    val autoBadge = stringResource(R.string.st_PurgeShot_AutoBadge)
     val scale by animateFloatAsState(
         targetValue = if (isPressed) 0.93f else 1f,
         animationSpec = spring(dampingRatio = 0.5f, stiffness = 420f),
@@ -461,8 +468,7 @@ private fun PurgePresetChip(
             .graphicsLayer { scaleX = scale; scaleY = scale }
             .then(
                 if (isAuto) Modifier.border(1.2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.34f), RoundedCornerShape(22.dp)) else Modifier
-            )
-            .semantics { contentDescription = "${preset.label}${if (isAuto) ", auto" else ""}" },
+            ),
         tonalElevation = if (isAuto) 1.dp else 0.dp,
         interactionSource = interaction
     ) {
@@ -492,7 +498,7 @@ private fun PurgePresetChip(
                 )
                 if (isAuto) {
                     Text(
-                        "AUTO",
+                        autoBadge,
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Black,
                         color = MaterialTheme.colorScheme.primary,
