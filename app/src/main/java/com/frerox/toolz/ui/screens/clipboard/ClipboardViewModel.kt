@@ -62,6 +62,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import org.json.JSONObject
 import java.util.Calendar
+import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 
 /** Date buckets used by the history list. Labels are resolved in the UI. */
@@ -336,6 +337,13 @@ class ClipboardViewModel @Inject constructor(
     private var wasSandboxed = false
     private var appOpAutoGrantAttempted = false
     private val manualCaptureMutex = Mutex()
+    /**
+     * Number of captures queued or running. The `busy` flag is derived from
+     * this instead of being set/cleared by each capture: with two overlapping
+     * manual captures the first one's `finally` used to clear the flag while
+     * the second one was still working.
+     */
+    private val capturesInFlight = AtomicInteger(0)
 
     /**
      * Latest monitoring preference, tracked separately from the UI state so
@@ -486,7 +494,9 @@ class ClipboardViewModel @Inject constructor(
      * Toolz would otherwise be lost.
      */
     private fun shouldHandleForegroundCapture(): Boolean =
-        !ClipboardService.isRunning || !_gateInfo.value.capabilities.backgroundCapable
+        !ClipboardService.isRunning ||
+            !ClipboardService.captureReady ||
+            !_gateInfo.value.capabilities.backgroundCapable
 
     /**
      * Captures clipboard changes that happen while Toolz is in the foreground
@@ -829,36 +839,40 @@ class ClipboardViewModel @Inject constructor(
             return
         }
         viewModelScope.launch {
+            // Re-read the row: rapid toggles (or an AI/sensitivity update in
+            // flight) would otherwise be applied from a stale snapshot and
+            // could revive removed sensitivity metadata.
+            val current = clipboardDao.getEntryById(entry.id) ?: return@launch
             if (locked) {
                 clipboardDao.updateSensitivity(
-                    id = entry.id,
+                    id = current.id,
                     sensitive = true,
-                    reason = entry.sensitivityReason ?: ClipSensitivityReason.MANUAL,
-                    vaultMatch = entry.passwordVaultMatch,
+                    reason = current.sensitivityReason ?: ClipSensitivityReason.MANUAL,
+                    vaultMatch = current.passwordVaultMatch,
                     locked = true,
                 )
-                clipboardDao.setExpiresAt(entry.id, null)
-                clipboardDao.clearAiDetails(entry.id, ClipAiState.SKIPPED_SENSITIVE)
+                clipboardDao.setExpiresAt(current.id, null)
+                clipboardDao.clearAiDetails(current.id, ClipAiState.SKIPPED_SENSITIVE)
             } else {
-                val keepSensitive = entry.passwordVaultMatch ||
-                    (entry.sensitivityReason != null &&
-                        entry.sensitivityReason != ClipSensitivityReason.MANUAL)
+                val keepSensitive = current.passwordVaultMatch ||
+                    (current.sensitivityReason != null &&
+                        current.sensitivityReason != ClipSensitivityReason.MANUAL)
                 clipboardDao.updateSensitivity(
-                    id = entry.id,
+                    id = current.id,
                     sensitive = keepSensitive,
-                    reason = if (keepSensitive) entry.sensitivityReason else null,
-                    vaultMatch = entry.passwordVaultMatch,
+                    reason = if (keepSensitive) current.sensitivityReason else null,
+                    vaultMatch = current.passwordVaultMatch,
                     locked = false,
                 )
                 if (!keepSensitive) {
                     // Unlocking can clear sensitivity. Put the clip back on
                     // the normal retention schedule instead of keeping the
                     // "never expires" expiry that locking applied.
-                    clipboardDao.setExpiresAt(entry.id, expiryFor(entry.timestamp))
-                    clipboardDao.updateAiState(entry.id, ClipAiState.IDLE, null)
+                    clipboardDao.setExpiresAt(current.id, expiryFor(current.timestamp))
+                    clipboardDao.updateAiState(current.id, ClipAiState.IDLE, null)
                 }
             }
-            _extras.update { it.copy(revealed = it.revealed - entry.id) }
+            _extras.update { it.copy(revealed = it.revealed - current.id) }
             refreshStats()
             _events.send(
                 ClipboardEvent.Message(
@@ -869,17 +883,6 @@ class ClipboardViewModel @Inject constructor(
     }
 
     fun setSensitive(entry: ClipboardEntry, sensitive: Boolean) {
-        if (entry.passwordVaultMatch) {
-            // Password Vault matches are always sensitive and cannot be
-            // downgraded from the clipboard UI.
-            return
-        }
-        if (!sensitive && entry.isLocked) {
-            // Locked clips must always remain sensitive. Unlocking is a
-            // separate, explicit action so this can never create a locked but
-            // non-sensitive row.
-            return
-        }
         if (clipboardSandboxActive) {
             viewModelScope.launch {
                 _events.send(ClipboardEvent.Message(ClipboardMessage.SANDBOX))
@@ -887,31 +890,45 @@ class ClipboardViewModel @Inject constructor(
             return
         }
         viewModelScope.launch {
+            // Guards must use the fresh row, not the snapshot captured when
+            // the menu was built.
+            val current = clipboardDao.getEntryById(entry.id) ?: return@launch
+            if (current.passwordVaultMatch) {
+                // Password Vault matches are always sensitive and cannot be
+                // downgraded from the clipboard UI.
+                return@launch
+            }
+            if (!sensitive && current.isLocked) {
+                // Locked clips must always remain sensitive. Unlocking is a
+                // separate, explicit action so this can never create a locked
+                // but non-sensitive row.
+                return@launch
+            }
             if (sensitive) {
                 clipboardDao.updateSensitivity(
-                    id = entry.id,
+                    id = current.id,
                     sensitive = true,
-                    reason = entry.sensitivityReason ?: ClipSensitivityReason.MANUAL,
+                    reason = current.sensitivityReason ?: ClipSensitivityReason.MANUAL,
                     vaultMatch = false,
-                    locked = entry.isLocked,
+                    locked = current.isLocked,
                 )
-                clipboardDao.setExpiresAt(entry.id, null)
-                clipboardDao.clearAiDetails(entry.id, ClipAiState.SKIPPED_SENSITIVE)
+                clipboardDao.setExpiresAt(current.id, null)
+                clipboardDao.clearAiDetails(current.id, ClipAiState.SKIPPED_SENSITIVE)
             } else {
                 clipboardDao.updateSensitivity(
-                    id = entry.id,
+                    id = current.id,
                     sensitive = false,
                     reason = null,
                     vaultMatch = false,
-                    locked = entry.isLocked,
+                    locked = current.isLocked,
                 )
-                if (!entry.isLocked) {
+                if (!current.isLocked) {
                     // Removing sensitivity re-enables retention for this clip.
-                    clipboardDao.setExpiresAt(entry.id, expiryFor(entry.timestamp))
-                    clipboardDao.updateAiState(entry.id, ClipAiState.IDLE, null)
+                    clipboardDao.setExpiresAt(current.id, expiryFor(current.timestamp))
+                    clipboardDao.updateAiState(current.id, ClipAiState.IDLE, null)
                 }
             }
-            _extras.update { it.copy(revealed = it.revealed - entry.id) }
+            _extras.update { it.copy(revealed = it.revealed - current.id) }
             refreshStats()
             _events.send(
                 ClipboardEvent.Message(
@@ -1080,6 +1097,7 @@ class ClipboardViewModel @Inject constructor(
     // ── AI ────────────────────────────────────────────────────────────────
 
     fun runAi(entry: ClipboardEntry) {
+        if (entry.deletedAt != null) return
         if (entry.isSensitive || entry.isLocked) {
             viewModelScope.launch {
                 _events.send(ClipboardEvent.Message(ClipboardMessage.AI_SENSITIVE))
@@ -1149,7 +1167,7 @@ class ClipboardViewModel @Inject constructor(
             }
             return
         }
-        val selected = state.visibleEntries.filter { it.id in ids }
+        val selected = state.visibleEntries.filter { it.id in ids && it.deletedAt == null }
         // AI is only ever sent text-like, non-sensitive clips. Attachments,
         // images and locked rows are silently excluded from the batch.
         val targets = selected.filter { it.isTextLike && !it.isSensitive && !it.isLocked }
@@ -1235,7 +1253,7 @@ class ClipboardViewModel @Inject constructor(
         if (!notify && !manualCaptureMutex.tryLock()) return
         viewModelScope.launch {
             if (notify) manualCaptureMutex.lock()
-            _extras.update { it.copy(busy = true) }
+            beginCapture()
             try {
                 val exclude = settingsState.first().excludeSensitive
                 // Prefer the rich system clipboard while Toolz is foreground:
@@ -1243,25 +1261,44 @@ class ClipboardViewModel @Inject constructor(
                 // only exposes plain text, so it is strictly a fallback for
                 // ROMs that deny the direct read.
                 val payload = readSystemClipboard() ?: readShizukuPayload()
-                if (payload == null) {
-                    if (notify) emit(ClipboardMessage.EMPTY)
-                } else {
-                    val result = captureProcessor.process(payload, exclude)
-                    // Silent refreshes (screen resume, popup open) must not
-                    // produce snackbars/toasts for an unchanged clipboard.
-                    if (notify) emitOutcome(result.outcome)
-                    if (result.outcome == ClipboardCaptureProcessor.Outcome.INSERTED) {
-                        aiProcessor.processQueued(1)
+                when {
+                    payload == null -> {
+                        if (notify) emit(ClipboardMessage.EMPTY)
+                    }
+                    // Toolz wrote this clip itself (history copy / bulk copy).
+                    // `copyEntry`/`copySelected` already bumped those rows, so
+                    // never run the capture pipeline over them again.
+                    ClipboardSelfCopyGuard.consume(payload) -> Unit
+                    else -> {
+                        val result = captureProcessor.process(payload, exclude)
+                        // Silent refreshes (screen resume, popup open) must not
+                        // produce snackbars/toasts for an unchanged clipboard.
+                        if (notify) emitOutcome(result.outcome)
+                        if (result.outcome == ClipboardCaptureProcessor.Outcome.INSERTED) {
+                            aiProcessor.processQueued(1)
+                        }
                     }
                 }
                 refreshStats()
             } catch (e: Exception) {
                 if (notify) emit(ClipboardMessage.FAILED, detail = e.message)
             } finally {
-                _extras.update { it.copy(busy = false) }
+                endCapture()
                 manualCaptureMutex.unlock()
             }
         }
+    }
+
+    /** Marks one capture as queued/running and keeps the UI busy until it ends. */
+    private fun beginCapture() {
+        capturesInFlight.incrementAndGet()
+        _extras.update { it.copy(busy = true) }
+    }
+
+    /** Clears busy only when the last queued/running capture is done. */
+    private fun endCapture() {
+        val remaining = capturesInFlight.decrementAndGet().coerceAtLeast(0)
+        _extras.update { it.copy(busy = remaining > 0) }
     }
 
     private suspend fun readShizukuPayload(): ClipboardPayload? {
@@ -1382,7 +1419,9 @@ class ClipboardViewModel @Inject constructor(
         // Copy only what is actually visible and selected. Locked clips stay
         // out of bulk copy until individually revealed.
         val selected = state.visibleEntries.filter {
-            it.id in ids && (!it.isLocked || it.id in state.revealedIds)
+            it.id in ids &&
+                it.deletedAt == null &&
+                (!it.isLocked || it.id in state.revealedIds)
         }
         val texts = selected
             .sortedByDescending { it.timestamp }

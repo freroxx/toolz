@@ -131,7 +131,11 @@ class ClipboardService : Service() {
         } catch (e: Exception) {
             // Android 12+ can reject a background FGS start. Stop honestly
             // instead of crash-looping; the UI will show the fallback banner.
+            // Release the capture-ownership claim immediately: the screen-level
+            // listener must take over even before `onDestroy` runs.
             Log.w(TAG, "Could not start foreground service: ${e.message}")
+            isRunning = false
+            captureReady = false
             stopSelf()
             return
         }
@@ -221,6 +225,10 @@ class ClipboardService : Service() {
                         monitoringEnabled = monitoring,
                         onboardingSeen = seen,
                     )
+                    // Tell the screen-level listener whether the service can
+                    // really read the clipboard now; `isRunning` alone is not
+                    // enough while the gate is still SETUP_REQUIRED.
+                    publishCaptureState(running = true, ready = monitoring && backgroundCapable())
                     updateNotification()
                     if (!monitoring || !backgroundCapable()) {
                         if (manualCaptureRequested) return@collect
@@ -500,6 +508,7 @@ class ClipboardService : Service() {
         monitoringEnabled = monitoring
         onboardingSeen = seen
         gateStatus = ClipboardGate.evaluate(this, monitoring, seen)
+        publishCaptureState(running = true, ready = monitoring && backgroundCapable())
         updateNotification()
         if (!manualCaptureRequested && (!monitoring || !backgroundCapable())) stopSelf()
     }
@@ -508,6 +517,7 @@ class ClipboardService : Service() {
 
     override fun onDestroy() {
         isRunning = false
+        captureReady = false
         clipboardManager?.removePrimaryClipChangedListener(clipListener)
         screenshotObserver?.let { observer ->
             try {
@@ -614,6 +624,22 @@ class ClipboardService : Service() {
         @Volatile
         var isRunning: Boolean = false
             private set
+
+        /**
+         * True only while the service both is running and has a privileged
+         * clipboard read path. The screen must run its own listener while this
+         * is false, even though [isRunning] is true: a service that is stuck
+         * in `SETUP_REQUIRED` (or is stopping) cannot read the clipboard, so
+         * relying on [isRunning] alone would silently drop copies.
+         */
+        @Volatile
+        var captureReady: Boolean = false
+            private set
+
+        private fun publishCaptureState(running: Boolean, ready: Boolean) {
+            isRunning = running
+            captureReady = ready
+        }
 
         const val ACTION_CHECK_CLIPBOARD = "com.frerox.toolz.action.CHECK_CLIPBOARD"
         const val ACTION_PAUSE = "com.frerox.toolz.action.CLIPBOARD_PAUSE"

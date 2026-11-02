@@ -1376,59 +1376,52 @@ private fun ClipboardCard(
                             onCheckedChange = { onOpen() },
                         )
                     } else if (showTrash) {
-                        Column {
-                            IconButton(onClick = { haptic.click(); onRestore() }) {
-                                Icon(
-                                    Icons.Rounded.Restore,
-                                    contentDescription = stringResource(R.string.st_ClipboardScreen_action_restore),
-                                    tint = MaterialTheme.colorScheme.primary,
-                                )
-                            }
-                            IconButton(onClick = { haptic.click(); onDeleteForever() }) {
-                                Icon(
-                                    Icons.Rounded.DeleteForever,
-                                    contentDescription = stringResource(R.string.st_ClipboardScreen_action_delete_forever),
-                                    tint = MaterialTheme.colorScheme.error,
-                                )
-                            }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CompactClipAction(
+                                icon = Icons.Rounded.Restore,
+                                contentDescription = stringResource(R.string.st_ClipboardScreen_action_restore),
+                                tint = MaterialTheme.colorScheme.primary,
+                                onClick = { haptic.click(); onRestore() },
+                            )
+                            CompactClipAction(
+                                icon = Icons.Rounded.DeleteForever,
+                                contentDescription = stringResource(R.string.st_ClipboardScreen_action_delete_forever),
+                                tint = MaterialTheme.colorScheme.error,
+                                onClick = { haptic.click(); onDeleteForever() },
+                            )
                         }
                     } else {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            IconButton(onClick = { haptic.click(); onPin() }) {
-                                Icon(
-                                    Icons.Rounded.PushPin,
-                                    contentDescription = stringResource(
-                                        if (entry.isPinned) R.string.st_ClipboardScreen_action_unpin
-                                        else R.string.st_ClipboardScreen_action_pin,
-                                    ),
-                                    tint = if (entry.isPinned) {
-                                        MaterialTheme.colorScheme.primary
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                                    },
-                                )
-                            }
-                            IconButton(
+                            CompactClipAction(
+                                icon = Icons.Rounded.PushPin,
+                                contentDescription = stringResource(
+                                    if (entry.isPinned) R.string.st_ClipboardScreen_action_unpin
+                                    else R.string.st_ClipboardScreen_action_pin,
+                                ),
+                                tint = if (entry.isPinned) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                },
+                                onClick = { haptic.click(); onPin() },
+                            )
+                            CompactClipAction(
+                                icon = if (copiedFlash) Icons.Rounded.CheckCircle else Icons.Rounded.ContentCopy,
+                                contentDescription = stringResource(
+                                    if (copiedFlash) R.string.st_ClipboardScreen_copied
+                                    else R.string.st_ClipboardScreen_action_copy,
+                                ),
+                                tint = if (copiedFlash) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
                                 onClick = {
                                     haptic.click()
                                     copyFlashToken += 1
                                     onCopy()
                                 },
-                            ) {
-                                Icon(
-                                    if (copiedFlash) Icons.Rounded.CheckCircle
-                                    else Icons.Rounded.ContentCopy,
-                                    contentDescription = stringResource(
-                                        if (copiedFlash) R.string.st_ClipboardScreen_copied
-                                        else R.string.st_ClipboardScreen_action_copy,
-                                    ),
-                                    tint = if (copiedFlash) {
-                                        MaterialTheme.colorScheme.primary
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    },
-                                )
-                            }
+                            )
                         }
                     }
                 }
@@ -1459,8 +1452,8 @@ private fun ClipHeroPreview(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(160.dp)
-            .clip(RoundedCornerShape(18.dp))
+            .height(132.dp)
+            .clip(RoundedCornerShape(14.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             .clickable(onClick = onOpen),
         contentAlignment = Alignment.Center,
@@ -1485,11 +1478,11 @@ private fun ClipHeroPreview(
 }
 
 @Composable
-private fun TypeBadge(type: String) {
+private fun TypeBadge(type: String, compact: Boolean = false) {
     val icon = typeIcon(type)
     Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.75f),
+        shape = RoundedCornerShape(if (compact) 11.dp else 16.dp),
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
     ) {
         Icon(
             icon,
@@ -1498,25 +1491,83 @@ private fun TypeBadge(type: String) {
                 typeLabel(type),
             ),
             modifier = Modifier
-                .padding(10.dp)
-                .size(22.dp),
+                .padding(if (compact) 8.dp else 10.dp)
+                .size(if (compact) 18.dp else 22.dp),
             tint = MaterialTheme.colorScheme.primary,
         )
     }
 }
 
+/**
+ * One line of secondary context instead of a scrollable row of pills. Type is
+ * already conveyed by the leading icon, so the line only carries what changes
+ * per clip: age, source and the few states worth surfacing.
+ */
 @Composable
-private fun MetaPill(text: String, color: Color = MaterialTheme.colorScheme.onSurfaceVariant) {
-    Surface(
-        shape = CircleShape,
-        color = color.copy(alpha = 0.1f),
+private fun ClipMetaLine(
+    entry: ClipboardEntry,
+    sourceText: String,
+    masked: Boolean,
+) {
+    val parts = buildList {
+        add(relativeTime(entry.timestamp))
+        if (sourceText.isNotBlank()) add(sourceText)
+        if (entry.passwordVaultMatch) add(stringResource(R.string.st_ClipboardScreen_badge_vault))
+        if (entry.isAiProcessed && !masked) add(stringResource(R.string.st_ClipboardScreen_badge_ai))
+        entry.expiresAt?.let { expiresAt ->
+            add(stringResource(R.string.st_ClipboardScreen_expires_on, relativeTime(expiresAt)))
+        }
+    }
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth(),
     ) {
+        if (entry.isPinned) {
+            Icon(
+                Icons.Rounded.PushPin,
+                contentDescription = stringResource(R.string.st_ClipboardScreen_badge_pinned),
+                modifier = Modifier.size(12.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        }
+        if (entry.isSensitive || entry.isLocked) {
+            Icon(
+                if (entry.isLocked) Icons.Rounded.Lock else Icons.Rounded.Shield,
+                contentDescription = if (entry.isLocked) {
+                    stringResource(R.string.st_ClipboardScreen_badge_locked)
+                } else {
+                    stringResource(R.string.st_ClipboardScreen_badge_sensitive)
+                },
+                modifier = Modifier.size(12.dp),
+                tint = MaterialTheme.colorScheme.error,
+            )
+        }
         Text(
-            text = text,
+            text = parts.joinToString(" · "),
             style = MaterialTheme.typography.labelSmall,
-            color = color,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+    }
+}
+
+/** Smaller 36dp icon action so the row's content, not the buttons, dominates. */
+@Composable
+private fun CompactClipAction(
+    icon: ImageVector,
+    contentDescription: String,
+    tint: Color,
+    onClick: () -> Unit,
+) {
+    IconButton(onClick = onClick, modifier = Modifier.size(36.dp)) {
+        Icon(
+            icon,
+            contentDescription = contentDescription,
+            tint = tint,
+            modifier = Modifier.size(20.dp),
         )
     }
 }
@@ -1653,8 +1704,8 @@ private fun ClipDetailSheet(
         Box(Modifier.fillMaxWidth()) {
         LazyColumn(
             modifier = Modifier.fillMaxWidth(),
-            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 40.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 36.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {
                 Row(
@@ -1687,7 +1738,7 @@ private fun ClipDetailSheet(
             if (entry.isSensitive || entry.isLocked) {
                 item {
                     Surface(
-                        shape = RoundedCornerShape(20.dp),
+                        shape = RoundedCornerShape(16.dp),
                         color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f),
                     ) {
                         Row(
@@ -1742,7 +1793,7 @@ private fun ClipDetailSheet(
                     ) {
                         items(imageAttachments, key = { it.id }) { image ->
                             Surface(
-                                shape = RoundedCornerShape(18.dp),
+                                shape = RoundedCornerShape(14.dp),
                                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                                 modifier = Modifier
                                     .width(240.dp)
@@ -1764,7 +1815,7 @@ private fun ClipDetailSheet(
                 item {
                     SectionTitle(stringResource(R.string.st_ClipboardScreen_detail_content))
                     Surface(
-                        shape = RoundedCornerShape(20.dp),
+                        shape = RoundedCornerShape(16.dp),
                         color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     ) {
                         SelectionContainer {
@@ -1814,7 +1865,7 @@ private fun ClipDetailSheet(
             item {
                 SectionTitle(stringResource(R.string.st_ClipboardScreen_detail_meta))
                 Surface(
-                    shape = RoundedCornerShape(20.dp),
+                    shape = RoundedCornerShape(16.dp),
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 ) {
                     Column(
@@ -2006,7 +2057,7 @@ private fun AiSection(
 ) {
     SectionTitle(stringResource(R.string.st_ClipboardScreen_detail_ai))
     Surface(
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.35f),
     ) {
         Column(
@@ -2164,7 +2215,7 @@ private fun ActionTile(
     onClick: () -> Unit,
 ) {
     Surface(
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(14.dp),
         color = if (selected) {
             MaterialTheme.colorScheme.secondaryContainer
         } else {
@@ -2173,7 +2224,7 @@ private fun ActionTile(
         modifier = modifier.clickable(onClick = onClick),
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 11.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
