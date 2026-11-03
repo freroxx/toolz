@@ -4975,6 +4975,9 @@
     <string name="st_ClipboardScreen_expires_relative_on">Expires %1$s · %2$s</string>
     <string name="st_ClipboardScreen_loading">Loading your clips…</string>
     <string name="st_ClipboardScreen_empty_title">No clips yet</string>
+    <string name="st_ClipboardScreen_empty_filter_title">No matching clips</string>
+    <string name="st_ClipboardScreen_empty_filter_body">No clips in %1$s yet. Show all clips or copy something new.</string>
+    <string name="st_ClipboardScreen_action_show_all">Show all</string>
     <string name="st_ClipboardScreen_empty_trash_body">Deleted clips stay here for 30 days before they are removed.</string>
     <string name="st_ClipboardScreen_empty_trash_confirm_body">This permanently removes every clip in the trash.</string>
     <string name="st_ClipboardScreen_empty_trash_confirm_title">Empty trash?</string>

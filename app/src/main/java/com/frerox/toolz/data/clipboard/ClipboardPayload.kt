@@ -111,4 +111,14 @@ data class ClipboardPayload(
     val sourcePackage: String? = null,
     val timestamp: Long = System.currentTimeMillis(),
     val isSensitiveExtra: Boolean = false,
+    /**
+     * `ClipDescription.timestamp` of the system clip this payload came from.
+     *
+     * Every `setPrimaryClip` produces a new timestamp, even when the content is
+     * byte-for-byte identical, so it is the only reliable way to tell a repeat
+     * copy apart from the same clip being read again (screen resume, manual
+     * refresh). Null when the payload does not originate from the system
+     * clipboard (share target, ACTION_PROCESS_TEXT, tests).
+     */
+    val clipTimestamp: Long? = null,
 )

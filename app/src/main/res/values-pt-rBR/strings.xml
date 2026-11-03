@@ -4866,6 +4866,9 @@
     <string name="st_ClipboardScreen_expires_relative_on">Expira %1$s · %2$s</string>
     <string name="st_ClipboardScreen_loading">Carregando seus clipes…</string>
     <string name="st_ClipboardScreen_empty_title">Ainda não há clips</string>
+    <string name="st_ClipboardScreen_empty_filter_title">Nenhum clip correspondente</string>
+    <string name="st_ClipboardScreen_empty_filter_body">Ainda não há clips em %1$s. Mostre todos os clips ou copie algo novo.</string>
+    <string name="st_ClipboardScreen_action_show_all">Mostrar tudo</string>
     <string name="st_ClipboardScreen_empty_trash_body">Os clips excluídos ficam aqui por 30 dias antes de serem removidos.</string>
     <string name="st_ClipboardScreen_empty_trash_confirm_body">Isso remove permanentemente todos os clips da lixeira.</string>
     <string name="st_ClipboardScreen_empty_trash_confirm_title">Esvaziar a lixeira?</string>

@@ -4896,6 +4896,9 @@
     <string name="st_ClipboardScreen_expires_relative_on">Caduca %1$s · %2$s</string>
     <string name="st_ClipboardScreen_loading">Cargando tus clips…</string>
     <string name="st_ClipboardScreen_empty_title">Aún no hay clips</string>
+    <string name="st_ClipboardScreen_empty_filter_title">No hay clips coincidentes</string>
+    <string name="st_ClipboardScreen_empty_filter_body">Aún no hay clips en %1$s. Muestra todos los clips o copia algo nuevo.</string>
+    <string name="st_ClipboardScreen_action_show_all">Mostrar todo</string>
     <string name="st_ClipboardScreen_empty_trash_body">Los clips eliminados permanecen aquí 30 días antes de borrarse.</string>
     <string name="st_ClipboardScreen_empty_trash_confirm_body">Esto elimina permanentemente todos los clips de la papelera.</string>
     <string name="st_ClipboardScreen_empty_trash_confirm_title">¿Vaciar la papelera?</string>

@@ -46,6 +46,30 @@ object ClipboardHashing {
             .digest(bytes)
             .joinToString("") { "%02x".format(it.toInt() and 0xff) }
 
+    /**
+     * Identity of the raw clipboard payload (before classification). Used to
+     * decide whether a re-read of the current clipboard is the same event that
+     * was already captured.
+     */
+    fun payloadFingerprint(payload: ClipboardPayload): String = sha256(
+        buildString {
+            append(if (payload.isSensitiveExtra) "sensitive" else "normal")
+            append('\u0002')
+            append(payload.label.orEmpty())
+            append('\u0002')
+            payload.items.forEach { item ->
+                append(item.text.orEmpty())
+                append('\u0000')
+                append(item.html.orEmpty())
+                append('\u0000')
+                append(item.uri?.toString().orEmpty())
+                append('\u0000')
+                append(item.mimeType.orEmpty())
+                append('\u0001')
+            }
+        },
+    )
+
     fun contentHash(
         content: String,
         html: String? = null,

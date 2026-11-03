@@ -85,6 +85,7 @@ import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.FileOpen
+import androidx.compose.material.icons.rounded.FilterList
 import androidx.compose.material.icons.rounded.Fingerprint
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Info
@@ -197,9 +198,16 @@ import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.components.rememberToolzHapticFeedback
 import com.frerox.toolz.ui.theme.toolzBackground
 import com.frerox.toolz.util.security.BiometricPromptUtils
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Date
+
+/** A snackbar request; newer requests replace older ones instead of queueing. */
+private data class TransientMessage(
+    val text: String,
+    val undoable: Boolean = false,
+)
 
 /**
  * Toolz Clipboard — full Material 3 Expressive history, trash, detail sheet,
@@ -236,6 +244,9 @@ fun ClipboardScreen(
     // regular snackbar host is hidden behind the scrim. Events raised while a
     // sheet is open are shown by a second host rendered inside that sheet.
     val sheetSnackbarHostState = remember { SnackbarHostState() }
+    // Conflated queue: a burst of copy/delete taps shows the newest message
+    // immediately instead of stacking snackbars that appear seconds late.
+    val snackbarQueue = remember { Channel<TransientMessage>(Channel.CONFLATED) }
     val haptic = rememberToolzHapticFeedback()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     // Resolve localized labels through composition so they stay correct across
@@ -254,6 +265,17 @@ fun ClipboardScreen(
     var showClearDialog by rememberSaveable { mutableStateOf(false) }
     var showEmptyTrashDialog by rememberSaveable { mutableStateOf(false) }
     var showOverflow by rememberSaveable { mutableStateOf(false) }
+    // Confirmed copy flash. It is only advanced by the ViewModel's COPIED
+    // event, so a cancelled biometric prompt or a failed write never shows a
+    // false "copied" check on the row.
+    var copyFlashEntryId by remember { mutableStateOf<Int?>(null) }
+    var copyFlashToken by remember { mutableStateOf(0) }
+    LaunchedEffect(copyFlashEntryId, copyFlashToken) {
+        if (copyFlashEntryId != null) {
+            delay(1_400)
+            copyFlashEntryId = null
+        }
+    }
 
     val detailEntry = remember(detailId, state.entries, state.trashed) {
         detailId?.let { id -> state.entries.firstOrNull { it.id == id } ?: state.trashed.firstOrNull { it.id == id } }
@@ -266,8 +288,7 @@ fun ClipboardScreen(
     val shareFailedLabelState by rememberUpdatedState(shareFailedLabel)
 
     fun showTransient(message: String) {
-        val host = if (anySheetOpenState) sheetSnackbarHostState else snackbarHostState
-        scope.launch { host.showSnackbar(message) }
+        snackbarQueue.trySend(TransientMessage(message))
     }
 
     LaunchedEffect(state.loaded, state.settings.onboardingSeen) {
@@ -288,24 +309,18 @@ fun ClipboardScreen(
 
     LaunchedEffect(Unit) {
         viewModel.events.collect { event ->
-            val host = if (anySheetOpenState) sheetSnackbarHostState else snackbarHostState
             when (event) {
                 is ClipboardEvent.Message -> {
-                    val text = messageText(context, event)
-                    val undoable = event.type == ClipboardMessage.DELETED
-                    val result = host.showSnackbar(
-                        message = text,
-                        actionLabel = if (undoable) {
-                            undoLabelState
-                        } else {
-                            null
-                        },
-                        withDismissAction = !undoable,
-                        duration = if (undoable) SnackbarDuration.Long else SnackbarDuration.Short,
-                    )
-                    if (result == SnackbarResult.ActionPerformed && undoable) {
-                        viewModel.undoDelete()
+                    if (event.type == ClipboardMessage.COPIED && event.entryId != null) {
+                        copyFlashEntryId = event.entryId
+                        copyFlashToken += 1
                     }
+                    snackbarQueue.trySend(
+                        TransientMessage(
+                            text = messageText(context, event),
+                            undoable = event.type == ClipboardMessage.DELETED,
+                        ),
+                    )
                 }
                 is ClipboardEvent.Share -> {
                     runCatching {
@@ -313,9 +328,29 @@ fun ClipboardScreen(
                             Intent.createChooser(event.intent, shareLabelState),
                         )
                     }.onFailure {
-                        host.showSnackbar(shareFailedLabelState)
+                        snackbarQueue.trySend(TransientMessage(shareFailedLabelState))
                     }
                 }
+            }
+        }
+    }
+
+    // Single consumer for feedback. It runs outside the event collector so
+    // showing a snackbar never blocks processing the next clipboard event, and
+    // it always dismisses whatever is visible so the newest message wins.
+    LaunchedEffect(Unit) {
+        for (message in snackbarQueue) {
+            snackbarHostState.currentSnackbarData?.dismiss()
+            sheetSnackbarHostState.currentSnackbarData?.dismiss()
+            val host = if (anySheetOpenState) sheetSnackbarHostState else snackbarHostState
+            val result = host.showSnackbar(
+                message = message.text,
+                actionLabel = if (message.undoable) undoLabelState else null,
+                withDismissAction = !message.undoable,
+                duration = if (message.undoable) SnackbarDuration.Long else SnackbarDuration.Short,
+            )
+            if (result == SnackbarResult.ActionPerformed && message.undoable) {
+                viewModel.undoDelete()
             }
         }
     }
@@ -640,7 +675,8 @@ fun ClipboardScreen(
                             onAction = { viewModel.onSearchQueryChanged("") },
                         )
                     }
-                    state.visibleEntries.isEmpty() && state.showTrash -> {
+                    state.visibleEntries.isEmpty() && state.showTrash &&
+                        state.trashed.isEmpty() -> {
                         EmptyState(
                             icon = Icons.Rounded.Delete,
                             title = stringResource(R.string.st_ClipboardScreen_empty_trash_title),
@@ -650,20 +686,39 @@ fun ClipboardScreen(
                         )
                     }
                     state.visibleEntries.isEmpty() -> {
-                        EmptyState(
-                            icon = Icons.Rounded.ContentPaste,
-                            title = stringResource(R.string.st_ClipboardScreen_empty_title),
-                            body = stringResource(R.string.st_ClipboardScreen_empty_body),
-                            actionLabel = stringResource(R.string.st_ClipboardScreen_action_capture_clipboard),
-                            onAction = { viewModel.pasteCurrent() },
-                            secondaryLabel = stringResource(R.string.st_ClipboardScreen_action_settings),
-                            onSecondaryAction = { showSettings = true },
-                        )
+                        if (state.filter != ClipboardFilter.ALL) {
+                            val label = filterLabel(state.filter)
+                            EmptyState(
+                                icon = Icons.Rounded.FilterList,
+                                title = stringResource(
+                                    R.string.st_ClipboardScreen_empty_filter_title,
+                                    label,
+                                ),
+                                body = stringResource(
+                                    R.string.st_ClipboardScreen_empty_filter_body,
+                                    label,
+                                ),
+                                actionLabel = stringResource(R.string.st_ClipboardScreen_action_show_all),
+                                onAction = { viewModel.setFilter(ClipboardFilter.ALL) },
+                            )
+                        } else {
+                            EmptyState(
+                                icon = Icons.Rounded.ContentPaste,
+                                title = stringResource(R.string.st_ClipboardScreen_empty_title),
+                                body = stringResource(R.string.st_ClipboardScreen_empty_body),
+                                actionLabel = stringResource(R.string.st_ClipboardScreen_action_capture_clipboard),
+                                onAction = { viewModel.pasteCurrent() },
+                                secondaryLabel = stringResource(R.string.st_ClipboardScreen_action_settings),
+                                onSecondaryAction = { showSettings = true },
+                            )
+                        }
                     }
                     else -> {
                         HistoryList(
                             state = state,
                             viewModel = viewModel,
+                            copyFlashEntryId = copyFlashEntryId,
+                            copyFlashToken = copyFlashToken,
                             onOpen = { entry ->
                                 if (state.isSelectionMode) {
                                     viewModel.toggleSelection(entry.id)
@@ -1083,6 +1138,8 @@ private fun RowScope.SelectionAction(
 private fun HistoryList(
     state: ClipboardUiState,
     viewModel: ClipboardViewModel,
+    copyFlashEntryId: Int?,
+    copyFlashToken: Int,
     onOpen: (ClipboardEntry) -> Unit,
     onLongPress: (ClipboardEntry) -> Unit,
     onCopy: (ClipboardEntry) -> Unit,
@@ -1121,6 +1178,7 @@ private fun HistoryList(
                     showTrash = state.showTrash,
                     aiEnabled = state.settings.aiEnabled,
                     aiRunning = entry.id in state.aiRunningIds,
+                    copiedFlashToken = if (entry.id == copyFlashEntryId) copyFlashToken else 0,
                     onOpen = { onOpen(entry) },
                     onLongPress = { onLongPress(entry) },
                     onCopy = { onCopy(entry) },
@@ -1156,6 +1214,7 @@ private fun ClipboardCard(
     showTrash: Boolean,
     aiEnabled: Boolean,
     aiRunning: Boolean,
+    copiedFlashToken: Int,
     onOpen: () -> Unit,
     onLongPress: () -> Unit,
     onCopy: () -> Unit,
@@ -1181,17 +1240,10 @@ private fun ClipboardCard(
         }
     }
 
-    // Immediate, per-row confirmation even when the global snackbar is hidden
-    // behind a sheet or dismissed by a fast repeat copy. The counter restarts
-    // the timer on every tap so rapid copies always show the full flash.
-    var copyFlashToken by remember(entry.id) { mutableStateOf(0) }
-    val copiedFlash = copyFlashToken > 0
-    LaunchedEffect(copyFlashToken) {
-        if (copyFlashToken > 0) {
-            delay(1_400)
-            copyFlashToken = 0
-        }
-    }
+    // Confirmed per-row copy feedback. The token only advances after the
+    // ViewModel reports a successful write, so a cancelled biometric unlock or
+    // a failed clipboard write never shows a false checkmark.
+    val copiedFlash = copiedFlashToken > 0
     val heroImage = attachments.firstOrNull { it.mimeType?.startsWith("image/") == true }
 
     val masked = (entry.isSensitive || entry.isLocked) && !revealed
@@ -1418,7 +1470,6 @@ private fun ClipboardCard(
                                 },
                                 onClick = {
                                     haptic.click()
-                                    copyFlashToken += 1
                                     onCopy()
                                 },
                             )
@@ -1818,16 +1869,26 @@ private fun ClipDetailSheet(
                         shape = RoundedCornerShape(16.dp),
                         color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     ) {
-                        SelectionContainer {
-                            Text(
-                                text = if (masked) viewModel.classifier.mask(entry.content) else entry.content,
-                                style = if (entry.type == ClipboardType.CODE) {
-                                    MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace)
-                                } else {
-                                    MaterialTheme.typography.bodyLarge
-                                },
-                                modifier = Modifier.padding(16.dp),
-                            )
+                        // A clip can hold up to 100k characters. Rendering it
+                        // unbounded makes the sheet unusable and forces the
+                        // whole paragraph into a single enormous item; cap the
+                        // visible area and let the content scroll instead.
+                        Box(
+                            modifier = Modifier
+                                .heightIn(max = 340.dp)
+                                .verticalScroll(rememberScrollState()),
+                        ) {
+                            SelectionContainer {
+                                Text(
+                                    text = if (masked) viewModel.classifier.mask(entry.content) else entry.content,
+                                    style = if (entry.type == ClipboardType.CODE) {
+                                        MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace)
+                                    } else {
+                                        MaterialTheme.typography.bodyLarge
+                                    },
+                                    modifier = Modifier.padding(16.dp),
+                                )
+                            }
                         }
                     }
                 }

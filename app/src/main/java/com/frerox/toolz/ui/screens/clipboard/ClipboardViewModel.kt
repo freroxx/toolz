@@ -30,6 +30,7 @@ import com.frerox.toolz.data.clipboard.ClipboardDao
 import com.frerox.toolz.data.clipboard.ClipboardEntry
 import com.frerox.toolz.data.clipboard.ClipboardFilter
 import com.frerox.toolz.data.clipboard.ClipboardGate
+import com.frerox.toolz.data.clipboard.ClipboardHashing
 import com.frerox.toolz.data.clipboard.ClipboardPayload
 import com.frerox.toolz.data.clipboard.ClipboardPayloadItem
 import com.frerox.toolz.data.clipboard.ClipboardRetentionManager
@@ -170,6 +171,8 @@ sealed interface ClipboardEvent {
         val type: ClipboardMessage,
         val count: Int = 0,
         val detail: String? = null,
+        /** Clip that the event refers to, when the UI should highlight a row. */
+        val entryId: Int? = null,
     ) : ClipboardEvent
 
     data class Share(val intent: Intent) : ClipboardEvent
@@ -346,6 +349,20 @@ class ClipboardViewModel @Inject constructor(
     private val capturesInFlight = AtomicInteger(0)
 
     /**
+     * Timestamp of the most recent system clip this ViewModel captured (or
+     * deliberately skipped). A screen resume re-reads the clipboard; without
+     * this guard every resume would send the unchanged clip through capture
+     * again, BUMP it to the top and silently extend its retention even though
+     * the user copied nothing.
+     */
+    @Volatile
+    private var lastHandledClipTimestamp = 0L
+
+    /** Fingerprint fallback for Shizuku reads, which have no clip timestamp. */
+    @Volatile
+    private var lastHandledClipFingerprint: String? = null
+
+    /**
      * Latest monitoring preference, tracked separately from the UI state so
      * the listener can gate itself even before the history screen subscribes.
      */
@@ -486,6 +503,9 @@ class ClipboardViewModel @Inject constructor(
         }
     }
 
+    private fun serviceOwnsCapture(): Boolean =
+        ClipboardService.isRunning && ClipboardService.captureReady
+
     /**
      * The screen must run its own listener whenever the service is not
      * actually running, even if the device reports background capability.
@@ -494,9 +514,7 @@ class ClipboardViewModel @Inject constructor(
      * Toolz would otherwise be lost.
      */
     private fun shouldHandleForegroundCapture(): Boolean =
-        !ClipboardService.isRunning ||
-            !ClipboardService.captureReady ||
-            !_gateInfo.value.capabilities.backgroundCapable
+        !serviceOwnsCapture() || !_gateInfo.value.capabilities.backgroundCapable
 
     /**
      * Captures clipboard changes that happen while Toolz is in the foreground
@@ -529,6 +547,13 @@ class ClipboardViewModel @Inject constructor(
             false
         }
         val result = captureProcessor.process(payload, excludeSensitive)
+        // Remember this clip so a later screen resume does not treat the same
+        // clipboard content as a brand-new copy and BUMP it again.
+        lastHandledClipTimestamp = maxOf(
+            lastHandledClipTimestamp,
+            payload.clipTimestamp ?: 0L,
+        )
+        lastHandledClipFingerprint = ClipboardHashing.payloadFingerprint(payload)
         if (result.outcome == ClipboardCaptureProcessor.Outcome.INSERTED) {
             aiProcessor.processQueued(1)
         }
@@ -613,7 +638,13 @@ class ClipboardViewModel @Inject constructor(
     fun onScreenResumed() {
         refreshGate()
         refreshStats()
-        refreshClipboard(notify = false)
+        // When the background service owns capture it has already recorded
+        // every clipboard change, including while another app was foreground.
+        // Re-reading on resume would only BUMP the unchanged clip and extend
+        // its retention. The screen listener still owns capture when the
+        // service is absent or cannot read the clipboard, so refresh then to
+        // pick up copies made while Toolz was backgrounded.
+        if (!serviceOwnsCapture()) refreshClipboard(notify = false)
         // Screenshots never reach the system clipboard on most ROMs. Scan
         // MediaStore when the screen returns so a capture taken while the
         // foreground service was stopped still lands in history.
@@ -773,7 +804,16 @@ class ClipboardViewModel @Inject constructor(
     }
 
     fun setShowTrash(show: Boolean) {
-        _extras.update { it.copy(showTrash = show, selection = emptySet()) }
+        // Trash is a separate mode: a leftover search or filter would hide
+        // trashed clips and show a misleading "No matches" state.
+        _extras.update {
+            it.copy(
+                showTrash = show,
+                selection = emptySet(),
+                query = "",
+                filter = ClipboardFilter.ALL,
+            )
+        }
     }
 
     fun toggleSelection(id: Int) {
@@ -804,20 +844,35 @@ class ClipboardViewModel @Inject constructor(
     // ── Mutations ─────────────────────────────────────────────────────────
 
     fun togglePin(entry: ClipboardEntry) {
-        val pinned = !entry.isPinned
         if (clipboardSandboxActive) {
             FakeClipboardSandbox.togglePin(entry.id)
-        } else {
+            // Read the sandbox value back so the toast always matches what is
+            // actually rendered, even for a rapid double tap.
+            val pinned = FakeClipboardSandbox.entries().value
+                .firstOrNull { it.id == entry.id }?.isPinned == true
             viewModelScope.launch {
-                clipboardDao.setPinnedWithExpiry(
-                    id = entry.id,
-                    pinned = pinned,
-                    retentionMs = retentionMsOrZero(),
+                _events.send(
+                    ClipboardEvent.Message(
+                        if (pinned) ClipboardMessage.PINNED else ClipboardMessage.UNPINNED,
+                    ),
                 )
-                refreshStats()
             }
+            return
         }
         viewModelScope.launch {
+            // Flip the freshly read row, not the snapshot the menu was built
+            // from. Two fast taps would otherwise both compute the same target
+            // and collapse into a single toggle (the row ends up pinned when
+            // the user expects it unpinned). Reading first also avoids showing
+            // a success toast when the clip was deleted in the meantime.
+            val current = clipboardDao.getEntryById(entry.id) ?: return@launch
+            val pinned = !current.isPinned
+            clipboardDao.setPinnedWithExpiry(
+                id = current.id,
+                pinned = pinned,
+                retentionMs = retentionMsOrZero(),
+            )
+            refreshStats()
             _events.send(
                 ClipboardEvent.Message(
                     if (pinned) ClipboardMessage.PINNED else ClipboardMessage.UNPINNED,
@@ -1270,12 +1325,34 @@ class ClipboardViewModel @Inject constructor(
                     // never run the capture pipeline over them again.
                     ClipboardSelfCopyGuard.consume(payload) -> Unit
                     else -> {
-                        val result = captureProcessor.process(payload, exclude)
-                        // Silent refreshes (screen resume, popup open) must not
-                        // produce snackbars/toasts for an unchanged clipboard.
-                        if (notify) emitOutcome(result.outcome)
-                        if (result.outcome == ClipboardCaptureProcessor.Outcome.INSERTED) {
-                            aiProcessor.processQueued(1)
+                        val fingerprint = ClipboardHashing.payloadFingerprint(payload)
+                        val clipTimestamp = payload.clipTimestamp
+                        // A silent refresh (screen resume) re-reads whatever is
+                        // already on the clipboard. If it is the clip we have
+                        // already handled, capture again would only BUMP it to
+                        // the top and extend its retention. Every real copy
+                        // produces a fresh ClipDescription timestamp, so a
+                        // repeat copy of identical text is still processed.
+                        val alreadyHandled = !notify && (
+                            if (clipTimestamp != null) {
+                                clipTimestamp <= lastHandledClipTimestamp
+                            } else {
+                                fingerprint == lastHandledClipFingerprint
+                            }
+                            )
+                        if (!alreadyHandled) {
+                            val result = captureProcessor.process(payload, exclude)
+                            // Silent refreshes must not produce snackbars for
+                            // an unchanged clipboard.
+                            if (notify) emitOutcome(result.outcome)
+                            if (result.outcome == ClipboardCaptureProcessor.Outcome.INSERTED) {
+                                aiProcessor.processQueued(1)
+                            }
+                            lastHandledClipTimestamp = maxOf(
+                                lastHandledClipTimestamp,
+                                clipTimestamp ?: 0L,
+                            )
+                            lastHandledClipFingerprint = fingerprint
                         }
                     }
                 }
@@ -1358,6 +1435,7 @@ class ClipboardViewModel @Inject constructor(
             source = source,
             isSensitiveExtra = description?.extras
                 ?.getBoolean("android.content.extra.IS_SENSITIVE", false) ?: false,
+            clipTimestamp = description?.timestamp,
         )
     }
 
@@ -1407,6 +1485,7 @@ class ClipboardViewModel @Inject constructor(
             _events.send(
                 ClipboardEvent.Message(
                     if (copied) ClipboardMessage.COPIED else ClipboardMessage.FAILED,
+                    entryId = entry.id.takeIf { copied },
                 ),
             )
         }

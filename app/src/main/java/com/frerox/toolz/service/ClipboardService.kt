@@ -32,6 +32,7 @@ import com.frerox.toolz.R
 import com.frerox.toolz.data.clipboard.ClipboardAiProcessor
 import com.frerox.toolz.data.clipboard.ClipboardCaptureProcessor
 import com.frerox.toolz.data.clipboard.ClipboardGate
+import com.frerox.toolz.data.clipboard.ClipboardHashing
 import com.frerox.toolz.data.clipboard.ClipboardPayload
 import com.frerox.toolz.data.clipboard.ClipboardPayloadItem
 import com.frerox.toolz.data.clipboard.ClipboardScreenshotIngestor
@@ -53,7 +54,6 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import java.security.MessageDigest
 import javax.inject.Inject
 
 private const val TAG = "ClipboardService"
@@ -402,6 +402,7 @@ class ClipboardService : Service() {
                 source = source,
                 isSensitiveExtra = description?.extras
                     ?.getBoolean("android.content.extra.IS_SENSITIVE", false) ?: false,
+                clipTimestamp = description?.timestamp,
             )
         } catch (e: Exception) {
             Log.w(TAG, "Standard clipboard read denied: ${e.message}")
@@ -409,35 +410,8 @@ class ClipboardService : Service() {
         }
     }
 
-    private fun fingerprint(payload: ClipboardPayload): String = sha256(
-        buildString {
-            // Sensitivity and MIME affect both the capture decision and the
-            // stored classification, so they are part of the identity. Without
-            // them the same text re-copied as sensitive could be skipped.
-            append(if (payload.isSensitiveExtra) "sensitive" else "normal")
-            append('\u0002')
-            append(payload.label.orEmpty())
-            append('\u0002')
-            payload.items.forEach { item ->
-                append(item.text.orEmpty())
-                append('\u0000')
-                append(item.html.orEmpty())
-                append('\u0000')
-                append(item.uri?.toString().orEmpty())
-                append('\u0000')
-                append(item.mimeType.orEmpty())
-                append('\u0001')
-            }
-        },
-    )
-
-    private fun sha256(value: String): String = try {
-        MessageDigest.getInstance("SHA-256")
-            .digest(value.toByteArray())
-            .joinToString("") { "%02x".format(it) }
-    } catch (_: Exception) {
-        value.hashCode().toString()
-    }
+    private fun fingerprint(payload: ClipboardPayload): String =
+        ClipboardHashing.payloadFingerprint(payload)
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_CHECK_CLIPBOARD) manualCaptureRequested = true
