@@ -4857,6 +4857,7 @@ La plupart des optimisations nécessitent Shizuku pour un accès shell privilég
     <string name="st_ClipboardScreen_badge_vault_desc">Correspond à une entrée du coffre-fort de mots de passe</string>
     <string name="st_ClipboardScreen_biometric_unavailable">Le déverrouillage biométrique n’est pas disponible sur cet appareil.</string>
     <string name="st_ClipboardScreen_capture_active_no_screenshots">Capture en arrière-plan active · Captures d’écran désactivées</string>
+    <string name="st_ClipboardScreen_capture_missing_permission">Captures d’écran activées · Autorisez l’accès aux photos</string>
     <string name="st_ClipboardScreen_capture_active_screenshots">Capture en arrière-plan active · Captures d’écran activées</string>
     <string name="st_ClipboardScreen_capture_paused">Capture en pause</string>
     <string name="st_ClipboardScreen_clear_body">Cela supprime tous les clips non épinglés. Les clips épinglés sont conservés.</string>
@@ -5004,6 +5005,9 @@ La plupart des optimisations nécessitent Shizuku pour un accès shell privilég
     <string name="st_ClipboardScreen_settings_retention_desc">Les clips sensibles et épinglés n’expirent jamais.</string>
     <string name="st_ClipboardScreen_settings_screenshots">Inclure les captures d’écran</string>
     <string name="st_ClipboardScreen_settings_screenshots_desc">Ajoute les nouvelles captures d’écran au Presse-papiers comme clips d’image.</string>
+    <string name="st_ClipboardScreen_settings_screenshots_permission">Autoriser l’accès aux photos</string>
+    <string name="st_ClipboardScreen_settings_screenshots_permission_desc">La capture d’écran lit les nouvelles images de votre galerie. Sans cette autorisation, aucune capture ne peut être ajoutée.</string>
+    <string name="st_ClipboardScreen_action_grant_media">Autoriser l’accès</string>
     <string name="st_ClipboardScreen_settings_sensitive">Exclure les clips sensibles</string>
     <string name="st_ClipboardScreen_settings_sensitive_desc">Ne pas enregistrer les clips qui ressemblent à des mots de passe, OTP ou cartes.</string>
     <string name="st_ClipboardScreen_settings_title">Paramètres du presse-papiers</string>
@@ -5029,6 +5033,7 @@ La plupart des optimisations nécessitent Shizuku pour un accès shell privilég
     <string name="st_ClipboardScreen_status_paused">En pause</string>
     <string name="st_ClipboardScreen_status_quota_used">%1$s sur %2$s</string>
     <string name="st_ClipboardScreen_status_screenshots">Capture d’écran</string>
+    <string name="st_ClipboardScreen_status_media_permission">Accès aux photos</string>
     <string name="st_ClipboardScreen_status_sensitive">Clips sensibles</string>
     <string name="st_ClipboardScreen_status_setup">Configuration requise</string>
     <string name="st_ClipboardScreen_status_shizuku_authorized">Autorisé</string>

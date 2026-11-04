@@ -14,6 +14,7 @@
 
 package com.frerox.toolz.ui.screens.clipboard
 
+import android.Manifest
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
@@ -25,6 +26,8 @@ import android.text.format.DateUtils
 import android.text.format.Formatter
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
@@ -189,6 +192,7 @@ import com.frerox.toolz.data.clipboard.ClipboardFilter
 import com.frerox.toolz.data.clipboard.ClipboardGate
 import com.frerox.toolz.data.clipboard.ClipboardSource
 import com.frerox.toolz.data.clipboard.ClipboardType
+import com.frerox.toolz.service.PurgeShotDetector
 import com.frerox.toolz.ui.components.ExpressiveCard
 import com.frerox.toolz.ui.components.ExpressiveFilterChip
 import com.frerox.toolz.ui.components.ExpressiveSearchField
@@ -198,6 +202,7 @@ import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.components.rememberToolzHapticFeedback
 import com.frerox.toolz.ui.theme.toolzBackground
 import com.frerox.toolz.util.security.BiometricPromptUtils
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -239,14 +244,44 @@ fun ClipboardScreen(
     }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    // Screenshot ingestion reads MediaStore. Without this runtime permission
+    // the observer and scan silently find nothing, so surface and request it
+    // instead of pretending screenshots are being captured.
+    var mediaPermissionGranted by remember {
+        mutableStateOf(PurgeShotDetector.hasMediaPermission(context))
+    }
+    val mediaPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        mediaPermissionGranted = granted
+    }
+    fun requestMediaPermission() {
+        val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Manifest.permission.READ_MEDIA_IMAGES
+        } else {
+            Manifest.permission.READ_EXTERNAL_STORAGE
+        }
+        mediaPermissionLauncher.launch(permission)
+    }
+    DisposableEffect(lifecycleOwner, context) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                mediaPermissionGranted = PurgeShotDetector.hasMediaPermission(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     val snackbarHostState = remember { SnackbarHostState() }
     // Modal bottom sheets live in their own window above the Scaffold, so the
     // regular snackbar host is hidden behind the scrim. Events raised while a
     // sheet is open are shown by a second host rendered inside that sheet.
     val sheetSnackbarHostState = remember { SnackbarHostState() }
-    // Conflated queue: a burst of copy/delete taps shows the newest message
-    // immediately instead of stacking snackbars that appear seconds late.
-    val snackbarQueue = remember { Channel<TransientMessage>(Channel.CONFLATED) }
+    // Unbounded queue processed by a single consumer below. It must not be
+    // conflated: an undoable delete prompt could be overwritten by an ordinary
+    // "copied" message before the consumer ever sees it, silently losing the
+    // only way to undo. The consumer itself cancels stale messages.
+    val snackbarQueue = remember { Channel<TransientMessage>(Channel.UNLIMITED) }
     val haptic = rememberToolzHapticFeedback()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     // Resolve localized labels through composition so they stay correct across
@@ -335,28 +370,45 @@ fun ClipboardScreen(
         }
     }
 
-    // Single consumer for feedback. It runs outside the event collector so
-    // showing a snackbar never blocks processing the next clipboard event, and
-    // it always dismisses whatever is visible so the newest message wins.
+    // Single consumer for feedback. Showing a snackbar suspends for its whole
+    // timeout, so each message is shown in its own child job: a newer message
+    // cancels the previous one instead of waiting seconds behind it. A visible
+    // delete/undo prompt is never stolen by ordinary feedback, so the undo
+    // action stays reachable.
     LaunchedEffect(Unit) {
+        var active: Job? = null
+        var activeUndoable = false
         for (message in snackbarQueue) {
+            if (activeUndoable && !message.undoable) continue
             snackbarHostState.currentSnackbarData?.dismiss()
             sheetSnackbarHostState.currentSnackbarData?.dismiss()
+            active?.cancel()
+            activeUndoable = message.undoable
             val host = if (anySheetOpenState) sheetSnackbarHostState else snackbarHostState
-            val result = host.showSnackbar(
-                message = message.text,
-                actionLabel = if (message.undoable) undoLabelState else null,
-                withDismissAction = !message.undoable,
-                duration = if (message.undoable) SnackbarDuration.Long else SnackbarDuration.Short,
-            )
-            if (result == SnackbarResult.ActionPerformed && message.undoable) {
-                viewModel.undoDelete()
+            active = launch {
+                val result = host.showSnackbar(
+                    message = message.text,
+                    actionLabel = if (message.undoable) undoLabelState else null,
+                    withDismissAction = !message.undoable,
+                    duration = if (message.undoable) SnackbarDuration.Long else SnackbarDuration.Short,
+                )
+                if (result == SnackbarResult.ActionPerformed && message.undoable) {
+                    viewModel.undoDelete()
+                }
+                if (message.undoable) activeUndoable = false
             }
         }
     }
 
     fun runWithUnlock(entry: ClipboardEntry, action: () -> Unit) {
         if (!entry.isLocked) {
+            action()
+            return
+        }
+        // The clip was already unlocked in this session. Re-prompting for
+        // every follow-up action (copy, share, open attachment, tool) would
+        // make a revealed clip feel broken.
+        if (entry.id in state.revealedIds) {
             action()
             return
         }
@@ -646,6 +698,8 @@ fun ClipboardScreen(
 
             CaptureStatusStrip(
                 state = state,
+                mediaPermissionGranted = mediaPermissionGranted,
+                onRequestMediaPermission = ::requestMediaPermission,
                 onClick = { showStatus = true },
             )
 
@@ -770,6 +824,8 @@ fun ClipboardScreen(
             state = state,
             viewModel = viewModel,
             feedbackHostState = sheetSnackbarHostState,
+            mediaPermissionGranted = mediaPermissionGranted,
+            onRequestMediaPermission = ::requestMediaPermission,
             onDismiss = { showSettings = false },
             onShowStatus = {
                 showSettings = false
@@ -784,6 +840,8 @@ fun ClipboardScreen(
             onDismiss = { showStatus = false },
             viewModel = viewModel,
             feedbackHostState = sheetSnackbarHostState,
+            mediaPermissionGranted = mediaPermissionGranted,
+            onRequestMediaPermission = ::requestMediaPermission,
             onOpenAppDetails = {
                 runCatching { context.startActivity(viewModel.appDetailsIntent()) }
             },
@@ -807,11 +865,11 @@ fun ClipboardScreen(
             onUnlock = { runWithUnlock(entry) { viewModel.markRevealed(entry.id) } },
             onCopy = { runWithUnlock(entry) { viewModel.copyEntry(entry) } },
             onShare = { runWithUnlock(entry) { viewModel.shareEntry(entry) } },
-            onOpenNotepad = { toolText?.let(onOpenNotepad) },
-            onCreateTask = { toolText?.let(onCreateTask) },
-            onShowQr = { toolText?.let(onShowQr) },
-            onEncrypt = { toolText?.let(onEncrypt) },
-            onOpenLink = { toolText?.let { openLink(context, it) } },
+            onOpenNotepad = { toolText?.let { text -> runWithUnlock(entry) { onOpenNotepad(text) } } },
+            onCreateTask = { toolText?.let { text -> runWithUnlock(entry) { onCreateTask(text) } } },
+            onShowQr = { toolText?.let { text -> runWithUnlock(entry) { onShowQr(text) } } },
+            onEncrypt = { toolText?.let { text -> runWithUnlock(entry) { onEncrypt(text) } } },
+            onOpenLink = { toolText?.let { text -> runWithUnlock(entry) { openLink(context, text) } } },
             onToggleLock = {
                 if (entry.isLocked) {
                     runWithUnlock(entry) { viewModel.setLocked(entry, false) }
@@ -820,13 +878,15 @@ fun ClipboardScreen(
                 }
             },
             onOpenAttachment = { attachment ->
-                scope.launch {
-                    val intent = viewModel.openAttachment(attachment)
-                    if (intent == null) {
-                        showTransient(attachmentFailedLabel)
-                    } else {
-                        runCatching { context.startActivity(intent) }.onFailure {
-                            showTransient(openFailedLabel)
+                runWithUnlock(entry) {
+                    scope.launch {
+                        val intent = viewModel.openAttachment(attachment)
+                        if (intent == null) {
+                            showTransient(attachmentFailedLabel)
+                        } else {
+                            runCatching { context.startActivity(intent) }.onFailure {
+                                showTransient(openFailedLabel)
+                            }
                         }
                     }
                 }
@@ -871,6 +931,8 @@ fun ClipboardScreen(
 @Composable
 private fun CaptureStatusStrip(
     state: ClipboardUiState,
+    mediaPermissionGranted: Boolean,
+    onRequestMediaPermission: () -> Unit,
     onClick: () -> Unit,
 ) {
     if (!state.loaded || state.showTrash || state.isSelectionMode ||
@@ -882,21 +944,32 @@ private fun CaptureStatusStrip(
     val paused = !state.settings.monitoring || status == ClipboardGate.Status.PAUSED
     val active = status == ClipboardGate.Status.ACTIVE_SHIZUKU ||
         status == ClipboardGate.Status.ACTIVE_APP_OP
-    if (!paused && !active) return
+    val missingMediaPermission =
+        state.settings.captureScreenshots && !mediaPermissionGranted
+    // A healthy capture pipeline with screenshots enabled and permitted needs
+    // no banner; it would be a permanent strip of noise above the history.
+    // Only surface states the user can act on.
+    if (!paused && !missingMediaPermission &&
+        !(active && !state.settings.captureScreenshots)
+    ) {
+        return
+    }
 
     val label = when {
         paused -> stringResource(R.string.st_ClipboardScreen_capture_paused)
-        state.settings.captureScreenshots ->
-            stringResource(R.string.st_ClipboardScreen_capture_active_screenshots)
-        else -> stringResource(R.string.st_ClipboardScreen_capture_active_no_screenshots)
+        !state.settings.captureScreenshots ->
+            stringResource(R.string.st_ClipboardScreen_capture_active_no_screenshots)
+        else -> stringResource(R.string.st_ClipboardScreen_capture_missing_permission)
     }
     val tint = if (paused) {
         MaterialTheme.colorScheme.tertiary
+    } else if (missingMediaPermission) {
+        MaterialTheme.colorScheme.error
     } else {
         MaterialTheme.colorScheme.primary
     }
     Surface(
-        onClick = onClick,
+        onClick = if (missingMediaPermission) onRequestMediaPermission else onClick,
         shape = CircleShape,
         color = tint.copy(alpha = 0.1f),
         modifier = Modifier
@@ -909,7 +982,9 @@ private fun CaptureStatusStrip(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
-                if (paused) Icons.Rounded.Info else Icons.Rounded.CheckCircle,
+                if (missingMediaPermission) Icons.Rounded.WarningAmber
+                else if (paused) Icons.Rounded.Info
+                else Icons.Rounded.CheckCircle,
                 contentDescription = null,
                 modifier = Modifier.size(16.dp),
                 tint = tint,
@@ -2450,6 +2525,8 @@ private fun SettingsSheet(
     state: ClipboardUiState,
     viewModel: ClipboardViewModel,
     feedbackHostState: SnackbarHostState,
+    mediaPermissionGranted: Boolean,
+    onRequestMediaPermission: () -> Unit,
     onDismiss: () -> Unit,
     onShowStatus: () -> Unit,
 ) {
@@ -2488,6 +2565,16 @@ private fun SettingsSheet(
                     enabled = state.settings.monitoring,
                     onCheckedChange = viewModel::setCaptureScreenshots,
                 )
+            }
+            if (state.settings.captureScreenshots && !mediaPermissionGranted) {
+                item {
+                    PermissionRow(
+                        title = stringResource(R.string.st_ClipboardScreen_settings_screenshots_permission),
+                        body = stringResource(R.string.st_ClipboardScreen_settings_screenshots_permission_desc),
+                        action = stringResource(R.string.st_ClipboardScreen_action_grant_media),
+                        onAction = onRequestMediaPermission,
+                    )
+                }
             }
             item {
                 SettingSwitchRow(
@@ -2647,6 +2734,44 @@ private fun SettingSwitchRow(
 }
 
 @Composable
+private fun PermissionRow(
+    title: String,
+    body: String,
+    action: String,
+    onAction: () -> Unit,
+) {
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Icon(
+                    Icons.Rounded.WarningAmber,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(20.dp),
+                )
+                Column(Modifier.weight(1f)) {
+                    Text(text = title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = body,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            FilledTonalButton(onClick = onAction, modifier = Modifier.fillMaxWidth()) {
+                Text(action)
+            }
+        }
+    }
+}
+
+@Composable
 private fun StepperRow(
     title: String,
     value: String,
@@ -2703,6 +2828,8 @@ private fun StatusSheet(
     onDismiss: () -> Unit,
     viewModel: ClipboardViewModel,
     feedbackHostState: SnackbarHostState,
+    mediaPermissionGranted: Boolean,
+    onRequestMediaPermission: () -> Unit,
     onOpenAppDetails: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -2753,6 +2880,12 @@ private fun StatusSheet(
                 stringResource(R.string.st_ClipboardScreen_status_screenshots),
                 state.settings.captureScreenshots,
             )
+            if (state.settings.captureScreenshots) {
+                StatusRow(
+                    stringResource(R.string.st_ClipboardScreen_status_media_permission),
+                    mediaPermissionGranted,
+                )
+            }
             HorizontalDivider()
             StatusRow(
                 stringResource(R.string.st_ClipboardScreen_status_active_clips),

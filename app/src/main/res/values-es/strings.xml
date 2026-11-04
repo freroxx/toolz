@@ -4880,6 +4880,7 @@
     <string name="st_ClipboardScreen_badge_vault_desc">Coincide con una entrada de la caja fuerte de contraseñas</string>
     <string name="st_ClipboardScreen_biometric_unavailable">El desbloqueo biométrico no está disponible en este dispositivo.</string>
     <string name="st_ClipboardScreen_capture_active_no_screenshots">Captura en segundo plano activa · Capturas de pantalla desactivadas</string>
+    <string name="st_ClipboardScreen_capture_missing_permission">Capturas de pantalla activas · Permite el acceso a fotos</string>
     <string name="st_ClipboardScreen_capture_active_screenshots">Captura en segundo plano activa · Capturas de pantalla activadas</string>
     <string name="st_ClipboardScreen_capture_paused">Captura en pausa</string>
     <string name="st_ClipboardScreen_clear_body">Esto elimina todos los clips no fijados. Los clips fijados se conservan.</string>
@@ -5027,6 +5028,9 @@
     <string name="st_ClipboardScreen_settings_retention_desc">Los clips sensibles y fijados nunca caducan.</string>
     <string name="st_ClipboardScreen_settings_screenshots">Incluir capturas de pantalla</string>
     <string name="st_ClipboardScreen_settings_screenshots_desc">Añade las capturas nuevas al Portapapeles como clips de imagen.</string>
+    <string name="st_ClipboardScreen_settings_screenshots_permission">Permitir acceso a fotos</string>
+    <string name="st_ClipboardScreen_settings_screenshots_permission_desc">La captura de pantalla lee las imágenes nuevas de tu galería. Sin este permiso no se pueden añadir capturas.</string>
+    <string name="st_ClipboardScreen_action_grant_media">Permitir acceso</string>
     <string name="st_ClipboardScreen_settings_sensitive">Excluir clips sensibles</string>
     <string name="st_ClipboardScreen_settings_sensitive_desc">No guardar clips que parezcan contraseñas, OTP o tarjetas.</string>
     <string name="st_ClipboardScreen_settings_title">Ajustes del portapapeles</string>
@@ -5052,6 +5056,7 @@
     <string name="st_ClipboardScreen_status_paused">En pausa</string>
     <string name="st_ClipboardScreen_status_quota_used">%1$s de %2$s</string>
     <string name="st_ClipboardScreen_status_screenshots">Captura de pantalla</string>
+    <string name="st_ClipboardScreen_status_media_permission">Acceso a fotos</string>
     <string name="st_ClipboardScreen_status_sensitive">Clips sensibles</string>
     <string name="st_ClipboardScreen_status_setup">Configuración necesaria</string>
     <string name="st_ClipboardScreen_status_shizuku_authorized">Autorizado</string>

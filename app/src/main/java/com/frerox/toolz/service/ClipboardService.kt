@@ -88,8 +88,11 @@ class ClipboardService : Service() {
     @Volatile private var captureScreenshots = true
     @Volatile private var gateStatus: ClipboardGate.Status = ClipboardGate.Status.SETUP_REQUIRED
     @Volatile private var lastFingerprint: String? = null
+    /** Revision (ClipDescription timestamp) of the last handled clipboard write. */
+    @Volatile private var lastClipTimestamp = 0L
     private val captureMutex = Mutex()
     @Volatile private var foregroundStarted = false
+    @Volatile private var stopping = false
     @Volatile private var manualCaptureRequested = false
     @Volatile private var settingsCollectorStarted = false
     @Volatile private var lastScreenshotScanAt = 0L
@@ -134,6 +137,7 @@ class ClipboardService : Service() {
             // Release the capture-ownership claim immediately: the screen-level
             // listener must take over even before `onDestroy` runs.
             Log.w(TAG, "Could not start foreground service: ${e.message}")
+            stopping = true
             isRunning = false
             captureReady = false
             stopSelf()
@@ -228,7 +232,7 @@ class ClipboardService : Service() {
                     // Tell the screen-level listener whether the service can
                     // really read the clipboard now; `isRunning` alone is not
                     // enough while the gate is still SETUP_REQUIRED.
-                    publishCaptureState(running = true, ready = monitoring && backgroundCapable())
+                    publishCaptureState(monitoring && backgroundCapable())
                     updateNotification()
                     if (!monitoring || !backgroundCapable()) {
                         if (manualCaptureRequested) return@collect
@@ -298,14 +302,22 @@ class ClipboardService : Service() {
             // Shizuku only returns plain text, so the standard read is tried
             // first and Shizuku is the fallback when that read is denied.
             val payload = readSystemClipboard(source) ?: readShizukuPayload(source) ?: return
+            val fingerprint = fingerprint(payload)
             // Writes initiated from the clipboard history already bumped the
             // entry through markCopied; capturing them again would double-bump
             // and bulk copy would insert its synthesized aggregate as a clip.
             if (ClipboardSelfCopyGuard.consume(payload)) {
-                lastFingerprint = fingerprint(payload)
+                // Remember the revision even when the write is skipped: the
+                // guard token is single-use, so a duplicate listener callback
+                // (or the next poll) would otherwise treat Toolz's own copy as
+                // a brand-new clip.
+                rememberHandled(payload.clipTimestamp, fingerprint)
                 return
             }
-            val fingerprint = fingerprint(payload)
+            // Duplicate listener callbacks for one write share the same
+            // ClipDescription timestamp; a genuine repeat copy gets a fresh
+            // one. Drop only true duplicate callbacks.
+            if (isDuplicateCallback(payload.clipTimestamp, fingerprint)) return
             // A manual/listener capture must retry even when the fingerprint
             // matches the last capture. The previous attempt may have been
             // ignored by the sensitivity filter or rejected by a quota.
@@ -314,7 +326,7 @@ class ClipboardService : Service() {
             // settings collector has delivered its first value, and a stale
             // default would store sensitive clips the user asked to discard.
             val result = captureProcessor.process(payload, currentExcludeSensitive())
-            handleOutcome(result.outcome, fingerprint)
+            handleOutcome(result.outcome, fingerprint, payload.clipTimestamp)
         } catch (e: Exception) {
             Log.w(TAG, "Clipboard capture failed: ${e.message}")
         } finally {
@@ -357,9 +369,10 @@ class ClipboardService : Service() {
     private suspend fun handleOutcome(
         outcome: ClipboardCaptureProcessor.Outcome,
         fingerprint: String,
+        clipTimestamp: Long? = null,
     ) {
         if (outcome == ClipboardCaptureProcessor.Outcome.FAILED) return
-        lastFingerprint = fingerprint
+        rememberHandled(clipTimestamp, fingerprint)
         // The capture processor already enforces retention after inserting a
         // clip. Running it again here doubled the DB work on every capture.
         if (outcome == ClipboardCaptureProcessor.Outcome.INSERTED ||
@@ -368,6 +381,19 @@ class ClipboardService : Service() {
             if (aiProcessor.canAutoProcess()) aiProcessor.processQueued(1)
         }
     }
+
+    private fun rememberHandled(timestamp: Long?, fingerprint: String) {
+        lastFingerprint = fingerprint
+        if (timestamp != null) {
+            lastClipTimestamp = maxOf(lastClipTimestamp, timestamp)
+        }
+    }
+
+    /** True when this is a second listener callback for an already handled write. */
+    private fun isDuplicateCallback(timestamp: Long?, fingerprint: String): Boolean =
+        timestamp != null &&
+            timestamp == lastClipTimestamp &&
+            fingerprint == lastFingerprint
 
     private fun readSystemClipboard(source: String): ClipboardPayload? {
         return try {
@@ -414,6 +440,14 @@ class ClipboardService : Service() {
         ClipboardHashing.payloadFingerprint(payload)
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // `onCreate` returns early when it could not enter the foreground, and
+        // `onStartCommand` is still delivered afterwards. Processing an action
+        // against a half-initialized service would capture with a null
+        // ClipboardManager and republish a dead capture-ownership claim.
+        if (stopping || !foregroundStarted) {
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
         if (intent?.action == ACTION_CHECK_CLIPBOARD) manualCaptureRequested = true
         startSettingsCollector()
         when (intent?.action) {
@@ -475,21 +509,43 @@ class ClipboardService : Service() {
     }
 
     private suspend fun refreshGate() {
-        val monitoring = settingsRepository.clipboardMonitoringEnabled.first()
-        val seen = settingsRepository.clipboardOnboardingSeen.first()
-        excludeSensitive = settingsRepository.clipboardExcludeSensitive.first()
-        captureScreenshots = settingsRepository.clipboardCaptureScreenshots.first()
-        monitoringEnabled = monitoring
-        onboardingSeen = seen
-        gateStatus = ClipboardGate.evaluate(this, monitoring, seen)
-        publishCaptureState(running = true, ready = monitoring && backgroundCapable())
-        updateNotification()
-        if (!manualCaptureRequested && (!monitoring || !backgroundCapable())) stopSelf()
+        try {
+            val monitoring = settingsRepository.clipboardMonitoringEnabled.first()
+            val seen = settingsRepository.clipboardOnboardingSeen.first()
+            excludeSensitive = settingsRepository.clipboardExcludeSensitive.first()
+            captureScreenshots = settingsRepository.clipboardCaptureScreenshots.first()
+            monitoringEnabled = monitoring
+            onboardingSeen = seen
+            gateStatus = ClipboardGate.evaluate(this, monitoring, seen)
+            publishCaptureState(monitoring && backgroundCapable())
+            updateNotification()
+            if (!manualCaptureRequested && (!monitoring || !backgroundCapable())) stopSelf()
+        } catch (e: Exception) {
+            // A transient DataStore failure must not crash this coroutine (or
+            // leave the screen believing capture is ready after a stop).
+            Log.w(TAG, "Could not refresh clipboard gate: ${e.message}")
+        }
+    }
+
+    /**
+     * Publishes capture ownership only while this instance is actually alive.
+     *
+     * A settings emission or the `finally` of a manual capture can resume
+     * after [onDestroy] (or after the foreground start already failed). Blindly
+     * writing `isRunning = true` there leaves the screen believing a dead
+     * service owns capture, so it stops running its own listener and every copy
+     * is silently dropped until the process restarts.
+     */
+    private fun publishCaptureState(ready: Boolean) {
+        if (stopping || !foregroundStarted) return
+        isRunning = true
+        captureReady = ready
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        stopping = true
         isRunning = false
         captureReady = false
         clipboardManager?.removePrimaryClipChangedListener(clipListener)
@@ -609,11 +665,6 @@ class ClipboardService : Service() {
         @Volatile
         var captureReady: Boolean = false
             private set
-
-        private fun publishCaptureState(running: Boolean, ready: Boolean) {
-            isRunning = running
-            captureReady = ready
-        }
 
         const val ACTION_CHECK_CLIPBOARD = "com.frerox.toolz.action.CHECK_CLIPBOARD"
         const val ACTION_PAUSE = "com.frerox.toolz.action.CLIPBOARD_PAUSE"

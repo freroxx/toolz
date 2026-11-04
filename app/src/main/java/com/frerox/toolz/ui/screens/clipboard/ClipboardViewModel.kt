@@ -536,11 +536,26 @@ class ClipboardViewModel @Inject constructor(
         } ?: return
         if (clip.itemCount == 0) return
 
+        val clipTimestamp = clip.description?.timestamp
         // Copying a clip from history must only bump it (done by copyEntry /
         // copySelected), never run through the capture pipeline again.
-        if (ClipboardSelfCopyGuard.consume(clip)) return
+        if (ClipboardSelfCopyGuard.consume(clip)) {
+            // The guard token is single-use, but some ROMs deliver
+            // onPrimaryClipChanged twice for the same write and a later screen
+            // resume re-reads the clipboard. Remember the revision even when we
+            // skip our own copy; otherwise the second callback (or the resume)
+            // would capture Toolz's write as a brand-new clip and, for bulk
+            // copy, insert the synthesized aggregate into history.
+            rememberHandledClip(clipTimestamp, null)
+            return
+        }
 
         val payload = payloadFromClip(clip, ClipboardSource.LISTENER) ?: return
+        val fingerprint = ClipboardHashing.payloadFingerprint(payload)
+        // Duplicate listener callbacks for one write share the same
+        // ClipDescription timestamp. A genuine repeat copy always produces a
+        // fresh timestamp, so this only drops true duplicates.
+        if (isDuplicateCallback(payload.clipTimestamp, fingerprint)) return
         val excludeSensitive = try {
             settingsState.first().excludeSensitive
         } catch (_: Exception) {
@@ -549,16 +564,30 @@ class ClipboardViewModel @Inject constructor(
         val result = captureProcessor.process(payload, excludeSensitive)
         // Remember this clip so a later screen resume does not treat the same
         // clipboard content as a brand-new copy and BUMP it again.
-        lastHandledClipTimestamp = maxOf(
-            lastHandledClipTimestamp,
-            payload.clipTimestamp ?: 0L,
-        )
-        lastHandledClipFingerprint = ClipboardHashing.payloadFingerprint(payload)
+        rememberHandledClip(payload.clipTimestamp, fingerprint)
         if (result.outcome == ClipboardCaptureProcessor.Outcome.INSERTED) {
             aiProcessor.processQueued(1)
         }
         refreshStats()
     }
+
+    /**
+     * Remembers the newest clipboard revision handled by the foreground
+     * listener. Fingerprint stays null when only the self-copy guard skipped
+     * the write, so the silent-resume path still dedupes by timestamp.
+     */
+    private fun rememberHandledClip(timestamp: Long?, fingerprint: String?) {
+        if (timestamp != null) {
+            lastHandledClipTimestamp = maxOf(lastHandledClipTimestamp, timestamp)
+        }
+        if (fingerprint != null) lastHandledClipFingerprint = fingerprint
+    }
+
+    /** True when this is a second listener callback for an already handled write. */
+    private fun isDuplicateCallback(timestamp: Long?, fingerprint: String): Boolean =
+        timestamp != null &&
+            timestamp == lastHandledClipTimestamp &&
+            fingerprint == lastHandledClipFingerprint
 
     override fun onCleared() {
         try {
@@ -1305,9 +1334,15 @@ class ClipboardViewModel @Inject constructor(
         // Silent refreshes are coalesced while a capture is already running.
         // An explicit paste waits its turn: dropping it would leave the popup
         // spinner spinning forever because no result event would ever arrive.
-        if (!notify && !manualCaptureMutex.tryLock()) return
         viewModelScope.launch {
-            if (notify) manualCaptureMutex.lock()
+            if (notify) {
+                manualCaptureMutex.lock()
+            } else if (!manualCaptureMutex.tryLock()) {
+                // Acquire inside the coroutine: a launch cancelled before it
+                // starts would otherwise leave the caller-held lock stuck and
+                // block every future paste for the rest of the session.
+                return@launch
+            }
             beginCapture()
             try {
                 val exclude = settingsState.first().excludeSensitive
@@ -1322,8 +1357,12 @@ class ClipboardViewModel @Inject constructor(
                     }
                     // Toolz wrote this clip itself (history copy / bulk copy).
                     // `copyEntry`/`copySelected` already bumped those rows, so
-                    // never run the capture pipeline over them again.
-                    ClipboardSelfCopyGuard.consume(payload) -> Unit
+                    // never run the capture pipeline over them again. Still
+                    // report a result for an explicit paste, otherwise the
+                    // popup spinner waits forever for an event that never comes.
+                    ClipboardSelfCopyGuard.consume(payload) -> {
+                        if (notify) emit(ClipboardMessage.BUMPED)
+                    }
                     else -> {
                         val fingerprint = ClipboardHashing.payloadFingerprint(payload)
                         val clipTimestamp = payload.clipTimestamp

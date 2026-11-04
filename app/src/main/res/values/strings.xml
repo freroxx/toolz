@@ -4959,6 +4959,7 @@
     <string name="st_ClipboardScreen_badge_vault_desc">Matches an entry in Password Vault</string>
     <string name="st_ClipboardScreen_biometric_unavailable">Biometric unlock is unavailable on this device.</string>
     <string name="st_ClipboardScreen_capture_active_no_screenshots">Background capture on · Screenshots off</string>
+    <string name="st_ClipboardScreen_capture_missing_permission">Screenshots on · Allow photo access</string>
     <string name="st_ClipboardScreen_capture_active_screenshots">Background capture on · Screenshots on</string>
     <string name="st_ClipboardScreen_capture_paused">Capture paused</string>
     <string name="st_ClipboardScreen_clear_body">This removes every unpinned clip. Pinned clips are kept.</string>
@@ -5106,6 +5107,9 @@
     <string name="st_ClipboardScreen_settings_retention_desc">Sensitive and pinned clips never expire.</string>
     <string name="st_ClipboardScreen_settings_screenshots">Capture screenshots</string>
     <string name="st_ClipboardScreen_settings_screenshots_desc">Add new screenshots to Clipboard as image clips.</string>
+    <string name="st_ClipboardScreen_settings_screenshots_permission">Allow photo access</string>
+    <string name="st_ClipboardScreen_settings_screenshots_permission_desc">Screenshot capture reads new images from your gallery. Without this permission no screenshots can be added.</string>
+    <string name="st_ClipboardScreen_action_grant_media">Allow access</string>
     <string name="st_ClipboardScreen_settings_sensitive">Exclude sensitive clips</string>
     <string name="st_ClipboardScreen_settings_sensitive_desc">Don’t save clips that look like passwords, OTPs, or cards.</string>
     <string name="st_ClipboardScreen_settings_title">Clipboard settings</string>
@@ -5131,6 +5135,7 @@
     <string name="st_ClipboardScreen_status_paused">Paused</string>
     <string name="st_ClipboardScreen_status_quota_used">%1$s of %2$s</string>
     <string name="st_ClipboardScreen_status_screenshots">Screenshot capture</string>
+    <string name="st_ClipboardScreen_status_media_permission">Photo access</string>
     <string name="st_ClipboardScreen_status_sensitive">Sensitive clips</string>
     <string name="st_ClipboardScreen_status_setup">Setup required</string>
     <string name="st_ClipboardScreen_status_shizuku_authorized">Authorized</string>
