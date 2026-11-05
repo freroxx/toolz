@@ -253,7 +253,11 @@ fun ClipboardScreen(
     val mediaPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
-        mediaPermissionGranted = granted
+        // Re-read the real grant state: on Android 14 a partial photo grant can
+        // report `granted` for the request while MediaStore still cannot read
+        // every image. The check is the source of truth.
+        mediaPermissionGranted = PurgeShotDetector.hasMediaPermission(context)
+        if (granted || mediaPermissionGranted) viewModel.onMediaPermissionGranted()
     }
     fun requestMediaPermission() {
         val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

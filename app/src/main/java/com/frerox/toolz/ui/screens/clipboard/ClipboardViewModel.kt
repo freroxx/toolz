@@ -536,22 +536,23 @@ class ClipboardViewModel @Inject constructor(
         } ?: return
         if (clip.itemCount == 0) return
 
-        val clipTimestamp = clip.description?.timestamp
-        // Copying a clip from history must only bump it (done by copyEntry /
-        // copySelected), never run through the capture pipeline again.
-        if (ClipboardSelfCopyGuard.consume(clip)) {
-            // The guard token is single-use, but some ROMs deliver
-            // onPrimaryClipChanged twice for the same write and a later screen
-            // resume re-reads the clipboard. Remember the revision even when we
-            // skip our own copy; otherwise the second callback (or the resume)
-            // would capture Toolz's write as a brand-new clip and, for bulk
-            // copy, insert the synthesized aggregate into history.
-            rememberHandledClip(clipTimestamp, null)
-            return
-        }
-
         val payload = payloadFromClip(clip, ClipboardSource.LISTENER) ?: return
         val fingerprint = ClipboardHashing.payloadFingerprint(payload)
+        // Copying a clip from history must only bump it (done by copyEntry /
+        // copySelected), never run through the capture pipeline again.
+        if (ClipboardSelfCopyGuard.consume(payload)) {
+            // The guard token is single-use, but some ROMs deliver
+            // onPrimaryClipChanged twice for the same write and a later screen
+            // resume re-reads the clipboard. Remember both the revision and the
+            // fingerprint even when we skip our own copy; otherwise the second
+            // callback (or the resume) would capture Toolz's write as a
+            // brand-new clip and, for bulk copy, insert the synthesized
+            // aggregate into history. Computing the fingerprint from the
+            // payload (instead of leaving it null) is what lets the duplicate
+            // check below match.
+            rememberHandledClip(payload.clipTimestamp, fingerprint)
+            return
+        }
         // Duplicate listener callbacks for one write share the same
         // ClipDescription timestamp. A genuine repeat copy always produces a
         // fresh timestamp, so this only drops true duplicates.
@@ -690,6 +691,25 @@ class ClipboardViewModel @Inject constructor(
 
     fun refreshStats() {
         viewModelScope.launch { refreshStatsNow() }
+    }
+
+    /**
+     * Called after the user grants photo access. A permission dialog can
+     * dismiss without an ON_RESUME for the host activity on some OEMs, so the
+     * screenshot scan is triggered explicitly instead of waiting for the next
+     * poll. Safe to call when screenshots are disabled: the ingestor re-checks
+     * both monitoring and screenshot settings before touching MediaStore.
+     */
+    fun onMediaPermissionGranted() {
+        viewModelScope.launch {
+            if (clipboardSandboxActive) return@launch
+            try {
+                val ingested = screenshotIngestor.ingestRecentScreenshots(isPoll = true)
+                if (ingested > 0) refreshStatsNow()
+            } catch (e: Exception) {
+                android.util.Log.w("ClipboardViewModel", "Screenshot scan after permission failed", e)
+            }
+        }
     }
 
     private suspend fun refreshStatsNow() {
