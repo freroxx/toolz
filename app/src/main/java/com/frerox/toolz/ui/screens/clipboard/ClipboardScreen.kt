@@ -10,6 +10,7 @@
 @file:OptIn(
     ExperimentalMaterial3Api::class,
     ExperimentalMaterial3ExpressiveApi::class,
+    ExperimentalLayoutApi::class,
 )
 
 package com.frerox.toolz.ui.screens.clipboard
@@ -31,7 +32,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.SpringSpec
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -41,7 +43,6 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -50,6 +51,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -67,6 +70,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -122,16 +126,18 @@ import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.TaskAlt
 import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -139,6 +145,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SheetState
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -169,6 +176,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -183,6 +191,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.Lifecycle
@@ -212,7 +221,6 @@ import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.components.ToolzExpressiveTextButton
 import com.frerox.toolz.ui.components.ToolzOutlinedExpressiveButton
 import com.frerox.toolz.ui.components.ToolzTonalExpressiveButton
-import com.frerox.toolz.ui.components.ToolzTonalExpressiveIconButton
 import com.frerox.toolz.ui.components.rememberToolzHapticFeedback
 import com.frerox.toolz.ui.theme.toolzBackground
 import com.frerox.toolz.util.security.BiometricPromptUtils
@@ -222,18 +230,33 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Date
 
-// ── Layout constants (8dp grid) ───────────────────────────────────────────
+// ── Design tokens ─────────────────────────────────────────────────────────
+//
+// Shape: grouped content is "segmented". Items in a group sit 2dp apart; the
+// first and last carry large outer corners, the middle ones small corners.
+// A selected item morphs to a large rounded shape on all four corners.
+//
+// Motion: M3 Expressive uses two spring families. Spatial springs (position,
+// size, shape) have a little bounce; effects springs (colour, alpha) never
+// overshoot.
 
 private val ScreenGutter = 16.dp
-private val CardPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
-private val ListItemGap = 8.dp
-private val CompactButtonHeight = 44.dp
+private val OuterRadius = 20.dp
+private val InnerRadius = 6.dp
+private val SelectedRadius = 28.dp
+private val SegmentGap = 2.dp
+private val ControlHeight = 40.dp
+private val CardPadding = PaddingValues(start = 12.dp, top = 12.dp, end = 8.dp, bottom = 12.dp)
 
-/** Content spring used for state changes (selection, copy flash, swipe icons). */
-private val ExpressiveSpring = spring<Float>(
-    dampingRatio = Spring.DampingRatioMediumBouncy,
-    stiffness = Spring.StiffnessMediumLow,
-)
+private fun <T> spatialSpring(): SpringSpec<T> = spring(dampingRatio = 0.82f, stiffness = 380f)
+private fun <T> effectsSpring(): SpringSpec<T> = spring(dampingRatio = 1f, stiffness = 1600f)
+private fun <T> playfulSpring(): SpringSpec<T> = spring(dampingRatio = 0.55f, stiffness = 520f)
+
+private fun segmentShape(index: Int, count: Int): RoundedCornerShape {
+    val top = if (index == 0) OuterRadius else InnerRadius
+    val bottom = if (index == count - 1) OuterRadius else InnerRadius
+    return RoundedCornerShape(topStart = top, topEnd = top, bottomStart = bottom, bottomEnd = bottom)
+}
 
 private val LinkTypes = setOf(ClipboardType.LINK, ClipboardType.URL, ClipboardType.SOCIAL)
 
@@ -241,14 +264,6 @@ private val LinkTypes = setOf(ClipboardType.LINK, ClipboardType.URL, ClipboardTy
 private data class TransientMessage(
     val text: String,
     val undoable: Boolean = false,
-)
-
-/** One tile in the detail sheet action grid. */
-private data class SheetAction(
-    val icon: ImageVector,
-    val label: String,
-    val selected: Boolean = false,
-    val onClick: () -> Unit,
 )
 
 /** Retention steps, ascending. 0 means "keep forever" and sorts last. */
@@ -265,8 +280,8 @@ private fun stepRetention(current: Int, up: Boolean): Int {
 }
 
 /**
- * Toolz Clipboard — Material 3 Expressive history, trash, detail sheet,
- * onboarding, capture diagnostics and settings.
+ * Toolz Clipboard — history, trash, detail sheet, onboarding, capture
+ * diagnostics and settings.
  *
  * Integration callbacks are optional so the screen can be embedded anywhere.
  */
@@ -523,7 +538,7 @@ fun ClipboardScreen(
                         } else {
                             stringResource(R.string.st_ClipboardScreen_title)
                         },
-                        fontWeight = FontWeight.Black,
+                        fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -589,9 +604,6 @@ fun ClipboardScreen(
                         }
                     } else {
                         if (!state.showTrash) {
-                            // The badge lives outside the icon button: the
-                            // button clips its content to the expressive shape,
-                            // so an inset badge would be cut off at the edge.
                             BadgedBox(
                                 badge = {
                                     if (state.stats.trashedCount > 0) {
@@ -607,7 +619,7 @@ fun ClipboardScreen(
                                     }
                                 },
                             ) {
-                                ToolzTonalExpressiveIconButton(
+                                IconButton(
                                     onClick = {
                                         haptic.click()
                                         viewModel.setShowTrash(true)
@@ -720,11 +732,10 @@ fun ClipboardScreen(
         bottomBar = {
             AnimatedVisibility(
                 visible = state.isSelectionMode,
-                enter = slideInVertically(
-                    initialOffsetY = { it },
-                    animationSpec = spring(Spring.DampingRatioLowBouncy, Spring.StiffnessMediumLow),
-                ) + fadeIn(),
-                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+                enter = slideInVertically(animationSpec = spatialSpring()) { it } +
+                        fadeIn(animationSpec = effectsSpring()),
+                exit = slideOutVertically(animationSpec = spatialSpring()) { it } +
+                        fadeOut(animationSpec = effectsSpring()),
             ) {
                 SelectionActionBar(
                     state = state,
@@ -736,8 +747,8 @@ fun ClipboardScreen(
         floatingActionButton = {
             AnimatedVisibility(
                 visible = !state.isSelectionMode && !state.showTrash,
-                enter = fadeIn() + scaleIn(initialScale = 0.8f),
-                exit = fadeOut() + scaleOut(targetScale = 0.8f),
+                enter = fadeIn(effectsSpring()) + scaleIn(playfulSpring(), initialScale = 0.6f),
+                exit = fadeOut(effectsSpring()) + scaleOut(effectsSpring(), targetScale = 0.6f),
             ) {
                 ExtendedFloatingActionButton(
                     onClick = {
@@ -766,46 +777,13 @@ fun ClipboardScreen(
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            // Banners and the attention card share one animated container so
-            // the list below glides instead of jumping when they come and go.
-            Column(modifier = Modifier.animateContentSize()) {
-                if (state.sandboxActive) {
-                    InfoBanner(
-                        icon = Icons.Rounded.Info,
-                        title = stringResource(R.string.st_ClipboardScreen_sandbox_banner),
-                        color = MaterialTheme.colorScheme.tertiary,
-                    )
-                } else if (state.showSetupBanner) {
-                    InfoBanner(
-                        icon = Icons.Rounded.WarningAmber,
-                        title = stringResource(R.string.st_ClipboardScreen_foreground_banner),
-                        action = stringResource(R.string.st_ClipboardScreen_action_finish_setup),
-                        color = MaterialTheme.colorScheme.error,
-                        onClick = { showStatus = true },
-                    )
-                }
-
-                // Never stack banners: setup/sandbox already explain why capture
-                // needs attention, and an AI-offline row underneath them only
-                // pushes the actual history further down.
-                if (!state.sandboxActive && !state.showSetupBanner &&
-                    state.settings.offline && state.settings.aiEnabled
-                ) {
-                    InfoBanner(
-                        icon = Icons.Rounded.Info,
-                        title = stringResource(R.string.st_ClipboardScreen_ai_offline),
-                        color = MaterialTheme.colorScheme.secondary,
-                    )
-                }
-
-                CaptureAttentionCard(
-                    state = state,
-                    mediaPermissionGranted = mediaPermissionGranted,
-                    onRequestMediaPermission = ::requestMediaPermission,
-                    onResumeCapture = { viewModel.setMonitoringEnabled(true) },
-                    onClick = { showStatus = true },
-                )
-            }
+            NoticeHost(
+                state = state,
+                mediaPermissionGranted = mediaPermissionGranted,
+                onRequestMediaPermission = ::requestMediaPermission,
+                onResumeCapture = { viewModel.setMonitoringEnabled(true) },
+                onOpenStatus = { showStatus = true },
+            )
 
             SearchAndFilters(
                 query = state.query,
@@ -1068,115 +1046,159 @@ fun ClipboardScreen(
     }
 }
 
-// ── Capture attention + search + filters ──────────────────────────────────
+// ── Notices, search and filters ───────────────────────────────────────────
 
 /**
- * Shown only when capture needs the user (paused, foreground-only, missing
- * media permission). Healthy capture takes no space; the status sheet stays
- * reachable from the overflow menu.
+ * At most one notice is ever shown, in order of urgency: sandbox, setup,
+ * capture needs attention, AI offline. Healthy capture takes no space at all;
+ * the status sheet stays reachable from the overflow menu.
  */
 @Composable
-private fun CaptureAttentionCard(
+private fun NoticeHost(
     state: ClipboardUiState,
     mediaPermissionGranted: Boolean,
     onRequestMediaPermission: () -> Unit,
     onResumeCapture: () -> Unit,
-    onClick: () -> Unit,
+    onOpenStatus: () -> Unit,
 ) {
-    if (!state.loaded || state.showTrash || state.isSelectionMode ||
-        state.sandboxActive || state.showSetupBanner
-    ) {
-        return
-    }
+    val scheme = MaterialTheme.colorScheme
     val status = state.gate.status
     val monitoringOff = !state.settings.monitoring
     val paused = monitoringOff || status == ClipboardGate.Status.PAUSED
     val foregroundOnly = status == ClipboardGate.Status.FOREGROUND_ONLY
-    val missingMediaPermission = state.settings.captureScreenshots && !mediaPermissionGranted
-    if (!paused && !foregroundOnly && !missingMediaPermission) return
+    val missingMedia = state.settings.captureScreenshots && !mediaPermissionGranted
+    val attentionVisible = state.loaded && !state.showTrash && !state.isSelectionMode &&
+            (paused || foregroundOnly || missingMedia)
+    val noticeModifier = Modifier
+        .fillMaxWidth()
+        .padding(horizontal = ScreenGutter, vertical = 4.dp)
 
-    val calmPause = paused && !missingMediaPermission
-    val accent = if (calmPause) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error
-    val title = when {
-        paused -> stringResource(R.string.st_ClipboardScreen_capture_paused)
-        missingMediaPermission -> stringResource(R.string.st_ClipboardScreen_capture_issue_title)
-        else -> stringResource(R.string.st_ClipboardScreen_capture_foreground_title)
-    }
-    val subtitle = when {
-        missingMediaPermission -> stringResource(R.string.st_ClipboardScreen_capture_missing_permission)
-        paused -> stringResource(
-            R.string.st_ClipboardScreen_overview_counts,
-            state.stats.activeCount,
-            state.stats.trashedCount,
-        )
-        else -> stringResource(R.string.st_ClipboardScreen_capture_foreground_subtitle)
-    }
-    val actionLabel = when {
-        monitoringOff -> R.string.st_ClipboardScreen_action_resume_capture
-        missingMediaPermission -> R.string.st_ClipboardScreen_action_grant_media
-        else -> R.string.st_ClipboardScreen_action_status
-    }
-
-    ExpressiveCard(
-        onClick = {
-            when {
-                monitoringOff -> onResumeCapture()
-                missingMediaPermission -> onRequestMediaPermission()
-                else -> onClick()
+    Box(Modifier.fillMaxWidth().animateContentSize(spatialSpring())) {
+        when {
+            state.sandboxActive -> Notice(
+                icon = Icons.Rounded.Info,
+                title = stringResource(R.string.st_ClipboardScreen_sandbox_banner),
+                container = scheme.tertiaryContainer,
+                content = scheme.onTertiaryContainer,
+                modifier = noticeModifier,
+            )
+            state.showSetupBanner -> Notice(
+                icon = Icons.Rounded.WarningAmber,
+                title = stringResource(R.string.st_ClipboardScreen_foreground_banner),
+                action = stringResource(R.string.st_ClipboardScreen_action_finish_setup),
+                container = scheme.errorContainer,
+                content = scheme.onErrorContainer,
+                onClick = onOpenStatus,
+                modifier = noticeModifier,
+            )
+            attentionVisible -> {
+                val calmPause = paused && !missingMedia
+                Notice(
+                    icon = if (calmPause) Icons.Rounded.Pause else Icons.Rounded.WarningAmber,
+                    title = when {
+                        paused -> stringResource(R.string.st_ClipboardScreen_capture_paused)
+                        missingMedia -> stringResource(R.string.st_ClipboardScreen_capture_issue_title)
+                        else -> stringResource(R.string.st_ClipboardScreen_capture_foreground_title)
+                    },
+                    subtitle = when {
+                        missingMedia -> stringResource(R.string.st_ClipboardScreen_capture_missing_permission)
+                        paused -> stringResource(
+                            R.string.st_ClipboardScreen_overview_counts,
+                            state.stats.activeCount,
+                            state.stats.trashedCount,
+                        )
+                        else -> stringResource(R.string.st_ClipboardScreen_capture_foreground_subtitle)
+                    },
+                    action = stringResource(
+                        when {
+                            monitoringOff -> R.string.st_ClipboardScreen_action_resume_capture
+                            missingMedia -> R.string.st_ClipboardScreen_action_grant_media
+                            else -> R.string.st_ClipboardScreen_action_status
+                        },
+                    ),
+                    container = if (calmPause) scheme.tertiaryContainer else scheme.errorContainer,
+                    content = if (calmPause) scheme.onTertiaryContainer else scheme.onErrorContainer,
+                    onClick = {
+                        when {
+                            monitoringOff -> onResumeCapture()
+                            missingMedia -> onRequestMediaPermission()
+                            else -> onOpenStatus()
+                        }
+                    },
+                    modifier = noticeModifier,
+                )
             }
-        },
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = ScreenGutter, vertical = 4.dp),
-        shape = SmallExpressiveShape,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = BorderStroke(1.dp, accent.copy(alpha = 0.35f)),
-    ) {
+            state.settings.offline && state.settings.aiEnabled -> Notice(
+                icon = Icons.Rounded.Info,
+                title = stringResource(R.string.st_ClipboardScreen_ai_offline),
+                container = scheme.secondaryContainer,
+                content = scheme.onSecondaryContainer,
+                modifier = noticeModifier,
+            )
+        }
+    }
+}
+
+/** One solid tonal row: icon, message, optional trailing action label. */
+@Composable
+private fun Notice(
+    icon: ImageVector,
+    title: String,
+    container: Color,
+    content: Color,
+    modifier: Modifier = Modifier,
+    subtitle: String? = null,
+    action: String? = null,
+    onClick: (() -> Unit)? = null,
+) {
+    val body: @Composable () -> Unit = {
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(CircleShape)
-                    .background(accent.copy(alpha = 0.14f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    if (calmPause) Icons.Rounded.Pause else Icons.Rounded.WarningAmber,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                    tint = accent,
-                )
-            }
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
+                    style = if (subtitle != null) MaterialTheme.typography.titleSmall
+                    else MaterialTheme.typography.bodyMedium,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
+                if (subtitle != null) {
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            if (action != null) {
                 Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    text = action,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
                 )
             }
-            Text(
-                text = stringResource(actionLabel),
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Bold,
-                color = accent,
-            )
         }
+    }
+    if (onClick != null) {
+        Surface(
+            onClick = onClick,
+            modifier = modifier,
+            shape = RoundedCornerShape(16.dp),
+            color = container,
+            contentColor = content,
+        ) { body() }
+    } else {
+        Surface(
+            modifier = modifier,
+            shape = RoundedCornerShape(16.dp),
+            color = container,
+            contentColor = content,
+        ) { body() }
     }
 }
 
@@ -1191,7 +1213,7 @@ private fun SearchAndFilters(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 4.dp, bottom = 4.dp),
+            .padding(vertical = 4.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         ExpressiveSearchField(
@@ -1211,8 +1233,8 @@ private fun SearchAndFilters(
             trailingIcon = {
                 AnimatedVisibility(
                     visible = query.isNotEmpty(),
-                    enter = fadeIn() + scaleIn(initialScale = 0.7f),
-                    exit = fadeOut() + scaleOut(targetScale = 0.7f),
+                    enter = fadeIn(effectsSpring()) + scaleIn(playfulSpring(), initialScale = 0.6f),
+                    exit = fadeOut(effectsSpring()) + scaleOut(effectsSpring(), targetScale = 0.6f),
                 ) {
                     IconButton(onClick = { onQueryChange("") }) {
                         Icon(
@@ -1270,12 +1292,11 @@ private fun filterLabel(filter: ClipboardFilter): String = stringResource(
     },
 )
 
-// ── History list ──────────────────────────────────────────────────────────
+// ── Selection bar ─────────────────────────────────────────────────────────
 
 /**
- * Selection actions live in a bottom bar so the top bar stays uncluttered and
- * every action has a visible label (important on compact screens and for
- * accessibility).
+ * A floating tonal bar rather than a full-width slab: it only takes the room
+ * its actions need and every action keeps a visible label.
  */
 @Composable
 private fun SelectionActionBar(
@@ -1284,6 +1305,7 @@ private fun SelectionActionBar(
     onDeleteForever: () -> Unit,
 ) {
     val haptic = rememberToolzHapticFeedback()
+    val scheme = MaterialTheme.colorScheme
     val aiEligible = !state.showTrash &&
             state.settings.aiEnabled &&
             state.aiConfigured &&
@@ -1295,17 +1317,19 @@ private fun SelectionActionBar(
                         !candidate.isLocked
             }
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = Modifier
+            .navigationBarsPadding()
+            .padding(horizontal = ScreenGutter, vertical = 8.dp),
+        color = scheme.surfaceContainerHighest,
+        shape = RoundedCornerShape(28.dp),
         tonalElevation = 3.dp,
-        shadowElevation = 12.dp,
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        shadowElevation = 6.dp,
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(horizontal = 12.dp, vertical = 8.dp)
-                .animateContentSize(),
+                .padding(8.dp)
+                .animateContentSize(spatialSpring()),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -1313,7 +1337,8 @@ private fun SelectionActionBar(
                 SelectionAction(
                     icon = Icons.Rounded.Restore,
                     label = stringResource(R.string.st_ClipboardScreen_action_restore),
-                    tint = MaterialTheme.colorScheme.primary,
+                    container = scheme.secondaryContainer,
+                    content = scheme.onSecondaryContainer,
                     onClick = {
                         haptic.click()
                         viewModel.restoreSelected()
@@ -1322,7 +1347,8 @@ private fun SelectionActionBar(
                 SelectionAction(
                     icon = Icons.Rounded.DeleteForever,
                     label = stringResource(R.string.st_ClipboardScreen_action_delete_forever),
-                    tint = MaterialTheme.colorScheme.error,
+                    container = scheme.errorContainer,
+                    content = scheme.onErrorContainer,
                     onClick = {
                         haptic.click()
                         onDeleteForever()
@@ -1332,7 +1358,8 @@ private fun SelectionActionBar(
                 SelectionAction(
                     icon = Icons.Rounded.ContentCopy,
                     label = stringResource(R.string.st_ClipboardScreen_action_copy),
-                    tint = MaterialTheme.colorScheme.primary,
+                    container = scheme.primaryContainer,
+                    content = scheme.onPrimaryContainer,
                     onClick = {
                         haptic.click()
                         viewModel.copySelected()
@@ -1342,7 +1369,8 @@ private fun SelectionActionBar(
                     SelectionAction(
                         icon = Icons.Rounded.AutoAwesome,
                         label = stringResource(R.string.st_ClipboardScreen_action_ai),
-                        tint = MaterialTheme.colorScheme.tertiary,
+                        container = scheme.tertiaryContainer,
+                        content = scheme.onTertiaryContainer,
                         onClick = {
                             haptic.click()
                             viewModel.runAiSelected()
@@ -1352,7 +1380,8 @@ private fun SelectionActionBar(
                 SelectionAction(
                     icon = Icons.Rounded.Delete,
                     label = stringResource(R.string.st_ClipboardScreen_action_delete),
-                    tint = MaterialTheme.colorScheme.error,
+                    container = scheme.errorContainer,
+                    content = scheme.onErrorContainer,
                     onClick = {
                         haptic.click()
                         viewModel.deleteSelected()
@@ -1367,37 +1396,33 @@ private fun SelectionActionBar(
 private fun RowScope.SelectionAction(
     icon: ImageVector,
     label: String,
-    tint: Color,
+    container: Color,
+    content: Color,
     onClick: () -> Unit,
 ) {
-    Column(
+    Row(
         modifier = Modifier
             .weight(1f)
-            .clip(SmallExpressiveShape)
-            .background(tint.copy(alpha = 0.12f))
+            .heightIn(min = ControlHeight)
+            .clip(CircleShape)
+            .background(container)
             .clickable(role = Role.Button, onClick = onClick)
-            .heightIn(min = 52.dp)
-            .padding(vertical = 6.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
+            .padding(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            modifier = Modifier.size(20.dp),
-            tint = tint,
-        )
-        Spacer(Modifier.height(2.dp))
+        Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp), tint = content)
         Text(
             text = label,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-            color = tint,
+            style = MaterialTheme.typography.labelLarge,
+            color = content,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
     }
 }
+
+// ── History list ──────────────────────────────────────────────────────────
 
 @Composable
 private fun HistoryList(
@@ -1419,14 +1444,14 @@ private fun HistoryList(
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = ScreenGutter, end = ScreenGutter, top = 8.dp, bottom = 96.dp),
-        verticalArrangement = Arrangement.spacedBy(ListItemGap),
+        contentPadding = PaddingValues(start = ScreenGutter, end = ScreenGutter, top = 4.dp, bottom = 96.dp),
+        verticalArrangement = Arrangement.spacedBy(SegmentGap),
     ) {
         item(key = "history_summary") {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 4.dp)
+                    .padding(horizontal = 4.dp, vertical = 4.dp)
                     .animateItem(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1437,7 +1462,6 @@ private fun HistoryList(
                         state.visibleEntries.size,
                     ),
                     style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 if (!state.isSelectionMode) {
@@ -1461,17 +1485,18 @@ private fun HistoryList(
                         groupLabel(group.group),
                         group.entries.size,
                     ),
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier
-                        .padding(start = 4.dp, top = 8.dp)
+                        .padding(start = 4.dp, top = 14.dp, bottom = 6.dp)
                         .animateItem(),
                 )
             }
-            items(group.entries, key = { it.id }) { entry ->
+            itemsIndexed(group.entries, key = { _, entry -> entry.id }) { index, entry ->
                 ClipboardCard(
                     entry = entry,
+                    index = index,
+                    count = group.entries.size,
                     attachments = state.attachmentsByClip[entry.id].orEmpty(),
                     now = now,
                     selected = entry.id in state.selection,
@@ -1506,14 +1531,15 @@ private fun groupLabel(group: ClipboardDateGroup): String = stringResource(
 )
 
 /**
- * One history row. Swipe right pins, swipe left deletes (undoable). The only
- * trailing action is copy, which keeps rows compact; pin/lock/share live in the
- * detail sheet. Trash rows carry their two actions as compact pills below the
- * content instead of two stacked 48dp buttons.
+ * One history row, part of a segmented group. Swipe right pins, swipe left
+ * deletes (undoable). Selecting a row morphs its shape and turns the leading
+ * badge into a check, so no separate checkbox is needed.
  */
 @Composable
 private fun ClipboardCard(
     entry: ClipboardEntry,
+    index: Int,
+    count: Int,
     attachments: List<ClipboardAttachment>,
     now: Long,
     selected: Boolean,
@@ -1533,6 +1559,7 @@ private fun ClipboardCard(
     modifier: Modifier = Modifier,
 ) {
     val haptic = rememberToolzHapticFeedback()
+    val scheme = MaterialTheme.colorScheme
     val canSwipe = !selectionMode && !showTrash
     val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = { it != SwipeToDismissBoxValue.Settled },
@@ -1555,6 +1582,29 @@ private fun ClipboardCard(
             SwipeToDismissBoxValue.Settled -> Unit
         }
     }
+
+    // Shape morph: outer corners by position, all-round when selected.
+    val topRadius by animateDpAsState(
+        targetValue = when {
+            selected -> SelectedRadius
+            index == 0 -> OuterRadius
+            else -> InnerRadius
+        },
+        animationSpec = spatialSpring(),
+        label = "clipTopRadius",
+    )
+    val bottomRadius by animateDpAsState(
+        targetValue = when {
+            selected -> SelectedRadius
+            index == count - 1 -> OuterRadius
+            else -> InnerRadius
+        },
+        animationSpec = spatialSpring(),
+        label = "clipBottomRadius",
+    )
+    val top = topRadius.coerceAtLeast(0.dp)
+    val bottom = bottomRadius.coerceAtLeast(0.dp)
+    val cardShape = RoundedCornerShape(topStart = top, topEnd = top, bottomStart = bottom, bottomEnd = bottom)
 
     val copiedFlash = copiedFlashToken > 0
     val heroImage = attachments.firstOrNull { it.mimeType?.startsWith("image/") == true }
@@ -1591,12 +1641,11 @@ private fun ClipboardCard(
 
     val containerColor by animateColorAsState(
         when {
-            copiedFlash -> MaterialTheme.colorScheme.primaryContainer
-            selected -> MaterialTheme.colorScheme.secondaryContainer
-            masked -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f)
-            else -> MaterialTheme.colorScheme.surfaceContainerHigh
+            copiedFlash -> scheme.primaryContainer
+            selected -> scheme.secondaryContainer
+            else -> scheme.surfaceContainerHigh
         },
-        animationSpec = tween(200),
+        animationSpec = effectsSpring(),
         label = "clipCardColor",
     )
 
@@ -1610,34 +1659,26 @@ private fun ClipboardCard(
             val pinning = direction == SwipeToDismissBoxValue.StartToEnd
             val active = dismissState.targetValue != SwipeToDismissBoxValue.Settled
             val background by animateColorAsState(
-                when (dismissState.targetValue) {
-                    SwipeToDismissBoxValue.EndToStart -> MaterialTheme.colorScheme.errorContainer
-                    SwipeToDismissBoxValue.StartToEnd -> MaterialTheme.colorScheme.primaryContainer
-                    SwipeToDismissBoxValue.Settled ->
-                        if (direction == SwipeToDismissBoxValue.Settled) {
-                            Color.Transparent
-                        } else {
-                            MaterialTheme.colorScheme.surfaceContainerHighest
-                        }
+                when {
+                    direction == SwipeToDismissBoxValue.Settled -> Color.Transparent
+                    !active -> scheme.surfaceContainerHighest
+                    pinning -> scheme.primaryContainer
+                    else -> scheme.errorContainer
                 },
-                animationSpec = tween(160),
+                animationSpec = effectsSpring(),
                 label = "clipSwipeBg",
             )
             // The icon pops once the swipe passes the commit threshold.
             val iconScale by animateFloatAsState(
                 targetValue = if (active) 1.2f else 0.9f,
-                animationSpec = ExpressiveSpring,
+                animationSpec = playfulSpring(),
                 label = "clipSwipeIcon",
             )
-            val contentColor = if (pinning) {
-                MaterialTheme.colorScheme.onPrimaryContainer
-            } else {
-                MaterialTheme.colorScheme.onErrorContainer
-            }
+            val contentColor = if (pinning) scheme.onPrimaryContainer else scheme.onErrorContainer
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .clip(SmallExpressiveShape)
+                    .clip(cardShape)
                     .background(background)
                     .padding(horizontal = 20.dp),
                 contentAlignment = if (pinning) Alignment.CenterStart else Alignment.CenterEnd,
@@ -1662,7 +1703,6 @@ private fun ClipboardCard(
                                 else R.string.st_ClipboardScreen_action_delete,
                             ),
                             style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Bold,
                             color = contentColor,
                         )
                     }
@@ -1677,27 +1717,25 @@ private fun ClipboardCard(
             },
             onLongClick = onLongPress,
             modifier = Modifier.fillMaxWidth(),
-            shape = SmallExpressiveShape,
+            shape = cardShape,
             containerColor = containerColor,
-            border = when {
-                selected -> BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
-                masked -> BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f))
-                else -> null
-            },
+            border = null,
         ) {
             Column(
                 modifier = Modifier
                     .padding(CardPadding)
-                    .animateContentSize(),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                    .animateContentSize(spatialSpring()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.Top,
                 ) {
-                    TypeBadge(type = entry.type, compact = true)
+                    LeadingBadge(type = entry.type, selected = selected, masked = masked)
                     Column(
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(top = 2.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         Text(
@@ -1707,34 +1745,10 @@ private fun ClipboardCard(
                             } else {
                                 MaterialTheme.typography.bodyLarge
                             },
-                            fontWeight = if (masked) FontWeight.Medium else FontWeight.Normal,
                             maxLines = if (entry.type == ClipboardType.CODE) 4 else 3,
                             overflow = TextOverflow.Ellipsis,
-                            color = if (masked) {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            } else {
-                                MaterialTheme.colorScheme.onSurface
-                            },
+                            color = if (masked) scheme.onSurfaceVariant else scheme.onSurface,
                         )
-                        if (masked) {
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Icon(
-                                    if (entry.isLocked) Icons.Rounded.Lock else Icons.Rounded.Shield,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(12.dp),
-                                    tint = MaterialTheme.colorScheme.error,
-                                )
-                                Text(
-                                    text = stringResource(R.string.st_ClipboardScreen_reveal_hint),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.error,
-                                )
-                            }
-                        }
                         if (aiRunning && !masked) {
                             Row(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -1744,11 +1758,12 @@ private fun ClipboardCard(
                                 Text(
                                     text = stringResource(R.string.st_ClipboardScreen_ai_running),
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    color = scheme.onSurfaceVariant,
                                 )
                             }
                         }
-                        if (aiEnabled && !masked && !entry.summary.isNullOrBlank()) {
+                        val summary = entry.summary?.takeIf { it.isNotBlank() }
+                        if (aiEnabled && !masked && summary != null) {
                             Row(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                                 verticalAlignment = Alignment.Top,
@@ -1759,12 +1774,12 @@ private fun ClipboardCard(
                                     modifier = Modifier
                                         .padding(top = 2.dp)
                                         .size(14.dp),
-                                    tint = MaterialTheme.colorScheme.tertiary,
+                                    tint = scheme.tertiary,
                                 )
                                 Text(
-                                    text = entry.summary,
+                                    text = summary,
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    color = scheme.onSurfaceVariant,
                                     maxLines = 2,
                                     overflow = TextOverflow.Ellipsis,
                                 )
@@ -1793,24 +1808,15 @@ private fun ClipboardCard(
                             now = now,
                         )
                     }
-                    when {
-                        selectionMode -> Checkbox(
-                            checked = selected,
-                            onCheckedChange = { onOpen() },
-                        )
-                        showTrash -> Unit
-                        else -> CompactClipAction(
+                    if (!selectionMode && !showTrash) {
+                        CompactClipAction(
                             icon = if (copiedFlash) Icons.Rounded.CheckCircle else Icons.Rounded.ContentCopy,
                             copied = copiedFlash,
                             contentDescription = stringResource(
                                 if (copiedFlash) R.string.st_ClipboardScreen_copied
                                 else R.string.st_ClipboardScreen_action_copy,
                             ),
-                            tint = if (copiedFlash) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
+                            tint = if (copiedFlash) scheme.primary else scheme.onSurfaceVariant,
                             onClick = {
                                 haptic.click()
                                 onCopy()
@@ -1833,13 +1839,15 @@ private fun ClipboardCard(
                         ActionPill(
                             icon = Icons.Rounded.Restore,
                             label = stringResource(R.string.st_ClipboardScreen_action_restore),
-                            tint = MaterialTheme.colorScheme.primary,
+                            container = scheme.secondaryContainer,
+                            content = scheme.onSecondaryContainer,
                             onClick = { haptic.click(); onRestore() },
                         )
                         ActionPill(
                             icon = Icons.Rounded.DeleteForever,
                             label = stringResource(R.string.st_ClipboardScreen_action_delete_forever),
-                            tint = MaterialTheme.colorScheme.error,
+                            container = scheme.errorContainer,
+                            content = scheme.onErrorContainer,
                             onClick = { haptic.click(); onDeleteForever() },
                         )
                     }
@@ -1849,30 +1857,84 @@ private fun ClipboardCard(
     }
 }
 
+/**
+ * Leading badge. Its corner radius morphs from a rounded square to a circle
+ * and the glyph crossfades to a check when the row is selected.
+ */
+@Composable
+private fun LeadingBadge(
+    type: String,
+    selected: Boolean,
+    masked: Boolean,
+    size: Dp = 40.dp,
+) {
+    val scheme = MaterialTheme.colorScheme
+    val radius by animateDpAsState(
+        targetValue = if (selected) size / 2 else size * 0.3f,
+        animationSpec = spatialSpring(),
+        label = "badgeRadius",
+    )
+    val container by animateColorAsState(
+        when {
+            selected -> scheme.primary
+            masked -> scheme.errorContainer
+            else -> scheme.secondaryContainer
+        },
+        animationSpec = effectsSpring(),
+        label = "badgeContainer",
+    )
+    val content by animateColorAsState(
+        when {
+            selected -> scheme.onPrimary
+            masked -> scheme.onErrorContainer
+            else -> scheme.onSecondaryContainer
+        },
+        animationSpec = effectsSpring(),
+        label = "badgeContent",
+    )
+    val typeDescription = stringResource(R.string.st_ClipboardScreen_badge_type_desc, typeLabel(type))
+    Box(
+        modifier = Modifier
+            .size(size)
+            .clip(RoundedCornerShape(radius.coerceAtLeast(0.dp)))
+            .background(container),
+        contentAlignment = Alignment.Center,
+    ) {
+        Crossfade(targetState = selected, animationSpec = tween(150), label = "badgeGlyph") { isSelected ->
+            Icon(
+                if (isSelected) Icons.Rounded.Check else typeIcon(type),
+                contentDescription = if (isSelected) null else typeDescription,
+                modifier = Modifier.size(size * 0.5f),
+                tint = content,
+            )
+        }
+    }
+}
+
 /** Small tonal pill (36dp) for secondary row actions. */
 @Composable
 private fun ActionPill(
     icon: ImageVector,
     label: String,
-    tint: Color,
+    container: Color,
+    content: Color,
     onClick: () -> Unit,
 ) {
     Row(
         modifier = Modifier
             .heightIn(min = 36.dp)
             .clip(CircleShape)
-            .background(tint.copy(alpha = 0.12f))
+            .background(container)
             .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
+            .padding(horizontal = 14.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp), tint = tint)
+        Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp), tint = content)
         Text(
             text = label,
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.Bold,
-            color = tint,
+            style = MaterialTheme.typography.labelLarge,
+            color = content,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -1895,13 +1957,12 @@ private fun ClipHeroPreview(
         modifier = Modifier
             .fillMaxWidth()
             .height(132.dp)
-            .clip(SmallExpressiveShape)
+            .clip(RoundedCornerShape(14.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             .clickable(onClick = onOpen),
         contentAlignment = Alignment.Center,
     ) {
-        val image = bitmap
-        Crossfade(targetState = image, animationSpec = tween(220), label = "heroPreview") { loaded ->
+        Crossfade(targetState = bitmap, animationSpec = tween(220), label = "heroPreview") { loaded ->
             if (loaded != null) {
                 Image(
                     bitmap = loaded,
@@ -1915,7 +1976,7 @@ private fun ClipHeroPreview(
                         Icons.Rounded.Image,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(36.dp),
+                        modifier = Modifier.size(32.dp),
                     )
                 }
             }
@@ -1923,30 +1984,10 @@ private fun ClipHeroPreview(
     }
 }
 
-@Composable
-private fun TypeBadge(type: String, compact: Boolean = false) {
-    Surface(
-        shape = RoundedCornerShape(if (compact) 12.dp else 16.dp),
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
-    ) {
-        Icon(
-            typeIcon(type),
-            contentDescription = stringResource(
-                R.string.st_ClipboardScreen_badge_type_desc,
-                typeLabel(type),
-            ),
-            modifier = Modifier
-                .padding(if (compact) 9.dp else 11.dp)
-                .size(if (compact) 18.dp else 22.dp),
-            tint = MaterialTheme.colorScheme.primary,
-        )
-    }
-}
-
 /**
- * One line of secondary context instead of a row of pills. Type is already
- * conveyed by the leading icon, so the line carries only what changes per
- * clip: age, source and the few states worth surfacing.
+ * One line of secondary context. Type is already conveyed by the leading
+ * badge, so the line carries only what changes per clip: age, source and the
+ * few states worth surfacing.
  */
 @Composable
 private fun ClipMetaLine(
@@ -1977,7 +2018,7 @@ private fun ClipMetaLine(
                 tint = MaterialTheme.colorScheme.primary,
             )
         }
-        if (entry.isSensitive || entry.isLocked) {
+        if (masked) {
             Icon(
                 if (entry.isLocked) Icons.Rounded.Lock else Icons.Rounded.Shield,
                 contentDescription = if (entry.isLocked) {
@@ -1990,7 +2031,11 @@ private fun ClipMetaLine(
             )
         }
         Text(
-            text = parts.joinToString(" · "),
+            text = if (masked) {
+                stringResource(R.string.st_ClipboardScreen_reveal_hint) + " · " + parts.first()
+            } else {
+                parts.joinToString(" · ")
+            },
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
@@ -2002,7 +2047,7 @@ private fun ClipMetaLine(
 
 /**
  * 48dp touch target so the row action stays comfortably tappable. The icon
- * crossfades with a small pop when a copy is confirmed.
+ * crossfades with a small bounce when a copy is confirmed.
  */
 @Composable
 private fun CompactClipAction(
@@ -2014,7 +2059,7 @@ private fun CompactClipAction(
 ) {
     val scale by animateFloatAsState(
         targetValue = if (copied) 1.15f else 1f,
-        animationSpec = ExpressiveSpring,
+        animationSpec = playfulSpring(),
         label = "copyIconScale",
     )
     IconButton(onClick = onClick, modifier = Modifier.size(48.dp)) {
@@ -2051,18 +2096,18 @@ private fun AttachmentStrip(
                     attachment = attachment,
                     viewModel = viewModel,
                     modifier = Modifier
-                        .size(64.dp)
+                        .size(56.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .clickable(onClick = onOpen),
                 )
             } else {
                 Surface(
-                    shape = RoundedCornerShape(12.dp),
+                    shape = CircleShape,
                     color = MaterialTheme.colorScheme.surfaceContainerHighest,
                     modifier = Modifier.clickable(onClick = onOpen),
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -2073,7 +2118,7 @@ private fun AttachmentStrip(
                         )
                         Text(
                             text = attachment.fileName ?: stringResource(R.string.st_ClipboardScreen_attachment_file),
-                            style = MaterialTheme.typography.labelSmall,
+                            style = MaterialTheme.typography.labelMedium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.widthIn(max = 120.dp),
@@ -2084,16 +2129,16 @@ private fun AttachmentStrip(
         }
         if (attachments.size > 4) {
             Surface(
-                shape = RoundedCornerShape(12.dp),
+                shape = CircleShape,
                 color = MaterialTheme.colorScheme.surfaceContainerHighest,
                 modifier = Modifier
-                    .clip(RoundedCornerShape(12.dp))
+                    .clip(CircleShape)
                     .clickable(role = Role.Button, onClick = onOpen),
             ) {
                 Text(
                     text = "+${attachments.size - 4}",
-                    style = MaterialTheme.typography.labelMedium,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp),
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
                 )
             }
         }
@@ -2134,11 +2179,46 @@ private fun AttachmentThumbnail(
     }
 }
 
+// ── Sheet scaffold ────────────────────────────────────────────────────────
+
+/** Shared modal sheet: one container colour, one snackbar overlay. */
+@Composable
+private fun ToolzSheet(
+    onDismiss: () -> Unit,
+    feedbackHostState: SnackbarHostState,
+    content: @Composable (SheetState) -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+    ) {
+        Box(Modifier.fillMaxWidth()) {
+            content(sheetState)
+            SheetSnackbarHost(feedbackHostState)
+        }
+    }
+}
+
+/** Bottom-anchored snackbar host used inside every modal sheet. */
+@Composable
+private fun BoxScope.SheetSnackbarHost(
+    hostState: SnackbarHostState,
+) {
+    SnackbarHost(
+        hostState = hostState,
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .padding(horizontal = 16.dp),
+    )
+}
+
 // ── Detail sheet ──────────────────────────────────────────────────────────
 
 /**
  * Order is by how often each block is used: content, then actions, then the
- * AI summary, then metadata, with destructive actions last.
+ * AI summary, then metadata, with the destructive action last.
  */
 @Composable
 private fun ClipDetailSheet(
@@ -2163,9 +2243,9 @@ private fun ClipDetailSheet(
     onToggleLock: () -> Unit,
     onDeleteForever: () -> Unit,
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
     val haptic = rememberToolzHapticFeedback()
+    val scheme = MaterialTheme.colorScheme
     val masked = (entry.isSensitive || entry.isLocked) && !revealed
     val imageAttachments = remember(attachments) {
         attachments.filter { it.mimeType?.startsWith("image/") == true }
@@ -2173,480 +2253,469 @@ private fun ClipDetailSheet(
     val showTextContent = entry.content.isNotBlank() && (entry.isTextLike || toolText != null)
     val isTrashed = entry.deletedAt != null
 
-    // Actions that leave the sheet slide it away first instead of cutting it.
-    fun closeAnimated(after: () -> Unit) {
-        after()
-        scope.launch { sheetState.hide() }.invokeOnCompletion {
-            if (!sheetState.isVisible) onDismiss()
+    ToolzSheet(onDismiss = onDismiss, feedbackHostState = feedbackHostState) { sheetState ->
+        // Actions that leave the sheet slide it away first instead of cutting it.
+        fun closeAnimated(after: () -> Unit) {
+            after()
+            scope.launch { sheetState.hide() }.invokeOnCompletion {
+                if (!sheetState.isVisible) onDismiss()
+            }
         }
-    }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-    ) {
-        Box(Modifier.fillMaxWidth()) {
-            LazyColumn(
-                modifier = Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 96.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                item {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        TypeBadge(entry.type)
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                text = typeLabel(entry.type),
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold,
-                            )
-                            Text(
-                                text = relativeTime(entry.timestamp, now),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        if (entry.isPinned) {
-                            Icon(
-                                Icons.Rounded.PushPin,
-                                contentDescription = stringResource(R.string.st_ClipboardScreen_badge_pinned),
-                                tint = MaterialTheme.colorScheme.primary,
-                            )
-                        }
-                    }
-                }
-
-                if (entry.isSensitive || entry.isLocked) {
-                    item {
-                        Surface(
-                            shape = SmallExpressiveShape,
-                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f),
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(start = 14.dp, top = 8.dp, end = 8.dp, bottom = 8.dp),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Icon(
-                                    if (entry.isLocked) Icons.Rounded.Lock else Icons.Rounded.Shield,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.error,
-                                )
-                                Column(Modifier.weight(1f)) {
-                                    Text(
-                                        text = sensitivityLabel(entry),
-                                        style = MaterialTheme.typography.labelLarge,
-                                        fontWeight = FontWeight.Bold,
-                                    )
-                                    if (entry.passwordVaultMatch) {
-                                        Text(
-                                            text = stringResource(R.string.st_ClipboardScreen_badge_vault_desc),
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                }
-                                if (masked) {
-                                    ToolzExpressiveTextButton(
-                                        onClick = onUnlock,
-                                        shape = SmallExpressiveShape,
-                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                    ) {
-                                        Text(stringResource(R.string.st_ClipboardScreen_action_reveal))
-                                    }
-                                } else {
-                                    ToolzExpressiveTextButton(
-                                        onClick = {
-                                            haptic.click()
-                                            viewModel.hideRevealed(entry.id)
-                                        },
-                                        shape = SmallExpressiveShape,
-                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                    ) {
-                                        Text(stringResource(R.string.st_ClipboardScreen_action_hide))
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (imageAttachments.isNotEmpty() && !masked) {
-                    item {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            SectionTitle(stringResource(R.string.st_ClipboardScreen_detail_images))
-                            LazyRow(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                contentPadding = PaddingValues(vertical = 2.dp),
-                            ) {
-                                items(imageAttachments, key = { it.id }) { image ->
-                                    Surface(
-                                        shape = SmallExpressiveShape,
-                                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                        modifier = Modifier
-                                            .width(240.dp)
-                                            .height(170.dp)
-                                            .clip(SmallExpressiveShape)
-                                            .clickable { onOpenAttachment(image) },
-                                    ) {
-                                        AttachmentThumbnail(
-                                            attachment = image,
-                                            viewModel = viewModel,
-                                            modifier = Modifier.fillMaxSize(),
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (showTextContent) {
-                    item {
-                        Column(
-                            modifier = Modifier.animateContentSize(),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            SectionTitle(stringResource(R.string.st_ClipboardScreen_detail_content))
-                            if (!masked) {
-                                Surface(
-                                    shape = SmallExpressiveShape,
-                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                ) {
-                                    // A clip can hold up to 100k characters. Cap the
-                                    // visible area and let the content scroll instead
-                                    // of forcing one enormous item into the list.
-                                    Box(
-                                        modifier = Modifier
-                                            .heightIn(max = 340.dp)
-                                            .verticalScroll(rememberScrollState()),
-                                    ) {
-                                        SelectionContainer {
-                                            Text(
-                                                text = entry.content,
-                                                style = if (entry.type == ClipboardType.CODE) {
-                                                    MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace)
-                                                } else {
-                                                    MaterialTheme.typography.bodyLarge
-                                                },
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .padding(16.dp),
-                                            )
-                                        }
-                                    }
-                                }
-                            } else {
-                                Surface(
-                                    shape = SmallExpressiveShape,
-                                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.32f),
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(start = 16.dp, top = 12.dp, end = 8.dp, bottom = 12.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        Icon(
-                                            if (entry.isLocked) Icons.Rounded.Lock else Icons.Rounded.Shield,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.error,
-                                        )
-                                        Column(
-                                            modifier = Modifier.weight(1f),
-                                            verticalArrangement = Arrangement.spacedBy(2.dp),
-                                        ) {
-                                            Text(
-                                                text = stringResource(R.string.st_ClipboardScreen_masked_title),
-                                                style = MaterialTheme.typography.titleSmall,
-                                                fontWeight = FontWeight.Bold,
-                                            )
-                                            Text(
-                                                text = stringResource(R.string.st_ClipboardScreen_reveal_hint),
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            )
-                                        }
-                                        ToolzExpressiveTextButton(
-                                            onClick = onUnlock,
-                                            shape = SmallExpressiveShape,
-                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                        ) {
-                                            Text(stringResource(R.string.st_ClipboardScreen_action_reveal))
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (attachments.isNotEmpty() && !masked) {
-                    item {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            SectionTitle(stringResource(R.string.st_ClipboardScreen_detail_attachments))
-                            attachments.forEach { attachment ->
-                                AttachmentRow(
-                                    attachment = attachment,
-                                    viewModel = viewModel,
-                                    onOpen = { onOpenAttachment(attachment) },
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // Trashed clips cannot be copied, shared, pinned or reclassified
-                // until they are restored; hide those actions instead of offering
-                // buttons that would either fail or mutate a deleted row.
-                if (!isTrashed) {
-                    item {
-                        val showLink = !masked && toolText != null && entry.type in LinkTypes
-                        val showTools = toolText != null && !masked
-                        val actions = buildList {
-                            add(
-                                SheetAction(
-                                    Icons.Rounded.ContentCopy,
-                                    stringResource(R.string.st_ClipboardScreen_action_copy),
-                                    onClick = onCopy,
-                                ),
-                            )
-                            add(
-                                SheetAction(
-                                    Icons.Rounded.Share,
-                                    stringResource(R.string.st_ClipboardScreen_action_share),
-                                    onClick = onShare,
-                                ),
-                            )
-                            add(
-                                SheetAction(
-                                    Icons.Rounded.PushPin,
-                                    stringResource(
-                                        if (entry.isPinned) R.string.st_ClipboardScreen_action_unpin
-                                        else R.string.st_ClipboardScreen_action_pin,
-                                    ),
-                                    selected = entry.isPinned,
-                                    onClick = { viewModel.togglePin(entry) },
-                                ),
-                            )
-                            add(
-                                SheetAction(
-                                    if (entry.isLocked) Icons.Rounded.LockOpen else Icons.Rounded.Lock,
-                                    stringResource(
-                                        if (entry.isLocked) R.string.st_ClipboardScreen_action_unlock
-                                        else R.string.st_ClipboardScreen_action_lock,
-                                    ),
-                                    selected = entry.isLocked,
-                                    onClick = onToggleLock,
-                                ),
-                            )
-                            if (!entry.passwordVaultMatch && !entry.isLocked) {
-                                add(
-                                    SheetAction(
-                                        if (entry.isSensitive) Icons.Rounded.Shield else Icons.Rounded.Security,
-                                        stringResource(
-                                            if (entry.isSensitive) R.string.st_ClipboardScreen_action_unmark_sensitive
-                                            else R.string.st_ClipboardScreen_action_mark_sensitive,
-                                        ),
-                                        selected = entry.isSensitive,
-                                        onClick = { viewModel.setSensitive(entry, !entry.isSensitive) },
-                                    ),
-                                )
-                            }
-                            if (showLink) {
-                                add(
-                                    SheetAction(
-                                        Icons.Rounded.Link,
-                                        stringResource(R.string.st_ClipboardScreen_action_open_link),
-                                        onClick = onOpenLink,
-                                    ),
-                                )
-                            }
-                            if (showTools) {
-                                add(
-                                    SheetAction(
-                                        Icons.AutoMirrored.Rounded.Notes,
-                                        stringResource(R.string.st_ClipboardScreen_action_notepad),
-                                        onClick = onOpenNotepad,
-                                    ),
-                                )
-                                add(
-                                    SheetAction(
-                                        Icons.Rounded.TaskAlt,
-                                        stringResource(R.string.st_ClipboardScreen_action_task),
-                                        onClick = onCreateTask,
-                                    ),
-                                )
-                                add(
-                                    SheetAction(
-                                        Icons.Rounded.QrCode,
-                                        stringResource(R.string.st_ClipboardScreen_action_qr),
-                                        onClick = onShowQr,
-                                    ),
-                                )
-                                add(
-                                    SheetAction(
-                                        Icons.Rounded.Lock,
-                                        stringResource(R.string.st_ClipboardScreen_action_encrypt),
-                                        onClick = onEncrypt,
-                                    ),
-                                )
-                            }
-                        }
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            SectionTitle(stringResource(R.string.st_ClipboardScreen_detail_actions))
-                            ActionGrid(actions)
-                        }
-                    }
-                }
-
-                if (state.settings.aiEnabled && entry.isTextLike &&
-                    !entry.isSensitive && !entry.isLocked
+        LazyColumn(
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 96.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
+        ) {
+            item {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    item {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            AiSection(
-                                entry = entry,
-                                running = entry.id in state.aiRunningIds,
-                                configured = state.aiConfigured,
-                                offline = state.settings.offline,
-                                onRun = { viewModel.runAi(entry) },
-                            )
-                        }
+                    LeadingBadge(
+                        type = entry.type,
+                        selected = false,
+                        masked = entry.isSensitive || entry.isLocked,
+                        size = 48.dp,
+                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = typeLabel(entry.type),
+                            style = MaterialTheme.typography.titleLarge,
+                        )
+                        Text(
+                            text = relativeTime(entry.timestamp, now),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = scheme.onSurfaceVariant,
+                        )
+                    }
+                    if (entry.isPinned) {
+                        Icon(
+                            Icons.Rounded.PushPin,
+                            contentDescription = stringResource(R.string.st_ClipboardScreen_badge_pinned),
+                            tint = scheme.primary,
+                        )
                     }
                 }
+            }
 
+            if (entry.isSensitive || entry.isLocked) {
                 item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        SectionTitle(stringResource(R.string.st_ClipboardScreen_detail_meta))
-                        Surface(
-                            shape = SmallExpressiveShape,
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(16.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp),
-                            ) {
-                                MetaRow(
-                                    stringResource(R.string.st_ClipboardScreen_meta_size),
-                                    Formatter.formatShortFileSize(LocalContext.current, entry.sizeBytes),
-                                )
-                                MetaRow(
-                                    stringResource(R.string.st_ClipboardScreen_meta_source),
-                                    sourceLabel(entry),
-                                )
-                                MetaRow(
-                                    stringResource(R.string.st_ClipboardScreen_meta_attachments),
-                                    attachments.size.toString(),
-                                )
-                                MetaRow(
-                                    stringResource(R.string.st_ClipboardScreen_meta_expiry),
-                                    entry.expiresAt?.let { timestamp ->
-                                        stringResource(
-                                            R.string.st_ClipboardScreen_expires_relative_on,
-                                            relativeTime(timestamp, now),
-                                            android.text.format.DateFormat.getDateFormat(LocalContext.current)
-                                                .format(Date(timestamp)),
-                                        )
-                                    } ?: stringResource(R.string.st_ClipboardScreen_no_expiry),
-                                )
-                            }
-                        }
-                    }
-                }
-
-                item {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        HorizontalDivider()
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = scheme.errorContainer,
+                        contentColor = scheme.onErrorContainer,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .animateContentSize(spatialSpring()),
+                    ) {
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.padding(start = 14.dp, top = 8.dp, end = 8.dp, bottom = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            if (isTrashed) {
-                                ToolzTonalExpressiveButton(
-                                    onClick = {
-                                        closeAnimated { viewModel.restoreEntry(entry) }
-                                    },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .heightIn(min = CompactButtonHeight),
-                                    shape = SmallExpressiveShape,
-                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                                ) {
-                                    Icon(Icons.Rounded.Restore, null, Modifier.size(18.dp))
-                                    Spacer(Modifier.width(6.dp))
+                            Icon(
+                                if (entry.isLocked) Icons.Rounded.Lock else Icons.Rounded.Shield,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp),
+                            )
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    text = sensitivityLabel(entry),
+                                    style = MaterialTheme.typography.titleSmall,
+                                )
+                                if (entry.passwordVaultMatch) {
                                     Text(
-                                        text = stringResource(R.string.st_ClipboardScreen_action_restore),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
+                                        text = stringResource(R.string.st_ClipboardScreen_badge_vault_desc),
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                } else if (masked) {
+                                    Text(
+                                        text = stringResource(R.string.st_ClipboardScreen_reveal_hint),
+                                        style = MaterialTheme.typography.bodySmall,
                                     )
                                 }
-                                ToolzExpressiveButton(
-                                    onClick = onDeleteForever,
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .heightIn(min = CompactButtonHeight),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.errorContainer,
-                                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                                    ),
+                            }
+                            if (masked) {
+                                ToolzExpressiveTextButton(
+                                    onClick = onUnlock,
                                     shape = SmallExpressiveShape,
-                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                                 ) {
-                                    Icon(Icons.Rounded.DeleteForever, null, Modifier.size(18.dp))
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(
-                                        text = stringResource(R.string.st_ClipboardScreen_action_delete_forever),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
+                                    Text(stringResource(R.string.st_ClipboardScreen_action_reveal))
                                 }
                             } else {
-                                ToolzExpressiveButton(
+                                ToolzExpressiveTextButton(
                                     onClick = {
-                                        closeAnimated { viewModel.deleteEntry(entry) }
+                                        haptic.click()
+                                        viewModel.hideRevealed(entry.id)
                                     },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .heightIn(min = CompactButtonHeight),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.errorContainer,
-                                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                                    ),
                                     shape = SmallExpressiveShape,
-                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                                 ) {
-                                    Icon(Icons.Rounded.Delete, null, Modifier.size(18.dp))
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(stringResource(R.string.st_ClipboardScreen_action_delete))
+                                    Text(stringResource(R.string.st_ClipboardScreen_action_hide))
                                 }
                             }
                         }
                     }
                 }
             }
-            SheetSnackbarHost(feedbackHostState)
+
+            if (imageAttachments.isNotEmpty() && !masked) {
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        SectionTitle(stringResource(R.string.st_ClipboardScreen_detail_images))
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            contentPadding = PaddingValues(vertical = 2.dp),
+                        ) {
+                            items(imageAttachments, key = { it.id }) { image ->
+                                AttachmentThumbnail(
+                                    attachment = image,
+                                    viewModel = viewModel,
+                                    modifier = Modifier
+                                        .width(220.dp)
+                                        .height(156.dp)
+                                        .clip(RoundedCornerShape(OuterRadius))
+                                        .clickable { onOpenAttachment(image) },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (showTextContent && !masked) {
+                item {
+                    Column(
+                        modifier = Modifier.animateContentSize(spatialSpring()),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        SectionTitle(stringResource(R.string.st_ClipboardScreen_detail_content))
+                        Surface(
+                            shape = RoundedCornerShape(OuterRadius),
+                            color = scheme.surfaceContainerHigh,
+                        ) {
+                            // A clip can hold up to 100k characters. Cap the
+                            // visible area and let the content scroll instead
+                            // of forcing one enormous item into the list.
+                            Box(
+                                modifier = Modifier
+                                    .heightIn(max = 300.dp)
+                                    .verticalScroll(rememberScrollState()),
+                            ) {
+                                SelectionContainer {
+                                    Text(
+                                        text = entry.content,
+                                        style = if (entry.type == ClipboardType.CODE) {
+                                            MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace)
+                                        } else {
+                                            MaterialTheme.typography.bodyLarge
+                                        },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(16.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (attachments.isNotEmpty() && !masked) {
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        SectionTitle(stringResource(R.string.st_ClipboardScreen_detail_attachments))
+                        Column(verticalArrangement = Arrangement.spacedBy(SegmentGap)) {
+                            attachments.forEachIndexed { index, attachment ->
+                                AttachmentRow(
+                                    attachment = attachment,
+                                    viewModel = viewModel,
+                                    shape = segmentShape(index, attachments.size),
+                                    onOpen = { onOpenAttachment(attachment) },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Trashed clips cannot be copied, shared, pinned or reclassified
+            // until they are restored; hide those actions instead of offering
+            // buttons that would either fail or mutate a deleted row.
+            if (!isTrashed) {
+                item {
+                    val showLink = !masked && toolText != null && entry.type in LinkTypes
+                    val showTools = toolText != null && !masked
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        SectionTitle(stringResource(R.string.st_ClipboardScreen_detail_actions))
+                        // Primary pair: the two things people actually do.
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            ToolzExpressiveButton(
+                                onClick = onCopy,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = ControlHeight),
+                                shape = SmallExpressiveShape,
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            ) {
+                                Icon(Icons.Rounded.ContentCopy, null, Modifier.size(18.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = stringResource(R.string.st_ClipboardScreen_action_copy),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            ToolzTonalExpressiveButton(
+                                onClick = onShare,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = ControlHeight),
+                                shape = SmallExpressiveShape,
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            ) {
+                                Icon(Icons.Rounded.Share, null, Modifier.size(18.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = stringResource(R.string.st_ClipboardScreen_action_share),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                        // State toggles are chips: selected means "on".
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            ExpressiveFilterChip(
+                                selected = entry.isPinned,
+                                onClick = { haptic.tick(); viewModel.togglePin(entry) },
+                                label = {
+                                    Text(
+                                        stringResource(
+                                            if (entry.isPinned) R.string.st_ClipboardScreen_action_unpin
+                                            else R.string.st_ClipboardScreen_action_pin,
+                                        ),
+                                    )
+                                },
+                                leadingIcon = { Icon(Icons.Rounded.PushPin, null, Modifier.size(16.dp)) },
+                            )
+                            ExpressiveFilterChip(
+                                selected = entry.isLocked,
+                                onClick = { haptic.tick(); onToggleLock() },
+                                label = {
+                                    Text(
+                                        stringResource(
+                                            if (entry.isLocked) R.string.st_ClipboardScreen_action_unlock
+                                            else R.string.st_ClipboardScreen_action_lock,
+                                        ),
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        if (entry.isLocked) Icons.Rounded.LockOpen else Icons.Rounded.Lock,
+                                        null,
+                                        Modifier.size(16.dp),
+                                    )
+                                },
+                            )
+                            if (!entry.passwordVaultMatch && !entry.isLocked) {
+                                ExpressiveFilterChip(
+                                    selected = entry.isSensitive,
+                                    onClick = { haptic.tick(); viewModel.setSensitive(entry, !entry.isSensitive) },
+                                    label = {
+                                        Text(
+                                            stringResource(
+                                                if (entry.isSensitive) R.string.st_ClipboardScreen_action_unmark_sensitive
+                                                else R.string.st_ClipboardScreen_action_mark_sensitive,
+                                            ),
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            if (entry.isSensitive) Icons.Rounded.Shield else Icons.Rounded.Security,
+                                            null,
+                                            Modifier.size(16.dp),
+                                        )
+                                    },
+                                )
+                            }
+                        }
+                        // Hand-offs to other tools are one-shot chips.
+                        if (showLink || showTools) {
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                if (showLink) {
+                                    ToolChip(
+                                        Icons.Rounded.Link,
+                                        stringResource(R.string.st_ClipboardScreen_action_open_link),
+                                        onOpenLink,
+                                    )
+                                }
+                                if (showTools) {
+                                    ToolChip(
+                                        Icons.AutoMirrored.Rounded.Notes,
+                                        stringResource(R.string.st_ClipboardScreen_action_notepad),
+                                        onOpenNotepad,
+                                    )
+                                    ToolChip(
+                                        Icons.Rounded.TaskAlt,
+                                        stringResource(R.string.st_ClipboardScreen_action_task),
+                                        onCreateTask,
+                                    )
+                                    ToolChip(
+                                        Icons.Rounded.QrCode,
+                                        stringResource(R.string.st_ClipboardScreen_action_qr),
+                                        onShowQr,
+                                    )
+                                    ToolChip(
+                                        Icons.Rounded.Lock,
+                                        stringResource(R.string.st_ClipboardScreen_action_encrypt),
+                                        onEncrypt,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (state.settings.aiEnabled && entry.isTextLike &&
+                !entry.isSensitive && !entry.isLocked
+            ) {
+                item {
+                    AiSection(
+                        entry = entry,
+                        running = entry.id in state.aiRunningIds,
+                        configured = state.aiConfigured,
+                        offline = state.settings.offline,
+                        onRun = { viewModel.runAi(entry) },
+                    )
+                }
+            }
+
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SectionTitle(stringResource(R.string.st_ClipboardScreen_detail_meta))
+                    Surface(
+                        shape = RoundedCornerShape(OuterRadius),
+                        color = scheme.surfaceContainerHigh,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            MetaRow(
+                                stringResource(R.string.st_ClipboardScreen_meta_size),
+                                Formatter.formatShortFileSize(LocalContext.current, entry.sizeBytes),
+                            )
+                            MetaRow(
+                                stringResource(R.string.st_ClipboardScreen_meta_source),
+                                sourceLabel(entry),
+                            )
+                            MetaRow(
+                                stringResource(R.string.st_ClipboardScreen_meta_attachments),
+                                attachments.size.toString(),
+                            )
+                            MetaRow(
+                                stringResource(R.string.st_ClipboardScreen_meta_expiry),
+                                entry.expiresAt?.let { timestamp ->
+                                    stringResource(
+                                        R.string.st_ClipboardScreen_expires_relative_on,
+                                        relativeTime(timestamp, now),
+                                        android.text.format.DateFormat.getDateFormat(LocalContext.current)
+                                            .format(Date(timestamp)),
+                                    )
+                                } ?: stringResource(R.string.st_ClipboardScreen_no_expiry),
+                            )
+                        }
+                    }
+                }
+            }
+
+            item {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    if (isTrashed) {
+                        ToolzTonalExpressiveButton(
+                            onClick = { closeAnimated { viewModel.restoreEntry(entry) } },
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = ControlHeight),
+                            shape = SmallExpressiveShape,
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        ) {
+                            Icon(Icons.Rounded.Restore, null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = stringResource(R.string.st_ClipboardScreen_action_restore),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        ToolzExpressiveButton(
+                            onClick = onDeleteForever,
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = ControlHeight),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = scheme.errorContainer,
+                                contentColor = scheme.onErrorContainer,
+                            ),
+                            shape = SmallExpressiveShape,
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        ) {
+                            Icon(Icons.Rounded.DeleteForever, null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = stringResource(R.string.st_ClipboardScreen_action_delete_forever),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    } else {
+                        ToolzExpressiveButton(
+                            onClick = { closeAnimated { viewModel.deleteEntry(entry) } },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = ControlHeight),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = scheme.errorContainer,
+                                contentColor = scheme.onErrorContainer,
+                            ),
+                            shape = SmallExpressiveShape,
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        ) {
+                            Icon(Icons.Rounded.Delete, null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(stringResource(R.string.st_ClipboardScreen_action_delete))
+                        }
+                    }
+                }
+            }
         }
     }
 }
 
-/** Bottom-anchored snackbar host used inside every modal sheet. */
 @Composable
-private fun BoxScope.SheetSnackbarHost(
-    hostState: SnackbarHostState,
-) {
-    SnackbarHost(
-        hostState = hostState,
-        modifier = Modifier
-            .align(Alignment.BottomCenter)
-            .padding(horizontal = 16.dp),
+private fun ToolChip(icon: ImageVector, label: String, onClick: () -> Unit) {
+    AssistChip(
+        onClick = onClick,
+        label = { Text(label) },
+        leadingIcon = {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(AssistChipDefaults.IconSize))
+        },
     )
 }
 
-/** Emits a title and a card; callers wrap it in a Column so they stack. */
 @Composable
 private fun AiSection(
     entry: ClipboardEntry,
@@ -2655,66 +2724,69 @@ private fun AiSection(
     offline: Boolean,
     onRun: () -> Unit,
 ) {
-    SectionTitle(stringResource(R.string.st_ClipboardScreen_detail_ai))
-    Surface(
-        shape = SmallExpressiveShape,
-        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.35f),
-    ) {
-        Column(
-            modifier = Modifier
-                .padding(16.dp)
-                .animateContentSize(),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+    val scheme = MaterialTheme.colorScheme
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        SectionTitle(stringResource(R.string.st_ClipboardScreen_detail_ai))
+        Surface(
+            shape = RoundedCornerShape(OuterRadius),
+            color = scheme.tertiaryContainer,
+            contentColor = scheme.onTertiaryContainer,
+            modifier = Modifier.fillMaxWidth(),
         ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            Column(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .animateContentSize(spatialSpring()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Icon(
-                    Icons.Rounded.AutoAwesome,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.tertiary,
-                )
-                Text(
-                    text = when {
-                        entry.aiState == ClipAiState.FAILED -> stringResource(R.string.st_ClipboardScreen_ai_failed)
-                        entry.aiState == ClipAiState.DISABLED -> stringResource(R.string.st_ClipboardScreen_ai_disabled_state)
-                        entry.aiState == ClipAiState.RUNNING -> stringResource(R.string.st_ClipboardScreen_ai_running)
-                        entry.isAiProcessed -> stringResource(R.string.st_ClipboardScreen_ai_done)
-                        else -> stringResource(R.string.st_ClipboardScreen_ai_idle)
-                    },
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f),
-                )
-                if (running) {
-                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                } else {
-                    ToolzTonalExpressiveButton(
-                        onClick = onRun,
-                        enabled = configured && !offline,
-                        shape = SmallExpressiveShape,
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
-                    ) {
-                        Text(stringResource(R.string.st_ClipboardScreen_action_ai))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Rounded.AutoAwesome,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Text(
+                        text = when {
+                            entry.aiState == ClipAiState.FAILED -> stringResource(R.string.st_ClipboardScreen_ai_failed)
+                            entry.aiState == ClipAiState.DISABLED -> stringResource(R.string.st_ClipboardScreen_ai_disabled_state)
+                            entry.aiState == ClipAiState.RUNNING -> stringResource(R.string.st_ClipboardScreen_ai_running)
+                            entry.isAiProcessed -> stringResource(R.string.st_ClipboardScreen_ai_done)
+                            else -> stringResource(R.string.st_ClipboardScreen_ai_idle)
+                        },
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (running) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    } else {
+                        ToolzTonalExpressiveButton(
+                            onClick = onRun,
+                            enabled = configured && !offline,
+                            shape = SmallExpressiveShape,
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+                            modifier = Modifier.heightIn(min = 36.dp),
+                        ) {
+                            Text(stringResource(R.string.st_ClipboardScreen_action_ai))
+                        }
                     }
                 }
-            }
-            entry.summary?.takeIf { it.isNotBlank() }?.let {
-                Text(text = it, style = MaterialTheme.typography.bodyMedium)
-            }
-            if (offline) {
-                Text(
-                    text = stringResource(R.string.st_ClipboardScreen_ai_offline),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else if (!configured) {
-                Text(
-                    text = stringResource(R.string.st_ClipboardScreen_ai_not_configured_hint),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                entry.summary?.takeIf { it.isNotBlank() }?.let {
+                    Text(text = it, style = MaterialTheme.typography.bodyMedium)
+                }
+                if (offline) {
+                    Text(
+                        text = stringResource(R.string.st_ClipboardScreen_ai_offline),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                } else if (!configured) {
+                    Text(
+                        text = stringResource(R.string.st_ClipboardScreen_ai_not_configured_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
             }
         }
     }
@@ -2724,15 +2796,16 @@ private fun AiSection(
 private fun AttachmentRow(
     attachment: ClipboardAttachment,
     viewModel: ClipboardViewModel,
+    shape: Shape,
     onOpen: () -> Unit,
 ) {
     val isImage = attachment.mimeType?.startsWith("image/") == true
     Surface(
-        shape = SmallExpressiveShape,
+        shape = shape,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         modifier = Modifier
             .fillMaxWidth()
-            .clip(SmallExpressiveShape)
+            .clip(shape)
             .clickable(role = Role.Button, onClick = onOpen),
     ) {
         Row(
@@ -2746,19 +2819,20 @@ private fun AttachmentRow(
                     viewModel = viewModel,
                     modifier = Modifier
                         .size(48.dp)
-                        .clip(RoundedCornerShape(10.dp)),
+                        .clip(RoundedCornerShape(12.dp)),
                 )
             } else {
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                    contentAlignment = Alignment.Center,
                 ) {
                     Icon(
                         Icons.AutoMirrored.Rounded.InsertDriveFile,
                         contentDescription = null,
-                        modifier = Modifier
-                            .padding(12.dp)
-                            .size(24.dp),
+                        modifier = Modifier.size(24.dp),
                     )
                 }
             }
@@ -2766,7 +2840,6 @@ private fun AttachmentRow(
                 Text(
                     text = attachment.fileName ?: stringResource(R.string.st_ClipboardScreen_attachment_file),
                     style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -2801,7 +2874,6 @@ private fun MetaRow(label: String, value: String) {
         Text(
             text = value,
             style = MaterialTheme.typography.bodySmall,
-            fontWeight = FontWeight.Medium,
             textAlign = TextAlign.End,
             modifier = Modifier.weight(1f),
         )
@@ -2812,81 +2884,10 @@ private fun MetaRow(label: String, value: String) {
 private fun SectionTitle(text: String) {
     Text(
         text = text,
-        style = MaterialTheme.typography.labelLarge,
-        fontWeight = FontWeight.Bold,
+        style = MaterialTheme.typography.titleSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(start = 4.dp),
     )
-}
-
-/** Four-column grid of compact icon-over-label tiles; short rows are padded. */
-@Composable
-private fun ActionGrid(actions: List<SheetAction>) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        actions.chunked(4).forEach { rowActions ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                rowActions.forEach { action ->
-                    ActionTile(
-                        icon = action.icon,
-                        label = action.label,
-                        modifier = Modifier.weight(1f),
-                        selected = action.selected,
-                        onClick = action.onClick,
-                    )
-                }
-                repeat(4 - rowActions.size) { Spacer(Modifier.weight(1f)) }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ActionTile(
-    icon: ImageVector,
-    label: String,
-    modifier: Modifier = Modifier,
-    selected: Boolean = false,
-    onClick: () -> Unit,
-) {
-    val container by animateColorAsState(
-        if (selected) {
-            MaterialTheme.colorScheme.secondaryContainer
-        } else {
-            MaterialTheme.colorScheme.surfaceContainerHigh
-        },
-        animationSpec = tween(180),
-        label = "actionTileColor",
-    )
-    val content by animateColorAsState(
-        if (selected) {
-            MaterialTheme.colorScheme.onSecondaryContainer
-        } else {
-            MaterialTheme.colorScheme.onSurfaceVariant
-        },
-        animationSpec = tween(180),
-        label = "actionTileContent",
-    )
-    Column(
-        modifier = modifier
-            .height(68.dp)
-            .clip(SmallExpressiveShape)
-            .background(container)
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = 4.dp, vertical = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp), tint = content)
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = content,
-            textAlign = TextAlign.Center,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
 }
 
 // ── Onboarding ────────────────────────────────────────────────────────────
@@ -2901,163 +2902,159 @@ private fun OnboardingSheet(
     onInstallShizuku: () -> Unit,
     onOpenStatus: () -> Unit,
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-    ) {
-        Box(Modifier.fillMaxWidth()) {
-            Column(
+    val scheme = MaterialTheme.colorScheme
+    ToolzSheet(onDismiss = onDismiss, feedbackHostState = feedbackHostState) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 24.dp)
-                    .padding(bottom = 32.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                    .size(56.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(scheme.primaryContainer),
+                contentAlignment = Alignment.Center,
             ) {
-                Surface(
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                ) {
-                    Icon(
-                        Icons.Rounded.ContentPaste,
-                        contentDescription = null,
-                        modifier = Modifier
-                            .padding(14.dp)
-                            .size(28.dp),
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
-                }
+                Icon(
+                    Icons.Rounded.ContentPaste,
+                    contentDescription = null,
+                    modifier = Modifier.size(28.dp),
+                    tint = scheme.onPrimaryContainer,
+                )
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
                     text = stringResource(R.string.st_ClipboardScreen_onboarding_title),
                     style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Black,
                 )
                 Text(
                     text = stringResource(R.string.st_ClipboardScreen_onboarding_body),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = scheme.onSurfaceVariant,
                 )
-                if (state.stats.activeCount > 0) {
-                    Surface(
-                        shape = SmallExpressiveShape,
-                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
-                    ) {
-                        Text(
-                            text = stringResource(R.string.st_ClipboardScreen_onboarding_existing),
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.padding(12.dp),
-                        )
-                    }
-                }
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OnboardingStep(
-                        number = 1,
-                        title = stringResource(R.string.st_ClipboardScreen_onboarding_step1_title),
-                        body = stringResource(R.string.st_ClipboardScreen_onboarding_step1_body),
+            }
+            if (state.stats.activeCount > 0) {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = scheme.secondaryContainer,
+                    contentColor = scheme.onSecondaryContainer,
+                ) {
+                    Text(
+                        text = stringResource(R.string.st_ClipboardScreen_onboarding_existing),
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(12.dp),
                     )
-                    OnboardingStep(
-                        number = 2,
-                        title = stringResource(R.string.st_ClipboardScreen_onboarding_step2_title),
-                        body = stringResource(R.string.st_ClipboardScreen_onboarding_step2_body),
-                    )
-                    OnboardingStep(
-                        number = 3,
-                        title = stringResource(R.string.st_ClipboardScreen_onboarding_step3_title),
-                        body = stringResource(R.string.st_ClipboardScreen_onboarding_step3_body),
-                    )
-                }
-                Text(
-                    text = stringResource(R.string.st_ClipboardScreen_onboarding_fallback),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                if (!state.gate.capabilities.shizukuInstalled) {
-                    ToolzExpressiveButton(
-                        onClick = onInstallShizuku,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = CompactButtonHeight),
-                        shape = SmallExpressiveShape,
-                    ) {
-                        Text(stringResource(R.string.st_ClipboardScreen_action_install_shizuku))
-                    }
-                } else if (!state.gate.capabilities.shizukuAuthorized) {
-                    ToolzExpressiveButton(
-                        onClick = onAuthorizeShizuku,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = CompactButtonHeight),
-                        shape = SmallExpressiveShape,
-                    ) {
-                        Text(stringResource(R.string.st_ClipboardScreen_action_authorize))
-                    }
-                }
-                if (state.gate.capabilities.shizukuAuthorized && !state.gate.capabilities.appOpAllowed) {
-                    ToolzOutlinedExpressiveButton(
-                        onClick = onGrantAppOp,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = CompactButtonHeight),
-                        shape = SmallExpressiveShape,
-                    ) {
-                        Text(stringResource(R.string.st_ClipboardScreen_action_grant_appop))
-                    }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ToolzOutlinedExpressiveButton(
-                        onClick = onDismiss,
-                        modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = CompactButtonHeight),
-                        shape = SmallExpressiveShape,
-                    ) {
-                        Text(stringResource(R.string.st_ClipboardScreen_onboarding_skip))
-                    }
-                    ToolzExpressiveButton(
-                        onClick = onOpenStatus,
-                        modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = CompactButtonHeight),
-                        shape = SmallExpressiveShape,
-                    ) {
-                        Text(stringResource(R.string.st_ClipboardScreen_onboarding_continue))
-                    }
                 }
             }
-            SheetSnackbarHost(feedbackHostState)
+            Column(verticalArrangement = Arrangement.spacedBy(SegmentGap)) {
+                OnboardingStep(
+                    number = 1,
+                    title = stringResource(R.string.st_ClipboardScreen_onboarding_step1_title),
+                    body = stringResource(R.string.st_ClipboardScreen_onboarding_step1_body),
+                    shape = segmentShape(0, 3),
+                )
+                OnboardingStep(
+                    number = 2,
+                    title = stringResource(R.string.st_ClipboardScreen_onboarding_step2_title),
+                    body = stringResource(R.string.st_ClipboardScreen_onboarding_step2_body),
+                    shape = segmentShape(1, 3),
+                )
+                OnboardingStep(
+                    number = 3,
+                    title = stringResource(R.string.st_ClipboardScreen_onboarding_step3_title),
+                    body = stringResource(R.string.st_ClipboardScreen_onboarding_step3_body),
+                    shape = segmentShape(2, 3),
+                )
+            }
+            Text(
+                text = stringResource(R.string.st_ClipboardScreen_onboarding_fallback),
+                style = MaterialTheme.typography.bodySmall,
+                color = scheme.onSurfaceVariant,
+            )
+            if (!state.gate.capabilities.shizukuInstalled) {
+                ToolzTonalExpressiveButton(
+                    onClick = onInstallShizuku,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = ControlHeight),
+                    shape = SmallExpressiveShape,
+                ) {
+                    Text(stringResource(R.string.st_ClipboardScreen_action_install_shizuku))
+                }
+            } else if (!state.gate.capabilities.shizukuAuthorized) {
+                ToolzTonalExpressiveButton(
+                    onClick = onAuthorizeShizuku,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = ControlHeight),
+                    shape = SmallExpressiveShape,
+                ) {
+                    Text(stringResource(R.string.st_ClipboardScreen_action_authorize))
+                }
+            }
+            if (state.gate.capabilities.shizukuAuthorized && !state.gate.capabilities.appOpAllowed) {
+                ToolzTonalExpressiveButton(
+                    onClick = onGrantAppOp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = ControlHeight),
+                    shape = SmallExpressiveShape,
+                ) {
+                    Text(stringResource(R.string.st_ClipboardScreen_action_grant_appop))
+                }
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                ToolzExpressiveTextButton(
+                    onClick = onDismiss,
+                    shape = SmallExpressiveShape,
+                ) {
+                    Text(stringResource(R.string.st_ClipboardScreen_onboarding_skip))
+                }
+                ToolzExpressiveButton(
+                    onClick = onOpenStatus,
+                    modifier = Modifier.heightIn(min = ControlHeight),
+                    shape = SmallExpressiveShape,
+                ) {
+                    Text(stringResource(R.string.st_ClipboardScreen_onboarding_continue))
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun OnboardingStep(number: Int, title: String, body: String) {
+private fun OnboardingStep(number: Int, title: String, body: String, shape: Shape) {
     Surface(
-        shape = SmallExpressiveShape,
+        shape = shape,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         modifier = Modifier.fillMaxWidth(),
     ) {
         Row(
-            modifier = Modifier.padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(28.dp),
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary),
+                contentAlignment = Alignment.Center,
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text(
-                        text = number.toString(),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onPrimary,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
+                Text(
+                    text = number.toString(),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onPrimary,
+                )
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(text = title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                Text(text = title, style = MaterialTheme.typography.titleSmall)
                 Text(
                     text = body,
                     style = MaterialTheme.typography.bodySmall,
@@ -3070,20 +3067,6 @@ private fun OnboardingStep(number: Int, title: String, body: String) {
 
 // ── Settings ──────────────────────────────────────────────────────────────
 
-/**
- * Settings rows of one section sit 2dp apart as a connected group, with
- * generous space between sections, so related options read as one unit.
- */
-@Composable
-private fun SettingsGroup(content: @Composable () -> Unit) {
-    Column(
-        modifier = Modifier.animateContentSize(),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-        content()
-    }
-}
-
 @Composable
 private fun SettingsSheet(
     state: ClipboardUiState,
@@ -3094,199 +3077,204 @@ private fun SettingsSheet(
     onDismiss: () -> Unit,
     onShowStatus: () -> Unit,
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-    ) {
-        Box(Modifier.fillMaxWidth()) {
-            LazyColumn(
-                modifier = Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 40.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                item {
-                    Text(
-                        text = stringResource(R.string.st_ClipboardScreen_settings_title),
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Black,
-                        modifier = Modifier.padding(bottom = 4.dp),
+    val scheme = MaterialTheme.colorScheme
+    val needsMediaRow = state.settings.captureScreenshots && !mediaPermissionGranted
+    ToolzSheet(onDismiss = onDismiss, feedbackHostState = feedbackHostState) {
+        LazyColumn(
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 40.dp),
+            verticalArrangement = Arrangement.spacedBy(SegmentGap),
+        ) {
+            item {
+                Text(
+                    text = stringResource(R.string.st_ClipboardScreen_settings_title),
+                    style = MaterialTheme.typography.headlineSmall,
+                    modifier = Modifier.padding(start = 4.dp, bottom = 4.dp),
+                )
+            }
+
+            // ── Capture
+            item { SettingsSectionTitle(stringResource(R.string.st_ClipboardScreen_settings_section_capture)) }
+            item {
+                val count = if (needsMediaRow) 3 else 2
+                Column(
+                    modifier = Modifier.animateContentSize(spatialSpring()),
+                    verticalArrangement = Arrangement.spacedBy(SegmentGap),
+                ) {
+                    SettingSwitchRow(
+                        title = stringResource(R.string.st_ClipboardScreen_settings_monitoring),
+                        body = stringResource(R.string.st_ClipboardScreen_settings_monitoring_desc),
+                        checked = state.settings.monitoring,
+                        shape = segmentShape(0, count),
+                        onCheckedChange = viewModel::setMonitoringEnabled,
                     )
-                }
-
-                item { SettingsSectionTitle(stringResource(R.string.st_ClipboardScreen_settings_section_capture)) }
-                item {
-                    SettingsGroup {
-                        SettingSwitchRow(
-                            title = stringResource(R.string.st_ClipboardScreen_settings_monitoring),
-                            body = stringResource(R.string.st_ClipboardScreen_settings_monitoring_desc),
-                            checked = state.settings.monitoring,
-                            onCheckedChange = viewModel::setMonitoringEnabled,
+                    SettingSwitchRow(
+                        title = stringResource(R.string.st_ClipboardScreen_settings_screenshots),
+                        body = stringResource(R.string.st_ClipboardScreen_settings_screenshots_desc),
+                        checked = state.settings.captureScreenshots,
+                        enabled = state.settings.monitoring,
+                        shape = segmentShape(1, count),
+                        onCheckedChange = viewModel::setCaptureScreenshots,
+                    )
+                    if (needsMediaRow) {
+                        PermissionRow(
+                            title = stringResource(R.string.st_ClipboardScreen_settings_screenshots_permission),
+                            body = stringResource(R.string.st_ClipboardScreen_settings_screenshots_permission_desc),
+                            action = stringResource(R.string.st_ClipboardScreen_action_grant_media),
+                            shape = segmentShape(2, count),
+                            onAction = onRequestMediaPermission,
                         )
-                        SettingSwitchRow(
-                            title = stringResource(R.string.st_ClipboardScreen_settings_screenshots),
-                            body = stringResource(R.string.st_ClipboardScreen_settings_screenshots_desc),
-                            checked = state.settings.captureScreenshots,
-                            enabled = state.settings.monitoring,
-                            onCheckedChange = viewModel::setCaptureScreenshots,
-                        )
-                        if (state.settings.captureScreenshots && !mediaPermissionGranted) {
-                            PermissionRow(
-                                title = stringResource(R.string.st_ClipboardScreen_settings_screenshots_permission),
-                                body = stringResource(R.string.st_ClipboardScreen_settings_screenshots_permission_desc),
-                                action = stringResource(R.string.st_ClipboardScreen_action_grant_media),
-                                onAction = onRequestMediaPermission,
-                            )
-                        }
-                    }
-                }
-
-                item { SettingsSectionTitle(stringResource(R.string.st_ClipboardScreen_settings_section_ai)) }
-                item {
-                    SettingsGroup {
-                        SettingSwitchRow(
-                            title = stringResource(R.string.st_ClipboardScreen_settings_ai),
-                            body = stringResource(R.string.st_ClipboardScreen_settings_ai_desc),
-                            checked = state.settings.aiEnabled,
-                            onCheckedChange = viewModel::setClipboardAiEnabled,
-                        )
-                        SettingSwitchRow(
-                            title = stringResource(R.string.st_ClipboardScreen_settings_auto_ai),
-                            body = stringResource(R.string.st_ClipboardScreen_settings_auto_ai_desc),
-                            checked = state.settings.autoAi,
-                            enabled = state.settings.aiEnabled && !state.settings.offline,
-                            onCheckedChange = viewModel::setAutoAiEnabled,
-                        )
-                    }
-                }
-
-                item { SettingsSectionTitle(stringResource(R.string.st_ClipboardScreen_settings_section_privacy)) }
-                item {
-                    SettingsGroup {
-                        SettingSwitchRow(
-                            title = stringResource(R.string.st_ClipboardScreen_settings_sensitive),
-                            body = stringResource(R.string.st_ClipboardScreen_settings_sensitive_desc),
-                            checked = state.settings.excludeSensitive,
-                            onCheckedChange = viewModel::setExcludeSensitive,
-                        )
-                        SettingSwitchRow(
-                            title = stringResource(R.string.st_ClipboardScreen_settings_biometric),
-                            body = stringResource(R.string.st_ClipboardScreen_settings_biometric_desc),
-                            checked = state.settings.biometricLock,
-                            onCheckedChange = viewModel::setBiometricLock,
-                        )
-                    }
-                }
-
-                item { SettingsSectionTitle(stringResource(R.string.st_ClipboardScreen_settings_section_storage)) }
-                item {
-                    SettingsGroup {
-                        val retention = state.settings.retentionDays
-                        StepperRow(
-                            title = stringResource(R.string.st_ClipboardScreen_settings_retention),
-                            value = if (retention == 0) {
-                                stringResource(R.string.st_ClipboardScreen_retention_forever)
-                            } else {
-                                pluralStringResource(
-                                    R.plurals.st_ClipboardScreen_retention_days,
-                                    retention,
-                                    retention,
-                                )
-                            },
-                            body = stringResource(R.string.st_ClipboardScreen_settings_retention_desc),
-                            canDecrease = stepRetention(retention, up = false) != retention,
-                            canIncrease = stepRetention(retention, up = true) != retention,
-                            onDecrease = { viewModel.setRetentionDays(stepRetention(retention, up = false)) },
-                            onIncrease = { viewModel.setRetentionDays(stepRetention(retention, up = true)) },
-                        )
-                        val itemQuota = state.settings.itemQuotaMb
-                        StepperRow(
-                            title = stringResource(R.string.st_ClipboardScreen_settings_item_quota),
-                            value = stringResource(R.string.st_ClipboardScreen_megabytes, itemQuota),
-                            body = stringResource(R.string.st_ClipboardScreen_settings_item_quota_desc),
-                            canDecrease = itemQuota > 1,
-                            canIncrease = itemQuota < 200,
-                            onDecrease = { viewModel.setItemQuotaMb((itemQuota - 5).coerceAtLeast(1)) },
-                            onIncrease = { viewModel.setItemQuotaMb((itemQuota + 5).coerceAtMost(200)) },
-                        )
-                        val totalQuota = state.settings.totalQuotaMb
-                        StepperRow(
-                            title = stringResource(R.string.st_ClipboardScreen_settings_total_quota),
-                            value = stringResource(R.string.st_ClipboardScreen_megabytes, totalQuota),
-                            body = stringResource(R.string.st_ClipboardScreen_settings_total_quota_desc),
-                            canDecrease = totalQuota > 25,
-                            canIncrease = totalQuota < 5_000,
-                            onDecrease = { viewModel.setTotalQuotaMb((totalQuota - 25).coerceAtLeast(25)) },
-                            onIncrease = { viewModel.setTotalQuotaMb((totalQuota + 25).coerceAtMost(5_000)) },
-                        )
-                        val entries = state.settings.maxEntries
-                        StepperRow(
-                            title = stringResource(R.string.st_ClipboardScreen_settings_max_entries),
-                            value = entries.toString(),
-                            body = stringResource(R.string.st_ClipboardScreen_settings_max_entries_desc),
-                            canDecrease = entries > 50,
-                            canIncrease = entries < 5_000,
-                            onDecrease = { viewModel.setMaxEntries((entries - 50).coerceAtLeast(50)) },
-                            onIncrease = { viewModel.setMaxEntries((entries + 50).coerceAtMost(5_000)) },
-                        )
-                    }
-                }
-
-                item {
-                    Surface(
-                        shape = SmallExpressiveShape,
-                        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.4f),
-                        modifier = Modifier.padding(top = 4.dp),
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(14.dp),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            Icon(Icons.Rounded.WarningAmber, null, tint = MaterialTheme.colorScheme.tertiary)
-                            Text(
-                                text = stringResource(R.string.st_ClipboardScreen_settings_backup_warning),
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
-                    }
-                }
-                item {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 4.dp),
-                    ) {
-                        ToolzOutlinedExpressiveButton(
-                            onClick = onShowStatus,
-                            modifier = Modifier
-                                .weight(1f)
-                                .heightIn(min = CompactButtonHeight),
-                            shape = SmallExpressiveShape,
-                        ) {
-                            Text(stringResource(R.string.st_ClipboardScreen_action_status))
-                        }
-                        ToolzOutlinedExpressiveButton(
-                            onClick = {
-                                viewModel.resetOnboarding()
-                                onDismiss()
-                            },
-                            modifier = Modifier
-                                .weight(1f)
-                                .heightIn(min = CompactButtonHeight),
-                            shape = SmallExpressiveShape,
-                        ) {
-                            Text(
-                                text = stringResource(R.string.st_ClipboardScreen_settings_reset_onboarding),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
                     }
                 }
             }
-            SheetSnackbarHost(feedbackHostState)
+
+            // ── AI
+            item { SettingsSectionTitle(stringResource(R.string.st_ClipboardScreen_settings_section_ai)) }
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(SegmentGap)) {
+                    SettingSwitchRow(
+                        title = stringResource(R.string.st_ClipboardScreen_settings_ai),
+                        body = stringResource(R.string.st_ClipboardScreen_settings_ai_desc),
+                        checked = state.settings.aiEnabled,
+                        shape = segmentShape(0, 2),
+                        onCheckedChange = viewModel::setClipboardAiEnabled,
+                    )
+                    SettingSwitchRow(
+                        title = stringResource(R.string.st_ClipboardScreen_settings_auto_ai),
+                        body = stringResource(R.string.st_ClipboardScreen_settings_auto_ai_desc),
+                        checked = state.settings.autoAi,
+                        enabled = state.settings.aiEnabled && !state.settings.offline,
+                        shape = segmentShape(1, 2),
+                        onCheckedChange = viewModel::setAutoAiEnabled,
+                    )
+                }
+            }
+
+            // ── Privacy
+            item { SettingsSectionTitle(stringResource(R.string.st_ClipboardScreen_settings_section_privacy)) }
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(SegmentGap)) {
+                    SettingSwitchRow(
+                        title = stringResource(R.string.st_ClipboardScreen_settings_sensitive),
+                        body = stringResource(R.string.st_ClipboardScreen_settings_sensitive_desc),
+                        checked = state.settings.excludeSensitive,
+                        shape = segmentShape(0, 2),
+                        onCheckedChange = viewModel::setExcludeSensitive,
+                    )
+                    SettingSwitchRow(
+                        title = stringResource(R.string.st_ClipboardScreen_settings_biometric),
+                        body = stringResource(R.string.st_ClipboardScreen_settings_biometric_desc),
+                        checked = state.settings.biometricLock,
+                        shape = segmentShape(1, 2),
+                        onCheckedChange = viewModel::setBiometricLock,
+                    )
+                }
+            }
+
+            // ── Storage
+            item { SettingsSectionTitle(stringResource(R.string.st_ClipboardScreen_settings_section_storage)) }
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(SegmentGap)) {
+                    val retention = state.settings.retentionDays
+                    StepperRow(
+                        title = stringResource(R.string.st_ClipboardScreen_settings_retention),
+                        value = if (retention == 0) {
+                            stringResource(R.string.st_ClipboardScreen_retention_forever)
+                        } else {
+                            pluralStringResource(
+                                R.plurals.st_ClipboardScreen_retention_days,
+                                retention,
+                                retention,
+                            )
+                        },
+                        body = stringResource(R.string.st_ClipboardScreen_settings_retention_desc),
+                        shape = segmentShape(0, 4),
+                        canDecrease = stepRetention(retention, up = false) != retention,
+                        canIncrease = stepRetention(retention, up = true) != retention,
+                        onDecrease = { viewModel.setRetentionDays(stepRetention(retention, up = false)) },
+                        onIncrease = { viewModel.setRetentionDays(stepRetention(retention, up = true)) },
+                    )
+                    val itemQuota = state.settings.itemQuotaMb
+                    StepperRow(
+                        title = stringResource(R.string.st_ClipboardScreen_settings_item_quota),
+                        value = stringResource(R.string.st_ClipboardScreen_megabytes, itemQuota),
+                        body = stringResource(R.string.st_ClipboardScreen_settings_item_quota_desc),
+                        shape = segmentShape(1, 4),
+                        canDecrease = itemQuota > 1,
+                        canIncrease = itemQuota < 200,
+                        onDecrease = { viewModel.setItemQuotaMb((itemQuota - 5).coerceAtLeast(1)) },
+                        onIncrease = { viewModel.setItemQuotaMb((itemQuota + 5).coerceAtMost(200)) },
+                    )
+                    val totalQuota = state.settings.totalQuotaMb
+                    StepperRow(
+                        title = stringResource(R.string.st_ClipboardScreen_settings_total_quota),
+                        value = stringResource(R.string.st_ClipboardScreen_megabytes, totalQuota),
+                        body = stringResource(R.string.st_ClipboardScreen_settings_total_quota_desc),
+                        shape = segmentShape(2, 4),
+                        canDecrease = totalQuota > 25,
+                        canIncrease = totalQuota < 5_000,
+                        onDecrease = { viewModel.setTotalQuotaMb((totalQuota - 25).coerceAtLeast(25)) },
+                        onIncrease = { viewModel.setTotalQuotaMb((totalQuota + 25).coerceAtMost(5_000)) },
+                    )
+                    val entries = state.settings.maxEntries
+                    StepperRow(
+                        title = stringResource(R.string.st_ClipboardScreen_settings_max_entries),
+                        value = entries.toString(),
+                        body = stringResource(R.string.st_ClipboardScreen_settings_max_entries_desc),
+                        shape = segmentShape(3, 4),
+                        canDecrease = entries > 50,
+                        canIncrease = entries < 5_000,
+                        onDecrease = { viewModel.setMaxEntries((entries - 50).coerceAtLeast(50)) },
+                        onIncrease = { viewModel.setMaxEntries((entries + 50).coerceAtMost(5_000)) },
+                    )
+                }
+            }
+
+            item {
+                Notice(
+                    icon = Icons.Rounded.WarningAmber,
+                    title = stringResource(R.string.st_ClipboardScreen_settings_backup_warning),
+                    container = scheme.tertiaryContainer,
+                    content = scheme.onTertiaryContainer,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 14.dp),
+                )
+            }
+            item {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp),
+                ) {
+                    ToolzOutlinedExpressiveButton(
+                        onClick = onShowStatus,
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = ControlHeight),
+                        shape = SmallExpressiveShape,
+                    ) {
+                        Text(stringResource(R.string.st_ClipboardScreen_action_status))
+                    }
+                    ToolzOutlinedExpressiveButton(
+                        onClick = {
+                            viewModel.resetOnboarding()
+                            onDismiss()
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = ControlHeight),
+                        shape = SmallExpressiveShape,
+                    ) {
+                        Text(
+                            text = stringResource(R.string.st_ClipboardScreen_settings_reset_onboarding),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -3296,10 +3284,9 @@ private fun SettingsSheet(
 private fun SettingsSectionTitle(text: String) {
     Text(
         text = text,
-        style = MaterialTheme.typography.labelLarge,
-        fontWeight = FontWeight.Bold,
+        style = MaterialTheme.typography.titleSmall,
         color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 4.dp, top = 12.dp),
+        modifier = Modifier.padding(start = 4.dp, top = 16.dp, bottom = 6.dp),
     )
 }
 
@@ -3308,26 +3295,26 @@ private fun SettingSwitchRow(
     title: String,
     body: String,
     checked: Boolean,
+    shape: Shape,
     enabled: Boolean = true,
     onCheckedChange: (Boolean) -> Unit,
 ) {
     Surface(
         onClick = { onCheckedChange(!checked) },
         enabled = enabled,
-        shape = SmallExpressiveShape,
+        shape = shape,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         modifier = Modifier.fillMaxWidth(),
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
                     text = title,
                     style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
                     color = if (enabled) {
                         MaterialTheme.colorScheme.onSurface
                     } else {
@@ -3354,38 +3341,35 @@ private fun PermissionRow(
     title: String,
     body: String,
     action: String,
+    shape: Shape,
     onAction: () -> Unit,
 ) {
     Surface(
-        shape = SmallExpressiveShape,
-        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f),
+        shape = shape,
+        color = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Icon(
                     Icons.Rounded.WarningAmber,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.error,
                     modifier = Modifier.size(20.dp),
                 )
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(text = title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                    Text(
-                        text = body,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Text(text = title, style = MaterialTheme.typography.titleSmall)
+                    Text(text = body, style = MaterialTheme.typography.bodySmall)
                 }
             }
             ToolzTonalExpressiveButton(
                 onClick = onAction,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = CompactButtonHeight),
+                    .heightIn(min = ControlHeight),
                 shape = SmallExpressiveShape,
             ) {
                 Text(action)
@@ -3394,12 +3378,13 @@ private fun PermissionRow(
     }
 }
 
-/** Title and description on top, value with inline −/+ buttons on the right. */
+/** Title and description on the left, value with compact −/+ buttons on the right. */
 @Composable
 private fun StepperRow(
     title: String,
     value: String,
     body: String,
+    shape: Shape,
     onDecrease: () -> Unit,
     onIncrease: () -> Unit,
     canDecrease: Boolean = true,
@@ -3407,58 +3392,53 @@ private fun StepperRow(
 ) {
     val haptic = rememberToolzHapticFeedback()
     Surface(
-        shape = SmallExpressiveShape,
+        shape = shape,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(
-            modifier = Modifier.padding(start = 16.dp, top = 6.dp, end = 8.dp, bottom = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(0.dp),
+        Row(
+            modifier = Modifier.padding(start = 16.dp, top = 10.dp, end = 12.dp, bottom = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(text = title, style = MaterialTheme.typography.titleSmall)
                 Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f),
+                    text = body,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                IconButton(
-                    onClick = { haptic.tick(); onDecrease() },
-                    enabled = canDecrease,
-                    modifier = Modifier.size(40.dp),
-                ) {
-                    Icon(
-                        Icons.Rounded.Remove,
-                        contentDescription = stringResource(R.string.st_ClipboardScreen_action_decrease),
-                    )
-                }
-                // Value changes slide in with the content size so the row never jumps.
-                Text(
-                    text = value,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
-                    textAlign = TextAlign.Center,
-                    maxLines = 1,
-                    modifier = Modifier.widthIn(min = 72.dp),
+            }
+            FilledTonalIconButton(
+                onClick = { haptic.tick(); onDecrease() },
+                enabled = canDecrease,
+                modifier = Modifier.size(36.dp),
+            ) {
+                Icon(
+                    Icons.Rounded.Remove,
+                    contentDescription = stringResource(R.string.st_ClipboardScreen_action_decrease),
+                    modifier = Modifier.size(18.dp),
                 )
-                IconButton(
-                    onClick = { haptic.tick(); onIncrease() },
-                    enabled = canIncrease,
-                    modifier = Modifier.size(40.dp),
-                ) {
-                    Icon(
-                        Icons.Rounded.Add,
-                        contentDescription = stringResource(R.string.st_ClipboardScreen_action_increase),
-                    )
-                }
             }
             Text(
-                text = body,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(end = 8.dp),
+                text = value,
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                modifier = Modifier.widthIn(min = 56.dp),
             )
+            FilledTonalIconButton(
+                onClick = { haptic.tick(); onIncrease() },
+                enabled = canIncrease,
+                modifier = Modifier.size(36.dp),
+            ) {
+                Icon(
+                    Icons.Rounded.Add,
+                    contentDescription = stringResource(R.string.st_ClipboardScreen_action_increase),
+                    modifier = Modifier.size(18.dp),
+                )
+            }
         }
     }
 }
@@ -3475,185 +3455,180 @@ private fun StatusSheet(
     onRequestMediaPermission: () -> Unit,
     onOpenAppDetails: () -> Unit,
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
     val status = state.gate.status
     val caps = state.gate.capabilities
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-    ) {
-        Box(Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 20.dp)
-                    .padding(bottom = 36.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+    val needsMediaRow = state.settings.captureScreenshots && !mediaPermissionGranted
+    ToolzSheet(onDismiss = onDismiss, feedbackHostState = feedbackHostState) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 36.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.st_ClipboardScreen_status_title),
+                style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier.padding(start = 4.dp),
+            )
+            StatusBanner(status)
+
+            SectionTitle(stringResource(R.string.st_ClipboardScreen_status_section_access))
+            Surface(
+                shape = RoundedCornerShape(OuterRadius),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                modifier = Modifier.fillMaxWidth(),
             ) {
-                Text(
-                    text = stringResource(R.string.st_ClipboardScreen_status_title),
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Black,
-                )
-                StatusBanner(status)
-
-                SectionTitle(stringResource(R.string.st_ClipboardScreen_status_section_access))
-                Surface(
-                    shape = SmallExpressiveShape,
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    modifier = Modifier.fillMaxWidth(),
+                Column(
+                    modifier = Modifier
+                        .padding(16.dp)
+                        .animateContentSize(spatialSpring()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .padding(16.dp)
-                            .animateContentSize(),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        StatusRow(stringResource(R.string.st_ClipboardScreen_status_shizuku_installed), caps.shizukuInstalled)
-                        StatusRow(stringResource(R.string.st_ClipboardScreen_status_shizuku_running), caps.shizukuRunning)
-                        StatusRow(stringResource(R.string.st_ClipboardScreen_status_shizuku_authorized), caps.shizukuAuthorized)
-                        StatusRow(stringResource(R.string.st_ClipboardScreen_status_appop), caps.appOpAllowed)
-                        StatusRow(stringResource(R.string.st_ClipboardScreen_status_monitoring), state.settings.monitoring)
-                        StatusRow(stringResource(R.string.st_ClipboardScreen_status_screenshots), state.settings.captureScreenshots)
-                        if (state.settings.captureScreenshots) {
-                            StatusRow(
-                                stringResource(R.string.st_ClipboardScreen_status_media_permission),
-                                mediaPermissionGranted,
-                            )
-                        }
-                    }
-                }
-                if (state.settings.captureScreenshots && !mediaPermissionGranted) {
-                    PermissionRow(
-                        title = stringResource(R.string.st_ClipboardScreen_settings_screenshots_permission),
-                        body = stringResource(R.string.st_ClipboardScreen_settings_screenshots_permission_desc),
-                        action = stringResource(R.string.st_ClipboardScreen_action_grant_media),
-                        onAction = onRequestMediaPermission,
-                    )
-                }
-
-                SectionTitle(stringResource(R.string.st_ClipboardScreen_status_section_storage))
-                Surface(
-                    shape = SmallExpressiveShape,
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
+                    StatusRow(stringResource(R.string.st_ClipboardScreen_status_shizuku_installed), caps.shizukuInstalled)
+                    StatusRow(stringResource(R.string.st_ClipboardScreen_status_shizuku_running), caps.shizukuRunning)
+                    StatusRow(stringResource(R.string.st_ClipboardScreen_status_shizuku_authorized), caps.shizukuAuthorized)
+                    StatusRow(stringResource(R.string.st_ClipboardScreen_status_appop), caps.appOpAllowed)
+                    StatusRow(stringResource(R.string.st_ClipboardScreen_status_monitoring), state.settings.monitoring)
+                    StatusRow(stringResource(R.string.st_ClipboardScreen_status_screenshots), state.settings.captureScreenshots)
+                    if (state.settings.captureScreenshots) {
                         StatusRow(
-                            stringResource(R.string.st_ClipboardScreen_status_active_clips),
-                            state.stats.activeCount.toString(),
-                        )
-                        StatusRow(
-                            stringResource(R.string.st_ClipboardScreen_status_trash),
-                            state.stats.trashedCount.toString(),
-                        )
-                        StatusRow(
-                            stringResource(R.string.st_ClipboardScreen_status_sensitive),
-                            state.stats.sensitiveCount.toString(),
-                        )
-                        val quotaBytes = state.stats.totalQuotaMb.toLong() * 1024L * 1024L
-                        StatusRow(
-                            stringResource(R.string.st_ClipboardScreen_status_storage),
-                            stringResource(
-                                R.string.st_ClipboardScreen_status_quota_used,
-                                Formatter.formatShortFileSize(context, state.stats.blobBytes),
-                                Formatter.formatShortFileSize(context, quotaBytes),
-                            ),
-                        )
-                        if (quotaBytes > 0) {
-                            LinearProgressIndicator(
-                                progress = { (state.stats.blobBytes.toFloat() / quotaBytes.toFloat()).coerceIn(0f, 1f) },
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        }
-                    }
-                }
-
-                if (!caps.shizukuInstalled) {
-                    ToolzExpressiveButton(
-                        onClick = {
-                            runCatching {
-                                context.startActivity(viewModel.shizukuInstallIntent())
-                                onDismiss()
-                            }
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = CompactButtonHeight),
-                        shape = SmallExpressiveShape,
-                    ) {
-                        Text(stringResource(R.string.st_ClipboardScreen_action_install_shizuku))
-                    }
-                } else if (!caps.shizukuAuthorized) {
-                    ToolzExpressiveButton(
-                        onClick = viewModel::requestShizukuAuthorization,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = CompactButtonHeight),
-                        shape = SmallExpressiveShape,
-                    ) {
-                        Text(stringResource(R.string.st_ClipboardScreen_action_authorize))
-                    }
-                } else if (!caps.appOpAllowed) {
-                    ToolzOutlinedExpressiveButton(
-                        onClick = viewModel::grantClipboardAppOp,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = CompactButtonHeight),
-                        shape = SmallExpressiveShape,
-                    ) {
-                        Text(stringResource(R.string.st_ClipboardScreen_action_grant_appop))
-                    }
-                } else {
-                    ToolzOutlinedExpressiveButton(
-                        onClick = viewModel::revokeClipboardAppOp,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = CompactButtonHeight),
-                        shape = SmallExpressiveShape,
-                    ) {
-                        Text(stringResource(R.string.st_ClipboardScreen_action_revoke_appop))
-                    }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ToolzOutlinedExpressiveButton(
-                        onClick = { viewModel.refreshGate(); viewModel.refreshStats() },
-                        modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = CompactButtonHeight),
-                        shape = SmallExpressiveShape,
-                    ) {
-                        Icon(Icons.Rounded.Refresh, null, Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text(stringResource(R.string.st_ClipboardScreen_action_refresh))
-                    }
-                    ToolzOutlinedExpressiveButton(
-                        onClick = onOpenAppDetails,
-                        modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = CompactButtonHeight),
-                        shape = SmallExpressiveShape,
-                    ) {
-                        Text(
-                            text = stringResource(R.string.st_ClipboardScreen_status_app_details),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+                            stringResource(R.string.st_ClipboardScreen_status_media_permission),
+                            mediaPermissionGranted,
                         )
                     }
                 }
-                Text(
-                    text = stringResource(R.string.st_ClipboardScreen_status_note),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+            }
+            if (needsMediaRow) {
+                PermissionRow(
+                    title = stringResource(R.string.st_ClipboardScreen_settings_screenshots_permission),
+                    body = stringResource(R.string.st_ClipboardScreen_settings_screenshots_permission_desc),
+                    action = stringResource(R.string.st_ClipboardScreen_action_grant_media),
+                    shape = RoundedCornerShape(OuterRadius),
+                    onAction = onRequestMediaPermission,
                 )
             }
-            SheetSnackbarHost(feedbackHostState)
+
+            SectionTitle(stringResource(R.string.st_ClipboardScreen_status_section_storage))
+            Surface(
+                shape = RoundedCornerShape(OuterRadius),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    StatusRow(
+                        stringResource(R.string.st_ClipboardScreen_status_active_clips),
+                        state.stats.activeCount.toString(),
+                    )
+                    StatusRow(
+                        stringResource(R.string.st_ClipboardScreen_status_trash),
+                        state.stats.trashedCount.toString(),
+                    )
+                    StatusRow(
+                        stringResource(R.string.st_ClipboardScreen_status_sensitive),
+                        state.stats.sensitiveCount.toString(),
+                    )
+                    val quotaBytes = state.stats.totalQuotaMb.toLong() * 1024L * 1024L
+                    StatusRow(
+                        stringResource(R.string.st_ClipboardScreen_status_storage),
+                        stringResource(
+                            R.string.st_ClipboardScreen_status_quota_used,
+                            Formatter.formatShortFileSize(context, state.stats.blobBytes),
+                            Formatter.formatShortFileSize(context, quotaBytes),
+                        ),
+                    )
+                    if (quotaBytes > 0) {
+                        LinearProgressIndicator(
+                            progress = { (state.stats.blobBytes.toFloat() / quotaBytes.toFloat()).coerceIn(0f, 1f) },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+            }
+
+            if (!caps.shizukuInstalled) {
+                ToolzExpressiveButton(
+                    onClick = {
+                        runCatching {
+                            context.startActivity(viewModel.shizukuInstallIntent())
+                            onDismiss()
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = ControlHeight),
+                    shape = SmallExpressiveShape,
+                ) {
+                    Text(stringResource(R.string.st_ClipboardScreen_action_install_shizuku))
+                }
+            } else if (!caps.shizukuAuthorized) {
+                ToolzExpressiveButton(
+                    onClick = viewModel::requestShizukuAuthorization,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = ControlHeight),
+                    shape = SmallExpressiveShape,
+                ) {
+                    Text(stringResource(R.string.st_ClipboardScreen_action_authorize))
+                }
+            } else if (!caps.appOpAllowed) {
+                ToolzTonalExpressiveButton(
+                    onClick = viewModel::grantClipboardAppOp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = ControlHeight),
+                    shape = SmallExpressiveShape,
+                ) {
+                    Text(stringResource(R.string.st_ClipboardScreen_action_grant_appop))
+                }
+            } else {
+                ToolzOutlinedExpressiveButton(
+                    onClick = viewModel::revokeClipboardAppOp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = ControlHeight),
+                    shape = SmallExpressiveShape,
+                ) {
+                    Text(stringResource(R.string.st_ClipboardScreen_action_revoke_appop))
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ToolzOutlinedExpressiveButton(
+                    onClick = { viewModel.refreshGate(); viewModel.refreshStats() },
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = ControlHeight),
+                    shape = SmallExpressiveShape,
+                ) {
+                    Icon(Icons.Rounded.Refresh, null, Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(stringResource(R.string.st_ClipboardScreen_action_refresh))
+                }
+                ToolzOutlinedExpressiveButton(
+                    onClick = onOpenAppDetails,
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = ControlHeight),
+                    shape = SmallExpressiveShape,
+                ) {
+                    Text(
+                        text = stringResource(R.string.st_ClipboardScreen_status_app_details),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            Text(
+                text = stringResource(R.string.st_ClipboardScreen_status_note),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 4.dp),
+            )
         }
     }
 }
@@ -3729,61 +3704,13 @@ private fun StatusRow(label: String, value: String) {
         Text(
             text = value,
             style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Bold,
             textAlign = TextAlign.End,
             modifier = Modifier.weight(1f),
         )
     }
 }
 
-// ── Shared small pieces ───────────────────────────────────────────────────
-
-@Composable
-private fun InfoBanner(
-    icon: ImageVector,
-    title: String,
-    color: Color,
-    action: String? = null,
-    onClick: (() -> Unit)? = null,
-) {
-    Surface(
-        shape = SmallExpressiveShape,
-        color = color.copy(alpha = 0.12f),
-        border = BorderStroke(1.dp, color.copy(alpha = 0.2f)),
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = ScreenGutter, vertical = 4.dp)
-            .clip(SmallExpressiveShape)
-            .then(
-                if (onClick != null) {
-                    Modifier.clickable(role = Role.Button, onClick = onClick)
-                } else {
-                    Modifier
-                },
-            ),
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(20.dp))
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.weight(1f),
-            )
-            if (action != null) {
-                Text(
-                    text = action,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = color,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
-        }
-    }
-}
+// ── Empty / loading / dialogs ─────────────────────────────────────────────
 
 @Composable
 private fun FullHeightState(content: @Composable () -> Unit) {
@@ -3838,7 +3765,8 @@ private fun EmptyState(
     FullHeightState {
         AnimatedVisibility(
             visible = visible,
-            enter = fadeIn(tween(240)) + slideInVertically(tween(240)) { it / 16 },
+            enter = fadeIn(effectsSpring()) + slideInVertically(spatialSpring()) { it / 12 } +
+                    scaleIn(spatialSpring(), initialScale = 0.92f),
             modifier = Modifier.fillMaxSize(),
         ) {
             Column(
@@ -3848,31 +3776,27 @@ private fun EmptyState(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
             ) {
-                Surface(
-                    shape = MediumExpressiveShape,
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
-                    border = BorderStroke(
-                        1.dp,
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
-                    ),
+                Box(
+                    modifier = Modifier
+                        .size(88.dp)
+                        .clip(RoundedCornerShape(32.dp))
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center,
                 ) {
                     Icon(
                         icon,
                         contentDescription = null,
-                        modifier = Modifier
-                            .padding(20.dp)
-                            .size(40.dp),
-                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(40.dp),
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
                     )
                 }
                 Spacer(Modifier.height(20.dp))
                 Text(
                     text = title,
                     style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Black,
                     textAlign = TextAlign.Center,
                 )
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(6.dp))
                 Text(
                     text = body,
                     style = MaterialTheme.typography.bodyMedium,
@@ -3883,7 +3807,7 @@ private fun EmptyState(
                     Spacer(Modifier.height(20.dp))
                     ToolzExpressiveButton(
                         onClick = onAction,
-                        modifier = Modifier.heightIn(min = CompactButtonHeight),
+                        modifier = Modifier.heightIn(min = ControlHeight),
                         shape = SmallExpressiveShape,
                     ) {
                         Text(actionLabel)
@@ -3915,11 +3839,18 @@ private fun ConfirmDialog(
         onDismissRequest = onDismiss,
         shape = MediumExpressiveShape,
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        icon = {
+            Icon(
+                Icons.Rounded.WarningAmber,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.error,
+            )
+        },
         title = {
             Text(
                 text = title,
                 style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Black,
+                textAlign = TextAlign.Center,
             )
         },
         text = {
