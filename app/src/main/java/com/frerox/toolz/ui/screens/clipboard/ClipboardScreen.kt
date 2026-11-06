@@ -84,7 +84,6 @@ import androidx.compose.material.icons.rounded.DeleteForever
 import androidx.compose.material.icons.rounded.Email
 import androidx.compose.material.icons.rounded.FileOpen
 import androidx.compose.material.icons.rounded.FilterList
-import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Key
@@ -209,14 +208,27 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Date
 
-/** A snackbar request; newer requests replace older ones instead of queueing. */
+/** A snackbar request. Ordinary messages replace each other; undoable ones are never stolen. */
 private data class TransientMessage(
     val text: String,
     val undoable: Boolean = false,
 )
 
+/** Retention steps, ascending. 0 means "keep forever" and sorts last. */
+private val RetentionPresets = listOf(1, 3, 7, 14, 30, 60, 90, 180, 365, 0)
+
+private fun stepRetention(current: Int, up: Boolean): Int {
+    fun rank(days: Int) = if (days == 0) Int.MAX_VALUE else days
+    val sorted = RetentionPresets.sortedBy(::rank)
+    return if (up) {
+        sorted.firstOrNull { rank(it) > rank(current) } ?: current
+    } else {
+        sorted.lastOrNull { rank(it) < rank(current) } ?: current
+    }
+}
+
 /**
- * Toolz Clipboard — full Material 3 Expressive history, trash, detail sheet,
+ * Toolz Clipboard — Material 3 Expressive history, trash, detail sheet,
  * onboarding, capture diagnostics and settings.
  *
  * Integration callbacks are optional so the screen can be embedded anywhere.
@@ -232,27 +244,16 @@ fun ClipboardScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
-    // Refresh status, stats and the current clipboard whenever the screen
-    // comes back to the foreground (returning from Shizuku settings, another
-    // app, the share sheet, etc.). Without this the setup banner and counters
-    // could stay stale for the whole session.
-    DisposableEffect(lifecycleOwner, viewModel) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) viewModel.onScreenResumed()
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    // Relative timestamps are refreshed once a minute so an open screen never
-    // shows "just now" for a clip captured hours ago.
+    // Relative timestamps refresh every 30 s so an open screen never shows
+    // "just now" for a clip captured hours ago.
     val now = rememberNow()
     var refreshing by remember { mutableStateOf(false) }
     val pullState = rememberPullToRefreshState()
+
     // Screenshot ingestion reads MediaStore. Without this runtime permission
-    // the observer and scan silently find nothing, so surface and request it
-    // instead of pretending screenshots are being captured.
+    // the observer and scan silently find nothing, so surface and request it.
     var mediaPermissionGranted by remember {
         mutableStateOf(PurgeShotDetector.hasMediaPermission(context))
     }
@@ -260,8 +261,7 @@ fun ClipboardScreen(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
         // Re-read the real grant state: on Android 14 a partial photo grant can
-        // report `granted` for the request while MediaStore still cannot read
-        // every image. The check is the source of truth.
+        // report `granted` while MediaStore still cannot read every image.
         mediaPermissionGranted = PurgeShotDetector.hasMediaPermission(context)
         if (granted || mediaPermissionGranted) viewModel.onMediaPermissionGranted()
     }
@@ -273,29 +273,31 @@ fun ClipboardScreen(
         }
         mediaPermissionLauncher.launch(permission)
     }
-    DisposableEffect(lifecycleOwner, context) {
+
+    // Refresh status, stats, clipboard and permission state whenever the screen
+    // returns to the foreground (Shizuku settings, another app, share sheet).
+    DisposableEffect(lifecycleOwner, viewModel, context) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.onScreenResumed()
                 mediaPermissionGranted = PurgeShotDetector.hasMediaPermission(context)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
+
     val snackbarHostState = remember { SnackbarHostState() }
     // Modal bottom sheets live in their own window above the Scaffold, so the
     // regular snackbar host is hidden behind the scrim. Events raised while a
     // sheet is open are shown by a second host rendered inside that sheet.
     val sheetSnackbarHostState = remember { SnackbarHostState() }
-    // Unbounded queue processed by a single consumer below. It must not be
-    // conflated: an undoable delete prompt could be overwritten by an ordinary
-    // "copied" message before the consumer ever sees it, silently losing the
-    // only way to undo. The consumer itself cancels stale messages.
+    // Unbounded queue with a single consumer below. It must not be conflated:
+    // an undoable delete prompt could be overwritten by an ordinary "copied"
+    // message and silently lose the only way to undo.
     val snackbarQueue = remember { Channel<TransientMessage>(Channel.UNLIMITED) }
     val haptic = rememberToolzHapticFeedback()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
-    // Resolve localized labels through composition so they stay correct across
-    // configuration/locale changes instead of reading resources from context.
     val undoLabel = stringResource(R.string.st_ClipboardScreen_action_undo)
     val shareLabel = stringResource(R.string.st_ClipboardScreen_action_share)
     val shareFailedLabel = stringResource(R.string.st_ClipboardScreen_message_share_failed)
@@ -311,12 +313,11 @@ fun ClipboardScreen(
     var showEmptyTrashDialog by rememberSaveable { mutableStateOf(false) }
     var showDeleteForeverDialog by rememberSaveable { mutableStateOf(false) }
     // A single-row "delete forever" is irreversible too, so it goes through
-    // the same confirmation step as the bulk action instead of firing on tap.
+    // the same confirmation step as the bulk action.
     var pendingDeleteForeverId by rememberSaveable { mutableStateOf<Int?>(null) }
     var showOverflow by rememberSaveable { mutableStateOf(false) }
-    // Confirmed copy flash. It is only advanced by the ViewModel's COPIED
-    // event, so a cancelled biometric prompt or a failed write never shows a
-    // false "copied" check on the row.
+    // Confirmed copy flash, advanced only by the ViewModel's COPIED event so a
+    // cancelled biometric prompt or failed write never shows a false check.
     var copyFlashEntryId by remember { mutableStateOf<Int?>(null) }
     var copyFlashToken by remember { mutableStateOf(0) }
     LaunchedEffect(copyFlashEntryId, copyFlashToken) {
@@ -327,7 +328,9 @@ fun ClipboardScreen(
     }
 
     val detailEntry = remember(detailId, state.entries, state.trashed) {
-        detailId?.let { id -> state.entries.firstOrNull { it.id == id } ?: state.trashed.firstOrNull { it.id == id } }
+        detailId?.let { id ->
+            state.entries.firstOrNull { it.id == id } ?: state.trashed.firstOrNull { it.id == id }
+        }
     }
 
     val anySheetOpen = showOnboarding || showSettings || showStatus || detailEntry != null
@@ -358,8 +361,8 @@ fun ClipboardScreen(
 
     LaunchedEffect(refreshing) {
         if (!refreshing) return@LaunchedEffect
-        // Pulling to refresh should re-read the system clipboard, capture gate
-        // and storage stats together so every counter agrees afterwards.
+        // Re-read the system clipboard, capture gate and storage stats together
+        // so every counter agrees afterwards.
         viewModel.refreshClipboard(notify = false)
         viewModel.refreshGate()
         viewModel.refreshStats()
@@ -384,9 +387,7 @@ fun ClipboardScreen(
                 }
                 is ClipboardEvent.Share -> {
                     runCatching {
-                        context.startActivity(
-                            Intent.createChooser(event.intent, shareLabelState),
-                        )
+                        context.startActivity(Intent.createChooser(event.intent, shareLabelState))
                     }.onFailure {
                         snackbarQueue.trySend(TransientMessage(shareFailedLabelState))
                     }
@@ -396,10 +397,9 @@ fun ClipboardScreen(
     }
 
     // Single consumer for feedback. Showing a snackbar suspends for its whole
-    // timeout, so each message is shown in its own child job: a newer message
-    // cancels the previous one instead of waiting seconds behind it. A visible
-    // delete/undo prompt is never stolen by ordinary feedback, so the undo
-    // action stays reachable.
+    // timeout, so each message runs in its own child job: a newer message
+    // cancels the previous one instead of waiting behind it. A visible
+    // delete/undo prompt is never stolen by ordinary feedback.
     LaunchedEffect(Unit) {
         var active: Job? = null
         var activeUndoable = false
@@ -430,9 +430,8 @@ fun ClipboardScreen(
             action()
             return
         }
-        // The clip was already unlocked in this session. Re-prompting for
-        // every follow-up action (copy, share, open attachment, tool) would
-        // make a revealed clip feel broken.
+        // Already unlocked in this session: re-prompting for every follow-up
+        // action would make a revealed clip feel broken.
         if (entry.id in state.revealedIds) {
             action()
             return
@@ -460,9 +459,8 @@ fun ClipboardScreen(
         )
     }
 
-    // Sheets handle their own back gesture in their own window. This handler
-    // only runs for the history screen, where back should undo one layer of
-    // navigation instead of leaving the whole feature.
+    // Sheets handle back in their own window. This handler only runs for the
+    // history screen, where back undoes one layer of navigation.
     BackHandler {
         when {
             state.isSelectionMode -> viewModel.clearSelection()
@@ -490,25 +488,21 @@ fun ClipboardScreen(
                 },
                 subtitle = {
                     Text(
-                        text = if (state.isSelectionMode) {
-                            pluralStringResource(
+                        text = when {
+                            state.isSelectionMode -> pluralStringResource(
                                 R.plurals.st_ClipboardScreen_selected_count,
                                 state.selection.size,
                                 state.selection.size,
                             )
-                        } else {
-                            if (state.showTrash) {
-                                stringResource(
-                                    R.string.st_ClipboardScreen_trash_subtitle,
-                                    state.stats.trashedCount,
-                                )
-                            } else {
-                                stringResource(
-                                    R.string.st_ClipboardScreen_subtitle,
-                                    state.stats.activeCount,
-                                    state.stats.sensitiveCount,
-                                )
-                            }
+                            state.showTrash -> stringResource(
+                                R.string.st_ClipboardScreen_trash_subtitle,
+                                state.stats.trashedCount,
+                            )
+                            else -> stringResource(
+                                R.string.st_ClipboardScreen_subtitle,
+                                state.stats.activeCount,
+                                state.stats.sensitiveCount,
+                            )
                         },
                         style = MaterialTheme.typography.labelMedium,
                     )
@@ -535,28 +529,19 @@ fun ClipboardScreen(
                 },
                 actions = {
                     if (state.isSelectionMode) {
+                        val allSelected = state.visibleEntries.isNotEmpty() &&
+                                state.selection.size == state.visibleEntries.size
                         IconButton(
                             onClick = {
                                 haptic.click()
-                                if (state.visibleEntries.isNotEmpty() && state.selection.size == state.visibleEntries.size) {
-                                    viewModel.clearSelection()
-                                } else {
-                                    viewModel.selectAll()
-                                }
+                                if (allSelected) viewModel.clearSelection() else viewModel.selectAll()
                             },
                         ) {
                             Icon(
-                                if (state.visibleEntries.isNotEmpty() && state.selection.size == state.visibleEntries.size) {
-                                    Icons.Rounded.Close
-                                } else {
-                                    Icons.Rounded.CheckCircle
-                                },
+                                if (allSelected) Icons.Rounded.Close else Icons.Rounded.CheckCircle,
                                 contentDescription = stringResource(
-                                    if (state.visibleEntries.isNotEmpty() && state.selection.size == state.visibleEntries.size) {
-                                        R.string.st_ClipboardScreen_action_clear_selection
-                                    } else {
-                                        R.string.st_ClipboardScreen_action_select_all
-                                    },
+                                    if (allSelected) R.string.st_ClipboardScreen_action_clear_selection
+                                    else R.string.st_ClipboardScreen_action_select_all,
                                 ),
                             )
                         }
@@ -758,7 +743,7 @@ fun ClipboardScreen(
                 )
             }
 
-            CaptureOverviewCard(
+            CaptureAttentionCard(
                 state = state,
                 mediaPermissionGranted = mediaPermissionGranted,
                 onRequestMediaPermission = ::requestMediaPermission,
@@ -793,9 +778,7 @@ fun ClipboardScreen(
                 },
             ) {
                 when {
-                    !state.loaded -> {
-                        LoadingState()
-                    }
+                    !state.loaded -> LoadingState()
                     state.visibleEntries.isEmpty() && state.query.isNotBlank() -> {
                         EmptyState(
                             icon = Icons.Rounded.Search,
@@ -805,8 +788,7 @@ fun ClipboardScreen(
                             onAction = { viewModel.onSearchQueryChanged("") },
                         )
                     }
-                    state.visibleEntries.isEmpty() && state.showTrash &&
-                        state.trashed.isEmpty() -> {
+                    state.visibleEntries.isEmpty() && state.showTrash && state.trashed.isEmpty() -> {
                         EmptyState(
                             icon = Icons.Rounded.Delete,
                             title = stringResource(R.string.st_ClipboardScreen_empty_trash_title),
@@ -820,14 +802,8 @@ fun ClipboardScreen(
                             val label = filterLabel(state.filter)
                             EmptyState(
                                 icon = Icons.Rounded.FilterList,
-                                title = stringResource(
-                                    R.string.st_ClipboardScreen_empty_filter_title,
-                                    label,
-                                ),
-                                body = stringResource(
-                                    R.string.st_ClipboardScreen_empty_filter_body,
-                                    label,
-                                ),
+                                title = stringResource(R.string.st_ClipboardScreen_empty_filter_title, label),
+                                body = stringResource(R.string.st_ClipboardScreen_empty_filter_body, label),
                                 actionLabel = stringResource(R.string.st_ClipboardScreen_action_show_all),
                                 onAction = { viewModel.setFilter(ClipboardFilter.ALL) },
                             )
@@ -861,9 +837,7 @@ fun ClipboardScreen(
                                 haptic.longClick()
                                 viewModel.toggleSelection(entry.id)
                             },
-                            onCopy = { entry ->
-                                runWithUnlock(entry) { viewModel.copyEntry(entry) }
-                            },
+                            onCopy = { entry -> runWithUnlock(entry) { viewModel.copyEntry(entry) } },
                             onPin = viewModel::togglePin,
                             onDelete = viewModel::deleteEntry,
                             onRestore = viewModel::restoreEntry,
@@ -1015,8 +989,6 @@ fun ClipboardScreen(
         )
     }
 
-    // A row's delete-forever action is just as irreversible as the bulk one,
-    // so it asks for confirmation too instead of deleting on a single tap.
     pendingDeleteForeverId?.let { pendingId ->
         val pendingEntry = state.trashed.firstOrNull { it.id == pendingId }
             ?: state.entries.firstOrNull { it.id == pendingId }
@@ -1039,15 +1011,15 @@ fun ClipboardScreen(
     }
 }
 
-// ── Search + filters ──────────────────────────────────────────────────────
+// ── Capture attention + search + filters ──────────────────────────────────
 
 /**
- * Compact capture overview shown above the history. It keeps capture state,
- * clip counts and screenshot health visible while routing detail to the status
- * sheet.
+ * Shown only when capture needs the user (paused, foreground-only, missing
+ * media permission). Healthy capture takes no space; the status sheet stays
+ * reachable from the overflow menu.
  */
 @Composable
-private fun CaptureOverviewCard(
+private fun CaptureAttentionCard(
     state: ClipboardUiState,
     mediaPermissionGranted: Boolean,
     onRequestMediaPermission: () -> Unit,
@@ -1063,42 +1035,29 @@ private fun CaptureOverviewCard(
     val monitoringOff = !state.settings.monitoring
     val paused = monitoringOff || status == ClipboardGate.Status.PAUSED
     val foregroundOnly = status == ClipboardGate.Status.FOREGROUND_ONLY
-    val active = status == ClipboardGate.Status.ACTIVE_SHIZUKU ||
-        status == ClipboardGate.Status.ACTIVE_APP_OP
-    val missingMediaPermission =
-        state.settings.captureScreenshots && !mediaPermissionGranted
-    val needsAttention = paused || foregroundOnly || missingMediaPermission
-    val accent = when {
-        paused -> MaterialTheme.colorScheme.tertiary
-        needsAttention -> MaterialTheme.colorScheme.error
-        active -> MaterialTheme.colorScheme.primary
-        else -> MaterialTheme.colorScheme.secondary
-    }
+    val missingMediaPermission = state.settings.captureScreenshots && !mediaPermissionGranted
+    if (!paused && !foregroundOnly && !missingMediaPermission) return
+
+    val calmPause = paused && !missingMediaPermission
+    val accent = if (calmPause) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error
     val title = when {
         paused -> stringResource(R.string.st_ClipboardScreen_capture_paused)
         missingMediaPermission -> stringResource(R.string.st_ClipboardScreen_capture_issue_title)
-        foregroundOnly -> stringResource(R.string.st_ClipboardScreen_capture_foreground_title)
-        active -> stringResource(R.string.st_ClipboardScreen_capture_active_title)
         else -> stringResource(R.string.st_ClipboardScreen_capture_foreground_title)
     }
     val subtitle = when {
-        missingMediaPermission ->
-            stringResource(R.string.st_ClipboardScreen_capture_missing_permission)
+        missingMediaPermission -> stringResource(R.string.st_ClipboardScreen_capture_missing_permission)
         paused -> stringResource(
             R.string.st_ClipboardScreen_overview_counts,
             state.stats.activeCount,
             state.stats.trashedCount,
         )
-        foregroundOnly ->
-            stringResource(R.string.st_ClipboardScreen_capture_foreground_subtitle)
-        active && !state.settings.captureScreenshots ->
-            stringResource(R.string.st_ClipboardScreen_capture_active_no_screenshots)
-        active -> stringResource(R.string.st_ClipboardScreen_capture_active_screenshots)
-        else -> stringResource(
-            R.string.st_ClipboardScreen_overview_counts,
-            state.stats.activeCount,
-            state.stats.trashedCount,
-        )
+        else -> stringResource(R.string.st_ClipboardScreen_capture_foreground_subtitle)
+    }
+    val actionLabel = when {
+        monitoringOff -> R.string.st_ClipboardScreen_action_resume_capture
+        missingMediaPermission -> R.string.st_ClipboardScreen_action_grant_media
+        else -> R.string.st_ClipboardScreen_action_status
     }
 
     ExpressiveCard(
@@ -1114,11 +1073,7 @@ private fun CaptureOverviewCard(
             .padding(horizontal = 16.dp, vertical = 8.dp),
         shape = SmallExpressiveShape,
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = if (needsAttention) {
-            androidx.compose.foundation.BorderStroke(1.dp, accent.copy(alpha = 0.35f))
-        } else {
-            null
-        },
+        border = androidx.compose.foundation.BorderStroke(1.dp, accent.copy(alpha = 0.35f)),
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
@@ -1132,33 +1087,12 @@ private fun CaptureOverviewCard(
                     .background(accent.copy(alpha = 0.14f)),
                 contentAlignment = Alignment.Center,
             ) {
-                if (paused) {
-                    Icon(
-                        Icons.Rounded.Pause,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                        tint = accent,
-                    )
-                } else if (needsAttention) {
-                    Icon(
-                        Icons.Rounded.WarningAmber,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                        tint = accent,
-                    )
-                } else if (active) {
-                    ExpressivePulseIndicator(
-                        modifier = Modifier.size(14.dp),
-                        color = accent,
-                    )
-                } else {
-                    Icon(
-                        Icons.Rounded.Info,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                        tint = accent,
-                    )
-                }
+                Icon(
+                    if (calmPause) Icons.Rounded.Pause else Icons.Rounded.WarningAmber,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = accent,
+                )
             }
             Column(
                 modifier = Modifier.weight(1f),
@@ -1178,13 +1112,7 @@ private fun CaptureOverviewCard(
                 )
             }
             Text(
-                text = stringResource(
-                    when {
-                        monitoringOff -> R.string.st_ClipboardScreen_action_resume_capture
-                        missingMediaPermission -> R.string.st_ClipboardScreen_action_grant_media
-                        else -> R.string.st_ClipboardScreen_action_status
-                    },
-                ),
+                text = stringResource(actionLabel),
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold,
                 color = accent,
@@ -1223,7 +1151,10 @@ private fun SearchAndFilters(
             trailingIcon = {
                 if (query.isNotEmpty()) {
                     IconButton(onClick = { onQueryChange("") }) {
-                        Icon(Icons.Rounded.Close, contentDescription = stringResource(R.string.st_ClipboardScreen_action_clear_search))
+                        Icon(
+                            Icons.Rounded.Close,
+                            contentDescription = stringResource(R.string.st_ClipboardScreen_action_clear_search),
+                        )
                     }
                 }
             },
@@ -1232,7 +1163,7 @@ private fun SearchAndFilters(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(end = 8.dp),
         ) {
-            items(ClipboardFilter.entries) { item ->
+            items(ClipboardFilter.entries, key = { it.name }) { item ->
                 val count = counts[item] ?: 0
                 val label = filterLabel(item)
                 ExpressiveFilterChip(
@@ -1288,15 +1219,15 @@ private fun SelectionActionBar(
 ) {
     val haptic = rememberToolzHapticFeedback()
     val aiEligible = !state.showTrash &&
-        state.settings.aiEnabled &&
-        state.aiConfigured &&
-        !state.settings.offline &&
-        state.visibleEntries.any { candidate ->
-            candidate.id in state.selection &&
-                candidate.isTextLike &&
-                !candidate.isSensitive &&
-                !candidate.isLocked
-        }
+            state.settings.aiEnabled &&
+            state.aiConfigured &&
+            !state.settings.offline &&
+            state.visibleEntries.any { candidate ->
+                candidate.id in state.selection &&
+                        candidate.isTextLike &&
+                        !candidate.isSensitive &&
+                        !candidate.isLocked
+            }
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
         tonalElevation = 3.dp,
@@ -1502,6 +1433,11 @@ private fun groupLabel(group: ClipboardDateGroup): String = stringResource(
     },
 )
 
+/**
+ * One history row. Swipe right pins, swipe left deletes (undoable). The only
+ * trailing action is copy, which keeps rows compact; pin/lock/share live in the
+ * detail sheet.
+ */
 @Composable
 private fun ClipboardCard(
     entry: ClipboardEntry,
@@ -1524,44 +1460,48 @@ private fun ClipboardCard(
     modifier: Modifier = Modifier,
 ) {
     val haptic = rememberToolzHapticFeedback()
+    val canSwipe = !selectionMode && !showTrash
     val dismissState = rememberSwipeToDismissBoxState(
-        confirmValueChange = { it == SwipeToDismissBoxValue.EndToStart },
+        confirmValueChange = { it != SwipeToDismissBoxValue.Settled },
         positionalThreshold = { it * 0.4f },
     )
     LaunchedEffect(dismissState.currentValue) {
-        if (dismissState.currentValue == SwipeToDismissBoxValue.EndToStart) {
-            haptic.tick()
-            onDelete()
-            // If the row survives (delete failed or the list is slow to
-            // update), snap it back so it never stays stuck off-screen.
-            dismissState.reset()
+        when (dismissState.currentValue) {
+            SwipeToDismissBoxValue.EndToStart -> {
+                haptic.tick()
+                onDelete()
+                // If the row survives (delete failed or the list is slow to
+                // update), snap it back so it never stays stuck off-screen.
+                dismissState.reset()
+            }
+            SwipeToDismissBoxValue.StartToEnd -> {
+                haptic.tick()
+                onPin()
+                dismissState.reset()
+            }
+            SwipeToDismissBoxValue.Settled -> Unit
         }
     }
 
-    // Confirmed per-row copy feedback. The token only advances after the
-    // ViewModel reports a successful write, so a cancelled biometric unlock or
-    // a failed clipboard write never shows a false checkmark.
     val copiedFlash = copiedFlashToken > 0
     val heroImage = attachments.firstOrNull { it.mimeType?.startsWith("image/") == true }
 
     // Sensitive/locked clips never reveal their content in the list, even if
-    // the user already unlocked them in the detail sheet: the list is visible
-    // to anyone glancing at the screen, the sheet is the deliberate reveal.
+    // already unlocked in the detail sheet: the list is visible to anyone
+    // glancing at the screen, the sheet is the deliberate reveal.
     val masked = entry.isSensitive || entry.isLocked
     val sourceText = sourceLabel(entry)
+    val itemCount = entry.attachmentCount.coerceAtLeast(attachments.size)
     val preview = when {
-        // Never leak a file name or text preview while the clip is masked.
         masked -> when (entry.type) {
             ClipboardType.IMAGE -> stringResource(R.string.st_ClipboardScreen_attachment_image)
             ClipboardType.FILE -> stringResource(R.string.st_ClipboardScreen_attachment_file)
             ClipboardType.MULTI -> pluralStringResource(
                 R.plurals.st_ClipboardScreen_multi_items,
-                entry.attachmentCount.coerceAtLeast(attachments.size),
-                entry.attachmentCount.coerceAtLeast(attachments.size),
+                itemCount,
+                itemCount,
             )
-            // Never show partially masked characters on the card. Even the
-            // first/last letters of a password or OTP are sensitive, and the
-            // detail sheet is the only place that should reveal content.
+            // Even the first/last letters of a password or OTP are sensitive.
             else -> stringResource(R.string.st_ClipboardScreen_masked_title)
         }
         entry.type == ClipboardType.IMAGE -> stringResource(R.string.st_ClipboardScreen_attachment_image)
@@ -1570,8 +1510,8 @@ private fun ClipboardCard(
             ?: stringResource(R.string.st_ClipboardScreen_attachment_file)
         entry.type == ClipboardType.MULTI -> pluralStringResource(
             R.plurals.st_ClipboardScreen_multi_items,
-            entry.attachmentCount.coerceAtLeast(attachments.size),
-            entry.attachmentCount.coerceAtLeast(attachments.size),
+            itemCount,
+            itemCount,
         )
         else -> entry.content
     }
@@ -1580,8 +1520,7 @@ private fun ClipboardCard(
         when {
             copiedFlash -> MaterialTheme.colorScheme.primaryContainer
             selected -> MaterialTheme.colorScheme.secondaryContainer
-            entry.isSensitive || entry.isLocked ->
-                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f)
+            masked -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f)
             else -> MaterialTheme.colorScheme.surfaceContainerHigh
         },
         animationSpec = tween(180),
@@ -1591,14 +1530,16 @@ private fun ClipboardCard(
     SwipeToDismissBox(
         state = dismissState,
         modifier = modifier,
-        enableDismissFromStartToEnd = false,
-        enableDismissFromEndToStart = !selectionMode && !showTrash,
+        enableDismissFromStartToEnd = canSwipe,
+        enableDismissFromEndToStart = canSwipe,
         backgroundContent = {
+            val pinning = dismissState.dismissDirection == SwipeToDismissBoxValue.StartToEnd
             val background by animateColorAsState(
-                if (dismissState.targetValue == SwipeToDismissBoxValue.EndToStart) {
-                    MaterialTheme.colorScheme.errorContainer
-                } else {
-                    MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.4f)
+                when (dismissState.targetValue) {
+                    SwipeToDismissBoxValue.EndToStart -> MaterialTheme.colorScheme.errorContainer
+                    SwipeToDismissBoxValue.StartToEnd -> MaterialTheme.colorScheme.primaryContainer
+                    SwipeToDismissBoxValue.Settled ->
+                        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.4f)
                 },
                 animationSpec = tween(160),
                 label = "clipSwipeBg",
@@ -1608,13 +1549,17 @@ private fun ClipboardCard(
                     .fillMaxSize()
                     .clip(SmallExpressiveShape)
                     .background(background)
-                    .padding(end = 22.dp),
-                contentAlignment = Alignment.CenterEnd,
+                    .padding(horizontal = 22.dp),
+                contentAlignment = if (pinning) Alignment.CenterStart else Alignment.CenterEnd,
             ) {
                 Icon(
-                    Icons.Rounded.Delete,
+                    if (pinning) Icons.Rounded.PushPin else Icons.Rounded.Delete,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onErrorContainer,
+                    tint = if (pinning) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onErrorContainer
+                    },
                 )
             }
         },
@@ -1624,18 +1569,13 @@ private fun ClipboardCard(
                 haptic.click()
                 onOpen()
             },
-            onLongClick = {
-                onLongPress()
-            },
+            onLongClick = onLongPress,
             modifier = Modifier.fillMaxWidth(),
             shape = SmallExpressiveShape,
             containerColor = containerColor,
             border = when {
-                selected -> androidx.compose.foundation.BorderStroke(
-                    2.dp,
-                    MaterialTheme.colorScheme.primary,
-                )
-                entry.isSensitive || entry.isLocked -> androidx.compose.foundation.BorderStroke(
+                selected -> androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
+                masked -> androidx.compose.foundation.BorderStroke(
                     1.dp,
                     MaterialTheme.colorScheme.error.copy(alpha = 0.35f),
                 )
@@ -1746,13 +1686,12 @@ private fun ClipboardCard(
                             now = now,
                         )
                     }
-                    if (selectionMode) {
-                        Checkbox(
+                    when {
+                        selectionMode -> Checkbox(
                             checked = selected,
                             onCheckedChange = { onOpen() },
                         )
-                    } else if (showTrash) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        showTrash -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             CompactClipAction(
                                 icon = Icons.Rounded.Restore,
                                 contentDescription = stringResource(R.string.st_ClipboardScreen_action_restore),
@@ -1766,38 +1705,22 @@ private fun ClipboardCard(
                                 onClick = { haptic.click(); onDeleteForever() },
                             )
                         }
-                    } else {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            CompactClipAction(
-                                icon = Icons.Rounded.PushPin,
-                                contentDescription = stringResource(
-                                    if (entry.isPinned) R.string.st_ClipboardScreen_action_unpin
-                                    else R.string.st_ClipboardScreen_action_pin,
-                                ),
-                                tint = if (entry.isPinned) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                                },
-                                onClick = { haptic.click(); onPin() },
-                            )
-                            CompactClipAction(
-                                icon = if (copiedFlash) Icons.Rounded.CheckCircle else Icons.Rounded.ContentCopy,
-                                contentDescription = stringResource(
-                                    if (copiedFlash) R.string.st_ClipboardScreen_copied
-                                    else R.string.st_ClipboardScreen_action_copy,
-                                ),
-                                tint = if (copiedFlash) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
-                                onClick = {
-                                    haptic.click()
-                                    onCopy()
-                                },
-                            )
-                        }
+                        else -> CompactClipAction(
+                            icon = if (copiedFlash) Icons.Rounded.CheckCircle else Icons.Rounded.ContentCopy,
+                            contentDescription = stringResource(
+                                if (copiedFlash) R.string.st_ClipboardScreen_copied
+                                else R.string.st_ClipboardScreen_action_copy,
+                            ),
+                            tint = if (copiedFlash) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            onClick = {
+                                haptic.click()
+                                onCopy()
+                            },
+                        )
                     }
                 }
                 if (heroImage != null && !masked) {
@@ -1854,13 +1777,12 @@ private fun ClipHeroPreview(
 
 @Composable
 private fun TypeBadge(type: String, compact: Boolean = false) {
-    val icon = typeIcon(type)
     Surface(
         shape = RoundedCornerShape(if (compact) 11.dp else 16.dp),
         color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
     ) {
         Icon(
-            icon,
+            typeIcon(type),
             contentDescription = stringResource(
                 R.string.st_ClipboardScreen_badge_type_desc,
                 typeLabel(type),
@@ -1874,9 +1796,9 @@ private fun TypeBadge(type: String, compact: Boolean = false) {
 }
 
 /**
- * One line of secondary context instead of a scrollable row of pills. Type is
- * already conveyed by the leading icon, so the line only carries what changes
- * per clip: age, source and the few states worth surfacing.
+ * One line of secondary context instead of a row of pills. Type is already
+ * conveyed by the leading icon, so the line carries only what changes per
+ * clip: age, source and the few states worth surfacing.
  */
 @Composable
 private fun ClipMetaLine(
@@ -2027,9 +1949,10 @@ private fun AttachmentThumbnail(
         modifier = modifier.background(MaterialTheme.colorScheme.surfaceContainerHighest),
         contentAlignment = Alignment.Center,
     ) {
-        if (bitmap != null) {
+        val image = bitmap
+        if (image != null) {
             Image(
-                bitmap = bitmap!!,
+                bitmap = image,
                 contentDescription = attachment.fileName,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
@@ -2046,6 +1969,10 @@ private fun AttachmentThumbnail(
 
 // ── Detail sheet ──────────────────────────────────────────────────────────
 
+/**
+ * Order is by how often each block is used: content, then actions, then the
+ * AI summary, then metadata, with destructive actions last.
+ */
 @Composable
 private fun ClipDetailSheet(
     entry: ClipboardEntry,
@@ -2076,6 +2003,7 @@ private fun ClipDetailSheet(
         attachments.filter { it.mimeType?.startsWith("image/") == true }
     }
     val showTextContent = entry.content.isNotBlank() && (entry.isTextLike || toolText != null)
+    val isTrashed = entry.deletedAt != null
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -2083,166 +2011,48 @@ private fun ClipDetailSheet(
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
         Box(Modifier.fillMaxWidth()) {
-        LazyColumn(
-            modifier = Modifier.fillMaxWidth(),
-            contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 96.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            item {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    TypeBadge(entry.type)
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            text = typeLabel(entry.type),
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            text = relativeTime(entry.timestamp, now),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    if (entry.isPinned) {
-                        Icon(
-                            Icons.Rounded.PushPin,
-                            contentDescription = stringResource(R.string.st_ClipboardScreen_badge_pinned),
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                }
-            }
-
-            if (entry.isSensitive || entry.isLocked) {
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 96.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 item {
-                    Surface(
-                        shape = SmallExpressiveShape,
-                        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f),
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Row(
-                            modifier = Modifier.padding(14.dp),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(
-                                if (entry.isLocked) Icons.Rounded.Lock else Icons.Rounded.Shield,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.error,
+                        TypeBadge(entry.type)
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                text = typeLabel(entry.type),
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
                             )
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    text = sensitivityLabel(entry),
-                                    style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = FontWeight.Bold,
-                                )
-                                if (entry.passwordVaultMatch) {
-                                    Text(
-                                        text = stringResource(R.string.st_ClipboardScreen_badge_vault_desc),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                            }
-                            if (masked) {
-                                ToolzExpressiveTextButton(
-                                    onClick = onUnlock,
-                                    shape = SmallExpressiveShape,
-                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                ) {
-                                    Text(stringResource(R.string.st_ClipboardScreen_action_reveal))
-                                }
-                            } else {
-                                ToolzExpressiveTextButton(
-                                    onClick = {
-                                        haptic.click()
-                                        viewModel.hideRevealed(entry.id)
-                                    },
-                                    shape = SmallExpressiveShape,
-                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                ) {
-                                    Text(stringResource(R.string.st_ClipboardScreen_action_hide))
-                                }
-                            }
+                            Text(
+                                text = relativeTime(entry.timestamp, now),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        if (entry.isPinned) {
+                            Icon(
+                                Icons.Rounded.PushPin,
+                                contentDescription = stringResource(R.string.st_ClipboardScreen_badge_pinned),
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
                         }
                     }
                 }
-            }
 
-            if (imageAttachments.isNotEmpty() && !masked) {
-                item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        SectionTitle(stringResource(R.string.st_ClipboardScreen_detail_images))
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            contentPadding = PaddingValues(vertical = 2.dp),
-                        ) {
-                            items(imageAttachments, key = { it.id }) { image ->
-                                Surface(
-                                    shape = SmallExpressiveShape,
-                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                    modifier = Modifier
-                                        .width(240.dp)
-                                        .height(170.dp)
-                                        .clickable { onOpenAttachment(image) },
-                                ) {
-                                    AttachmentThumbnail(
-                                        attachment = image,
-                                        viewModel = viewModel,
-                                        modifier = Modifier.fillMaxSize(),
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (showTextContent && !masked) {
-                item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        SectionTitle(stringResource(R.string.st_ClipboardScreen_detail_content))
+                if (entry.isSensitive || entry.isLocked) {
+                    item {
                         Surface(
                             shape = SmallExpressiveShape,
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        ) {
-                            // A clip can hold up to 100k characters. Rendering it
-                            // unbounded makes the sheet unusable and forces the
-                            // whole paragraph into a single enormous item; cap the
-                            // visible area and let the content scroll instead.
-                            Box(
-                                modifier = Modifier
-                                    .heightIn(max = 340.dp)
-                                    .verticalScroll(rememberScrollState()),
-                            ) {
-                                SelectionContainer {
-                                    Text(
-                                        text = entry.content,
-                                        style = if (entry.type == ClipboardType.CODE) {
-                                            MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace)
-                                        } else {
-                                            MaterialTheme.typography.bodyLarge
-                                        },
-                                        modifier = Modifier.padding(16.dp),
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            } else if (showTextContent) {
-                item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        SectionTitle(stringResource(R.string.st_ClipboardScreen_detail_content))
-                        Surface(
-                            shape = SmallExpressiveShape,
-                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.32f),
+                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f),
                         ) {
                             Row(
-                                modifier = Modifier.padding(16.dp),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                modifier = Modifier.padding(14.dp),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Icon(
@@ -2250,39 +2060,152 @@ private fun ClipDetailSheet(
                                     contentDescription = null,
                                     tint = MaterialTheme.colorScheme.error,
                                 )
-                                Column(
-                                    modifier = Modifier.weight(1f),
-                                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                                ) {
+                                Column(Modifier.weight(1f)) {
                                     Text(
-                                        text = stringResource(R.string.st_ClipboardScreen_masked_title),
-                                        style = MaterialTheme.typography.titleSmall,
+                                        text = sensitivityLabel(entry),
+                                        style = MaterialTheme.typography.labelLarge,
                                         fontWeight = FontWeight.Bold,
                                     )
-                                    Text(
-                                        text = stringResource(R.string.st_ClipboardScreen_reveal_hint),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
+                                    if (entry.passwordVaultMatch) {
+                                        Text(
+                                            text = stringResource(R.string.st_ClipboardScreen_badge_vault_desc),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
                                 }
-                                ToolzExpressiveTextButton(
-                                    onClick = onUnlock,
-                                    shape = SmallExpressiveShape,
-                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                ) {
-                                    Text(stringResource(R.string.st_ClipboardScreen_action_reveal))
+                                if (masked) {
+                                    ToolzExpressiveTextButton(
+                                        onClick = onUnlock,
+                                        shape = SmallExpressiveShape,
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                    ) {
+                                        Text(stringResource(R.string.st_ClipboardScreen_action_reveal))
+                                    }
+                                } else {
+                                    ToolzExpressiveTextButton(
+                                        onClick = {
+                                            haptic.click()
+                                            viewModel.hideRevealed(entry.id)
+                                        },
+                                        shape = SmallExpressiveShape,
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                    ) {
+                                        Text(stringResource(R.string.st_ClipboardScreen_action_hide))
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
 
-            if (attachments.isNotEmpty() && !masked) {
-                item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        SectionTitle(stringResource(R.string.st_ClipboardScreen_detail_attachments))
+                if (imageAttachments.isNotEmpty() && !masked) {
+                    item {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            SectionTitle(stringResource(R.string.st_ClipboardScreen_detail_images))
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                contentPadding = PaddingValues(vertical = 2.dp),
+                            ) {
+                                items(imageAttachments, key = { it.id }) { image ->
+                                    Surface(
+                                        shape = SmallExpressiveShape,
+                                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                        modifier = Modifier
+                                            .width(240.dp)
+                                            .height(170.dp)
+                                            .clickable { onOpenAttachment(image) },
+                                    ) {
+                                        AttachmentThumbnail(
+                                            attachment = image,
+                                            viewModel = viewModel,
+                                            modifier = Modifier.fillMaxSize(),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (showTextContent) {
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            SectionTitle(stringResource(R.string.st_ClipboardScreen_detail_content))
+                            if (!masked) {
+                                Surface(
+                                    shape = SmallExpressiveShape,
+                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                ) {
+                                    // A clip can hold up to 100k characters. Cap the
+                                    // visible area and let the content scroll instead
+                                    // of forcing one enormous item into the list.
+                                    Box(
+                                        modifier = Modifier
+                                            .heightIn(max = 340.dp)
+                                            .verticalScroll(rememberScrollState()),
+                                    ) {
+                                        SelectionContainer {
+                                            Text(
+                                                text = entry.content,
+                                                style = if (entry.type == ClipboardType.CODE) {
+                                                    MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace)
+                                                } else {
+                                                    MaterialTheme.typography.bodyLarge
+                                                },
+                                                modifier = Modifier.padding(16.dp),
+                                            )
+                                        }
+                                    }
+                                }
+                            } else {
+                                Surface(
+                                    shape = SmallExpressiveShape,
+                                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.32f),
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(16.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Icon(
+                                            if (entry.isLocked) Icons.Rounded.Lock else Icons.Rounded.Shield,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.error,
+                                        )
+                                        Column(
+                                            modifier = Modifier.weight(1f),
+                                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                                        ) {
+                                            Text(
+                                                text = stringResource(R.string.st_ClipboardScreen_masked_title),
+                                                style = MaterialTheme.typography.titleSmall,
+                                                fontWeight = FontWeight.Bold,
+                                            )
+                                            Text(
+                                                text = stringResource(R.string.st_ClipboardScreen_reveal_hint),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                        ToolzExpressiveTextButton(
+                                            onClick = onUnlock,
+                                            shape = SmallExpressiveShape,
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                        ) {
+                                            Text(stringResource(R.string.st_ClipboardScreen_action_reveal))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (attachments.isNotEmpty() && !masked) {
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            SectionTitle(stringResource(R.string.st_ClipboardScreen_detail_attachments))
                             attachments.forEach { attachment ->
                                 AttachmentRow(
                                     attachment = attachment,
@@ -2293,237 +2216,245 @@ private fun ClipDetailSheet(
                         }
                     }
                 }
-            }
 
-            if (state.settings.aiEnabled && entry.isTextLike &&
-                !entry.isSensitive && !entry.isLocked
-            ) {
-                item {
-                    AiSection(
-                        entry = entry,
-                        running = entry.id in state.aiRunningIds,
-                        configured = state.aiConfigured,
-                        offline = state.settings.offline,
-                        onRun = { viewModel.runAi(entry) },
-                    )
-                }
-            }
-
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SectionTitle(stringResource(R.string.st_ClipboardScreen_detail_meta))
-                    Surface(
-                        shape = SmallExpressiveShape,
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            MetaRow(
-                                stringResource(R.string.st_ClipboardScreen_meta_size),
-                                Formatter.formatShortFileSize(LocalContext.current, entry.sizeBytes),
-                            )
-                            MetaRow(
-                                stringResource(R.string.st_ClipboardScreen_meta_source),
-                                sourceLabel(entry),
-                            )
-                            MetaRow(
-                                stringResource(R.string.st_ClipboardScreen_meta_attachments),
-                                attachments.size.toString(),
-                            )
-                            MetaRow(
-                                stringResource(R.string.st_ClipboardScreen_meta_expiry),
-                                entry.expiresAt?.let { timestamp ->
-                                    stringResource(
-                                        R.string.st_ClipboardScreen_expires_relative_on,
-                                        relativeTime(timestamp, now),
-                                        android.text.format.DateFormat.getDateFormat(LocalContext.current)
-                                            .format(Date(timestamp)),
+                // Trashed clips cannot be copied, shared, pinned or reclassified
+                // until they are restored; hide those actions instead of offering
+                // buttons that would either fail or mutate a deleted row.
+                if (!isTrashed) {
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            SectionTitle(stringResource(R.string.st_ClipboardScreen_detail_actions))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                ActionTile(
+                                    icon = Icons.Rounded.ContentCopy,
+                                    label = stringResource(R.string.st_ClipboardScreen_action_copy),
+                                    modifier = Modifier.weight(1f),
+                                    onClick = onCopy,
+                                )
+                                ActionTile(
+                                    icon = Icons.Rounded.Share,
+                                    label = stringResource(R.string.st_ClipboardScreen_action_share),
+                                    modifier = Modifier.weight(1f),
+                                    onClick = onShare,
+                                )
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                ActionTile(
+                                    icon = Icons.Rounded.PushPin,
+                                    label = stringResource(
+                                        if (entry.isPinned) R.string.st_ClipboardScreen_action_unpin
+                                        else R.string.st_ClipboardScreen_action_pin,
+                                    ),
+                                    modifier = Modifier.weight(1f),
+                                    selected = entry.isPinned,
+                                    onClick = { viewModel.togglePin(entry) },
+                                )
+                                ActionTile(
+                                    icon = if (entry.isLocked) Icons.Rounded.LockOpen else Icons.Rounded.Lock,
+                                    label = stringResource(
+                                        if (entry.isLocked) R.string.st_ClipboardScreen_action_unlock
+                                        else R.string.st_ClipboardScreen_action_lock,
+                                    ),
+                                    modifier = Modifier.weight(1f),
+                                    selected = entry.isLocked,
+                                    onClick = onToggleLock,
+                                )
+                            }
+                            if (!entry.passwordVaultMatch && !entry.isLocked) {
+                                ActionTile(
+                                    icon = if (entry.isSensitive) Icons.Rounded.Shield else Icons.Rounded.Security,
+                                    label = stringResource(
+                                        if (entry.isSensitive) R.string.st_ClipboardScreen_action_unmark_sensitive
+                                        else R.string.st_ClipboardScreen_action_mark_sensitive,
+                                    ),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    selected = entry.isSensitive,
+                                    onClick = { viewModel.setSensitive(entry, !entry.isSensitive) },
+                                )
+                            }
+                            if (!masked && toolText != null &&
+                                entry.type in setOf(ClipboardType.LINK, ClipboardType.URL, ClipboardType.SOCIAL)
+                            ) {
+                                ActionTile(
+                                    icon = Icons.Rounded.Link,
+                                    label = stringResource(R.string.st_ClipboardScreen_action_open_link),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    onClick = onOpenLink,
+                                )
+                            }
+                            if (toolText != null && !masked) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    ActionTile(
+                                        icon = Icons.AutoMirrored.Rounded.Notes,
+                                        label = stringResource(R.string.st_ClipboardScreen_action_notepad),
+                                        modifier = Modifier.weight(1f),
+                                        onClick = onOpenNotepad,
                                     )
-                                } ?: stringResource(R.string.st_ClipboardScreen_no_expiry),
+                                    ActionTile(
+                                        icon = Icons.Rounded.TaskAlt,
+                                        label = stringResource(R.string.st_ClipboardScreen_action_task),
+                                        modifier = Modifier.weight(1f),
+                                        onClick = onCreateTask,
+                                    )
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    ActionTile(
+                                        icon = Icons.Rounded.QrCode,
+                                        label = stringResource(R.string.st_ClipboardScreen_action_qr),
+                                        modifier = Modifier.weight(1f),
+                                        onClick = onShowQr,
+                                    )
+                                    ActionTile(
+                                        icon = Icons.Rounded.Lock,
+                                        label = stringResource(R.string.st_ClipboardScreen_action_encrypt),
+                                        modifier = Modifier.weight(1f),
+                                        onClick = onEncrypt,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (state.settings.aiEnabled && entry.isTextLike &&
+                    !entry.isSensitive && !entry.isLocked
+                ) {
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            AiSection(
+                                entry = entry,
+                                running = entry.id in state.aiRunningIds,
+                                configured = state.aiConfigured,
+                                offline = state.settings.offline,
+                                onRun = { viewModel.runAi(entry) },
                             )
                         }
                     }
                 }
-            }
 
-            // Trashed clips cannot be copied, shared, pinned or reclassified
-            // until they are restored; hide those actions instead of offering
-            // buttons that would either fail or mutate a deleted row.
-            if (entry.deletedAt == null) {
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        SectionTitle(stringResource(R.string.st_ClipboardScreen_detail_actions))
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        ActionTile(
-                            icon = Icons.Rounded.ContentCopy,
-                            label = stringResource(R.string.st_ClipboardScreen_action_copy),
-                            modifier = Modifier.weight(1f),
-                            onClick = onCopy,
-                        )
-                        ActionTile(
-                            icon = Icons.Rounded.Share,
-                            label = stringResource(R.string.st_ClipboardScreen_action_share),
-                            modifier = Modifier.weight(1f),
-                            onClick = onShare,
-                        )
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        ActionTile(
-                            icon = Icons.Rounded.PushPin,
-                            label = stringResource(
-                                if (entry.isPinned) R.string.st_ClipboardScreen_action_unpin
-                                else R.string.st_ClipboardScreen_action_pin,
-                            ),
-                            modifier = Modifier.weight(1f),
-                            selected = entry.isPinned,
-                            onClick = { viewModel.togglePin(entry) },
-                        )
-                        ActionTile(
-                            icon = if (entry.isLocked) Icons.Rounded.LockOpen else Icons.Rounded.Lock,
-                            label = stringResource(
-                                if (entry.isLocked) R.string.st_ClipboardScreen_action_unlock
-                                else R.string.st_ClipboardScreen_action_lock,
-                            ),
-                            modifier = Modifier.weight(1f),
-                            selected = entry.isLocked,
-                            onClick = onToggleLock,
-                        )
-                    }
-                    if (!entry.passwordVaultMatch && !entry.isLocked) {
-                        ActionTile(
-                            icon = if (entry.isSensitive) Icons.Rounded.Shield else Icons.Rounded.Security,
-                            label = stringResource(
-                                if (entry.isSensitive) R.string.st_ClipboardScreen_action_unmark_sensitive
-                                else R.string.st_ClipboardScreen_action_mark_sensitive,
-                            ),
-                            modifier = Modifier.fillMaxWidth(),
-                            selected = entry.isSensitive,
-                            onClick = { viewModel.setSensitive(entry, !entry.isSensitive) },
-                        )
-                    }
-                    if (!masked && toolText != null &&
-                        entry.type in setOf(ClipboardType.LINK, ClipboardType.URL, ClipboardType.SOCIAL)
-                    ) {
-                        ActionTile(
-                            icon = Icons.Rounded.Link,
-                            label = stringResource(R.string.st_ClipboardScreen_action_open_link),
-                            modifier = Modifier.fillMaxWidth(),
-                            onClick = onOpenLink,
-                        )
-                    }
-                    if (toolText != null && !masked) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            ActionTile(
-                                icon = Icons.AutoMirrored.Rounded.Notes,
-                                label = stringResource(R.string.st_ClipboardScreen_action_notepad),
-                                modifier = Modifier.weight(1f),
-                                onClick = onOpenNotepad,
-                            )
-                            ActionTile(
-                                icon = Icons.Rounded.TaskAlt,
-                                label = stringResource(R.string.st_ClipboardScreen_action_task),
-                                modifier = Modifier.weight(1f),
-                                onClick = onCreateTask,
-                            )
-                        }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            ActionTile(
-                                icon = Icons.Rounded.QrCode,
-                                label = stringResource(R.string.st_ClipboardScreen_action_qr),
-                                modifier = Modifier.weight(1f),
-                                onClick = onShowQr,
-                            )
-                            ActionTile(
-                                icon = Icons.Rounded.Lock,
-                                label = stringResource(R.string.st_ClipboardScreen_action_encrypt),
-                                modifier = Modifier.weight(1f),
-                                onClick = onEncrypt,
-                            )
+                        SectionTitle(stringResource(R.string.st_ClipboardScreen_detail_meta))
+                        Surface(
+                            shape = SmallExpressiveShape,
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                MetaRow(
+                                    stringResource(R.string.st_ClipboardScreen_meta_size),
+                                    Formatter.formatShortFileSize(LocalContext.current, entry.sizeBytes),
+                                )
+                                MetaRow(
+                                    stringResource(R.string.st_ClipboardScreen_meta_source),
+                                    sourceLabel(entry),
+                                )
+                                MetaRow(
+                                    stringResource(R.string.st_ClipboardScreen_meta_attachments),
+                                    attachments.size.toString(),
+                                )
+                                MetaRow(
+                                    stringResource(R.string.st_ClipboardScreen_meta_expiry),
+                                    entry.expiresAt?.let { timestamp ->
+                                        stringResource(
+                                            R.string.st_ClipboardScreen_expires_relative_on,
+                                            relativeTime(timestamp, now),
+                                            android.text.format.DateFormat.getDateFormat(LocalContext.current)
+                                                .format(Date(timestamp)),
+                                        )
+                                    } ?: stringResource(R.string.st_ClipboardScreen_no_expiry),
+                                )
+                            }
                         }
                     }
                 }
-                }
-            }
-            }
 
-            item {
-                HorizontalDivider()
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 4.dp),
-                ) {
-                    if (entry.deletedAt != null) {
-                        ToolzTonalExpressiveButton(
-                            onClick = { viewModel.restoreEntry(entry); onDismiss() },
-                            modifier = Modifier
-                                .weight(1f)
-                                .heightIn(min = 48.dp),
-                            shape = SmallExpressiveShape,
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
-                        ) {
-                            Icon(Icons.Rounded.Restore, null, Modifier.size(18.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                text = stringResource(R.string.st_ClipboardScreen_action_restore),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                        ToolzExpressiveButton(
-                            onClick = { onDeleteForever() },
-                            modifier = Modifier
-                                .weight(1f)
-                                .heightIn(min = 48.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.errorContainer,
-                                contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                            ),
-                            shape = SmallExpressiveShape,
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
-                        ) {
-                            Icon(Icons.Rounded.DeleteForever, null, Modifier.size(18.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                text = stringResource(R.string.st_ClipboardScreen_action_delete_forever),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    } else {
-                        ToolzExpressiveButton(
-                            onClick = { viewModel.deleteEntry(entry); onDismiss() },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 48.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.errorContainer,
-                                contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                            ),
-                            shape = SmallExpressiveShape,
-                        ) {
-                            Icon(Icons.Rounded.Delete, null, Modifier.size(18.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text(stringResource(R.string.st_ClipboardScreen_action_delete))
+                item {
+                    HorizontalDivider()
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp),
+                    ) {
+                        if (isTrashed) {
+                            ToolzTonalExpressiveButton(
+                                onClick = { viewModel.restoreEntry(entry); onDismiss() },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 48.dp),
+                                shape = SmallExpressiveShape,
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
+                            ) {
+                                Icon(Icons.Rounded.Restore, null, Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    text = stringResource(R.string.st_ClipboardScreen_action_restore),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            ToolzExpressiveButton(
+                                onClick = onDeleteForever,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 48.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                                ),
+                                shape = SmallExpressiveShape,
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
+                            ) {
+                                Icon(Icons.Rounded.DeleteForever, null, Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    text = stringResource(R.string.st_ClipboardScreen_action_delete_forever),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        } else {
+                            ToolzExpressiveButton(
+                                onClick = { viewModel.deleteEntry(entry); onDismiss() },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 48.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                                ),
+                                shape = SmallExpressiveShape,
+                            ) {
+                                Icon(Icons.Rounded.Delete, null, Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(stringResource(R.string.st_ClipboardScreen_action_delete))
+                            }
                         }
                     }
                 }
             }
-        }
-        SnackbarHost(
-            hostState = feedbackHostState,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(horizontal = 16.dp),
-        )
+            SheetSnackbarHost(feedbackHostState)
         }
     }
 }
 
+/** Bottom-anchored snackbar host used inside every modal sheet. */
+@Composable
+private fun androidx.compose.foundation.layout.BoxScope.SheetSnackbarHost(
+    hostState: SnackbarHostState,
+) {
+    SnackbarHost(
+        hostState = hostState,
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .padding(horizontal = 16.dp),
+    )
+}
+
+/** Emits a title and a card; callers wrap it in a Column so they stack. */
 @Composable
 private fun AiSection(
     entry: ClipboardEntry,
@@ -2744,118 +2675,113 @@ private fun OnboardingSheet(
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
         Box(Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp)
-                .padding(bottom = 32.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.primaryContainer,
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 24.dp)
+                    .padding(bottom = 32.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                Icon(
-                    Icons.Rounded.ContentPaste,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .padding(16.dp)
-                        .size(32.dp),
-                    tint = MaterialTheme.colorScheme.primary,
-                )
-            }
-            Text(
-                text = stringResource(R.string.st_ClipboardScreen_onboarding_title),
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Black,
-            )
-            Text(
-                text = stringResource(R.string.st_ClipboardScreen_onboarding_body),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            if (state.stats.activeCount > 0) {
                 Surface(
-                    shape = RoundedCornerShape(18.dp),
-                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer,
                 ) {
-                    Text(
-                        text = stringResource(R.string.st_ClipboardScreen_onboarding_existing),
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(12.dp),
+                    Icon(
+                        Icons.Rounded.ContentPaste,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .padding(16.dp)
+                            .size(32.dp),
+                        tint = MaterialTheme.colorScheme.primary,
                     )
                 }
+                Text(
+                    text = stringResource(R.string.st_ClipboardScreen_onboarding_title),
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Black,
+                )
+                Text(
+                    text = stringResource(R.string.st_ClipboardScreen_onboarding_body),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (state.stats.activeCount > 0) {
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.st_ClipboardScreen_onboarding_existing),
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(12.dp),
+                        )
+                    }
+                }
+                OnboardingStep(
+                    number = 1,
+                    title = stringResource(R.string.st_ClipboardScreen_onboarding_step1_title),
+                    body = stringResource(R.string.st_ClipboardScreen_onboarding_step1_body),
+                )
+                OnboardingStep(
+                    number = 2,
+                    title = stringResource(R.string.st_ClipboardScreen_onboarding_step2_title),
+                    body = stringResource(R.string.st_ClipboardScreen_onboarding_step2_body),
+                )
+                OnboardingStep(
+                    number = 3,
+                    title = stringResource(R.string.st_ClipboardScreen_onboarding_step3_title),
+                    body = stringResource(R.string.st_ClipboardScreen_onboarding_step3_body),
+                )
+                Text(
+                    text = stringResource(R.string.st_ClipboardScreen_onboarding_fallback),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (!state.gate.capabilities.shizukuInstalled) {
+                    ToolzExpressiveButton(
+                        onClick = onInstallShizuku,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = SmallExpressiveShape,
+                    ) {
+                        Text(stringResource(R.string.st_ClipboardScreen_action_install_shizuku))
+                    }
+                } else if (!state.gate.capabilities.shizukuAuthorized) {
+                    ToolzExpressiveButton(
+                        onClick = onAuthorizeShizuku,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = SmallExpressiveShape,
+                    ) {
+                        Text(stringResource(R.string.st_ClipboardScreen_action_authorize))
+                    }
+                }
+                if (state.gate.capabilities.shizukuAuthorized && !state.gate.capabilities.appOpAllowed) {
+                    ToolzOutlinedExpressiveButton(
+                        onClick = onGrantAppOp,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = SmallExpressiveShape,
+                    ) {
+                        Text(stringResource(R.string.st_ClipboardScreen_action_grant_appop))
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ToolzOutlinedExpressiveButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f),
+                        shape = SmallExpressiveShape,
+                    ) {
+                        Text(stringResource(R.string.st_ClipboardScreen_onboarding_skip))
+                    }
+                    ToolzExpressiveButton(
+                        onClick = onOpenStatus,
+                        modifier = Modifier.weight(1f),
+                        shape = SmallExpressiveShape,
+                    ) {
+                        Text(stringResource(R.string.st_ClipboardScreen_onboarding_continue))
+                    }
+                }
             }
-            OnboardingStep(
-                number = 1,
-                title = stringResource(R.string.st_ClipboardScreen_onboarding_step1_title),
-                body = stringResource(R.string.st_ClipboardScreen_onboarding_step1_body),
-            )
-            OnboardingStep(
-                number = 2,
-                title = stringResource(R.string.st_ClipboardScreen_onboarding_step2_title),
-                body = stringResource(R.string.st_ClipboardScreen_onboarding_step2_body),
-            )
-            OnboardingStep(
-                number = 3,
-                title = stringResource(R.string.st_ClipboardScreen_onboarding_step3_title),
-                body = stringResource(R.string.st_ClipboardScreen_onboarding_step3_body),
-            )
-            Text(
-                text = stringResource(R.string.st_ClipboardScreen_onboarding_fallback),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            if (!state.gate.capabilities.shizukuInstalled) {
-                ToolzExpressiveButton(
-                    onClick = onInstallShizuku,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = SmallExpressiveShape,
-                ) {
-                    Text(stringResource(R.string.st_ClipboardScreen_action_install_shizuku))
-                }
-            } else if (!state.gate.capabilities.shizukuAuthorized) {
-                ToolzExpressiveButton(
-                    onClick = onAuthorizeShizuku,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = SmallExpressiveShape,
-                ) {
-                    Text(stringResource(R.string.st_ClipboardScreen_action_authorize))
-                }
-            }
-            if (state.gate.capabilities.shizukuAuthorized && !state.gate.capabilities.appOpAllowed) {
-                ToolzOutlinedExpressiveButton(
-                    onClick = onGrantAppOp,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = SmallExpressiveShape,
-                ) {
-                    Text(stringResource(R.string.st_ClipboardScreen_action_grant_appop))
-                }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ToolzOutlinedExpressiveButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.weight(1f),
-                    shape = SmallExpressiveShape,
-                ) {
-                    Text(stringResource(R.string.st_ClipboardScreen_onboarding_skip))
-                }
-                ToolzExpressiveButton(
-                    onClick = onOpenStatus,
-                    modifier = Modifier.weight(1f),
-                    shape = SmallExpressiveShape,
-                ) {
-                    Text(stringResource(R.string.st_ClipboardScreen_onboarding_continue))
-                }
-            }
-        }
-        SnackbarHost(
-            hostState = feedbackHostState,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(horizontal = 16.dp),
-        )
+            SheetSnackbarHost(feedbackHostState)
         }
     }
 }
@@ -2916,174 +2842,181 @@ private fun SettingsSheet(
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
         Box(Modifier.fillMaxWidth()) {
-        LazyColumn(
-            modifier = Modifier.fillMaxWidth(),
-            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 40.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            item {
-                Text(
-                    text = stringResource(R.string.st_ClipboardScreen_settings_title),
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Black,
-                )
-            }
-            item { SectionTitle(stringResource(R.string.st_ClipboardScreen_settings_section_capture)) }
-            item {
-                SettingSwitchRow(
-                    title = stringResource(R.string.st_ClipboardScreen_settings_monitoring),
-                    body = stringResource(R.string.st_ClipboardScreen_settings_monitoring_desc),
-                    checked = state.settings.monitoring,
-                    onCheckedChange = viewModel::setMonitoringEnabled,
-                )
-            }
-            item {
-                SettingSwitchRow(
-                    title = stringResource(R.string.st_ClipboardScreen_settings_screenshots),
-                    body = stringResource(R.string.st_ClipboardScreen_settings_screenshots_desc),
-                    checked = state.settings.captureScreenshots,
-                    enabled = state.settings.monitoring,
-                    onCheckedChange = viewModel::setCaptureScreenshots,
-                )
-            }
-            if (state.settings.captureScreenshots && !mediaPermissionGranted) {
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 40.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 item {
-                    PermissionRow(
-                        title = stringResource(R.string.st_ClipboardScreen_settings_screenshots_permission),
-                        body = stringResource(R.string.st_ClipboardScreen_settings_screenshots_permission_desc),
-                        action = stringResource(R.string.st_ClipboardScreen_action_grant_media),
-                        onAction = onRequestMediaPermission,
+                    Text(
+                        text = stringResource(R.string.st_ClipboardScreen_settings_title),
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Black,
                     )
                 }
-            }
-            item { SectionTitle(stringResource(R.string.st_ClipboardScreen_settings_section_ai)) }
-            item {
-                SettingSwitchRow(
-                    title = stringResource(R.string.st_ClipboardScreen_settings_ai),
-                    body = stringResource(R.string.st_ClipboardScreen_settings_ai_desc),
-                    checked = state.settings.aiEnabled,
-                    onCheckedChange = viewModel::setClipboardAiEnabled,
-                )
-            }
-            item {
-                SettingSwitchRow(
-                    title = stringResource(R.string.st_ClipboardScreen_settings_auto_ai),
-                    body = stringResource(R.string.st_ClipboardScreen_settings_auto_ai_desc),
-                    checked = state.settings.autoAi,
-                    enabled = state.settings.aiEnabled && !state.settings.offline,
-                    onCheckedChange = viewModel::setAutoAiEnabled,
-                )
-            }
-            item { SectionTitle(stringResource(R.string.st_ClipboardScreen_settings_section_privacy)) }
-            item {
-                SettingSwitchRow(
-                    title = stringResource(R.string.st_ClipboardScreen_settings_sensitive),
-                    body = stringResource(R.string.st_ClipboardScreen_settings_sensitive_desc),
-                    checked = state.settings.excludeSensitive,
-                    onCheckedChange = viewModel::setExcludeSensitive,
-                )
-            }
-            item {
-                SettingSwitchRow(
-                    title = stringResource(R.string.st_ClipboardScreen_settings_biometric),
-                    body = stringResource(R.string.st_ClipboardScreen_settings_biometric_desc),
-                    checked = state.settings.biometricLock,
-                    onCheckedChange = viewModel::setBiometricLock,
-                )
-            }
-            item { SectionTitle(stringResource(R.string.st_ClipboardScreen_settings_section_storage)) }
-            item {
-                StepperRow(
-                    title = stringResource(R.string.st_ClipboardScreen_settings_retention),
-                    value = if (state.settings.retentionDays == 0) {
-                        stringResource(R.string.st_ClipboardScreen_retention_forever)
-                    } else {
-                        pluralStringResource(
-                            R.plurals.st_ClipboardScreen_retention_days,
-                            state.settings.retentionDays,
-                            state.settings.retentionDays,
-                        )
-                    },
-                    body = stringResource(R.string.st_ClipboardScreen_settings_retention_desc),
-                    onDecrease = { viewModel.setRetentionDays((state.settings.retentionDays - 1).coerceAtLeast(0)) },
-                    onIncrease = { viewModel.setRetentionDays((state.settings.retentionDays + 1).coerceAtMost(365)) },
-                )
-            }
-            item {
-                StepperRow(
-                    title = stringResource(R.string.st_ClipboardScreen_settings_item_quota),
-                    value = stringResource(R.string.st_ClipboardScreen_megabytes, state.settings.itemQuotaMb),
-                    body = stringResource(R.string.st_ClipboardScreen_settings_item_quota_desc),
-                    onDecrease = { viewModel.setItemQuotaMb((state.settings.itemQuotaMb - 5).coerceAtLeast(1)) },
-                    onIncrease = { viewModel.setItemQuotaMb((state.settings.itemQuotaMb + 5).coerceAtMost(200)) },
-                )
-            }
-            item {
-                StepperRow(
-                    title = stringResource(R.string.st_ClipboardScreen_settings_total_quota),
-                    value = stringResource(R.string.st_ClipboardScreen_megabytes, state.settings.totalQuotaMb),
-                    body = stringResource(R.string.st_ClipboardScreen_settings_total_quota_desc),
-                    onDecrease = { viewModel.setTotalQuotaMb((state.settings.totalQuotaMb - 25).coerceAtLeast(25)) },
-                    onIncrease = { viewModel.setTotalQuotaMb((state.settings.totalQuotaMb + 25).coerceAtMost(5_000)) },
-                )
-            }
-            item {
-                StepperRow(
-                    title = stringResource(R.string.st_ClipboardScreen_settings_max_entries),
-                    value = state.settings.maxEntries.toString(),
-                    body = stringResource(R.string.st_ClipboardScreen_settings_max_entries_desc),
-                    onDecrease = { viewModel.setMaxEntries((state.settings.maxEntries - 50).coerceAtLeast(50)) },
-                    onIncrease = { viewModel.setMaxEntries((state.settings.maxEntries + 50).coerceAtMost(5_000)) },
-                )
-            }
-            item {
-                Surface(
-                    shape = RoundedCornerShape(18.dp),
-                    color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.4f),
-                ) {
-                    Row(
-                        modifier = Modifier.padding(14.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        Icon(Icons.Rounded.WarningAmber, null, tint = MaterialTheme.colorScheme.tertiary)
-                        Text(
-                            text = stringResource(R.string.st_ClipboardScreen_settings_backup_warning),
-                            style = MaterialTheme.typography.bodySmall,
+                item { SectionTitle(stringResource(R.string.st_ClipboardScreen_settings_section_capture)) }
+                item {
+                    SettingSwitchRow(
+                        title = stringResource(R.string.st_ClipboardScreen_settings_monitoring),
+                        body = stringResource(R.string.st_ClipboardScreen_settings_monitoring_desc),
+                        checked = state.settings.monitoring,
+                        onCheckedChange = viewModel::setMonitoringEnabled,
+                    )
+                }
+                item {
+                    SettingSwitchRow(
+                        title = stringResource(R.string.st_ClipboardScreen_settings_screenshots),
+                        body = stringResource(R.string.st_ClipboardScreen_settings_screenshots_desc),
+                        checked = state.settings.captureScreenshots,
+                        enabled = state.settings.monitoring,
+                        onCheckedChange = viewModel::setCaptureScreenshots,
+                    )
+                }
+                if (state.settings.captureScreenshots && !mediaPermissionGranted) {
+                    item {
+                        PermissionRow(
+                            title = stringResource(R.string.st_ClipboardScreen_settings_screenshots_permission),
+                            body = stringResource(R.string.st_ClipboardScreen_settings_screenshots_permission_desc),
+                            action = stringResource(R.string.st_ClipboardScreen_action_grant_media),
+                            onAction = onRequestMediaPermission,
                         )
                     }
                 }
-            }
-            item {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    ToolzOutlinedExpressiveButton(
-                        onClick = onShowStatus,
-                        modifier = Modifier.weight(1f),
-                        shape = SmallExpressiveShape,
-                    ) {
-                        Text(stringResource(R.string.st_ClipboardScreen_action_status))
-                    }
-                    ToolzOutlinedExpressiveButton(
-                        onClick = {
-                            viewModel.resetOnboarding()
-                            onDismiss()
+                item { SectionTitle(stringResource(R.string.st_ClipboardScreen_settings_section_ai)) }
+                item {
+                    SettingSwitchRow(
+                        title = stringResource(R.string.st_ClipboardScreen_settings_ai),
+                        body = stringResource(R.string.st_ClipboardScreen_settings_ai_desc),
+                        checked = state.settings.aiEnabled,
+                        onCheckedChange = viewModel::setClipboardAiEnabled,
+                    )
+                }
+                item {
+                    SettingSwitchRow(
+                        title = stringResource(R.string.st_ClipboardScreen_settings_auto_ai),
+                        body = stringResource(R.string.st_ClipboardScreen_settings_auto_ai_desc),
+                        checked = state.settings.autoAi,
+                        enabled = state.settings.aiEnabled && !state.settings.offline,
+                        onCheckedChange = viewModel::setAutoAiEnabled,
+                    )
+                }
+                item { SectionTitle(stringResource(R.string.st_ClipboardScreen_settings_section_privacy)) }
+                item {
+                    SettingSwitchRow(
+                        title = stringResource(R.string.st_ClipboardScreen_settings_sensitive),
+                        body = stringResource(R.string.st_ClipboardScreen_settings_sensitive_desc),
+                        checked = state.settings.excludeSensitive,
+                        onCheckedChange = viewModel::setExcludeSensitive,
+                    )
+                }
+                item {
+                    SettingSwitchRow(
+                        title = stringResource(R.string.st_ClipboardScreen_settings_biometric),
+                        body = stringResource(R.string.st_ClipboardScreen_settings_biometric_desc),
+                        checked = state.settings.biometricLock,
+                        onCheckedChange = viewModel::setBiometricLock,
+                    )
+                }
+                item { SectionTitle(stringResource(R.string.st_ClipboardScreen_settings_section_storage)) }
+                item {
+                    val retention = state.settings.retentionDays
+                    StepperRow(
+                        title = stringResource(R.string.st_ClipboardScreen_settings_retention),
+                        value = if (retention == 0) {
+                            stringResource(R.string.st_ClipboardScreen_retention_forever)
+                        } else {
+                            pluralStringResource(
+                                R.plurals.st_ClipboardScreen_retention_days,
+                                retention,
+                                retention,
+                            )
                         },
-                        modifier = Modifier.weight(1f),
-                        shape = SmallExpressiveShape,
+                        body = stringResource(R.string.st_ClipboardScreen_settings_retention_desc),
+                        canDecrease = stepRetention(retention, up = false) != retention,
+                        canIncrease = stepRetention(retention, up = true) != retention,
+                        onDecrease = { viewModel.setRetentionDays(stepRetention(retention, up = false)) },
+                        onIncrease = { viewModel.setRetentionDays(stepRetention(retention, up = true)) },
+                    )
+                }
+                item {
+                    val quota = state.settings.itemQuotaMb
+                    StepperRow(
+                        title = stringResource(R.string.st_ClipboardScreen_settings_item_quota),
+                        value = stringResource(R.string.st_ClipboardScreen_megabytes, quota),
+                        body = stringResource(R.string.st_ClipboardScreen_settings_item_quota_desc),
+                        canDecrease = quota > 1,
+                        canIncrease = quota < 200,
+                        onDecrease = { viewModel.setItemQuotaMb((quota - 5).coerceAtLeast(1)) },
+                        onIncrease = { viewModel.setItemQuotaMb((quota + 5).coerceAtMost(200)) },
+                    )
+                }
+                item {
+                    val quota = state.settings.totalQuotaMb
+                    StepperRow(
+                        title = stringResource(R.string.st_ClipboardScreen_settings_total_quota),
+                        value = stringResource(R.string.st_ClipboardScreen_megabytes, quota),
+                        body = stringResource(R.string.st_ClipboardScreen_settings_total_quota_desc),
+                        canDecrease = quota > 25,
+                        canIncrease = quota < 5_000,
+                        onDecrease = { viewModel.setTotalQuotaMb((quota - 25).coerceAtLeast(25)) },
+                        onIncrease = { viewModel.setTotalQuotaMb((quota + 25).coerceAtMost(5_000)) },
+                    )
+                }
+                item {
+                    val entries = state.settings.maxEntries
+                    StepperRow(
+                        title = stringResource(R.string.st_ClipboardScreen_settings_max_entries),
+                        value = entries.toString(),
+                        body = stringResource(R.string.st_ClipboardScreen_settings_max_entries_desc),
+                        canDecrease = entries > 50,
+                        canIncrease = entries < 5_000,
+                        onDecrease = { viewModel.setMaxEntries((entries - 50).coerceAtLeast(50)) },
+                        onIncrease = { viewModel.setMaxEntries((entries + 50).coerceAtMost(5_000)) },
+                    )
+                }
+                item {
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.4f),
                     ) {
-                        Text(stringResource(R.string.st_ClipboardScreen_settings_reset_onboarding))
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Icon(Icons.Rounded.WarningAmber, null, tint = MaterialTheme.colorScheme.tertiary)
+                            Text(
+                                text = stringResource(R.string.st_ClipboardScreen_settings_backup_warning),
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                }
+                item {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        ToolzOutlinedExpressiveButton(
+                            onClick = onShowStatus,
+                            modifier = Modifier.weight(1f),
+                            shape = SmallExpressiveShape,
+                        ) {
+                            Text(stringResource(R.string.st_ClipboardScreen_action_status))
+                        }
+                        ToolzOutlinedExpressiveButton(
+                            onClick = {
+                                viewModel.resetOnboarding()
+                                onDismiss()
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = SmallExpressiveShape,
+                        ) {
+                            Text(stringResource(R.string.st_ClipboardScreen_settings_reset_onboarding))
+                        }
                     }
                 }
             }
-        }
-        SnackbarHost(
-            hostState = feedbackHostState,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(horizontal = 16.dp),
-        )
+            SheetSnackbarHost(feedbackHostState)
         }
     }
 }
@@ -3167,6 +3100,7 @@ private fun PermissionRow(
     }
 }
 
+/** Title and description on top, value with inline −/+ buttons on the right. */
 @Composable
 private fun StepperRow(
     title: String,
@@ -3174,52 +3108,52 @@ private fun StepperRow(
     body: String,
     onDecrease: () -> Unit,
     onIncrease: () -> Unit,
+    canDecrease: Boolean = true,
+    canIncrease: Boolean = true,
 ) {
     Surface(
         shape = SmallExpressiveShape,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(
+            modifier = Modifier.padding(start = 16.dp, top = 8.dp, end = 8.dp, bottom = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(text = title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                    Text(
-                        text = body,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = onDecrease, enabled = canDecrease) {
+                    Icon(
+                        Icons.Rounded.Remove,
+                        contentDescription = stringResource(R.string.st_ClipboardScreen_action_decrease),
                     )
                 }
                 Text(
                     text = value,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.widthIn(min = 64.dp),
                 )
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ToolzTonalExpressiveButton(
-                    onClick = onDecrease,
-                    modifier = Modifier.weight(1f),
-                    shape = SmallExpressiveShape,
-                ) {
-                    Icon(
-                        Icons.Rounded.Remove,
-                        contentDescription = stringResource(R.string.st_ClipboardScreen_action_decrease),
-                        modifier = Modifier.size(18.dp),
-                    )
-                }
-                ToolzTonalExpressiveButton(
-                    onClick = onIncrease,
-                    modifier = Modifier.weight(1f),
-                    shape = SmallExpressiveShape,
-                ) {
+                IconButton(onClick = onIncrease, enabled = canIncrease) {
                     Icon(
                         Icons.Rounded.Add,
                         contentDescription = stringResource(R.string.st_ClipboardScreen_action_increase),
-                        modifier = Modifier.size(18.dp),
                     )
                 }
             }
+            Text(
+                text = body,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(end = 8.dp),
+            )
         }
     }
 }
@@ -3246,116 +3180,92 @@ private fun StatusSheet(
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
         Box(Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 36.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.st_ClipboardScreen_status_title),
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Black,
-            )
-            StatusBanner(status)
-            SectionTitle(stringResource(R.string.st_ClipboardScreen_status_section_access))
-            StatusRow(
-                stringResource(R.string.st_ClipboardScreen_status_shizuku_installed),
-                caps.shizukuInstalled,
-            )
-            StatusRow(
-                stringResource(R.string.st_ClipboardScreen_status_shizuku_running),
-                caps.shizukuRunning,
-            )
-            StatusRow(
-                stringResource(R.string.st_ClipboardScreen_status_shizuku_authorized),
-                caps.shizukuAuthorized,
-            )
-            StatusRow(
-                stringResource(R.string.st_ClipboardScreen_status_appop),
-                caps.appOpAllowed,
-            )
-            StatusRow(
-                stringResource(R.string.st_ClipboardScreen_status_monitoring),
-                state.settings.monitoring,
-            )
-            StatusRow(
-                stringResource(R.string.st_ClipboardScreen_status_screenshots),
-                state.settings.captureScreenshots,
-            )
-            if (state.settings.captureScreenshots) {
-                StatusRow(
-                    stringResource(R.string.st_ClipboardScreen_status_media_permission),
-                    mediaPermissionGranted,
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 36.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.st_ClipboardScreen_status_title),
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Black,
                 )
-                if (!mediaPermissionGranted) {
-                    PermissionRow(
-                        title = stringResource(R.string.st_ClipboardScreen_settings_screenshots_permission),
-                        body = stringResource(R.string.st_ClipboardScreen_settings_screenshots_permission_desc),
-                        action = stringResource(R.string.st_ClipboardScreen_action_grant_media),
-                        onAction = onRequestMediaPermission,
+                StatusBanner(status)
+                SectionTitle(stringResource(R.string.st_ClipboardScreen_status_section_access))
+                StatusRow(stringResource(R.string.st_ClipboardScreen_status_shizuku_installed), caps.shizukuInstalled)
+                StatusRow(stringResource(R.string.st_ClipboardScreen_status_shizuku_running), caps.shizukuRunning)
+                StatusRow(stringResource(R.string.st_ClipboardScreen_status_shizuku_authorized), caps.shizukuAuthorized)
+                StatusRow(stringResource(R.string.st_ClipboardScreen_status_appop), caps.appOpAllowed)
+                StatusRow(stringResource(R.string.st_ClipboardScreen_status_monitoring), state.settings.monitoring)
+                StatusRow(stringResource(R.string.st_ClipboardScreen_status_screenshots), state.settings.captureScreenshots)
+                if (state.settings.captureScreenshots) {
+                    StatusRow(
+                        stringResource(R.string.st_ClipboardScreen_status_media_permission),
+                        mediaPermissionGranted,
+                    )
+                    if (!mediaPermissionGranted) {
+                        PermissionRow(
+                            title = stringResource(R.string.st_ClipboardScreen_settings_screenshots_permission),
+                            body = stringResource(R.string.st_ClipboardScreen_settings_screenshots_permission_desc),
+                            action = stringResource(R.string.st_ClipboardScreen_action_grant_media),
+                            onAction = onRequestMediaPermission,
+                        )
+                    }
+                }
+                HorizontalDivider()
+                SectionTitle(stringResource(R.string.st_ClipboardScreen_status_section_storage))
+                StatusRow(
+                    stringResource(R.string.st_ClipboardScreen_status_active_clips),
+                    state.stats.activeCount.toString(),
+                )
+                StatusRow(
+                    stringResource(R.string.st_ClipboardScreen_status_trash),
+                    state.stats.trashedCount.toString(),
+                )
+                StatusRow(
+                    stringResource(R.string.st_ClipboardScreen_status_sensitive),
+                    state.stats.sensitiveCount.toString(),
+                )
+                val quotaBytes = state.stats.totalQuotaMb.toLong() * 1024L * 1024L
+                StatusRow(
+                    stringResource(R.string.st_ClipboardScreen_status_storage),
+                    stringResource(
+                        R.string.st_ClipboardScreen_status_quota_used,
+                        Formatter.formatShortFileSize(context, state.stats.blobBytes),
+                        Formatter.formatShortFileSize(context, quotaBytes),
+                    ),
+                )
+                if (quotaBytes > 0) {
+                    LinearProgressIndicator(
+                        progress = { (state.stats.blobBytes.toFloat() / quotaBytes.toFloat()).coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
-            }
-            HorizontalDivider()
-            SectionTitle(stringResource(R.string.st_ClipboardScreen_status_section_storage))
-            StatusRow(
-                stringResource(R.string.st_ClipboardScreen_status_active_clips),
-                state.stats.activeCount.toString(),
-            )
-            StatusRow(
-                stringResource(R.string.st_ClipboardScreen_status_trash),
-                state.stats.trashedCount.toString(),
-            )
-            StatusRow(
-                stringResource(R.string.st_ClipboardScreen_status_sensitive),
-                state.stats.sensitiveCount.toString(),
-            )
-            StatusRow(
-                stringResource(R.string.st_ClipboardScreen_status_storage),
-                stringResource(
-                    R.string.st_ClipboardScreen_status_quota_used,
-                    Formatter.formatShortFileSize(LocalContext.current, state.stats.blobBytes),
-                    Formatter.formatShortFileSize(
-                        LocalContext.current,
-                        state.stats.totalQuotaMb.toLong() * 1024L * 1024L,
-                    ),
-                ),
-            )
-            if (state.stats.totalQuotaMb > 0) {
-                LinearProgressIndicator(
-                    progress = {
-                        (state.stats.blobBytes.toFloat() /
-                            (state.stats.totalQuotaMb.toLong() * 1024f * 1024f)).coerceIn(0f, 1f)
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-            if (!caps.shizukuInstalled) {
-                ToolzExpressiveButton(
-                    onClick = {
-                        runCatching {
-                            context.startActivity(viewModel.shizukuInstallIntent())
-                            onDismiss()
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = SmallExpressiveShape,
-                ) {
-                    Text(stringResource(R.string.st_ClipboardScreen_action_install_shizuku))
-                }
-            } else if (!caps.shizukuAuthorized) {
-                ToolzExpressiveButton(
-                    onClick = viewModel::requestShizukuAuthorization,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = SmallExpressiveShape,
-                ) {
-                    Text(stringResource(R.string.st_ClipboardScreen_action_authorize))
-                }
-            } else {
-                if (!caps.appOpAllowed) {
+                if (!caps.shizukuInstalled) {
+                    ToolzExpressiveButton(
+                        onClick = {
+                            runCatching {
+                                context.startActivity(viewModel.shizukuInstallIntent())
+                                onDismiss()
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = SmallExpressiveShape,
+                    ) {
+                        Text(stringResource(R.string.st_ClipboardScreen_action_install_shizuku))
+                    }
+                } else if (!caps.shizukuAuthorized) {
+                    ToolzExpressiveButton(
+                        onClick = viewModel::requestShizukuAuthorization,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = SmallExpressiveShape,
+                    ) {
+                        Text(stringResource(R.string.st_ClipboardScreen_action_authorize))
+                    }
+                } else if (!caps.appOpAllowed) {
                     ToolzOutlinedExpressiveButton(
                         onClick = viewModel::grantClipboardAppOp,
                         modifier = Modifier.fillMaxWidth(),
@@ -3372,37 +3282,31 @@ private fun StatusSheet(
                         Text(stringResource(R.string.st_ClipboardScreen_action_revoke_appop))
                     }
                 }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ToolzOutlinedExpressiveButton(
-                    onClick = { viewModel.refreshGate(); viewModel.refreshStats() },
-                    modifier = Modifier.weight(1f),
-                    shape = SmallExpressiveShape,
-                ) {
-                    Icon(Icons.Rounded.Refresh, null, Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text(stringResource(R.string.st_ClipboardScreen_action_refresh))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ToolzOutlinedExpressiveButton(
+                        onClick = { viewModel.refreshGate(); viewModel.refreshStats() },
+                        modifier = Modifier.weight(1f),
+                        shape = SmallExpressiveShape,
+                    ) {
+                        Icon(Icons.Rounded.Refresh, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(stringResource(R.string.st_ClipboardScreen_action_refresh))
+                    }
+                    ToolzOutlinedExpressiveButton(
+                        onClick = onOpenAppDetails,
+                        modifier = Modifier.weight(1f),
+                        shape = SmallExpressiveShape,
+                    ) {
+                        Text(stringResource(R.string.st_ClipboardScreen_status_app_details))
+                    }
                 }
-                ToolzOutlinedExpressiveButton(
-                    onClick = onOpenAppDetails,
-                    modifier = Modifier.weight(1f),
-                    shape = SmallExpressiveShape,
-                ) {
-                    Text(stringResource(R.string.st_ClipboardScreen_status_app_details))
-                }
+                Text(
+                    text = stringResource(R.string.st_ClipboardScreen_status_note),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
-            Text(
-                text = stringResource(R.string.st_ClipboardScreen_status_note),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        SnackbarHost(
-            hostState = feedbackHostState,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(horizontal = 16.dp),
-        )
+            SheetSnackbarHost(feedbackHostState)
         }
     }
 }
@@ -3535,10 +3439,9 @@ private fun InfoBanner(
 
 @Composable
 private fun FullHeightState(content: @Composable () -> Unit) {
-    // Pull-to-refresh only receives gestures from a scrollable child. Empty
-    // and loading screens used to be plain Columns, so pulling on an empty
-    // history did nothing. A single full-height lazy item keeps the state
-    // centred while still giving the refresh gesture something to consume.
+    // Pull-to-refresh only receives gestures from a scrollable child. A single
+    // full-height lazy item keeps the state centred while still giving the
+    // refresh gesture something to consume.
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         item {
             Box(modifier = Modifier.fillParentMaxSize()) {
@@ -3750,10 +3653,9 @@ private fun sensitivityLabel(entry: ClipboardEntry): String = stringResource(
 )
 
 /**
- * Wall clock that advances every 30 seconds. Relative timestamps are derived
- * from this value so an open screen never keeps showing "just now" for a clip
- * captured hours ago. Thirty seconds keeps the UI honest without waking the
- * device often enough to matter.
+ * Wall clock that advances every 30 seconds. Relative timestamps derive from
+ * this value so an open screen never keeps showing "just now" for a clip
+ * captured hours ago, without waking the device often enough to matter.
  */
 @Composable
 private fun rememberNow(): Long {
