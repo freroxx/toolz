@@ -1118,7 +1118,7 @@ fun UpdateOverlayContent(
 fun UpdateOverlayPreview() {
     ToolzTheme {
         UpdateOverlayContent(
-            availableVersion = "1.1.8",
+            availableVersion = "1.1.9",
             changelog = "### Highlights\n- Faster downloads with resume\n- Clearer install flow",
             onDownload = {},
             onOpenUpdater = {},

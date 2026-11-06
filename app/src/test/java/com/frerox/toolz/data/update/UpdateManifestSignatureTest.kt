@@ -92,6 +92,30 @@ class UpdateManifestSignatureTest {
     }
 
     @Test
+    fun canonicalBytesPreserveKeyOrder() {
+        // The signature contract is "keys in their original order"
+        // (see UpdateManifest). org.json's JVM implementation reorders
+        // keys, so canonicalization must not depend on it.
+        val raw = """
+            {
+              "versionName": "1.1.8",
+              "versionCode": 19,
+              "minimumVersionCode": 18,
+              "signature": "ignored",
+              "_comment": "ignored",
+              "releases": [{"abi": "x86", "downloadUrl": "https://example.com/a.apk"}]
+            }
+        """.trimIndent().toByteArray(Charsets.UTF_8)
+        val expected =
+            """{"versionName":"1.1.8","versionCode":19,"minimumVersionCode":18,""" +
+                """"releases":[{"abi":"x86","downloadUrl":"https://example.com/a.apk"}]}"""
+        assertEquals(
+            expected,
+            UpdateRepository.canonicalManifestBytes(raw).toString(Charsets.UTF_8),
+        )
+    }
+
+    @Test
     fun rootUpdateManifestSignatureVerifies() {
         val file = java.io.File("../update_manifest.json")
         if (!file.exists()) return

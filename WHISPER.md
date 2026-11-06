@@ -7,7 +7,7 @@ document explains how the whole system works — the cryptography, the server,
 the client, and the user experience — well enough that a reader who has never
 seen the codebase can reason about it.
 
-**How to read this document.** It describes the codebase as of the 1.1.7
+**How to read this document.** It describes the codebase as of the 1.1.8
 release (October 2026), including the six client-side hardening rounds that
 followed the initial release cut (§6, §9, §11.7, §12, §13 — October 2026).
 It also records, without softening, the October 2026 field report that 1:1
@@ -54,7 +54,7 @@ lookup, and no pre-existing identity to import. An account is either a
 that *is* the credential — lose it without the access-file or vault backup
 and the account cannot be logged into again).
 
-Feature surface at 1.1.7:
+Feature surface at 1.1.8:
 
 - **1:1 chat** — text, images (with one-minute-to-180-day disappearing
   timers), replies, reactions, read receipts, typing and presence, in-chat

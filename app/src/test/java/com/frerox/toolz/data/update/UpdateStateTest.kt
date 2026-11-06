@@ -19,8 +19,8 @@ import org.junit.Test
 class UpdateStateTest {
 
     private val update = PendingUpdate(
-        version = "1.1.8",
-        versionCode = 19,
+        version = "1.1.9",
+        versionCode = 20,
         changelog = "### Highlights\n- Faster downloads",
         downloadUrl = "https://example.com/toolz.apk",
         sizeBytes = 3_200_000L,
@@ -52,7 +52,7 @@ class UpdateStateTest {
         assertNull(UpdateManagerState.Idle.pendingUpdate())
         assertNull(UpdateManagerState.Checking.pendingUpdate())
         assertNull(UpdateManagerState.UpToDate.pendingUpdate())
-        assertNull(UpdateManagerState.Installed("1.1.8").pendingUpdate())
+        assertNull(UpdateManagerState.Installed("1.1.9").pendingUpdate())
         assertNull(
             UpdateManagerState.Error(UpdateError.Timeout).pendingUpdate(),
         )

@@ -18,9 +18,9 @@ class UpdateVersionTest {
 
     @Test
     fun normalizeStripsWhitespaceAndLeadingV() {
-        assertEquals("1.1.7", UpdateVersion.normalize("  v1.1.7 "))
-        assertEquals("1.1.7", UpdateVersion.normalize("V1.1.7"))
-        assertEquals("1.1.7", UpdateVersion.normalize("1.1.7"))
+        assertEquals("1.1.8", UpdateVersion.normalize("  v1.1.8 "))
+        assertEquals("1.1.8", UpdateVersion.normalize("V1.1.8"))
+        assertEquals("1.1.8", UpdateVersion.normalize("1.1.8"))
     }
 
     @Test
@@ -28,7 +28,7 @@ class UpdateVersionTest {
         assertTrue(UpdateVersion.compare("1.9.9", "1.10.0") < 0)
         assertTrue(UpdateVersion.compare("1.10.0", "1.9.9") > 0)
         assertTrue(UpdateVersion.compare("2.0.0", "1.99.99") > 0)
-        assertEquals(0, UpdateVersion.compare("1.1.7", "1.1.7"))
+        assertEquals(0, UpdateVersion.compare("1.1.8", "1.1.8"))
     }
 
     @Test
@@ -47,17 +47,17 @@ class UpdateVersionTest {
 
     @Test
     fun isNewerOnlyForStrictlyNewerVersions() {
-        assertTrue(UpdateVersion.isNewer("1.1.7", "v1.1.8"))
-        assertFalse(UpdateVersion.isNewer("1.1.7", "1.1.7"))
-        assertFalse(UpdateVersion.isNewer("1.1.7", "1.1.6"))
-        assertFalse(UpdateVersion.isNewer("v1.1.7", "V1.1.7"))
+        assertTrue(UpdateVersion.isNewer("1.1.8", "v1.1.9"))
+        assertFalse(UpdateVersion.isNewer("1.1.8", "1.1.8"))
+        assertFalse(UpdateVersion.isNewer("1.1.8", "1.1.7"))
+        assertFalse(UpdateVersion.isNewer("v1.1.8", "V1.1.8"))
     }
 
     @Test
     fun unparsableVersionsCompareEqualInsteadOfNewer() {
         assertEquals(0, UpdateVersion.compare("", "1.2.3"))
         assertEquals(0, UpdateVersion.compare("nightly", "1.2.3"))
-        assertFalse(UpdateVersion.isNewer("1.1.7", ""))
-        assertFalse(UpdateVersion.isNewer("", "1.1.7"))
+        assertFalse(UpdateVersion.isNewer("1.1.8", ""))
+        assertFalse(UpdateVersion.isNewer("", "1.1.8"))
     }
 }

@@ -1,4 +1,4 @@
-# Whisper post-deploy smoke (v1.1.7)
+# Whisper post-deploy smoke (v1.1.8)
 
 Run this ONCE after ship-day deploys — SQL re-run, the four INSERT webhooks
 (whisper_group_invites, whisper_group_messages, whisper_group_events,

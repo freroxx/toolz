@@ -35,7 +35,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
-import org.json.JSONObject
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 
 /**
  * Resolves the newest installable update from two independent sources:
@@ -483,14 +484,21 @@ class UpdateRepository @Inject constructor(
 
         /**
          * Canonical manifest bytes for signature verification: raw JSON with
-         * `signature` and `_comment` removed, re-serialized compactly
-         * (org.json preserves key order).
+         * `signature` and `_comment` removed, re-serialized compactly with
+         * keys in their original order.
+         *
+         * Uses kotlinx.serialization (order-preserving on every platform)
+         * rather than `org.json`, whose JVM implementation reorders keys and
+         * would make signatures platform-dependent.
          */
         fun canonicalManifestBytes(manifestJsonBytes: ByteArray): ByteArray {
-            val json = JSONObject(String(manifestJsonBytes, Charsets.UTF_8))
-            json.remove("signature")
-            json.remove("_comment")
-            return json.toString().toByteArray(Charsets.UTF_8)
+            val root = Json.parseToJsonElement(
+                String(manifestJsonBytes, Charsets.UTF_8)
+            ) as? JsonObject ?: return ByteArray(0)
+            val canonical = JsonObject(
+                root.filterKeys { key -> key != "signature" && key != "_comment" }
+            )
+            return canonical.toString().toByteArray(Charsets.UTF_8)
         }
     }
 }

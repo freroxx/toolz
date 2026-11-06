@@ -1532,8 +1532,8 @@ private fun MetaChip(text: String) {
 // ── Previews ────────────────────────────────────────────────────────────────
 
 private val previewUpdate = PendingUpdate(
-    version = "1.1.8",
-    versionCode = 19,
+    version = "1.1.9",
+    versionCode = 20,
     changelog = "### Highlights\n" +
         "- Faster update downloads with resume support.\n" +
         "- Clearer install flow with a verification step.\n" +
@@ -1552,8 +1552,8 @@ private fun UpdateAvailablePreview() {
     ToolzTheme {
         UpdateScreenContent(
             onBack = {},
-            currentVersionName = "1.1.7",
-            currentVersionCode = 18,
+            currentVersionName = "1.1.8",
+            currentVersionCode = 19,
             managerState = UpdateManagerState.Available(previewUpdate),
             preferredAbi = "AUTO",
             autoUpdateEnabled = true,
@@ -1573,8 +1573,8 @@ private fun UpdateReadyPreview() {
     ToolzTheme {
         UpdateScreenContent(
             onBack = {},
-            currentVersionName = "1.1.7",
-            currentVersionCode = 18,
+            currentVersionName = "1.1.8",
+            currentVersionCode = 19,
             managerState = UpdateManagerState.ReadyToInstall(
                 update = previewUpdate,
                 apkFile = java.io.File("/tmp/toolz.apk"),
@@ -1598,8 +1598,8 @@ private fun UpdateDownloadingPreview() {
     ToolzTheme {
         UpdateScreenContent(
             onBack = {},
-            currentVersionName = "1.1.7",
-            currentVersionCode = 18,
+            currentVersionName = "1.1.8",
+            currentVersionCode = 19,
             managerState = UpdateManagerState.Downloading(
                 update = previewUpdate,
                 bytesDownloaded = 18_000_000L,
@@ -1625,8 +1625,8 @@ private fun UpdateErrorPreview() {
     ToolzTheme {
         UpdateScreenContent(
             onBack = {},
-            currentVersionName = "1.1.7",
-            currentVersionCode = 18,
+            currentVersionName = "1.1.8",
+            currentVersionCode = 19,
             managerState = UpdateManagerState.Error(
                 error = UpdateError.Offline,
                 retryDownload = true,
