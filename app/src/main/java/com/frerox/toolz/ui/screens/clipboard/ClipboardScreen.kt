@@ -28,19 +28,27 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -56,8 +64,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -121,6 +131,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -144,6 +155,7 @@ import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -156,8 +168,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -195,7 +210,6 @@ import com.frerox.toolz.ui.components.MediumExpressiveShape
 import com.frerox.toolz.ui.components.SmallExpressiveShape
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.components.ToolzExpressiveTextButton
-import com.frerox.toolz.ui.components.ToolzLargeExtendedFloatingActionButton
 import com.frerox.toolz.ui.components.ToolzOutlinedExpressiveButton
 import com.frerox.toolz.ui.components.ToolzTonalExpressiveButton
 import com.frerox.toolz.ui.components.ToolzTonalExpressiveIconButton
@@ -208,10 +222,33 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Date
 
+// ── Layout constants (8dp grid) ───────────────────────────────────────────
+
+private val ScreenGutter = 16.dp
+private val CardPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
+private val ListItemGap = 8.dp
+private val CompactButtonHeight = 44.dp
+
+/** Content spring used for state changes (selection, copy flash, swipe icons). */
+private val ExpressiveSpring = spring<Float>(
+    dampingRatio = Spring.DampingRatioMediumBouncy,
+    stiffness = Spring.StiffnessMediumLow,
+)
+
+private val LinkTypes = setOf(ClipboardType.LINK, ClipboardType.URL, ClipboardType.SOCIAL)
+
 /** A snackbar request. Ordinary messages replace each other; undoable ones are never stolen. */
 private data class TransientMessage(
     val text: String,
     val undoable: Boolean = false,
+)
+
+/** One tile in the detail sheet action grid. */
+private data class SheetAction(
+    val icon: ImageVector,
+    val label: String,
+    val selected: Boolean = false,
+    val onClick: () -> Unit,
 )
 
 /** Retention steps, ascending. 0 means "keep forever" and sorts last. */
@@ -251,6 +288,9 @@ fun ClipboardScreen(
     val now = rememberNow()
     var refreshing by remember { mutableStateOf(false) }
     val pullState = rememberPullToRefreshState()
+    val listState = rememberLazyListState()
+    // The FAB collapses to an icon once the list scrolls away from the top.
+    val fabExpanded by remember { derivedStateOf { listState.firstVisibleItemIndex == 0 } }
 
     // Screenshot ingestion reads MediaStore. Without this runtime permission
     // the observer and scan silently find nothing, so surface and request it.
@@ -470,7 +510,9 @@ fun ClipboardScreen(
     }
 
     Scaffold(
-        modifier = Modifier.toolzBackground(),
+        modifier = Modifier
+            .toolzBackground()
+            .nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = Color.Transparent,
         topBar = {
             ExpressiveTopAppBar(
@@ -678,7 +720,10 @@ fun ClipboardScreen(
         bottomBar = {
             AnimatedVisibility(
                 visible = state.isSelectionMode,
-                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                enter = slideInVertically(
+                    initialOffsetY = { it },
+                    animationSpec = spring(Spring.DampingRatioLowBouncy, Spring.StiffnessMediumLow),
+                ) + fadeIn(),
                 exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
             ) {
                 SelectionActionBar(
@@ -691,12 +736,19 @@ fun ClipboardScreen(
         floatingActionButton = {
             AnimatedVisibility(
                 visible = !state.isSelectionMode && !state.showTrash,
-                enter = fadeIn() + slideInVertically(initialOffsetY = { it / 2 }),
-                exit = fadeOut() + slideOutVertically(targetOffsetY = { it / 2 }),
+                enter = fadeIn() + scaleIn(initialScale = 0.8f),
+                exit = fadeOut() + scaleOut(targetScale = 0.8f),
             ) {
-                ToolzLargeExtendedFloatingActionButton(
-                    onClick = { viewModel.pasteCurrent() },
-                    enabled = !state.busy,
+                ExtendedFloatingActionButton(
+                    onClick = {
+                        if (!state.busy) {
+                            haptic.click()
+                            viewModel.pasteCurrent()
+                        }
+                    },
+                    expanded = fabExpanded,
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                     icon = {
                         if (state.busy) {
                             ExpressivePulseIndicator(modifier = Modifier.size(20.dp))
@@ -714,42 +766,46 @@ fun ClipboardScreen(
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            if (state.sandboxActive) {
-                InfoBanner(
-                    icon = Icons.Rounded.Info,
-                    title = stringResource(R.string.st_ClipboardScreen_sandbox_banner),
-                    color = MaterialTheme.colorScheme.tertiary,
-                )
-            } else if (state.showSetupBanner) {
-                InfoBanner(
-                    icon = Icons.Rounded.WarningAmber,
-                    title = stringResource(R.string.st_ClipboardScreen_foreground_banner),
-                    action = stringResource(R.string.st_ClipboardScreen_action_finish_setup),
-                    color = MaterialTheme.colorScheme.error,
+            // Banners and the attention card share one animated container so
+            // the list below glides instead of jumping when they come and go.
+            Column(modifier = Modifier.animateContentSize()) {
+                if (state.sandboxActive) {
+                    InfoBanner(
+                        icon = Icons.Rounded.Info,
+                        title = stringResource(R.string.st_ClipboardScreen_sandbox_banner),
+                        color = MaterialTheme.colorScheme.tertiary,
+                    )
+                } else if (state.showSetupBanner) {
+                    InfoBanner(
+                        icon = Icons.Rounded.WarningAmber,
+                        title = stringResource(R.string.st_ClipboardScreen_foreground_banner),
+                        action = stringResource(R.string.st_ClipboardScreen_action_finish_setup),
+                        color = MaterialTheme.colorScheme.error,
+                        onClick = { showStatus = true },
+                    )
+                }
+
+                // Never stack banners: setup/sandbox already explain why capture
+                // needs attention, and an AI-offline row underneath them only
+                // pushes the actual history further down.
+                if (!state.sandboxActive && !state.showSetupBanner &&
+                    state.settings.offline && state.settings.aiEnabled
+                ) {
+                    InfoBanner(
+                        icon = Icons.Rounded.Info,
+                        title = stringResource(R.string.st_ClipboardScreen_ai_offline),
+                        color = MaterialTheme.colorScheme.secondary,
+                    )
+                }
+
+                CaptureAttentionCard(
+                    state = state,
+                    mediaPermissionGranted = mediaPermissionGranted,
+                    onRequestMediaPermission = ::requestMediaPermission,
+                    onResumeCapture = { viewModel.setMonitoringEnabled(true) },
                     onClick = { showStatus = true },
                 )
             }
-
-            // Never stack banners: setup/sandbox already explain why capture
-            // needs attention, and an AI-offline row underneath them only
-            // pushes the actual history further down.
-            if (!state.sandboxActive && !state.showSetupBanner &&
-                state.settings.offline && state.settings.aiEnabled
-            ) {
-                InfoBanner(
-                    icon = Icons.Rounded.Info,
-                    title = stringResource(R.string.st_ClipboardScreen_ai_offline),
-                    color = MaterialTheme.colorScheme.secondary,
-                )
-            }
-
-            CaptureAttentionCard(
-                state = state,
-                mediaPermissionGranted = mediaPermissionGranted,
-                onRequestMediaPermission = ::requestMediaPermission,
-                onResumeCapture = { viewModel.setMonitoringEnabled(true) },
-                onClick = { showStatus = true },
-            )
 
             SearchAndFilters(
                 query = state.query,
@@ -823,6 +879,7 @@ fun ClipboardScreen(
                         HistoryList(
                             state = state,
                             viewModel = viewModel,
+                            listState = listState,
                             now = now,
                             copyFlashEntryId = copyFlashEntryId,
                             copyFlashToken = copyFlashToken,
@@ -1070,19 +1127,19 @@ private fun CaptureAttentionCard(
         },
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = ScreenGutter, vertical = 4.dp),
         shape = SmallExpressiveShape,
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = androidx.compose.foundation.BorderStroke(1.dp, accent.copy(alpha = 0.35f)),
+        border = BorderStroke(1.dp, accent.copy(alpha = 0.35f)),
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
                 modifier = Modifier
-                    .size(38.dp)
+                    .size(36.dp)
                     .clip(CircleShape)
                     .background(accent.copy(alpha = 0.14f)),
                 contentAlignment = Alignment.Center,
@@ -1102,6 +1159,8 @@ private fun CaptureAttentionCard(
                     text = title,
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     text = subtitle,
@@ -1113,7 +1172,7 @@ private fun CaptureAttentionCard(
             }
             Text(
                 text = stringResource(actionLabel),
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Bold,
                 color = accent,
             )
@@ -1132,14 +1191,15 @@ private fun SearchAndFilters(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-            .padding(top = 2.dp, bottom = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+            .padding(top = 4.dp, bottom = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         ExpressiveSearchField(
             query = query,
             onQueryChange = onQueryChange,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = ScreenGutter),
             placeholder = { Text(stringResource(R.string.st_ClipboardScreen_search_placeholder)) },
             leadingIcon = {
                 Icon(
@@ -1149,7 +1209,11 @@ private fun SearchAndFilters(
                 )
             },
             trailingIcon = {
-                if (query.isNotEmpty()) {
+                AnimatedVisibility(
+                    visible = query.isNotEmpty(),
+                    enter = fadeIn() + scaleIn(initialScale = 0.7f),
+                    exit = fadeOut() + scaleOut(targetScale = 0.7f),
+                ) {
                     IconButton(onClick = { onQueryChange("") }) {
                         Icon(
                             Icons.Rounded.Close,
@@ -1159,9 +1223,11 @@ private fun SearchAndFilters(
                 }
             },
         )
+        // Chips scroll edge to edge; the gutter lives in contentPadding so the
+        // first chip aligns with the search field and the last never clips.
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = PaddingValues(end = 8.dp),
+            contentPadding = PaddingValues(horizontal = ScreenGutter),
         ) {
             items(ClipboardFilter.entries, key = { it.name }) { item ->
                 val count = counts[item] ?: 0
@@ -1238,8 +1304,9 @@ private fun SelectionActionBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+                .animateContentSize(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (state.showTrash) {
@@ -1309,15 +1376,15 @@ private fun RowScope.SelectionAction(
             .clip(SmallExpressiveShape)
             .background(tint.copy(alpha = 0.12f))
             .clickable(role = Role.Button, onClick = onClick)
-            .heightIn(min = 56.dp)
-            .padding(vertical = 8.dp),
+            .heightIn(min = 52.dp)
+            .padding(vertical = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
         Icon(
             icon,
             contentDescription = null,
-            modifier = Modifier.size(22.dp),
+            modifier = Modifier.size(20.dp),
             tint = tint,
         )
         Spacer(Modifier.height(2.dp))
@@ -1336,6 +1403,7 @@ private fun RowScope.SelectionAction(
 private fun HistoryList(
     state: ClipboardUiState,
     viewModel: ClipboardViewModel,
+    listState: LazyListState,
     now: Long,
     copyFlashEntryId: Int?,
     copyFlashToken: Int,
@@ -1349,15 +1417,17 @@ private fun HistoryList(
 ) {
     val groups = remember(state.visibleEntries) { viewModel.groupedEntries(state.visibleEntries) }
     LazyColumn(
+        state = listState,
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 120.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = PaddingValues(start = ScreenGutter, end = ScreenGutter, top = 8.dp, bottom = 96.dp),
+        verticalArrangement = Arrangement.spacedBy(ListItemGap),
     ) {
         item(key = "history_summary") {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                    .padding(horizontal = 4.dp)
+                    .animateItem(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -1393,8 +1463,10 @@ private fun HistoryList(
                     ),
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 4.dp, top = 6.dp, bottom = 2.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .padding(start = 4.dp, top = 8.dp)
+                        .animateItem(),
                 )
             }
             items(group.entries, key = { it.id }) { entry ->
@@ -1436,7 +1508,8 @@ private fun groupLabel(group: ClipboardDateGroup): String = stringResource(
 /**
  * One history row. Swipe right pins, swipe left deletes (undoable). The only
  * trailing action is copy, which keeps rows compact; pin/lock/share live in the
- * detail sheet.
+ * detail sheet. Trash rows carry their two actions as compact pills below the
+ * content instead of two stacked 48dp buttons.
  */
 @Composable
 private fun ClipboardCard(
@@ -1523,7 +1596,7 @@ private fun ClipboardCard(
             masked -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f)
             else -> MaterialTheme.colorScheme.surfaceContainerHigh
         },
-        animationSpec = tween(180),
+        animationSpec = tween(200),
         label = "clipCardColor",
     )
 
@@ -1533,34 +1606,67 @@ private fun ClipboardCard(
         enableDismissFromStartToEnd = canSwipe,
         enableDismissFromEndToStart = canSwipe,
         backgroundContent = {
-            val pinning = dismissState.dismissDirection == SwipeToDismissBoxValue.StartToEnd
+            val direction = dismissState.dismissDirection
+            val pinning = direction == SwipeToDismissBoxValue.StartToEnd
+            val active = dismissState.targetValue != SwipeToDismissBoxValue.Settled
             val background by animateColorAsState(
                 when (dismissState.targetValue) {
                     SwipeToDismissBoxValue.EndToStart -> MaterialTheme.colorScheme.errorContainer
                     SwipeToDismissBoxValue.StartToEnd -> MaterialTheme.colorScheme.primaryContainer
                     SwipeToDismissBoxValue.Settled ->
-                        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.4f)
+                        if (direction == SwipeToDismissBoxValue.Settled) {
+                            Color.Transparent
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainerHighest
+                        }
                 },
                 animationSpec = tween(160),
                 label = "clipSwipeBg",
             )
+            // The icon pops once the swipe passes the commit threshold.
+            val iconScale by animateFloatAsState(
+                targetValue = if (active) 1.2f else 0.9f,
+                animationSpec = ExpressiveSpring,
+                label = "clipSwipeIcon",
+            )
+            val contentColor = if (pinning) {
+                MaterialTheme.colorScheme.onPrimaryContainer
+            } else {
+                MaterialTheme.colorScheme.onErrorContainer
+            }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .clip(SmallExpressiveShape)
                     .background(background)
-                    .padding(horizontal = 22.dp),
+                    .padding(horizontal = 20.dp),
                 contentAlignment = if (pinning) Alignment.CenterStart else Alignment.CenterEnd,
             ) {
-                Icon(
-                    if (pinning) Icons.Rounded.PushPin else Icons.Rounded.Delete,
-                    contentDescription = null,
-                    tint = if (pinning) {
-                        MaterialTheme.colorScheme.onPrimaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.onErrorContainer
-                    },
-                )
+                if (direction != SwipeToDismissBoxValue.Settled) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            if (pinning) Icons.Rounded.PushPin else Icons.Rounded.Delete,
+                            contentDescription = null,
+                            tint = contentColor,
+                            modifier = Modifier.graphicsLayer {
+                                scaleX = iconScale
+                                scaleY = iconScale
+                            },
+                        )
+                        Text(
+                            text = stringResource(
+                                if (pinning) R.string.st_ClipboardScreen_action_pin
+                                else R.string.st_ClipboardScreen_action_delete,
+                            ),
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = contentColor,
+                        )
+                    }
+                }
             }
         },
     ) {
@@ -1574,16 +1680,15 @@ private fun ClipboardCard(
             shape = SmallExpressiveShape,
             containerColor = containerColor,
             border = when {
-                selected -> androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
-                masked -> androidx.compose.foundation.BorderStroke(
-                    1.dp,
-                    MaterialTheme.colorScheme.error.copy(alpha = 0.35f),
-                )
+                selected -> BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
+                masked -> BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f))
                 else -> null
             },
         ) {
             Column(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                modifier = Modifier
+                    .padding(CardPadding)
+                    .animateContentSize(),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Row(
@@ -1646,12 +1751,14 @@ private fun ClipboardCard(
                         if (aiEnabled && !masked && !entry.summary.isNullOrBlank()) {
                             Row(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
+                                verticalAlignment = Alignment.Top,
                             ) {
                                 Icon(
                                     Icons.Rounded.AutoAwesome,
                                     contentDescription = null,
-                                    modifier = Modifier.size(14.dp),
+                                    modifier = Modifier
+                                        .padding(top = 2.dp)
+                                        .size(14.dp),
                                     tint = MaterialTheme.colorScheme.tertiary,
                                 )
                                 Text(
@@ -1691,22 +1798,10 @@ private fun ClipboardCard(
                             checked = selected,
                             onCheckedChange = { onOpen() },
                         )
-                        showTrash -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            CompactClipAction(
-                                icon = Icons.Rounded.Restore,
-                                contentDescription = stringResource(R.string.st_ClipboardScreen_action_restore),
-                                tint = MaterialTheme.colorScheme.primary,
-                                onClick = { haptic.click(); onRestore() },
-                            )
-                            CompactClipAction(
-                                icon = Icons.Rounded.DeleteForever,
-                                contentDescription = stringResource(R.string.st_ClipboardScreen_action_delete_forever),
-                                tint = MaterialTheme.colorScheme.error,
-                                onClick = { haptic.click(); onDeleteForever() },
-                            )
-                        }
+                        showTrash -> Unit
                         else -> CompactClipAction(
                             icon = if (copiedFlash) Icons.Rounded.CheckCircle else Icons.Rounded.ContentCopy,
+                            copied = copiedFlash,
                             contentDescription = stringResource(
                                 if (copiedFlash) R.string.st_ClipboardScreen_copied
                                 else R.string.st_ClipboardScreen_action_copy,
@@ -1730,8 +1825,57 @@ private fun ClipboardCard(
                         onOpen = onOpen,
                     )
                 }
+                if (showTrash && !selectionMode) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                    ) {
+                        ActionPill(
+                            icon = Icons.Rounded.Restore,
+                            label = stringResource(R.string.st_ClipboardScreen_action_restore),
+                            tint = MaterialTheme.colorScheme.primary,
+                            onClick = { haptic.click(); onRestore() },
+                        )
+                        ActionPill(
+                            icon = Icons.Rounded.DeleteForever,
+                            label = stringResource(R.string.st_ClipboardScreen_action_delete_forever),
+                            tint = MaterialTheme.colorScheme.error,
+                            onClick = { haptic.click(); onDeleteForever() },
+                        )
+                    }
+                }
             }
         }
+    }
+}
+
+/** Small tonal pill (36dp) for secondary row actions. */
+@Composable
+private fun ActionPill(
+    icon: ImageVector,
+    label: String,
+    tint: Color,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .heightIn(min = 36.dp)
+            .clip(CircleShape)
+            .background(tint.copy(alpha = 0.12f))
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp), tint = tint)
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            color = tint,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -1741,7 +1885,7 @@ private fun ClipHeroPreview(
     viewModel: ClipboardViewModel,
     onOpen: () -> Unit,
 ) {
-    val bitmap by produceState<androidx.compose.ui.graphics.ImageBitmap?>(
+    val bitmap by produceState<ImageBitmap?>(
         initialValue = null,
         key1 = attachment.blobId,
     ) {
@@ -1757,20 +1901,24 @@ private fun ClipHeroPreview(
         contentAlignment = Alignment.Center,
     ) {
         val image = bitmap
-        if (image != null) {
-            Image(
-                bitmap = image,
-                contentDescription = stringResource(R.string.st_ClipboardScreen_attachment_image),
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
-        } else {
-            Icon(
-                Icons.Rounded.Image,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(36.dp),
-            )
+        Crossfade(targetState = image, animationSpec = tween(220), label = "heroPreview") { loaded ->
+            if (loaded != null) {
+                Image(
+                    bitmap = loaded,
+                    contentDescription = stringResource(R.string.st_ClipboardScreen_attachment_image),
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Rounded.Image,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(36.dp),
+                    )
+                }
+            }
         }
     }
 }
@@ -1778,7 +1926,7 @@ private fun ClipHeroPreview(
 @Composable
 private fun TypeBadge(type: String, compact: Boolean = false) {
     Surface(
-        shape = RoundedCornerShape(if (compact) 11.dp else 16.dp),
+        shape = RoundedCornerShape(if (compact) 12.dp else 16.dp),
         color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
     ) {
         Icon(
@@ -1788,7 +1936,7 @@ private fun TypeBadge(type: String, compact: Boolean = false) {
                 typeLabel(type),
             ),
             modifier = Modifier
-                .padding(if (compact) 8.dp else 10.dp)
+                .padding(if (compact) 9.dp else 11.dp)
                 .size(if (compact) 18.dp else 22.dp),
             tint = MaterialTheme.colorScheme.primary,
         )
@@ -1852,21 +2000,37 @@ private fun ClipMetaLine(
     }
 }
 
-/** 48dp touch target so the row actions stay comfortably tappable. */
+/**
+ * 48dp touch target so the row action stays comfortably tappable. The icon
+ * crossfades with a small pop when a copy is confirmed.
+ */
 @Composable
 private fun CompactClipAction(
     icon: ImageVector,
+    copied: Boolean,
     contentDescription: String,
     tint: Color,
     onClick: () -> Unit,
 ) {
+    val scale by animateFloatAsState(
+        targetValue = if (copied) 1.15f else 1f,
+        animationSpec = ExpressiveSpring,
+        label = "copyIconScale",
+    )
     IconButton(onClick = onClick, modifier = Modifier.size(48.dp)) {
-        Icon(
-            icon,
-            contentDescription = contentDescription,
-            tint = tint,
-            modifier = Modifier.size(22.dp),
-        )
+        Crossfade(targetState = icon, animationSpec = tween(160), label = "copyIcon") { current ->
+            Icon(
+                current,
+                contentDescription = contentDescription,
+                tint = tint,
+                modifier = Modifier
+                    .size(22.dp)
+                    .graphicsLayer {
+                        scaleX = scale
+                        scaleY = scale
+                    },
+            )
+        }
     }
 }
 
@@ -1942,27 +2106,30 @@ private fun AttachmentThumbnail(
     viewModel: ClipboardViewModel,
     modifier: Modifier = Modifier,
 ) {
-    val bitmap by produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, attachment.blobId) {
+    val bitmap by produceState<ImageBitmap?>(null, attachment.blobId) {
         value = viewModel.loadAttachmentBitmap(attachment)?.asImageBitmap()
     }
     Box(
         modifier = modifier.background(MaterialTheme.colorScheme.surfaceContainerHighest),
         contentAlignment = Alignment.Center,
     ) {
-        val image = bitmap
-        if (image != null) {
-            Image(
-                bitmap = image,
-                contentDescription = attachment.fileName,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-            )
-        } else {
-            Icon(
-                Icons.Rounded.Image,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        Crossfade(targetState = bitmap, animationSpec = tween(220), label = "thumb") { loaded ->
+            if (loaded != null) {
+                Image(
+                    bitmap = loaded,
+                    contentDescription = attachment.fileName,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                )
+            } else {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Rounded.Image,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
         }
     }
 }
@@ -1997,6 +2164,7 @@ private fun ClipDetailSheet(
     onDeleteForever: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
     val haptic = rememberToolzHapticFeedback()
     val masked = (entry.isSensitive || entry.isLocked) && !revealed
     val imageAttachments = remember(attachments) {
@@ -2004,6 +2172,14 @@ private fun ClipDetailSheet(
     }
     val showTextContent = entry.content.isNotBlank() && (entry.isTextLike || toolText != null)
     val isTrashed = entry.deletedAt != null
+
+    // Actions that leave the sheet slide it away first instead of cutting it.
+    fun closeAnimated(after: () -> Unit) {
+        after()
+        scope.launch { sheetState.hide() }.invokeOnCompletion {
+            if (!sheetState.isVisible) onDismiss()
+        }
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -2013,8 +2189,8 @@ private fun ClipDetailSheet(
         Box(Modifier.fillMaxWidth()) {
             LazyColumn(
                 modifier = Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 96.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 96.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 item {
                     Row(
@@ -2051,7 +2227,7 @@ private fun ClipDetailSheet(
                             color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f),
                         ) {
                             Row(
-                                modifier = Modifier.padding(14.dp),
+                                modifier = Modifier.padding(start = 14.dp, top = 8.dp, end = 8.dp, bottom = 8.dp),
                                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
@@ -2104,7 +2280,7 @@ private fun ClipDetailSheet(
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             SectionTitle(stringResource(R.string.st_ClipboardScreen_detail_images))
                             LazyRow(
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 contentPadding = PaddingValues(vertical = 2.dp),
                             ) {
                                 items(imageAttachments, key = { it.id }) { image ->
@@ -2114,6 +2290,7 @@ private fun ClipDetailSheet(
                                         modifier = Modifier
                                             .width(240.dp)
                                             .height(170.dp)
+                                            .clip(SmallExpressiveShape)
                                             .clickable { onOpenAttachment(image) },
                                     ) {
                                         AttachmentThumbnail(
@@ -2130,7 +2307,10 @@ private fun ClipDetailSheet(
 
                 if (showTextContent) {
                     item {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Column(
+                            modifier = Modifier.animateContentSize(),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
                             SectionTitle(stringResource(R.string.st_ClipboardScreen_detail_content))
                             if (!masked) {
                                 Surface(
@@ -2153,7 +2333,9 @@ private fun ClipDetailSheet(
                                                 } else {
                                                     MaterialTheme.typography.bodyLarge
                                                 },
-                                                modifier = Modifier.padding(16.dp),
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(16.dp),
                                             )
                                         }
                                     }
@@ -2164,7 +2346,7 @@ private fun ClipDetailSheet(
                                     color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.32f),
                                 ) {
                                     Row(
-                                        modifier = Modifier.padding(16.dp),
+                                        modifier = Modifier.padding(start = 16.dp, top = 12.dp, end = 8.dp, bottom = 12.dp),
                                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
@@ -2222,96 +2404,101 @@ private fun ClipDetailSheet(
                 // buttons that would either fail or mutate a deleted row.
                 if (!isTrashed) {
                     item {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            SectionTitle(stringResource(R.string.st_ClipboardScreen_detail_actions))
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                ActionTile(
-                                    icon = Icons.Rounded.ContentCopy,
-                                    label = stringResource(R.string.st_ClipboardScreen_action_copy),
-                                    modifier = Modifier.weight(1f),
+                        val showLink = !masked && toolText != null && entry.type in LinkTypes
+                        val showTools = toolText != null && !masked
+                        val actions = buildList {
+                            add(
+                                SheetAction(
+                                    Icons.Rounded.ContentCopy,
+                                    stringResource(R.string.st_ClipboardScreen_action_copy),
                                     onClick = onCopy,
-                                )
-                                ActionTile(
-                                    icon = Icons.Rounded.Share,
-                                    label = stringResource(R.string.st_ClipboardScreen_action_share),
-                                    modifier = Modifier.weight(1f),
+                                ),
+                            )
+                            add(
+                                SheetAction(
+                                    Icons.Rounded.Share,
+                                    stringResource(R.string.st_ClipboardScreen_action_share),
                                     onClick = onShare,
-                                )
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                ActionTile(
-                                    icon = Icons.Rounded.PushPin,
-                                    label = stringResource(
+                                ),
+                            )
+                            add(
+                                SheetAction(
+                                    Icons.Rounded.PushPin,
+                                    stringResource(
                                         if (entry.isPinned) R.string.st_ClipboardScreen_action_unpin
                                         else R.string.st_ClipboardScreen_action_pin,
                                     ),
-                                    modifier = Modifier.weight(1f),
                                     selected = entry.isPinned,
                                     onClick = { viewModel.togglePin(entry) },
-                                )
-                                ActionTile(
-                                    icon = if (entry.isLocked) Icons.Rounded.LockOpen else Icons.Rounded.Lock,
-                                    label = stringResource(
+                                ),
+                            )
+                            add(
+                                SheetAction(
+                                    if (entry.isLocked) Icons.Rounded.LockOpen else Icons.Rounded.Lock,
+                                    stringResource(
                                         if (entry.isLocked) R.string.st_ClipboardScreen_action_unlock
                                         else R.string.st_ClipboardScreen_action_lock,
                                     ),
-                                    modifier = Modifier.weight(1f),
                                     selected = entry.isLocked,
                                     onClick = onToggleLock,
-                                )
-                            }
+                                ),
+                            )
                             if (!entry.passwordVaultMatch && !entry.isLocked) {
-                                ActionTile(
-                                    icon = if (entry.isSensitive) Icons.Rounded.Shield else Icons.Rounded.Security,
-                                    label = stringResource(
-                                        if (entry.isSensitive) R.string.st_ClipboardScreen_action_unmark_sensitive
-                                        else R.string.st_ClipboardScreen_action_mark_sensitive,
+                                add(
+                                    SheetAction(
+                                        if (entry.isSensitive) Icons.Rounded.Shield else Icons.Rounded.Security,
+                                        stringResource(
+                                            if (entry.isSensitive) R.string.st_ClipboardScreen_action_unmark_sensitive
+                                            else R.string.st_ClipboardScreen_action_mark_sensitive,
+                                        ),
+                                        selected = entry.isSensitive,
+                                        onClick = { viewModel.setSensitive(entry, !entry.isSensitive) },
                                     ),
-                                    modifier = Modifier.fillMaxWidth(),
-                                    selected = entry.isSensitive,
-                                    onClick = { viewModel.setSensitive(entry, !entry.isSensitive) },
                                 )
                             }
-                            if (!masked && toolText != null &&
-                                entry.type in setOf(ClipboardType.LINK, ClipboardType.URL, ClipboardType.SOCIAL)
-                            ) {
-                                ActionTile(
-                                    icon = Icons.Rounded.Link,
-                                    label = stringResource(R.string.st_ClipboardScreen_action_open_link),
-                                    modifier = Modifier.fillMaxWidth(),
-                                    onClick = onOpenLink,
+                            if (showLink) {
+                                add(
+                                    SheetAction(
+                                        Icons.Rounded.Link,
+                                        stringResource(R.string.st_ClipboardScreen_action_open_link),
+                                        onClick = onOpenLink,
+                                    ),
                                 )
                             }
-                            if (toolText != null && !masked) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    ActionTile(
-                                        icon = Icons.AutoMirrored.Rounded.Notes,
-                                        label = stringResource(R.string.st_ClipboardScreen_action_notepad),
-                                        modifier = Modifier.weight(1f),
+                            if (showTools) {
+                                add(
+                                    SheetAction(
+                                        Icons.AutoMirrored.Rounded.Notes,
+                                        stringResource(R.string.st_ClipboardScreen_action_notepad),
                                         onClick = onOpenNotepad,
-                                    )
-                                    ActionTile(
-                                        icon = Icons.Rounded.TaskAlt,
-                                        label = stringResource(R.string.st_ClipboardScreen_action_task),
-                                        modifier = Modifier.weight(1f),
+                                    ),
+                                )
+                                add(
+                                    SheetAction(
+                                        Icons.Rounded.TaskAlt,
+                                        stringResource(R.string.st_ClipboardScreen_action_task),
                                         onClick = onCreateTask,
-                                    )
-                                }
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    ActionTile(
-                                        icon = Icons.Rounded.QrCode,
-                                        label = stringResource(R.string.st_ClipboardScreen_action_qr),
-                                        modifier = Modifier.weight(1f),
+                                    ),
+                                )
+                                add(
+                                    SheetAction(
+                                        Icons.Rounded.QrCode,
+                                        stringResource(R.string.st_ClipboardScreen_action_qr),
                                         onClick = onShowQr,
-                                    )
-                                    ActionTile(
-                                        icon = Icons.Rounded.Lock,
-                                        label = stringResource(R.string.st_ClipboardScreen_action_encrypt),
-                                        modifier = Modifier.weight(1f),
+                                    ),
+                                )
+                                add(
+                                    SheetAction(
+                                        Icons.Rounded.Lock,
+                                        stringResource(R.string.st_ClipboardScreen_action_encrypt),
                                         onClick = onEncrypt,
-                                    )
-                                }
+                                    ),
+                                )
                             }
+                        }
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            SectionTitle(stringResource(R.string.st_ClipboardScreen_detail_actions))
+                            ActionGrid(actions)
                         }
                     }
                 }
@@ -2341,7 +2528,7 @@ private fun ClipDetailSheet(
                         ) {
                             Column(
                                 modifier = Modifier.padding(16.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp),
                             ) {
                                 MetaRow(
                                     stringResource(R.string.st_ClipboardScreen_meta_size),
@@ -2372,65 +2559,70 @@ private fun ClipDetailSheet(
                 }
 
                 item {
-                    HorizontalDivider()
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 4.dp),
-                    ) {
-                        if (isTrashed) {
-                            ToolzTonalExpressiveButton(
-                                onClick = { viewModel.restoreEntry(entry); onDismiss() },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .heightIn(min = 48.dp),
-                                shape = SmallExpressiveShape,
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
-                            ) {
-                                Icon(Icons.Rounded.Restore, null, Modifier.size(18.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text(
-                                    text = stringResource(R.string.st_ClipboardScreen_action_restore),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                            ToolzExpressiveButton(
-                                onClick = onDeleteForever,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .heightIn(min = 48.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.errorContainer,
-                                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                                ),
-                                shape = SmallExpressiveShape,
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
-                            ) {
-                                Icon(Icons.Rounded.DeleteForever, null, Modifier.size(18.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text(
-                                    text = stringResource(R.string.st_ClipboardScreen_action_delete_forever),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                        } else {
-                            ToolzExpressiveButton(
-                                onClick = { viewModel.deleteEntry(entry); onDismiss() },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .heightIn(min = 48.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.errorContainer,
-                                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                                ),
-                                shape = SmallExpressiveShape,
-                            ) {
-                                Icon(Icons.Rounded.Delete, null, Modifier.size(18.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text(stringResource(R.string.st_ClipboardScreen_action_delete))
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        HorizontalDivider()
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            if (isTrashed) {
+                                ToolzTonalExpressiveButton(
+                                    onClick = {
+                                        closeAnimated { viewModel.restoreEntry(entry) }
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .heightIn(min = CompactButtonHeight),
+                                    shape = SmallExpressiveShape,
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                                ) {
+                                    Icon(Icons.Rounded.Restore, null, Modifier.size(18.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        text = stringResource(R.string.st_ClipboardScreen_action_restore),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                ToolzExpressiveButton(
+                                    onClick = onDeleteForever,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .heightIn(min = CompactButtonHeight),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                                    ),
+                                    shape = SmallExpressiveShape,
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                                ) {
+                                    Icon(Icons.Rounded.DeleteForever, null, Modifier.size(18.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        text = stringResource(R.string.st_ClipboardScreen_action_delete_forever),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            } else {
+                                ToolzExpressiveButton(
+                                    onClick = {
+                                        closeAnimated { viewModel.deleteEntry(entry) }
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = CompactButtonHeight),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                                    ),
+                                    shape = SmallExpressiveShape,
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                                ) {
+                                    Icon(Icons.Rounded.Delete, null, Modifier.size(18.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(stringResource(R.string.st_ClipboardScreen_action_delete))
+                                }
                             }
                         }
                     }
@@ -2443,7 +2635,7 @@ private fun ClipDetailSheet(
 
 /** Bottom-anchored snackbar host used inside every modal sheet. */
 @Composable
-private fun androidx.compose.foundation.layout.BoxScope.SheetSnackbarHost(
+private fun BoxScope.SheetSnackbarHost(
     hostState: SnackbarHostState,
 ) {
     SnackbarHost(
@@ -2469,7 +2661,9 @@ private fun AiSection(
         color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.35f),
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier
+                .padding(16.dp)
+                .animateContentSize(),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Row(
@@ -2500,6 +2694,7 @@ private fun AiSection(
                         onClick = onRun,
                         enabled = configured && !offline,
                         shape = SmallExpressiveShape,
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
                     ) {
                         Text(stringResource(R.string.st_ClipboardScreen_action_ai))
                     }
@@ -2535,10 +2730,13 @@ private fun AttachmentRow(
     Surface(
         shape = SmallExpressiveShape,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(SmallExpressiveShape)
+            .clickable(role = Role.Button, onClick = onOpen),
     ) {
         Row(
-            modifier = Modifier.padding(10.dp),
+            modifier = Modifier.padding(start = 10.dp, top = 8.dp, end = 4.dp, bottom = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -2547,7 +2745,7 @@ private fun AttachmentRow(
                     attachment = attachment,
                     viewModel = viewModel,
                     modifier = Modifier
-                        .size(52.dp)
+                        .size(48.dp)
                         .clip(RoundedCornerShape(10.dp)),
                 )
             } else {
@@ -2617,8 +2815,29 @@ private fun SectionTitle(text: String) {
         style = MaterialTheme.typography.labelLarge,
         fontWeight = FontWeight.Bold,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(top = 4.dp),
+        modifier = Modifier.padding(start = 4.dp),
     )
+}
+
+/** Four-column grid of compact icon-over-label tiles; short rows are padded. */
+@Composable
+private fun ActionGrid(actions: List<SheetAction>) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        actions.chunked(4).forEach { rowActions ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                rowActions.forEach { action ->
+                    ActionTile(
+                        icon = action.icon,
+                        label = action.label,
+                        modifier = Modifier.weight(1f),
+                        selected = action.selected,
+                        onClick = action.onClick,
+                    )
+                }
+                repeat(4 - rowActions.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+    }
 }
 
 @Composable
@@ -2629,30 +2848,44 @@ private fun ActionTile(
     selected: Boolean = false,
     onClick: () -> Unit,
 ) {
-    Surface(
-        shape = SmallExpressiveShape,
-        color = if (selected) {
+    val container by animateColorAsState(
+        if (selected) {
             MaterialTheme.colorScheme.secondaryContainer
         } else {
             MaterialTheme.colorScheme.surfaceContainerHigh
         },
+        animationSpec = tween(180),
+        label = "actionTileColor",
+    )
+    val content by animateColorAsState(
+        if (selected) {
+            MaterialTheme.colorScheme.onSecondaryContainer
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        },
+        animationSpec = tween(180),
+        label = "actionTileContent",
+    )
+    Column(
         modifier = modifier
-            .heightIn(min = 48.dp)
-            .clickable(role = Role.Button, onClick = onClick),
+            .height(68.dp)
+            .clip(SmallExpressiveShape)
+            .background(container)
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = 4.dp, vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 11.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelLarge,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
+        Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp), tint = content)
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = content,
+            textAlign = TextAlign.Center,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -2681,7 +2914,7 @@ private fun OnboardingSheet(
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 24.dp)
                     .padding(bottom = 32.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Surface(
                     shape = CircleShape,
@@ -2691,8 +2924,8 @@ private fun OnboardingSheet(
                         Icons.Rounded.ContentPaste,
                         contentDescription = null,
                         modifier = Modifier
-                            .padding(16.dp)
-                            .size(32.dp),
+                            .padding(14.dp)
+                            .size(28.dp),
                         tint = MaterialTheme.colorScheme.primary,
                     )
                 }
@@ -2708,7 +2941,7 @@ private fun OnboardingSheet(
                 )
                 if (state.stats.activeCount > 0) {
                     Surface(
-                        shape = RoundedCornerShape(18.dp),
+                        shape = SmallExpressiveShape,
                         color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
                     ) {
                         Text(
@@ -2718,21 +2951,23 @@ private fun OnboardingSheet(
                         )
                     }
                 }
-                OnboardingStep(
-                    number = 1,
-                    title = stringResource(R.string.st_ClipboardScreen_onboarding_step1_title),
-                    body = stringResource(R.string.st_ClipboardScreen_onboarding_step1_body),
-                )
-                OnboardingStep(
-                    number = 2,
-                    title = stringResource(R.string.st_ClipboardScreen_onboarding_step2_title),
-                    body = stringResource(R.string.st_ClipboardScreen_onboarding_step2_body),
-                )
-                OnboardingStep(
-                    number = 3,
-                    title = stringResource(R.string.st_ClipboardScreen_onboarding_step3_title),
-                    body = stringResource(R.string.st_ClipboardScreen_onboarding_step3_body),
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OnboardingStep(
+                        number = 1,
+                        title = stringResource(R.string.st_ClipboardScreen_onboarding_step1_title),
+                        body = stringResource(R.string.st_ClipboardScreen_onboarding_step1_body),
+                    )
+                    OnboardingStep(
+                        number = 2,
+                        title = stringResource(R.string.st_ClipboardScreen_onboarding_step2_title),
+                        body = stringResource(R.string.st_ClipboardScreen_onboarding_step2_body),
+                    )
+                    OnboardingStep(
+                        number = 3,
+                        title = stringResource(R.string.st_ClipboardScreen_onboarding_step3_title),
+                        body = stringResource(R.string.st_ClipboardScreen_onboarding_step3_body),
+                    )
+                }
                 Text(
                     text = stringResource(R.string.st_ClipboardScreen_onboarding_fallback),
                     style = MaterialTheme.typography.bodySmall,
@@ -2741,7 +2976,9 @@ private fun OnboardingSheet(
                 if (!state.gate.capabilities.shizukuInstalled) {
                     ToolzExpressiveButton(
                         onClick = onInstallShizuku,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = CompactButtonHeight),
                         shape = SmallExpressiveShape,
                     ) {
                         Text(stringResource(R.string.st_ClipboardScreen_action_install_shizuku))
@@ -2749,7 +2986,9 @@ private fun OnboardingSheet(
                 } else if (!state.gate.capabilities.shizukuAuthorized) {
                     ToolzExpressiveButton(
                         onClick = onAuthorizeShizuku,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = CompactButtonHeight),
                         shape = SmallExpressiveShape,
                     ) {
                         Text(stringResource(R.string.st_ClipboardScreen_action_authorize))
@@ -2758,7 +2997,9 @@ private fun OnboardingSheet(
                 if (state.gate.capabilities.shizukuAuthorized && !state.gate.capabilities.appOpAllowed) {
                     ToolzOutlinedExpressiveButton(
                         onClick = onGrantAppOp,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = CompactButtonHeight),
                         shape = SmallExpressiveShape,
                     ) {
                         Text(stringResource(R.string.st_ClipboardScreen_action_grant_appop))
@@ -2767,14 +3008,18 @@ private fun OnboardingSheet(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ToolzOutlinedExpressiveButton(
                         onClick = onDismiss,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = CompactButtonHeight),
                         shape = SmallExpressiveShape,
                     ) {
                         Text(stringResource(R.string.st_ClipboardScreen_onboarding_skip))
                     }
                     ToolzExpressiveButton(
                         onClick = onOpenStatus,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = CompactButtonHeight),
                         shape = SmallExpressiveShape,
                     ) {
                         Text(stringResource(R.string.st_ClipboardScreen_onboarding_continue))
@@ -2794,7 +3039,7 @@ private fun OnboardingStep(number: Int, title: String, body: String) {
         modifier = Modifier.fillMaxWidth(),
     ) {
         Row(
-            modifier = Modifier.padding(14.dp),
+            modifier = Modifier.padding(12.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Surface(
@@ -2825,6 +3070,20 @@ private fun OnboardingStep(number: Int, title: String, body: String) {
 
 // ── Settings ──────────────────────────────────────────────────────────────
 
+/**
+ * Settings rows of one section sit 2dp apart as a connected group, with
+ * generous space between sections, so related options read as one unit.
+ */
+@Composable
+private fun SettingsGroup(content: @Composable () -> Unit) {
+    Column(
+        modifier = Modifier.animateContentSize(),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        content()
+    }
+}
+
 @Composable
 private fun SettingsSheet(
     state: ClipboardUiState,
@@ -2845,139 +3104,140 @@ private fun SettingsSheet(
             LazyColumn(
                 modifier = Modifier.fillMaxWidth(),
                 contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 40.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 item {
                     Text(
                         text = stringResource(R.string.st_ClipboardScreen_settings_title),
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Black,
+                        modifier = Modifier.padding(bottom = 4.dp),
                     )
                 }
-                item { SectionTitle(stringResource(R.string.st_ClipboardScreen_settings_section_capture)) }
+
+                item { SettingsSectionTitle(stringResource(R.string.st_ClipboardScreen_settings_section_capture)) }
                 item {
-                    SettingSwitchRow(
-                        title = stringResource(R.string.st_ClipboardScreen_settings_monitoring),
-                        body = stringResource(R.string.st_ClipboardScreen_settings_monitoring_desc),
-                        checked = state.settings.monitoring,
-                        onCheckedChange = viewModel::setMonitoringEnabled,
-                    )
+                    SettingsGroup {
+                        SettingSwitchRow(
+                            title = stringResource(R.string.st_ClipboardScreen_settings_monitoring),
+                            body = stringResource(R.string.st_ClipboardScreen_settings_monitoring_desc),
+                            checked = state.settings.monitoring,
+                            onCheckedChange = viewModel::setMonitoringEnabled,
+                        )
+                        SettingSwitchRow(
+                            title = stringResource(R.string.st_ClipboardScreen_settings_screenshots),
+                            body = stringResource(R.string.st_ClipboardScreen_settings_screenshots_desc),
+                            checked = state.settings.captureScreenshots,
+                            enabled = state.settings.monitoring,
+                            onCheckedChange = viewModel::setCaptureScreenshots,
+                        )
+                        if (state.settings.captureScreenshots && !mediaPermissionGranted) {
+                            PermissionRow(
+                                title = stringResource(R.string.st_ClipboardScreen_settings_screenshots_permission),
+                                body = stringResource(R.string.st_ClipboardScreen_settings_screenshots_permission_desc),
+                                action = stringResource(R.string.st_ClipboardScreen_action_grant_media),
+                                onAction = onRequestMediaPermission,
+                            )
+                        }
+                    }
                 }
+
+                item { SettingsSectionTitle(stringResource(R.string.st_ClipboardScreen_settings_section_ai)) }
                 item {
-                    SettingSwitchRow(
-                        title = stringResource(R.string.st_ClipboardScreen_settings_screenshots),
-                        body = stringResource(R.string.st_ClipboardScreen_settings_screenshots_desc),
-                        checked = state.settings.captureScreenshots,
-                        enabled = state.settings.monitoring,
-                        onCheckedChange = viewModel::setCaptureScreenshots,
-                    )
-                }
-                if (state.settings.captureScreenshots && !mediaPermissionGranted) {
-                    item {
-                        PermissionRow(
-                            title = stringResource(R.string.st_ClipboardScreen_settings_screenshots_permission),
-                            body = stringResource(R.string.st_ClipboardScreen_settings_screenshots_permission_desc),
-                            action = stringResource(R.string.st_ClipboardScreen_action_grant_media),
-                            onAction = onRequestMediaPermission,
+                    SettingsGroup {
+                        SettingSwitchRow(
+                            title = stringResource(R.string.st_ClipboardScreen_settings_ai),
+                            body = stringResource(R.string.st_ClipboardScreen_settings_ai_desc),
+                            checked = state.settings.aiEnabled,
+                            onCheckedChange = viewModel::setClipboardAiEnabled,
+                        )
+                        SettingSwitchRow(
+                            title = stringResource(R.string.st_ClipboardScreen_settings_auto_ai),
+                            body = stringResource(R.string.st_ClipboardScreen_settings_auto_ai_desc),
+                            checked = state.settings.autoAi,
+                            enabled = state.settings.aiEnabled && !state.settings.offline,
+                            onCheckedChange = viewModel::setAutoAiEnabled,
                         )
                     }
                 }
-                item { SectionTitle(stringResource(R.string.st_ClipboardScreen_settings_section_ai)) }
+
+                item { SettingsSectionTitle(stringResource(R.string.st_ClipboardScreen_settings_section_privacy)) }
                 item {
-                    SettingSwitchRow(
-                        title = stringResource(R.string.st_ClipboardScreen_settings_ai),
-                        body = stringResource(R.string.st_ClipboardScreen_settings_ai_desc),
-                        checked = state.settings.aiEnabled,
-                        onCheckedChange = viewModel::setClipboardAiEnabled,
-                    )
+                    SettingsGroup {
+                        SettingSwitchRow(
+                            title = stringResource(R.string.st_ClipboardScreen_settings_sensitive),
+                            body = stringResource(R.string.st_ClipboardScreen_settings_sensitive_desc),
+                            checked = state.settings.excludeSensitive,
+                            onCheckedChange = viewModel::setExcludeSensitive,
+                        )
+                        SettingSwitchRow(
+                            title = stringResource(R.string.st_ClipboardScreen_settings_biometric),
+                            body = stringResource(R.string.st_ClipboardScreen_settings_biometric_desc),
+                            checked = state.settings.biometricLock,
+                            onCheckedChange = viewModel::setBiometricLock,
+                        )
+                    }
                 }
+
+                item { SettingsSectionTitle(stringResource(R.string.st_ClipboardScreen_settings_section_storage)) }
                 item {
-                    SettingSwitchRow(
-                        title = stringResource(R.string.st_ClipboardScreen_settings_auto_ai),
-                        body = stringResource(R.string.st_ClipboardScreen_settings_auto_ai_desc),
-                        checked = state.settings.autoAi,
-                        enabled = state.settings.aiEnabled && !state.settings.offline,
-                        onCheckedChange = viewModel::setAutoAiEnabled,
-                    )
+                    SettingsGroup {
+                        val retention = state.settings.retentionDays
+                        StepperRow(
+                            title = stringResource(R.string.st_ClipboardScreen_settings_retention),
+                            value = if (retention == 0) {
+                                stringResource(R.string.st_ClipboardScreen_retention_forever)
+                            } else {
+                                pluralStringResource(
+                                    R.plurals.st_ClipboardScreen_retention_days,
+                                    retention,
+                                    retention,
+                                )
+                            },
+                            body = stringResource(R.string.st_ClipboardScreen_settings_retention_desc),
+                            canDecrease = stepRetention(retention, up = false) != retention,
+                            canIncrease = stepRetention(retention, up = true) != retention,
+                            onDecrease = { viewModel.setRetentionDays(stepRetention(retention, up = false)) },
+                            onIncrease = { viewModel.setRetentionDays(stepRetention(retention, up = true)) },
+                        )
+                        val itemQuota = state.settings.itemQuotaMb
+                        StepperRow(
+                            title = stringResource(R.string.st_ClipboardScreen_settings_item_quota),
+                            value = stringResource(R.string.st_ClipboardScreen_megabytes, itemQuota),
+                            body = stringResource(R.string.st_ClipboardScreen_settings_item_quota_desc),
+                            canDecrease = itemQuota > 1,
+                            canIncrease = itemQuota < 200,
+                            onDecrease = { viewModel.setItemQuotaMb((itemQuota - 5).coerceAtLeast(1)) },
+                            onIncrease = { viewModel.setItemQuotaMb((itemQuota + 5).coerceAtMost(200)) },
+                        )
+                        val totalQuota = state.settings.totalQuotaMb
+                        StepperRow(
+                            title = stringResource(R.string.st_ClipboardScreen_settings_total_quota),
+                            value = stringResource(R.string.st_ClipboardScreen_megabytes, totalQuota),
+                            body = stringResource(R.string.st_ClipboardScreen_settings_total_quota_desc),
+                            canDecrease = totalQuota > 25,
+                            canIncrease = totalQuota < 5_000,
+                            onDecrease = { viewModel.setTotalQuotaMb((totalQuota - 25).coerceAtLeast(25)) },
+                            onIncrease = { viewModel.setTotalQuotaMb((totalQuota + 25).coerceAtMost(5_000)) },
+                        )
+                        val entries = state.settings.maxEntries
+                        StepperRow(
+                            title = stringResource(R.string.st_ClipboardScreen_settings_max_entries),
+                            value = entries.toString(),
+                            body = stringResource(R.string.st_ClipboardScreen_settings_max_entries_desc),
+                            canDecrease = entries > 50,
+                            canIncrease = entries < 5_000,
+                            onDecrease = { viewModel.setMaxEntries((entries - 50).coerceAtLeast(50)) },
+                            onIncrease = { viewModel.setMaxEntries((entries + 50).coerceAtMost(5_000)) },
+                        )
+                    }
                 }
-                item { SectionTitle(stringResource(R.string.st_ClipboardScreen_settings_section_privacy)) }
-                item {
-                    SettingSwitchRow(
-                        title = stringResource(R.string.st_ClipboardScreen_settings_sensitive),
-                        body = stringResource(R.string.st_ClipboardScreen_settings_sensitive_desc),
-                        checked = state.settings.excludeSensitive,
-                        onCheckedChange = viewModel::setExcludeSensitive,
-                    )
-                }
-                item {
-                    SettingSwitchRow(
-                        title = stringResource(R.string.st_ClipboardScreen_settings_biometric),
-                        body = stringResource(R.string.st_ClipboardScreen_settings_biometric_desc),
-                        checked = state.settings.biometricLock,
-                        onCheckedChange = viewModel::setBiometricLock,
-                    )
-                }
-                item { SectionTitle(stringResource(R.string.st_ClipboardScreen_settings_section_storage)) }
-                item {
-                    val retention = state.settings.retentionDays
-                    StepperRow(
-                        title = stringResource(R.string.st_ClipboardScreen_settings_retention),
-                        value = if (retention == 0) {
-                            stringResource(R.string.st_ClipboardScreen_retention_forever)
-                        } else {
-                            pluralStringResource(
-                                R.plurals.st_ClipboardScreen_retention_days,
-                                retention,
-                                retention,
-                            )
-                        },
-                        body = stringResource(R.string.st_ClipboardScreen_settings_retention_desc),
-                        canDecrease = stepRetention(retention, up = false) != retention,
-                        canIncrease = stepRetention(retention, up = true) != retention,
-                        onDecrease = { viewModel.setRetentionDays(stepRetention(retention, up = false)) },
-                        onIncrease = { viewModel.setRetentionDays(stepRetention(retention, up = true)) },
-                    )
-                }
-                item {
-                    val quota = state.settings.itemQuotaMb
-                    StepperRow(
-                        title = stringResource(R.string.st_ClipboardScreen_settings_item_quota),
-                        value = stringResource(R.string.st_ClipboardScreen_megabytes, quota),
-                        body = stringResource(R.string.st_ClipboardScreen_settings_item_quota_desc),
-                        canDecrease = quota > 1,
-                        canIncrease = quota < 200,
-                        onDecrease = { viewModel.setItemQuotaMb((quota - 5).coerceAtLeast(1)) },
-                        onIncrease = { viewModel.setItemQuotaMb((quota + 5).coerceAtMost(200)) },
-                    )
-                }
-                item {
-                    val quota = state.settings.totalQuotaMb
-                    StepperRow(
-                        title = stringResource(R.string.st_ClipboardScreen_settings_total_quota),
-                        value = stringResource(R.string.st_ClipboardScreen_megabytes, quota),
-                        body = stringResource(R.string.st_ClipboardScreen_settings_total_quota_desc),
-                        canDecrease = quota > 25,
-                        canIncrease = quota < 5_000,
-                        onDecrease = { viewModel.setTotalQuotaMb((quota - 25).coerceAtLeast(25)) },
-                        onIncrease = { viewModel.setTotalQuotaMb((quota + 25).coerceAtMost(5_000)) },
-                    )
-                }
-                item {
-                    val entries = state.settings.maxEntries
-                    StepperRow(
-                        title = stringResource(R.string.st_ClipboardScreen_settings_max_entries),
-                        value = entries.toString(),
-                        body = stringResource(R.string.st_ClipboardScreen_settings_max_entries_desc),
-                        canDecrease = entries > 50,
-                        canIncrease = entries < 5_000,
-                        onDecrease = { viewModel.setMaxEntries((entries - 50).coerceAtLeast(50)) },
-                        onIncrease = { viewModel.setMaxEntries((entries + 50).coerceAtMost(5_000)) },
-                    )
-                }
+
                 item {
                     Surface(
-                        shape = RoundedCornerShape(18.dp),
+                        shape = SmallExpressiveShape,
                         color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.4f),
+                        modifier = Modifier.padding(top = 4.dp),
                     ) {
                         Row(
                             modifier = Modifier.padding(14.dp),
@@ -2994,11 +3254,15 @@ private fun SettingsSheet(
                 item {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp),
                     ) {
                         ToolzOutlinedExpressiveButton(
                             onClick = onShowStatus,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = CompactButtonHeight),
                             shape = SmallExpressiveShape,
                         ) {
                             Text(stringResource(R.string.st_ClipboardScreen_action_status))
@@ -3008,10 +3272,16 @@ private fun SettingsSheet(
                                 viewModel.resetOnboarding()
                                 onDismiss()
                             },
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = CompactButtonHeight),
                             shape = SmallExpressiveShape,
                         ) {
-                            Text(stringResource(R.string.st_ClipboardScreen_settings_reset_onboarding))
+                            Text(
+                                text = stringResource(R.string.st_ClipboardScreen_settings_reset_onboarding),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                         }
                     }
                 }
@@ -3019,6 +3289,18 @@ private fun SettingsSheet(
             SheetSnackbarHost(feedbackHostState)
         }
     }
+}
+
+/** Section label with extra room above so groups breathe. */
+@Composable
+private fun SettingsSectionTitle(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelLarge,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = 4.dp, top = 12.dp),
+    )
 }
 
 @Composable
@@ -3037,16 +3319,25 @@ private fun SettingSwitchRow(
         modifier = Modifier.fillMaxWidth(),
     ) {
         Row(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(Modifier.weight(1f)) {
-                Text(text = title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = if (enabled) {
+                        MaterialTheme.colorScheme.onSurface
+                    } else {
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                    },
+                )
                 Text(
                     text = body,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (enabled) 1f else 0.6f),
                 )
             }
             ExpressiveSwitch(
@@ -3068,6 +3359,7 @@ private fun PermissionRow(
     Surface(
         shape = SmallExpressiveShape,
         color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f),
+        modifier = Modifier.fillMaxWidth(),
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -3080,7 +3372,7 @@ private fun PermissionRow(
                     tint = MaterialTheme.colorScheme.error,
                     modifier = Modifier.size(20.dp),
                 )
-                Column(Modifier.weight(1f)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(text = title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                     Text(
                         text = body,
@@ -3091,7 +3383,9 @@ private fun PermissionRow(
             }
             ToolzTonalExpressiveButton(
                 onClick = onAction,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = CompactButtonHeight),
                 shape = SmallExpressiveShape,
             ) {
                 Text(action)
@@ -3111,14 +3405,15 @@ private fun StepperRow(
     canDecrease: Boolean = true,
     canIncrease: Boolean = true,
 ) {
+    val haptic = rememberToolzHapticFeedback()
     Surface(
         shape = SmallExpressiveShape,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(
-            modifier = Modifier.padding(start = 16.dp, top = 8.dp, end = 8.dp, bottom = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
+            modifier = Modifier.padding(start = 16.dp, top = 6.dp, end = 8.dp, bottom = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -3127,21 +3422,31 @@ private fun StepperRow(
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f),
                 )
-                IconButton(onClick = onDecrease, enabled = canDecrease) {
+                IconButton(
+                    onClick = { haptic.tick(); onDecrease() },
+                    enabled = canDecrease,
+                    modifier = Modifier.size(40.dp),
+                ) {
                     Icon(
                         Icons.Rounded.Remove,
                         contentDescription = stringResource(R.string.st_ClipboardScreen_action_decrease),
                     )
                 }
+                // Value changes slide in with the content size so the row never jumps.
                 Text(
                     text = value,
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary,
                     textAlign = TextAlign.Center,
-                    modifier = Modifier.widthIn(min = 64.dp),
+                    maxLines = 1,
+                    modifier = Modifier.widthIn(min = 72.dp),
                 )
-                IconButton(onClick = onIncrease, enabled = canIncrease) {
+                IconButton(
+                    onClick = { haptic.tick(); onIncrease() },
+                    enabled = canIncrease,
+                    modifier = Modifier.size(40.dp),
+                ) {
                     Icon(
                         Icons.Rounded.Add,
                         contentDescription = stringResource(R.string.st_ClipboardScreen_action_increase),
@@ -3194,56 +3499,82 @@ private fun StatusSheet(
                     fontWeight = FontWeight.Black,
                 )
                 StatusBanner(status)
+
                 SectionTitle(stringResource(R.string.st_ClipboardScreen_status_section_access))
-                StatusRow(stringResource(R.string.st_ClipboardScreen_status_shizuku_installed), caps.shizukuInstalled)
-                StatusRow(stringResource(R.string.st_ClipboardScreen_status_shizuku_running), caps.shizukuRunning)
-                StatusRow(stringResource(R.string.st_ClipboardScreen_status_shizuku_authorized), caps.shizukuAuthorized)
-                StatusRow(stringResource(R.string.st_ClipboardScreen_status_appop), caps.appOpAllowed)
-                StatusRow(stringResource(R.string.st_ClipboardScreen_status_monitoring), state.settings.monitoring)
-                StatusRow(stringResource(R.string.st_ClipboardScreen_status_screenshots), state.settings.captureScreenshots)
-                if (state.settings.captureScreenshots) {
-                    StatusRow(
-                        stringResource(R.string.st_ClipboardScreen_status_media_permission),
-                        mediaPermissionGranted,
-                    )
-                    if (!mediaPermissionGranted) {
-                        PermissionRow(
-                            title = stringResource(R.string.st_ClipboardScreen_settings_screenshots_permission),
-                            body = stringResource(R.string.st_ClipboardScreen_settings_screenshots_permission_desc),
-                            action = stringResource(R.string.st_ClipboardScreen_action_grant_media),
-                            onAction = onRequestMediaPermission,
-                        )
+                Surface(
+                    shape = SmallExpressiveShape,
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .padding(16.dp)
+                            .animateContentSize(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        StatusRow(stringResource(R.string.st_ClipboardScreen_status_shizuku_installed), caps.shizukuInstalled)
+                        StatusRow(stringResource(R.string.st_ClipboardScreen_status_shizuku_running), caps.shizukuRunning)
+                        StatusRow(stringResource(R.string.st_ClipboardScreen_status_shizuku_authorized), caps.shizukuAuthorized)
+                        StatusRow(stringResource(R.string.st_ClipboardScreen_status_appop), caps.appOpAllowed)
+                        StatusRow(stringResource(R.string.st_ClipboardScreen_status_monitoring), state.settings.monitoring)
+                        StatusRow(stringResource(R.string.st_ClipboardScreen_status_screenshots), state.settings.captureScreenshots)
+                        if (state.settings.captureScreenshots) {
+                            StatusRow(
+                                stringResource(R.string.st_ClipboardScreen_status_media_permission),
+                                mediaPermissionGranted,
+                            )
+                        }
                     }
                 }
-                HorizontalDivider()
-                SectionTitle(stringResource(R.string.st_ClipboardScreen_status_section_storage))
-                StatusRow(
-                    stringResource(R.string.st_ClipboardScreen_status_active_clips),
-                    state.stats.activeCount.toString(),
-                )
-                StatusRow(
-                    stringResource(R.string.st_ClipboardScreen_status_trash),
-                    state.stats.trashedCount.toString(),
-                )
-                StatusRow(
-                    stringResource(R.string.st_ClipboardScreen_status_sensitive),
-                    state.stats.sensitiveCount.toString(),
-                )
-                val quotaBytes = state.stats.totalQuotaMb.toLong() * 1024L * 1024L
-                StatusRow(
-                    stringResource(R.string.st_ClipboardScreen_status_storage),
-                    stringResource(
-                        R.string.st_ClipboardScreen_status_quota_used,
-                        Formatter.formatShortFileSize(context, state.stats.blobBytes),
-                        Formatter.formatShortFileSize(context, quotaBytes),
-                    ),
-                )
-                if (quotaBytes > 0) {
-                    LinearProgressIndicator(
-                        progress = { (state.stats.blobBytes.toFloat() / quotaBytes.toFloat()).coerceIn(0f, 1f) },
-                        modifier = Modifier.fillMaxWidth(),
+                if (state.settings.captureScreenshots && !mediaPermissionGranted) {
+                    PermissionRow(
+                        title = stringResource(R.string.st_ClipboardScreen_settings_screenshots_permission),
+                        body = stringResource(R.string.st_ClipboardScreen_settings_screenshots_permission_desc),
+                        action = stringResource(R.string.st_ClipboardScreen_action_grant_media),
+                        onAction = onRequestMediaPermission,
                     )
                 }
+
+                SectionTitle(stringResource(R.string.st_ClipboardScreen_status_section_storage))
+                Surface(
+                    shape = SmallExpressiveShape,
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        StatusRow(
+                            stringResource(R.string.st_ClipboardScreen_status_active_clips),
+                            state.stats.activeCount.toString(),
+                        )
+                        StatusRow(
+                            stringResource(R.string.st_ClipboardScreen_status_trash),
+                            state.stats.trashedCount.toString(),
+                        )
+                        StatusRow(
+                            stringResource(R.string.st_ClipboardScreen_status_sensitive),
+                            state.stats.sensitiveCount.toString(),
+                        )
+                        val quotaBytes = state.stats.totalQuotaMb.toLong() * 1024L * 1024L
+                        StatusRow(
+                            stringResource(R.string.st_ClipboardScreen_status_storage),
+                            stringResource(
+                                R.string.st_ClipboardScreen_status_quota_used,
+                                Formatter.formatShortFileSize(context, state.stats.blobBytes),
+                                Formatter.formatShortFileSize(context, quotaBytes),
+                            ),
+                        )
+                        if (quotaBytes > 0) {
+                            LinearProgressIndicator(
+                                progress = { (state.stats.blobBytes.toFloat() / quotaBytes.toFloat()).coerceIn(0f, 1f) },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
+                }
+
                 if (!caps.shizukuInstalled) {
                     ToolzExpressiveButton(
                         onClick = {
@@ -3252,7 +3583,9 @@ private fun StatusSheet(
                                 onDismiss()
                             }
                         },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = CompactButtonHeight),
                         shape = SmallExpressiveShape,
                     ) {
                         Text(stringResource(R.string.st_ClipboardScreen_action_install_shizuku))
@@ -3260,7 +3593,9 @@ private fun StatusSheet(
                 } else if (!caps.shizukuAuthorized) {
                     ToolzExpressiveButton(
                         onClick = viewModel::requestShizukuAuthorization,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = CompactButtonHeight),
                         shape = SmallExpressiveShape,
                     ) {
                         Text(stringResource(R.string.st_ClipboardScreen_action_authorize))
@@ -3268,7 +3603,9 @@ private fun StatusSheet(
                 } else if (!caps.appOpAllowed) {
                     ToolzOutlinedExpressiveButton(
                         onClick = viewModel::grantClipboardAppOp,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = CompactButtonHeight),
                         shape = SmallExpressiveShape,
                     ) {
                         Text(stringResource(R.string.st_ClipboardScreen_action_grant_appop))
@@ -3276,7 +3613,9 @@ private fun StatusSheet(
                 } else {
                     ToolzOutlinedExpressiveButton(
                         onClick = viewModel::revokeClipboardAppOp,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = CompactButtonHeight),
                         shape = SmallExpressiveShape,
                     ) {
                         Text(stringResource(R.string.st_ClipboardScreen_action_revoke_appop))
@@ -3285,7 +3624,9 @@ private fun StatusSheet(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ToolzOutlinedExpressiveButton(
                         onClick = { viewModel.refreshGate(); viewModel.refreshStats() },
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = CompactButtonHeight),
                         shape = SmallExpressiveShape,
                     ) {
                         Icon(Icons.Rounded.Refresh, null, Modifier.size(16.dp))
@@ -3294,10 +3635,16 @@ private fun StatusSheet(
                     }
                     ToolzOutlinedExpressiveButton(
                         onClick = onOpenAppDetails,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = CompactButtonHeight),
                         shape = SmallExpressiveShape,
                     ) {
-                        Text(stringResource(R.string.st_ClipboardScreen_status_app_details))
+                        Text(
+                            text = stringResource(R.string.st_ClipboardScreen_status_app_details),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
                 }
                 Text(
@@ -3402,10 +3749,11 @@ private fun InfoBanner(
     Surface(
         shape = SmallExpressiveShape,
         color = color.copy(alpha = 0.12f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.2f)),
+        border = BorderStroke(1.dp, color.copy(alpha = 0.2f)),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .padding(horizontal = ScreenGutter, vertical = 4.dp)
+            .clip(SmallExpressiveShape)
             .then(
                 if (onClick != null) {
                     Modifier.clickable(role = Role.Button, onClick = onClick)
@@ -3415,7 +3763,7 @@ private fun InfoBanner(
             ),
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -3484,61 +3832,71 @@ private fun EmptyState(
     secondaryLabel: String? = null,
     onSecondaryAction: (() -> Unit)? = null,
 ) {
+    // Fades and settles in so switching filters / trash does not flash a blank page.
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { visible = true }
     FullHeightState {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 32.dp, vertical = 24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
+        AnimatedVisibility(
+            visible = visible,
+            enter = fadeIn(tween(240)) + slideInVertically(tween(240)) { it / 16 },
+            modifier = Modifier.fillMaxSize(),
         ) {
-            Surface(
-                shape = MediumExpressiveShape,
-                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
-                border = androidx.compose.foundation.BorderStroke(
-                    1.dp,
-                    MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
-                ),
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 32.dp, vertical = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
             ) {
-                Icon(
-                    icon,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .padding(22.dp)
-                        .size(42.dp),
-                    tint = MaterialTheme.colorScheme.primary,
-                )
-            }
-            Spacer(Modifier.height(20.dp))
-            Text(
-                text = title,
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Black,
-                textAlign = TextAlign.Center,
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = body,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-            )
-            if (actionLabel != null && onAction != null) {
-                Spacer(Modifier.height(22.dp))
-                ToolzExpressiveButton(
-                    onClick = onAction,
-                    shape = SmallExpressiveShape,
+                Surface(
+                    shape = MediumExpressiveShape,
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                    border = BorderStroke(
+                        1.dp,
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
+                    ),
                 ) {
-                    Text(actionLabel)
+                    Icon(
+                        icon,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .padding(20.dp)
+                            .size(40.dp),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
                 }
-            }
-            if (secondaryLabel != null && onSecondaryAction != null) {
-                Spacer(Modifier.height(6.dp))
-                ToolzOutlinedExpressiveButton(
-                    onClick = onSecondaryAction,
-                    shape = SmallExpressiveShape,
-                ) {
-                    Text(secondaryLabel)
+                Spacer(Modifier.height(20.dp))
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Black,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = body,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+                if (actionLabel != null && onAction != null) {
+                    Spacer(Modifier.height(20.dp))
+                    ToolzExpressiveButton(
+                        onClick = onAction,
+                        modifier = Modifier.heightIn(min = CompactButtonHeight),
+                        shape = SmallExpressiveShape,
+                    ) {
+                        Text(actionLabel)
+                    }
+                }
+                if (secondaryLabel != null && onSecondaryAction != null) {
+                    Spacer(Modifier.height(4.dp))
+                    ToolzExpressiveTextButton(
+                        onClick = onSecondaryAction,
+                        shape = SmallExpressiveShape,
+                    ) {
+                        Text(secondaryLabel)
+                    }
                 }
             }
         }
@@ -3584,7 +3942,7 @@ private fun ConfirmDialog(
             }
         },
         dismissButton = {
-            ToolzOutlinedExpressiveButton(
+            ToolzExpressiveTextButton(
                 onClick = onDismiss,
                 shape = SmallExpressiveShape,
             ) {
