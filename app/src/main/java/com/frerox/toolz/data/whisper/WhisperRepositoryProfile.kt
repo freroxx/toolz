@@ -333,10 +333,11 @@ suspend fun WhisperRepository.getMyProfile(forceRefresh: Boolean = false): Resul
         // undecryptable for everyone (including self on next fetch which uses the
         // row's key). Publish the current key atomically with the avatar URL
         // when they differ so viewers derive the same key that was used to seal.
-        val serverPub = runCatching {
+        val serverRow = runCatching {
             db.from("profiles").select { filter { eq("id", myId) } }
-                .decodeSingleOrNull<WhisperProfile>()?.publicKey
+                .decodeSingleOrNull<WhisperProfile>()
         }.getOrNull()
+        val serverPub = serverRow?.publicKey
         // Publish the current key whenever the row's key is missing or stale so
         // the sealing key and the row's key stay in sync; otherwise keep the
         // avatar-only update to avoid unnecessary key churn.
@@ -355,8 +356,44 @@ suspend fun WhisperRepository.getMyProfile(forceRefresh: Boolean = false): Resul
             updateRes.getOrThrow()
         }
         profileCache.remove(myId); profileCacheTs.remove(myId)
+        // Avatar replacement is a hot path: without this cleanup every new picture
+        // orphaned the previous hosted ciphertext forever (ImgBB free-tier quota /
+        // Supabase storage bloat). Best-effort only — the new avatar is already
+        // live, so a failed delete must not fail the upload.
+        val previousUrl = serverRow?.avatarUrl
+        if (!previousUrl.isNullOrBlank() && previousUrl != finalUrl) {
+            deletePreviousAvatarBlob(previousUrl)
+        }
         ProtocolDiagnostics.increment("avatar.uploadOk")
         finalUrl
+    }
+
+    /**
+     * Best-effort removal of the blob a profile row referenced before an avatar
+     * replacement. Mirrors [deleteAvatar]'s URL parsing; [WhisperEncryptedImageHost.delete]
+     * still enforces the per-user ownership guard for both hosts.
+     */
+    private suspend fun WhisperRepository.deletePreviousAvatarBlob(url: String) {
+        if (url.isBlank()) return
+        if (url.contains("i.ibb.co")) {
+            val cleanUrl = url.substringBefore("#att=")
+            val attId = url.substringAfter("#att=", "").takeIf { it.isNotBlank() }
+                ?.let { runCatching { java.net.URLDecoder.decode(it, "UTF-8") }.getOrNull() }
+            runCatching { encryptedImageHost.delete(cleanUrl, attId) }
+        } else {
+            val path = runCatching {
+                val segments = java.net.URL(url).path.split("/").filter { it.isNotBlank() }
+                val bucketIdx = segments.indexOf("whisper-avatars")
+                if (bucketIdx >= 0 && bucketIdx < segments.lastIndex) {
+                    segments.drop(bucketIdx + 1).joinToString("/") {
+                        java.net.URLDecoder.decode(it, "UTF-8")
+                    }
+                } else ""
+            }.getOrDefault("")
+            if (path.isNotBlank()) {
+                runCatching { encryptedImageHost.delete(url.substringBefore("?"), path) }
+            }
+        }
     }
 
     /** Center-crop square + downscale to [WhisperRepository.AVATAR_SIDE_PX] JPEG for avatar uploads. */

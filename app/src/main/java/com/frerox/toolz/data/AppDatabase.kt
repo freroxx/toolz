@@ -62,20 +62,6 @@ import com.frerox.toolz.data.search.BookmarkEntry
 import com.frerox.toolz.data.search.QuickLinkEntry
 import com.frerox.toolz.data.search.SearchDao
 import com.frerox.toolz.data.search.SearchHistoryEntry
-import com.frerox.toolz.data.whisper.WhisperMessageEntity
-import com.frerox.toolz.data.whisper.WhisperMessageDao
-import com.frerox.toolz.data.whisper.WhisperOutboxEntity
-import com.frerox.toolz.data.whisper.WhisperOutboxDao
-import com.frerox.toolz.data.whisper.WhisperLocalTombstoneEntity
-import com.frerox.toolz.data.whisper.WhisperLocalTombstoneDao
-import com.frerox.toolz.data.whisper.WhisperGroupEntity
-import com.frerox.toolz.data.whisper.WhisperGroupMemberEntity
-import com.frerox.toolz.data.whisper.WhisperGroupEventEntity
-import com.frerox.toolz.data.whisper.WhisperGroupDao
-import com.frerox.toolz.data.whisper.WhisperStoryLocalEntity
-import com.frerox.toolz.data.whisper.WhisperStoryLocalDao
-import com.frerox.toolz.data.whisper.WhisperSelfReadEntity
-import com.frerox.toolz.data.whisper.WhisperSelfReadDao
 import com.frerox.toolz.data.device.cache.DeviceSpecCacheEntity
 import com.frerox.toolz.data.device.cache.DeviceSpecsDao
 import com.frerox.toolz.data.device.cache.DeviceSpecConverters
@@ -115,18 +101,9 @@ import com.frerox.toolz.data.purgeshot.PurgeShotEntity
         CryptoHistoryEntry::class,
         DeviceSpecCacheEntity::class,
         CatalogSearchEntry::class,
-        WhisperMessageEntity::class,
-        // P3: whisper prefs→Room consolidation (outbox + local tombstones).
-        WhisperOutboxEntity::class,
-        WhisperLocalTombstoneEntity::class,
-        // Phase-2 groups (v62): local event-log cache; server log stays authoritative.
-        WhisperGroupEntity::class,
-        WhisperGroupMemberEntity::class,
-        WhisperGroupEventEntity::class,
-        WhisperStoryLocalEntity::class,
-        // v66: device-sealed copies of the user's OWN sent plaintext so sent
-        // history survives process death / account switches (see MIGRATION_65_66).
-        WhisperSelfReadEntity::class,
+        // Whisper ciphertext moved to WhisperDatabase (v69) so cloud backup can
+        // exclude it at file level. The legacy tables are drained and dropped by
+        // WhisperLegacyImporter on first launch; see DatabaseModule.MIGRATION_68_69.
         SpeedHistoryEntity::class,
         DeviceInventoryEntity::class,
         ScanSnapshotEntity::class,
@@ -178,7 +155,17 @@ import com.frerox.toolz.data.purgeshot.PurgeShotEntity
     // (html/mime/size/attachments), the sensitive/locked model, trash/expiry and
     // the AI state machine; clipboard_attachments stores content-addressed,
     // encrypted blob metadata. Purely additive — existing clips survive.
-    version = 67,
+    // Whisper message sort index (68): whisper_messages gains
+    // (senderId, receiverId, sortEpoch) so the conversation query can satisfy
+    // its ORDER BY sortEpoch without a full sort (see MIGRATION_67_68).
+    // Purely additive.
+    // Whisper split (69): every Whisper ciphertext table moved to the separate
+    // `toolz_whisper_db` (see WhisperDatabase), which is excluded from cloud
+    // backup and device transfer. AppDatabase no longer declares those entities;
+    // MIGRATION_68_69 is intentionally a no-op because the legacy tables must
+    // stay readable until WhisperLegacyImporter has copied their rows and
+    // dropped them. No non-Whisper table changes.
+    version = 69,
     // H-10 FIX (reviewwhisper.md): schemas are now exported to app/schemas (see
     // build.gradle.kts room.schemaLocation). Every future bump MUST ship a Migration —
     // the DatabaseModule comment documents this contract too.
@@ -204,12 +191,6 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun cryptoDao(): CryptoDao
     abstract fun deviceSpecsDao(): DeviceSpecsDao
     abstract fun catalogSearchDao(): CatalogSearchDao
-    abstract fun whisperMessageDao(): WhisperMessageDao
-    abstract fun whisperOutboxDao(): WhisperOutboxDao
-    abstract fun whisperLocalTombstoneDao(): WhisperLocalTombstoneDao
-    abstract fun whisperGroupDao(): WhisperGroupDao
-    abstract fun whisperStoryLocalDao(): WhisperStoryLocalDao
-    abstract fun whisperSelfReadDao(): WhisperSelfReadDao
     abstract fun speedHistoryDao(): SpeedHistoryDao
     abstract fun deviceInventoryDao(): DeviceInventoryDao
     abstract fun scanSnapshotDao(): ScanSnapshotDao

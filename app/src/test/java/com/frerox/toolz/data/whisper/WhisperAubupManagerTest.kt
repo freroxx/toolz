@@ -57,4 +57,88 @@ class WhisperAubupManagerTest {
         // Ensure callers can detect mismatched app signatures
         assertFalse(decoded.app == "toolz_whisper")
     }
+
+    @Test
+    fun testCanonicalAccessFileStem_stripsMediaStoreDuplicateSuffix() {
+        assertEquals(
+            "whisper_access_Alice",
+            WhisperAubupManager.canonicalAccessFileStem("whisper_access_Alice.enc"),
+        )
+        assertEquals(
+            "whisper_access_Alice",
+            WhisperAubupManager.canonicalAccessFileStem("whisper_access_Alice (1).enc"),
+        )
+        assertEquals(
+            "whisper_access_Alice",
+            WhisperAubupManager.canonicalAccessFileStem("whisper_access_Alice (12).ENC"),
+        )
+        // Case is preserved: a case-variant name is a different account/file.
+        assertEquals(
+            "whisper_access_alice",
+            WhisperAubupManager.canonicalAccessFileStem("whisper_access_alice.enc"),
+        )
+        // Anything outside the access-file namespace is never sweep-eligible.
+        assertEquals(null, WhisperAubupManager.canonicalAccessFileStem("whisper_notes.enc"))
+        assertEquals(null, WhisperAubupManager.canonicalAccessFileStem("notes.enc"))
+        assertEquals(null, WhisperAubupManager.canonicalAccessFileStem("whisper_access_Alice.txt"))
+    }
+
+    @Test
+    fun testPlanSupersededAccessFileDeletions_keepsNewestNonPending() {
+        val rows = listOf(
+            MediaStoreEncRow(1, "whisper_access_Alice.enc", "Download/Toolz/", isPending = false),
+            MediaStoreEncRow(2, "whisper_access_Alice (1).enc", "Download/Toolz/", isPending = false),
+            MediaStoreEncRow(3, "whisper_access_Alice (2).enc", "Download/Toolz/", isPending = false),
+        )
+        assertEquals(
+            setOf(1L, 2L),
+            WhisperAubupManager.planSupersededAccessFileDeletions(rows).toSet(),
+        )
+    }
+
+    @Test
+    fun testPlanSupersededAccessFileDeletions_pendingRowsNeverDeletedOrChosen() {
+        val rows = listOf(
+            MediaStoreEncRow(1, "whisper_access_Alice.enc", "Download/Toolz/", isPending = false),
+            MediaStoreEncRow(2, "whisper_access_Alice (1).enc", "Download/Toolz/", isPending = false),
+            // A newer write is still in flight: never delete it, and keep the newest
+            // settled row (id 2) until it completes.
+            MediaStoreEncRow(3, "whisper_access_Alice (2).enc", "Download/Toolz/", isPending = true),
+        )
+        assertEquals(
+            listOf(1L),
+            WhisperAubupManager.planSupersededAccessFileDeletions(rows),
+        )
+    }
+
+    @Test
+    fun testPlanSupersededAccessFileDeletions_singleRowIsNeverDeleted() {
+        val rows = listOf(
+            MediaStoreEncRow(1, "whisper_access_Alice.enc", "Download/Toolz/", isPending = false),
+        )
+        assertEquals(emptyList<Long>(), WhisperAubupManager.planSupersededAccessFileDeletions(rows))
+    }
+
+    @Test
+    fun testPlanSupersededAccessFileDeletions_separatesStemsAndFolders() {
+        val rows = listOf(
+            MediaStoreEncRow(1, "whisper_access_Alice.enc", "Download/Toolz/", isPending = false),
+            MediaStoreEncRow(2, "whisper_access_Bob (1).enc", "Download/Toolz/", isPending = false),
+            MediaStoreEncRow(3, "whisper_access_Alice (1).enc", "Download/Other/", isPending = false),
+        )
+        assertEquals(emptyList<Long>(), WhisperAubupManager.planSupersededAccessFileDeletions(rows))
+    }
+
+    @Test
+    fun testPlanSupersededAccessFileDeletions_ignoresUnrelatedAndCaseVariantFiles() {
+        val rows = listOf(
+            MediaStoreEncRow(1, "whisper_notes.enc", "Download/Toolz/", isPending = false),
+            MediaStoreEncRow(2, "whisper_notes (1).enc", "Download/Toolz/", isPending = false),
+            MediaStoreEncRow(3, "notes.enc", "Download/Toolz/", isPending = false),
+            // Same letters, different case: distinct files, never collapsed.
+            MediaStoreEncRow(4, "whisper_access_alice.enc", "Download/Toolz/", isPending = false),
+            MediaStoreEncRow(5, "whisper_access_Alice.enc", "Download/Toolz/", isPending = false),
+        )
+        assertEquals(emptyList<Long>(), WhisperAubupManager.planSupersededAccessFileDeletions(rows))
+    }
 }

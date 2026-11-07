@@ -166,4 +166,70 @@ class WhisperErrorMapperTest {
         // V2-FIX (reviewwhisper.md) L-13: same contract for log().
         WhisperErrorMapper.log(CancellationException("job cancelled"), "flush")
     }
+
+    @Test
+    fun testReleaseSafeMessage_redactsUrlsAndQuerySecrets() {
+        val safe = WhisperErrorMapper.releaseSafeMessage(
+            "Unable to resolve host https://xyz.supabase.co/rest/v1/messages?apikey=super-secret&user=1",
+        )
+        assertTrue(safe.contains("<url>"))
+        assertFalse(safe.contains("xyz.supabase.co"))
+        assertFalse(safe.contains("super-secret"))
+        // The diagnosable prose survives.
+        assertTrue(safe.contains("Unable to resolve host"))
+    }
+
+    @Test
+    fun testReleaseSafeMessage_redactsEmailTokensIdsAndHashes() {
+        val safe = WhisperErrorMapper.releaseSafeMessage(
+            "user alice@example.com token eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.sig " +
+                "uuid 550e8400-e29b-41d4-a716-446655440000 hash 0123456789abcdef0123456789abcdef",
+        )
+        assertFalse("email leaked: $safe", safe.contains("alice@example.com"))
+        assertFalse("jwt leaked: $safe", safe.contains("eyJhbGciOiJIUzI1NiJ9"))
+        assertFalse("uuid leaked: $safe", safe.contains("550e8400-e29b-41d4-a716-446655440000"))
+        assertFalse("hash leaked: $safe", safe.contains("0123456789abcdef0123456789abcdef"))
+        assertTrue(safe.contains("<email>"))
+        assertTrue(safe.contains("<token>"))
+        assertTrue(safe.contains("<id>"))
+    }
+
+    @Test
+    fun testReleaseSafeMessage_keepsOrdinaryDiagnostics() {
+        assertEquals(
+            "duplicate key value violates unique constraint",
+            WhisperErrorMapper.releaseSafeMessage("duplicate key value violates unique constraint"),
+        )
+        assertEquals("-", WhisperErrorMapper.releaseSafeMessage(null))
+        assertEquals("-", WhisperErrorMapper.releaseSafeMessage("   "))
+    }
+
+    @Test
+    fun testReleaseSafeMessage_collapsesWhitespaceAndCapsLength() {
+        val safe = WhisperErrorMapper.releaseSafeMessage("line one\nline two\t\tline three")
+        assertEquals("line one line two line three", safe)
+
+        val capped = WhisperErrorMapper.releaseSafeMessage("word ".repeat(100))
+        assertTrue("release message not capped: ${capped.length}", capped.length <= 120)
+    }
+
+    @Test
+    fun testReleaseLogSummary_plainExceptionNeverLeaksMessagePayload() {
+        val summary = WhisperErrorMapper.releaseLogSummary(
+            IllegalStateException("send to bob@example.com failed at https://api.example.com/x?token=abc"),
+        )
+        assertTrue(summary.contains("IllegalStateException"))
+        assertFalse("url leaked: $summary", summary.contains("api.example.com"))
+        assertFalse("email leaked: $summary", summary.contains("bob@example.com"))
+        assertFalse("token leaked: $summary", summary.contains("token=abc"))
+    }
+
+    @Test
+    fun testReleaseLogSummary_restExceptionKeepsStatusAndCode() {
+        val summary = WhisperErrorMapper.releaseLogSummary(
+            restException(HttpStatusCode.Unauthorized, error = "invalid_jwt"),
+        )
+        assertTrue(summary.contains("code=401"))
+        assertTrue(summary.contains("err=invalid_jwt"))
+    }
 }

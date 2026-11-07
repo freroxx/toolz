@@ -229,8 +229,10 @@ class WhisperNotificationManager @Inject constructor(
 
         val notifId = senderNotifId(senderId)
 
-        val deepLinkIntent = Intent(context, MainActivity::class.java).apply {
-            action = "com.frerox.toolz.OPEN_WHISPER_CHAT"
+        val deepLinkIntent = whisperNotificationIntent(
+            action = "com.frerox.toolz.OPEN_WHISPER_CHAT",
+            identity = "chat:$senderId",
+        ) {
             putExtra("otherUserId", senderId)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
@@ -290,8 +292,10 @@ class WhisperNotificationManager @Inject constructor(
         if (isInForeground && isViewingFriendRequests) return
         val notifId = friendRequestNotifId(fromId)
         // Tapping the notification opens MainActivity and surfaces the request list
-        val intent = Intent(context, MainActivity::class.java).apply {
-            action = "com.frerox.toolz.OPEN_WHISPER_FRIEND_REQUESTS"
+        val intent = whisperNotificationIntent(
+            action = "com.frerox.toolz.OPEN_WHISPER_FRIEND_REQUESTS",
+            identity = "friend:$fromId",
+        ) {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra("open_friend_requests", true)
         }
@@ -426,7 +430,36 @@ class WhisperNotificationManager @Inject constructor(
             true
         }
 
-    /** Stable id for a friend-request notification inside [FRIEND_REQUEST_NOTIF_ID_BASE, +SPAN). */
+    /**
+     * Builds every Whisper notification Intent, with a unique `data` URI.
+     *
+     * PendingIntents are matched by (requestCode, [Intent.filterEquals]) — and
+     * filterEquals deliberately IGNORES extras. Group event notifications share
+     * the `com.frerox.toolz.OPEN_WHISPER_GROUP` action and use
+     * `REQUEST_CODE_BASE + (notifId % 900)`, so two
+     * events whose ids happened to be 900 apart were treated as the SAME
+     * PendingIntent: FLAG_UPDATE_CURRENT then overwrote the extras and tapping the
+     * older notification opened the wrong group. A unique data URI makes
+     * filterEquals distinguish each notification. This cannot affect routing: the
+     * Whisper custom actions are handled explicitly in MainActivity before/besides
+     * resolveExternalNavigationRoute, which only inspects `data` for ACTION_VIEW.
+     */
+    private fun whisperNotificationIntent(
+        action: String,
+        identity: String,
+        configure: Intent.() -> Unit = {},
+    ): Intent = Intent(context, MainActivity::class.java).apply {
+        this.action = action
+        data = android.net.Uri.Builder()
+            .scheme("toolz-whisper")
+            .authority("notification")
+            .appendPath(action.substringAfterLast('.'))
+            .appendPath(identity)
+            .build()
+        configure()
+    }
+
+    /** Stable id for a friend-request notification inside its dedicated band. */
     private fun friendRequestNotifId(fromId: String): Int =
         FRIEND_REQUEST_NOTIF_ID_BASE + ((fromId.hashCode() and 0x7FFFFFFF) % FRIEND_REQUEST_NOTIF_ID_SPAN)
 
@@ -444,8 +477,10 @@ class WhisperNotificationManager @Inject constructor(
         if (!groupsEnabled()) return
         if (groupId.isBlank()) return
         val notifId = groupNotifId("invite:$groupId:$inviterName")
-        val intent = Intent(context, MainActivity::class.java).apply {
-            action = "com.frerox.toolz.OPEN_WHISPER_GROUP_INVITES"
+        val intent = whisperNotificationIntent(
+            action = "com.frerox.toolz.OPEN_WHISPER_GROUP_INVITES",
+            identity = "invite:$groupId:$inviterName",
+        ) {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
         val pendingIntent = PendingIntent.getActivity(
@@ -496,8 +531,10 @@ class WhisperNotificationManager @Inject constructor(
         if (!shouldNotifyForMessage(storyId)) return
         if (mutePrefs.isMuted(posterId)) return
         val notifId = senderNotifId("dailyup:$posterId")
-        val deepLinkIntent = Intent(context, MainActivity::class.java).apply {
-            action = "com.frerox.toolz.OPEN_WHISPER_DAILY_UPS"
+        val deepLinkIntent = whisperNotificationIntent(
+            action = "com.frerox.toolz.OPEN_WHISPER_DAILY_UPS",
+            identity = "dailyup:$posterId",
+        ) {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
         val pendingIntent = PendingIntent.getActivity(
@@ -543,8 +580,10 @@ class WhisperNotificationManager @Inject constructor(
         if (mutePrefs.isMuted("group:$groupId")) return
         if (isInForeground && currentChatId == "group:$groupId") return
         val notifId = groupNotifId("event:$groupId:$dedupeKey")
-        val deepLinkIntent = Intent(context, MainActivity::class.java).apply {
-            action = "com.frerox.toolz.OPEN_WHISPER_GROUP"
+        val deepLinkIntent = whisperNotificationIntent(
+            action = "com.frerox.toolz.OPEN_WHISPER_GROUP",
+            identity = "event:$groupId:$dedupeKey",
+        ) {
             putExtra("groupId", groupId)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }

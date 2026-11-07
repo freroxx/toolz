@@ -39,6 +39,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.graphics.asImageBitmap
 import com.frerox.toolz.ui.LocalWhisperAvatarLoader
 import com.frerox.toolz.ui.components.bouncyClick
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * P0-6b FIX: Extracted from WhisperMainScreen.kt (2925 → ~2600) — first real split.
@@ -155,23 +157,30 @@ fun WhisperAvatar(
         // V6-R7 FIX: the loader already strips the PNG transport and returns the
         // SEALED payload — the extra decode here used to null the open and, on some
         // paths, feed ciphertext straight into BitmapFactory (the "static noise").
-        val sealed = avatarLoader.load(resolvedUrl.substringBefore("#att="), pub)
-        if (sealed == null) {
-            ProtocolDiagnostics.increment("avatar.fetchNull")
-            decryptFailed = true; return@LaunchedEffect
+        // Performance: this LaunchedEffect runs on the main dispatcher. Disk I/O is
+        // already hopped inside the loader, and the AES open + bitmap decode are
+        // hopped here so a large avatar can never stall a frame.
+        val bmp = withContext(Dispatchers.Default) {
+            val sealed = avatarLoader.load(resolvedUrl.substringBefore("#att="), pub)
+            if (sealed == null) {
+                ProtocolDiagnostics.increment("avatar.fetchNull")
+                return@withContext null
+            }
+            val opened = com.frerox.toolz.data.whisper.WhisperAvatarCodec.open(sealed, pub)
+            if (opened == null) {
+                ProtocolDiagnostics.increment("avatar.openFail")
+                ProtocolDiagnostics.logThrottled(
+                    "avatarOpenFail", "avatar.openFail",
+                    event = "avatar open failed urlKid=${WhisperEnvelope.keyId(pub.take(40))} profileKid=${WhisperEnvelope.keyId(pub)}",
+                )
+                return@withContext null
+            }
+            android.graphics.BitmapFactory.decodeByteArray(opened, 0, opened.size) ?: run {
+                ProtocolDiagnostics.increment("avatar.bitmapFail")
+                null
+            }
         }
-        val opened = com.frerox.toolz.data.whisper.WhisperAvatarCodec.open(sealed, pub)
-        if (opened == null) {
-            ProtocolDiagnostics.increment("avatar.openFail")
-            ProtocolDiagnostics.logThrottled(
-                "avatarOpenFail", "avatar.openFail",
-                event = "avatar open failed urlKid=${WhisperEnvelope.keyId(pub.take(40))} profileKid=${WhisperEnvelope.keyId(pub)}",
-            )
-            decryptFailed = true; return@LaunchedEffect
-        }
-        val bmp = android.graphics.BitmapFactory.decodeByteArray(opened, 0, opened.size)
         if (bmp == null) {
-            ProtocolDiagnostics.increment("avatar.bitmapFail")
             decryptFailed = true; return@LaunchedEffect
         }
         decryptedBitmap = bmp

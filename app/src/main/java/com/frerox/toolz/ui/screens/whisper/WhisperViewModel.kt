@@ -734,6 +734,11 @@ class WhisperViewModel @Inject constructor(
             return
         }
         viewModelScope.launch {
+            // Stop the 60 s heartbeat BEFORE the server delete: its republish/prekey
+            // health check could otherwise run between clearAllLocalData() and
+            // signOut(), re-seeding local key state for an identity that is gone.
+            // Restart it only when deletion failed and the account still exists.
+            stopHeartbeat()
             // Do NOT delete the push target before the server confirms deletion: a
             // failed delete would otherwise silently disable notifications for an
             // account that still exists. The callback below runs with the session
@@ -748,7 +753,12 @@ class WhisperViewModel @Inject constructor(
                 repository.clearAllLocalData()
             }
                 .onSuccess { onComplete() }
-                .onFailure { handleError(it, "deleteAccount") }
+                .onFailure { err ->
+                    handleError(err, "deleteAccount")
+                    // Session-expired failures sign out; only revive the heartbeat
+                    // while the account (and its session) is still valid.
+                    if (!WhisperErrorMapper.isSessionExpired(err)) startHeartbeat()
+                }
         }
     }
 

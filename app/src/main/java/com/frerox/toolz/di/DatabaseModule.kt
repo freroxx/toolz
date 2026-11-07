@@ -39,6 +39,7 @@ import com.frerox.toolz.data.crypto.CryptoDao
 import com.frerox.toolz.data.password.PasswordDao
 import com.frerox.toolz.data.search.SearchDao
 import com.frerox.toolz.data.device.cache.DeviceSpecsDao
+import com.frerox.toolz.data.whisper.WhisperDatabase
 import com.frerox.toolz.data.whisper.WhisperMessageDao
 import com.frerox.toolz.data.whisper.WhisperStoryLocalDao
 import com.frerox.toolz.util.security.KeyManager
@@ -495,6 +496,39 @@ object DatabaseModule {
         }
     }
 
+    // Whisper message sort index 67->68: whisper_messages orders conversation
+    // history by sortEpoch, but the only composite index keyed on participants
+    // used createdAt — SQLite therefore sorted every matching row before applying
+    // the LIMIT 500. Purely additive index; no row is rewritten or dropped.
+    internal val MIGRATION_67_68 = object : Migration(67, 68) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS " +
+                    "`index_whisper_messages_senderId_receiverId_sortEpoch` " +
+                    "ON `whisper_messages` (`senderId`, `receiverId`, `sortEpoch`)",
+            )
+        }
+    }
+
+    /**
+     * Whisper split 68->69: intentionally a no-op.
+     *
+     * The Whisper entities were removed from [AppDatabase] and moved to
+     * [WhisperDatabase] (`toolz_whisper_db`), which is excluded from cloud
+     * backup/device transfer. The legacy tables MUST remain readable after this
+     * migration because [com.frerox.toolz.data.whisper.WhisperLegacyImporter]
+     * copies their rows into the new database on first open and only then drops
+     * them. Dropping them here would destroy history before the copy.
+     *
+     * Room stops validating the unmanaged tables once they leave the entity
+     * list, so their continued presence is valid; the importer removes them.
+     */
+    internal val MIGRATION_68_69 = object : Migration(68, 69) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            // No schema change for the tables AppDatabase still owns.
+        }
+    }
+
     @Provides
     @Singleton
     fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase {
@@ -516,7 +550,7 @@ object DatabaseModule {
         .openHelperFactory(factory)
         // V2-FIX (reviewwhisper.md) H-10: explicit migrations only — every version bump
         // must ship one (see AppDatabase comment).
-        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56, MIGRATION_56_57, MIGRATION_57_58, MIGRATION_58_59, MIGRATION_59_60, MIGRATION_60_61, MIGRATION_61_62, MIGRATION_62_63, MIGRATION_63_64, MIGRATION_64_65, MIGRATION_65_66, MIGRATION_66_67)
+        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56, MIGRATION_56_57, MIGRATION_57_58, MIGRATION_58_59, MIGRATION_59_60, MIGRATION_60_61, MIGRATION_61_62, MIGRATION_62_63, MIGRATION_63_64, MIGRATION_64_65, MIGRATION_65_66, MIGRATION_66_67, MIGRATION_67_68, MIGRATION_68_69)
         .fallbackToDestructiveMigrationOnDowngrade()
         // NOTE: Add explicit Migration objects here when schema changes. Schemas are now
         // EXPORTED to app/schemas (H-10 fix) so diffs are reviewable — never re-introduce
@@ -580,11 +614,101 @@ object DatabaseModule {
                 // Fresh builder avoids leaking the first helper's connection.
                 return Room.databaseBuilder(context, AppDatabase::class.java, dbName)
                     .openHelperFactory(factory)
-        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56, MIGRATION_56_57, MIGRATION_57_58, MIGRATION_58_59, MIGRATION_59_60, MIGRATION_60_61, MIGRATION_61_62, MIGRATION_62_63, MIGRATION_63_64, MIGRATION_64_65, MIGRATION_65_66, MIGRATION_66_67)
+        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56, MIGRATION_56_57, MIGRATION_57_58, MIGRATION_58_59, MIGRATION_59_60, MIGRATION_60_61, MIGRATION_61_62, MIGRATION_62_63, MIGRATION_63_64, MIGRATION_64_65, MIGRATION_65_66, MIGRATION_66_67, MIGRATION_67_68, MIGRATION_68_69)
                     .fallbackToDestructiveMigrationOnDowngrade()
                     .build()
             }
             throw e
+        }
+
+        return db
+    }
+
+    /**
+     * Dedicated encrypted Whisper store. Depends on [AppDatabase] so the v69
+     * migration has already run before [WhisperLegacyImporter] reads the legacy
+     * tables; the import itself is idempotent and safe to retry.
+     *
+     * The database file is excluded from backup (see backup_rules.xml and
+     * data_extraction_rules.xml). A corrupt/unreadable file is rebuilt instead
+     * of crash-looping: the server/ratchet remain the durable source, and this
+     * database is a ciphertext cache plus pending-send state.
+     */
+    @Provides
+    @Singleton
+    fun provideWhisperDatabase(
+        @ApplicationContext context: Context,
+        appDatabase: AppDatabase,
+    ): WhisperDatabase {
+        System.loadLibrary("sqlcipher")
+        val dbName = WhisperDatabase.DB_NAME
+        val factory = SupportOpenHelperFactory(KeyManager.getOrCreateMasterKey(context))
+
+        fun build(): WhisperDatabase = Room.databaseBuilder(
+            context,
+            WhisperDatabase::class.java,
+            dbName,
+        )
+            .openHelperFactory(factory)
+            .fallbackToDestructiveMigrationOnDowngrade()
+            .build()
+
+        var db = build()
+        try {
+            db.openHelper.writableDatabase
+        } catch (e: Exception) {
+            val isCorruptOrWrongKey = e is SQLiteNotADatabaseException ||
+                (e.message?.contains("file is not a database") == true)
+            val isLegacyHashMismatch = e is IllegalStateException &&
+                e.message?.contains("Room cannot verify the data integrity") == true
+            if (!isCorruptOrWrongKey && !isLegacyHashMismatch) throw e
+            android.util.Log.e(
+                "DatabaseModule",
+                "Unopenable whisper database (${e.javaClass.simpleName}: ${e.message}). " +
+                    "Preserving a .corrupt backup and rebuilding.",
+                e,
+            )
+            runCatching { db.close() }
+            runCatching {
+                val dbFile = context.getDatabasePath(dbName)
+                if (dbFile.exists()) {
+                    dbFile.copyTo(
+                        java.io.File(
+                            dbFile.parent,
+                            "$dbName.corrupt.${System.currentTimeMillis()}.bak",
+                        ),
+                        overwrite = false,
+                    )
+                }
+            }
+            context.deleteDatabase(dbName)
+            db = build()
+            db.openHelper.writableDatabase
+        }
+
+        // One-time move of Whisper rows out of toolz_db. Best-effort: on failure
+        // the legacy rows remain and the next launch retries, so a transient
+        // error can never strand the app or lose history.
+        runCatching {
+            com.frerox.toolz.data.whisper.WhisperLegacyImporter.migrateIfNeeded(
+                legacy = appDatabase.openHelper.writableDatabase,
+                target = db.openHelper.writableDatabase,
+            )
+        }.onFailure {
+            if (com.frerox.toolz.BuildConfig.DEBUG) {
+                android.util.Log.e(
+                    "DatabaseModule",
+                    "Whisper legacy split failed; will retry on next launch",
+                    it,
+                )
+            } else {
+                // Release log hygiene: exception messages can carry SQL or file
+                // paths; the retry contract is the only actionable detail.
+                android.util.Log.e(
+                    "DatabaseModule",
+                    "Whisper legacy split failed; will retry on next launch",
+                )
+            }
         }
 
         return db
@@ -596,12 +720,12 @@ object DatabaseModule {
     }
 
     @Provides
-    fun provideWhisperStoryLocalDao(database: AppDatabase): WhisperStoryLocalDao {
+    fun provideWhisperStoryLocalDao(database: WhisperDatabase): WhisperStoryLocalDao {
         return database.whisperStoryLocalDao()
     }
 
     @Provides
-    fun provideWhisperSelfReadDao(database: AppDatabase): com.frerox.toolz.data.whisper.WhisperSelfReadDao {
+    fun provideWhisperSelfReadDao(database: WhisperDatabase): com.frerox.toolz.data.whisper.WhisperSelfReadDao {
         return database.whisperSelfReadDao()
     }
 
@@ -686,22 +810,22 @@ object DatabaseModule {
     }
 
     @Provides
-    fun provideWhisperMessageDao(database: AppDatabase): WhisperMessageDao {
+    fun provideWhisperMessageDao(database: WhisperDatabase): WhisperMessageDao {
         return database.whisperMessageDao()
     }
 
     @Provides
-    fun provideWhisperOutboxDao(database: AppDatabase): com.frerox.toolz.data.whisper.WhisperOutboxDao {
+    fun provideWhisperOutboxDao(database: WhisperDatabase): com.frerox.toolz.data.whisper.WhisperOutboxDao {
         return database.whisperOutboxDao()
     }
 
     @Provides
-    fun provideWhisperLocalTombstoneDao(database: AppDatabase): com.frerox.toolz.data.whisper.WhisperLocalTombstoneDao {
+    fun provideWhisperLocalTombstoneDao(database: WhisperDatabase): com.frerox.toolz.data.whisper.WhisperLocalTombstoneDao {
         return database.whisperLocalTombstoneDao()
     }
 
     @Provides
-    fun provideWhisperGroupDao(database: AppDatabase): com.frerox.toolz.data.whisper.WhisperGroupDao {
+    fun provideWhisperGroupDao(database: WhisperDatabase): com.frerox.toolz.data.whisper.WhisperGroupDao {
         return database.whisperGroupDao()
     }
 

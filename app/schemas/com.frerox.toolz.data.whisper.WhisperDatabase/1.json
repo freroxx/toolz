@@ -1,0 +1,609 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "90670e69246f80991078964c58e72f89",
+    "entities": [
+      {
+        "tableName": "whisper_messages",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `senderId` TEXT NOT NULL, `receiverId` TEXT NOT NULL, `content` TEXT NOT NULL, `contentIv` TEXT, `replyToId` TEXT, `isRead` INTEGER NOT NULL, `createdAt` TEXT NOT NULL, `replyToContent` TEXT, `replyToSenderName` TEXT, `isDeletedForEveryone` INTEGER NOT NULL, `sortEpoch` INTEGER NOT NULL DEFAULT 0, `protocolVersion` INTEGER NOT NULL DEFAULT 0, `reactionsJson` TEXT NOT NULL DEFAULT '', PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "senderId",
+            "columnName": "senderId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "receiverId",
+            "columnName": "receiverId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "content",
+            "columnName": "content",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "contentIv",
+            "columnName": "contentIv",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "replyToId",
+            "columnName": "replyToId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "isRead",
+            "columnName": "isRead",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "replyToContent",
+            "columnName": "replyToContent",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "replyToSenderName",
+            "columnName": "replyToSenderName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "isDeletedForEveryone",
+            "columnName": "isDeletedForEveryone",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sortEpoch",
+            "columnName": "sortEpoch",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "protocolVersion",
+            "columnName": "protocolVersion",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "reactionsJson",
+            "columnName": "reactionsJson",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "''"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_whisper_messages_senderId",
+            "unique": false,
+            "columnNames": [
+              "senderId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_whisper_messages_senderId` ON `${TABLE_NAME}` (`senderId`)"
+          },
+          {
+            "name": "index_whisper_messages_receiverId",
+            "unique": false,
+            "columnNames": [
+              "receiverId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_whisper_messages_receiverId` ON `${TABLE_NAME}` (`receiverId`)"
+          },
+          {
+            "name": "index_whisper_messages_createdAt",
+            "unique": false,
+            "columnNames": [
+              "createdAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_whisper_messages_createdAt` ON `${TABLE_NAME}` (`createdAt`)"
+          },
+          {
+            "name": "index_whisper_messages_senderId_receiverId_createdAt",
+            "unique": false,
+            "columnNames": [
+              "senderId",
+              "receiverId",
+              "createdAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_whisper_messages_senderId_receiverId_createdAt` ON `${TABLE_NAME}` (`senderId`, `receiverId`, `createdAt`)"
+          },
+          {
+            "name": "index_whisper_messages_senderId_receiverId_sortEpoch",
+            "unique": false,
+            "columnNames": [
+              "senderId",
+              "receiverId",
+              "sortEpoch"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_whisper_messages_senderId_receiverId_sortEpoch` ON `${TABLE_NAME}` (`senderId`, `receiverId`, `sortEpoch`)"
+          }
+        ]
+      },
+      {
+        "tableName": "whisper_outbox",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`clientId` TEXT NOT NULL, `senderId` TEXT NOT NULL, `receiverId` TEXT NOT NULL, `encryptedContent` TEXT NOT NULL, `contentIv` TEXT NOT NULL, `replyToId` TEXT, `createdAt` TEXT NOT NULL, `enqueuedAtMs` INTEGER NOT NULL, `attempts` INTEGER NOT NULL, `groupId` TEXT, `groupMsgKind` TEXT, PRIMARY KEY(`clientId`))",
+        "fields": [
+          {
+            "fieldPath": "clientId",
+            "columnName": "clientId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "senderId",
+            "columnName": "senderId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "receiverId",
+            "columnName": "receiverId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "encryptedContent",
+            "columnName": "encryptedContent",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "contentIv",
+            "columnName": "contentIv",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "replyToId",
+            "columnName": "replyToId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "enqueuedAtMs",
+            "columnName": "enqueuedAtMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "attempts",
+            "columnName": "attempts",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "groupId",
+            "columnName": "groupId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "groupMsgKind",
+            "columnName": "groupMsgKind",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "clientId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_whisper_outbox_enqueuedAtMs",
+            "unique": false,
+            "columnNames": [
+              "enqueuedAtMs"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_whisper_outbox_enqueuedAtMs` ON `${TABLE_NAME}` (`enqueuedAtMs`)"
+          },
+          {
+            "name": "index_whisper_outbox_receiverId",
+            "unique": false,
+            "columnNames": [
+              "receiverId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_whisper_outbox_receiverId` ON `${TABLE_NAME}` (`receiverId`)"
+          },
+          {
+            "name": "index_whisper_outbox_groupId",
+            "unique": false,
+            "columnNames": [
+              "groupId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_whisper_outbox_groupId` ON `${TABLE_NAME}` (`groupId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "whisper_local_tombstones",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`messageId` TEXT NOT NULL, `deletedAtMs` INTEGER NOT NULL, PRIMARY KEY(`messageId`))",
+        "fields": [
+          {
+            "fieldPath": "messageId",
+            "columnName": "messageId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deletedAtMs",
+            "columnName": "deletedAtMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "messageId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_whisper_local_tombstones_deletedAtMs",
+            "unique": false,
+            "columnNames": [
+              "deletedAtMs"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_whisper_local_tombstones_deletedAtMs` ON `${TABLE_NAME}` (`deletedAtMs`)"
+          }
+        ]
+      },
+      {
+        "tableName": "whisper_groups_local",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `epoch` INTEGER NOT NULL, `createdBy` TEXT NOT NULL, `updatedAtMs` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "epoch",
+            "columnName": "epoch",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdBy",
+            "columnName": "createdBy",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtMs",
+            "columnName": "updatedAtMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "whisper_group_members_local",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`groupId` TEXT NOT NULL, `memberId` TEXT NOT NULL, `role` TEXT NOT NULL, `invitedBy` TEXT, PRIMARY KEY(`groupId`, `memberId`))",
+        "fields": [
+          {
+            "fieldPath": "groupId",
+            "columnName": "groupId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "memberId",
+            "columnName": "memberId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "role",
+            "columnName": "role",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "invitedBy",
+            "columnName": "invitedBy",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "groupId",
+            "memberId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_whisper_group_members_local_groupId",
+            "unique": false,
+            "columnNames": [
+              "groupId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_whisper_group_members_local_groupId` ON `${TABLE_NAME}` (`groupId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "whisper_group_events_local",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `groupId` TEXT NOT NULL, `seq` INTEGER NOT NULL, `epoch` INTEGER NOT NULL, `type` TEXT NOT NULL, `actor` TEXT NOT NULL, `payload` TEXT NOT NULL, `adminSig` TEXT NOT NULL, `signerCert` TEXT, `createdAtMs` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "groupId",
+            "columnName": "groupId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "seq",
+            "columnName": "seq",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "epoch",
+            "columnName": "epoch",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "type",
+            "columnName": "type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "actor",
+            "columnName": "actor",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "payload",
+            "columnName": "payload",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "adminSig",
+            "columnName": "adminSig",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "signerCert",
+            "columnName": "signerCert",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAtMs",
+            "columnName": "createdAtMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_whisper_group_events_local_groupId_seq",
+            "unique": false,
+            "columnNames": [
+              "groupId",
+              "seq"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_whisper_group_events_local_groupId_seq` ON `${TABLE_NAME}` (`groupId`, `seq`)"
+          }
+        ]
+      },
+      {
+        "tableName": "whisper_story_local",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`storyId` TEXT NOT NULL, `ownerId` TEXT NOT NULL, `sealedDescriptor` TEXT NOT NULL, `expiresAtMs` INTEGER NOT NULL, `receiptsEnabled` INTEGER NOT NULL, `state` TEXT NOT NULL, `updatedAtMs` INTEGER NOT NULL, PRIMARY KEY(`storyId`))",
+        "fields": [
+          {
+            "fieldPath": "storyId",
+            "columnName": "storyId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ownerId",
+            "columnName": "ownerId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sealedDescriptor",
+            "columnName": "sealedDescriptor",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "expiresAtMs",
+            "columnName": "expiresAtMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "receiptsEnabled",
+            "columnName": "receiptsEnabled",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "state",
+            "columnName": "state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtMs",
+            "columnName": "updatedAtMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "storyId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_whisper_story_local_expiresAtMs",
+            "unique": false,
+            "columnNames": [
+              "expiresAtMs"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_whisper_story_local_expiresAtMs` ON `${TABLE_NAME}` (`expiresAtMs`)"
+          },
+          {
+            "name": "index_whisper_story_local_ownerId_expiresAtMs",
+            "unique": false,
+            "columnNames": [
+              "ownerId",
+              "expiresAtMs"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_whisper_story_local_ownerId_expiresAtMs` ON `${TABLE_NAME}` (`ownerId`, `expiresAtMs`)"
+          }
+        ]
+      },
+      {
+        "tableName": "whisper_self_read",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`messageId` TEXT NOT NULL, `ownerId` TEXT NOT NULL, `contentHash` TEXT NOT NULL, `sealed` TEXT NOT NULL, `createdAtMs` INTEGER NOT NULL, PRIMARY KEY(`messageId`))",
+        "fields": [
+          {
+            "fieldPath": "messageId",
+            "columnName": "messageId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ownerId",
+            "columnName": "ownerId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "contentHash",
+            "columnName": "contentHash",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sealed",
+            "columnName": "sealed",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtMs",
+            "columnName": "createdAtMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "messageId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_whisper_self_read_ownerId_contentHash",
+            "unique": false,
+            "columnNames": [
+              "ownerId",
+              "contentHash"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_whisper_self_read_ownerId_contentHash` ON `${TABLE_NAME}` (`ownerId`, `contentHash`)"
+          },
+          {
+            "name": "index_whisper_self_read_ownerId_createdAtMs",
+            "unique": false,
+            "columnNames": [
+              "ownerId",
+              "createdAtMs"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_whisper_self_read_ownerId_createdAtMs` ON `${TABLE_NAME}` (`ownerId`, `createdAtMs`)"
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '90670e69246f80991078964c58e72f89')"
+    ]
+  }
+}

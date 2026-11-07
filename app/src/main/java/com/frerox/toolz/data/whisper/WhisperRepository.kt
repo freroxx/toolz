@@ -1927,7 +1927,16 @@ class WhisperRepository @Inject constructor(
         // Cache the successfully sent message as ciphertext only (never the plaintext).
         // getMessagesFlow decrypts it on read using the recipient's accepted public key.
         // The self-read copy + memo were written before the insert (see above).
-        messageDao.insertMessage(insertedMsg.toEntity())
+        //
+        // The server row already exists at this point: a local Room failure must NOT
+        // turn a delivered message into a user-visible send failure (which would
+        // invite a resend with a new clientId and create a duplicate). Log the cache
+        // miss through diagnostics and return the successful message.
+        runCatching { messageDao.insertMessage(insertedMsg.toEntity()) }
+            .onFailure {
+                ProtocolDiagnostics.increment("send.localCacheFail")
+                WhisperErrorMapper.log(it, "send.localCache")
+            }
 
         // Invalidate conversation cache so the chats list refreshes
         invalidateConversationsCache()
@@ -2036,7 +2045,20 @@ class WhisperRepository @Inject constructor(
             expiresAtEpochSeconds = expiresAt,
             sizeBytes = imageBytes.size,
         )
-        sendMessage(receiverId, attachment.toMessageContent(), replyToId).getOrThrow()
+        try {
+            sendMessage(receiverId, attachment.toMessageContent(), replyToId).getOrThrow()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // Cancellation can race a server insert; never delete a blob that may
+            // already be referenced by a delivered message.
+            throw e
+        } catch (t: Throwable) {
+            // sendMessage only fails BEFORE the server row exists (local cache writes
+            // after a successful insert are non-fatal now), so this ciphertext will
+            // never be reachable: delete it instead of leaking an orphan blob.
+            runCatching { encryptedImageHost.delete(uploadUrl, attachmentId) }
+                .onFailure { ProtocolDiagnostics.increment("imgSend.orphanDeleteFail") }
+            throw t
+        }
     }
 
     suspend fun downloadEncryptedImage(

@@ -7,6 +7,11 @@
     <cloud-backup>
         <!-- PurgeShot: triple-redundant queue — DB + DataStore survive cloud restore; external file survives clear-data -->
         <include domain="database" path="toolz_db" />
+        <!-- Whisper ciphertext has its own database file (schema v69); never
+             back it up or transfer it to another device. -->
+        <exclude domain="database" path="toolz_whisper_db" />
+        <exclude domain="database" path="toolz_whisper_db-wal" />
+        <exclude domain="database" path="toolz_whisper_db-shm" />
         <include domain="sharedpref" path="." />
         <include domain="file" path="datastore/" />
         <!-- Whisper account material is Keystore-bound and device-local. -->
@@ -31,6 +36,9 @@
     </cloud-backup>
     <device-transfer>
         <include domain="database" path="toolz_db" />
+        <exclude domain="database" path="toolz_whisper_db" />
+        <exclude domain="database" path="toolz_whisper_db-wal" />
+        <exclude domain="database" path="toolz_whisper_db-shm" />
         <include domain="sharedpref" path="." />
         <include domain="file" path="datastore/" />
         <exclude domain="sharedpref" path="whisper_auth_session.xml" />

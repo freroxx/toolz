@@ -19,7 +19,11 @@ import java.time.OffsetDateTime
         Index(value = ["receiverId"]),
         Index(value = ["createdAt"]),
         // P1 FIX: Hot query is (senderId,receiverId,createdAt) — composite covers it.
-        Index(value = ["senderId", "receiverId", "createdAt"])
+        Index(value = ["senderId", "receiverId", "createdAt"]),
+        // v68: getMessages() orders by sortEpoch, not createdAt, so the composite
+        // above cannot satisfy the ORDER BY and SQLite sorted every matching row
+        // before picking the newest 500. This index matches the actual sort key.
+        Index(value = ["senderId", "receiverId", "sortEpoch"])
     ]
 )
 data class WhisperMessageEntity(

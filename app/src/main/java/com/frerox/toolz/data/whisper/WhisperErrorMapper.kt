@@ -279,9 +279,14 @@ object WhisperErrorMapper {
 
     /**
      * V2-FIX (reviewwhisper.md): release-build log hygiene. Full throwable detail
-     * (message + stack trace) only in debug builds; release logs limited diagnosable
-     * info (class + status + error code) so AuthRestException root cause is visible
-     * without leaking payload/URL.
+     * (message + stack trace) only in debug builds.
+     *
+     * P1 privacy: release builds must never write a raw exception message. Transport
+     * and third-party libraries routinely embed request URLs (with query strings),
+     * access tokens, email addresses, user UUIDs and long hashes into `message`.
+     * [releaseLogSummary] keeps only the class name, HTTP status and a sanitized
+     * error token so Logcat remains diagnosable without leaking identities or
+     * credentials.
      */
     private fun logTechnical(throwable: Throwable, context: String) {
         val prefix = if (context.isNotBlank()) "[$context] " else ""
@@ -293,11 +298,52 @@ object WhisperErrorMapper {
         if (BuildConfig.DEBUG) {
             Log.e(TAG, "$prefix${throwable.javaClass.simpleName}: ${throwable.message}", throwable)
         } else {
-            val code = (throwable as? RestException)?.statusCode?.toString() ?: "-"
-            val err = (throwable as? RestException)?.error ?: throwable.message?.take(120) ?: "-"
-            Log.e(TAG, "$prefix${throwable.javaClass.simpleName} code=$code err=$err")
+            Log.e(TAG, prefix + releaseLogSummary(throwable))
         }
     }
+
+    /**
+     * Release-safe one-line error summary. Never returns the raw message; the
+     * returned `err=` value passes through [releaseSafeMessage].
+     */
+    internal fun releaseLogSummary(throwable: Throwable): String {
+        val code = (throwable as? RestException)?.statusCode?.toString() ?: "-"
+        val rawErr = (throwable as? RestException)?.error ?: throwable.message
+        return "${throwable.javaClass.simpleName} code=$code err=${releaseSafeMessage(rawErr)}"
+    }
+
+    /**
+     * Redacts the values most likely to carry secrets or identifiers out of a
+     * diagnostic string: URLs, e-mails, JWTs, UUIDs and long token/hash-like
+     * strings. Surrounding prose is preserved (e.g. "Unable to resolve host
+     * <url>") so release logs stay actionable. Output is collapsed to one line
+     * and capped at 120 characters.
+     */
+    internal fun releaseSafeMessage(message: String?): String {
+        if (message.isNullOrBlank()) return "-"
+        val safe = message
+            .replace(URL_PATTERN, "<url>")
+            .replace(EMAIL_PATTERN, "<email>")
+            .replace(JWT_PATTERN, "<token>")
+            .replace(UUID_PATTERN, "<id>")
+            .replace(LONG_SECRET_PATTERN, "<token>")
+            .replace(WHITESPACE_PATTERN, " ")
+            .trim()
+        return safe.take(120).ifBlank { "-" }
+    }
+
+    private val URL_PATTERN =
+        Regex("""(?i)\b(?:https?|wss?|ftp)://[^\s"'<>]+""")
+    private val EMAIL_PATTERN =
+        Regex("""\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b""")
+    private val JWT_PATTERN =
+        Regex("""\beyJ[A-Za-z0-9_-]{8,}(?:\.[A-Za-z0-9_-]{8,}){0,2}\b""")
+    private val UUID_PATTERN =
+        Regex("""\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b""")
+    private val LONG_SECRET_PATTERN =
+        Regex("""[A-Za-z0-9+/_=-]{20,}""")
+    private val WHITESPACE_PATTERN =
+        Regex("""\s+""")
 
     private fun isInvalidCredentials(throwable: Throwable): Boolean {
         if (throwable is AuthRestException) {

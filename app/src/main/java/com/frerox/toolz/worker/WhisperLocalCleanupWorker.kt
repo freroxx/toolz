@@ -10,6 +10,7 @@ import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.ListenableWorker
 import androidx.work.WorkerParameters
+import com.frerox.toolz.data.whisper.WhisperAubupManager
 import com.frerox.toolz.data.whisper.WhisperDeletedMessagesStore
 import com.frerox.toolz.data.whisper.WhisperSelfLegCrypto
 import com.frerox.toolz.data.whisper.WhisperStoryLocalDao
@@ -26,6 +27,7 @@ class WhisperLocalCleanupWorker @AssistedInject constructor(
     private val storyDao: WhisperStoryLocalDao,
     private val storySeenStore: WhisperStorySeenStore,
     private val selfLegCrypto: WhisperSelfLegCrypto,
+    private val aubupManager: WhisperAubupManager,
 ) : CoroutineWorker(context, workerParams) {
     companion object {
         private const val TAG = "WhisperCleanup"
@@ -44,6 +46,10 @@ class WhisperLocalCleanupWorker @AssistedInject constructor(
             // surfaces again.
             storySeenStore.prune(now)
             selfLegCrypto.pruneAllUsers()
+            // V6-R?: remove MediaStore access-file duplicates left by older builds
+            // (`name (1).enc` …). Best-effort: the sweep keeps the newest non-pending
+            // row of each stem and never touches pending or unrelated files.
+            aubupManager.sweepSupersededMediaStoreDuplicates()
         }.fold(
             onSuccess = { ListenableWorker.Result.success() },
             onFailure = { e ->

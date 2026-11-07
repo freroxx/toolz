@@ -23,7 +23,6 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.io.FileInputStream
-import java.io.FileOutputStream
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -36,6 +35,18 @@ data class WhisperAccessPayload(
     val credential: String, // Raw token or password
     @SerialName("display_name") val displayName: String? = null,
     @SerialName("created_at") val createdAt: Long = System.currentTimeMillis(),
+)
+
+/**
+ * One MediaStore row considered by the access-file duplicate sweep. Kept as a
+ * plain data class so [WhisperAubupManager.planSupersededAccessFileDeletions]
+ * stays a pure, unit-testable decision (no ContentResolver in tests).
+ */
+internal data class MediaStoreEncRow(
+    val id: Long,
+    val displayName: String,
+    val relativePath: String?,
+    val isPending: Boolean,
 )
 
 @Singleton
@@ -58,6 +69,57 @@ class WhisperAubupManager @Inject constructor(
         // V3-FIX (multi-account): stable filename prefix — kept identical to the old
         // scheme so previously-written access files still match the folder scanner.
         const val ACCESS_FILE_PREFIX = "whisper_access_"
+
+        // MediaStore stores RELATIVE_PATH with a trailing slash and the singular
+        // "Download" component, regardless of Environment.DIRECTORY_DOWNLOADS' value.
+        private val DOWNLOADS_TOOLZ_RELATIVE_PATH =
+            Environment.DIRECTORY_DOWNLOADS + "/Toolz/"
+        private const val MAX_DELETE_BATCH = 100
+        private val MEDIASTORE_DUPLICATE_SUFFIX = Regex("""\s*\(\d+\)$""")
+
+        /**
+         * Canonical identity of an access file for duplicate detection.
+         *
+         * MediaStore resolves a DISPLAY_NAME clash by writing `name (1).enc`,
+         * `name (2).enc`, ... Older builds inserted a fresh row on every save, so a
+         * single account could accumulate several such rows. Stripping the numeric
+         * suffix yields the logical file they all supersede. Case is preserved on
+         * purpose: two accounts whose display names differ only by case are distinct
+         * files, and deleting one would be data loss.
+         *
+         * Returns null for anything that is not a Whisper access file, so a sweep can
+         * never touch unrelated `.enc` files.
+         */
+        internal fun canonicalAccessFileStem(displayName: String): String? {
+            if (!displayName.endsWith(".enc", ignoreCase = true)) return null
+            if (!displayName.startsWith(ACCESS_FILE_PREFIX, ignoreCase = true)) return null
+            return displayName.dropLast(4).replace(MEDIASTORE_DUPLICATE_SUFFIX, "")
+        }
+
+        /**
+         * Picks the MediaStore row ids that are safe to delete: within each
+         * (relative path, canonical stem) group, the newest NON-PENDING row wins and
+         * older non-pending duplicates are removed. Pending rows are never returned
+         * (a write may still be in flight) and groups with a single row are left
+         * alone. Pure so the destructive decision is exhaustively unit-tested.
+         */
+        internal fun planSupersededAccessFileDeletions(
+            rows: List<MediaStoreEncRow>,
+        ): List<Long> = rows
+            .filterNot { it.isPending }
+            .mapNotNull { row ->
+                canonicalAccessFileStem(row.displayName)?.let { stem ->
+                    AccessFileKey(
+                        relativePath = row.relativePath.orEmpty().trimEnd('/'),
+                        stem = stem,
+                    ) to row
+                }
+            }
+            .groupBy({ it.first }, { it.second })
+            .values
+            .flatMap { group -> group.sortedByDescending { it.id }.drop(1).map { it.id } }
+
+        private data class AccessFileKey(val relativePath: String, val stem: String)
 
         /**
          * V6-R7 (#auto-detect): the Downloads scan reads PUBLIC storage via the File
@@ -162,28 +224,180 @@ class WhisperAubupManager @Inject constructor(
         }
     }
 
+    private fun legacyDownloadsFile(fileName: String): File {
+        @Suppress("DEPRECATION")
+        return File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Toolz/$fileName")
+    }
+
+    /**
+     * Deletes prior MediaStore rows for an exact (name, relative path) pair.
+     *
+     * The first implementation inserted a new row on every save. MediaStore resolves
+     * the DISPLAY_NAME clash by renaming the new entry to `name (1).enc`, so every
+     * re-save (account switch, credential change) silently accumulated stale
+     * ciphertext and [readViaMediaStore] could then read the OLD credential.
+     * Saving an access file is idempotent per display name, so the previous row is
+     * replaced instead of shadowed.
+     */
+    private fun deleteMediaStoreRows(resolver: android.content.ContentResolver, fileName: String, relativePath: String): Int {
+        val where = "${MediaStore.Downloads.DISPLAY_NAME} = ? AND ${MediaStore.Downloads.RELATIVE_PATH} = ?"
+        return runCatching {
+            resolver.delete(MediaStore.Downloads.EXTERNAL_CONTENT_URI, where, arrayOf(fileName, relativePath))
+        }.getOrDefault(0)
+    }
+
     private fun writeViaMediaStore(fileName: String, content: String): File? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+        val resolver = context.contentResolver
+        val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+        // RELATIVE_PATH as MediaStore stores it: "Download/Toolz/" (singular Download).
+        val relativePath = Environment.DIRECTORY_DOWNLOADS + "/Toolz/"
         return try {
-            val resolver = context.contentResolver
+            deleteMediaStoreRows(resolver, fileName, relativePath)
             val values = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, fileName)
                 put(MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
-                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/Toolz")
+                put(MediaStore.Downloads.RELATIVE_PATH, relativePath)
                 put(MediaStore.Downloads.IS_PENDING, 1)
             }
-            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return null
-            resolver.openOutputStream(uri)?.use { out ->
-                out.write(content.toByteArray(Charsets.UTF_8))
+            val uri = resolver.insert(collection, values) ?: return null
+            try {
+                val out = resolver.openOutputStream(uri) ?: error("No MediaStore output stream")
+                out.use { it.write(content.toByteArray(Charsets.UTF_8)) }
+                resolver.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
+                // Older builds accumulated `name (1).enc`, `name (2).enc` rows. This new
+                // row has the highest id, so the sweep keeps it and removes superseded
+                // siblings for the same stem. Best-effort: cleanup must never turn a
+                // successful save into a failure. Protect the just-written row id so a
+                // concurrent writer cannot make this call delete our own result.
+                runCatching {
+                    deleteSupersededAccessFileRows(
+                        resolver = resolver,
+                        relativePath = relativePath,
+                        protectedRowId = uri.lastPathSegment?.toLongOrNull(),
+                    )
+                }
+            } catch (t: Throwable) {
+                // A failed write must not leave an IS_PENDING=1 row: it is invisible
+                // to the user and to this scanner, yet occupies the name forever.
+                runCatching { resolver.delete(uri, null, null) }
+                throw t
             }
-            values.clear()
-            values.put(MediaStore.Downloads.IS_PENDING, 0)
-            resolver.update(uri, values, null, null)
-            // Return a File pointing to legacy path for caller convenience (even though MediaStore holds the truth)
+            // Return a File pointing to the legacy path for caller convenience (even though MediaStore holds the truth)
             // On Q+ the File API path may not be directly readable without permission, but we return it for UI toast
-            @Suppress("DEPRECATION")
-            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Toolz/$fileName")
+            legacyDownloadsFile(fileName)
         } catch (_: Exception) { null }
+    }
+
+    /**
+     * Removes pre-existing MediaStore access-file duplicates left by older builds.
+     *
+     * The current writer replaces the exact DISPLAY_NAME before inserting, but rows
+     * created before that fix survive as `name (1).enc`, `name (2).enc`, ... and keep
+     * consuming space (and can shadow a newer credential in external tooling). This
+     * sweep deletes only older NON-PENDING rows that have a newer sibling with the
+     * same canonical stem in the same folder; the newest non-pending row always wins.
+     * Pending rows and unrelated `.enc` files are never touched.
+     *
+     * Runs from [com.frerox.toolz.worker.WhisperLocalCleanupWorker] and after every
+     * successful save. Returns the number of rows deleted (best-effort).
+     */
+    suspend fun sweepSupersededMediaStoreDuplicates(): Int = withContext(Dispatchers.IO) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return@withContext 0
+        runCatching {
+            deleteSupersededAccessFileRows(context.contentResolver, DOWNLOADS_TOOLZ_RELATIVE_PATH)
+        }.getOrDefault(0)
+    }
+
+    private fun deleteSupersededAccessFileRows(
+        resolver: android.content.ContentResolver,
+        relativePath: String?,
+        protectedRowId: Long? = null,
+    ): Int {
+        val ids = planSupersededAccessFileDeletions(queryAccessFileRowsForSweep(resolver, relativePath))
+            .filterNot { it == protectedRowId }
+        if (ids.isEmpty()) return 0
+        var deleted = 0
+        for (chunk in ids.chunked(MAX_DELETE_BATCH)) {
+            val placeholders = chunk.joinToString(",") { "?" }
+            deleted += runCatching {
+                resolver.delete(
+                    MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                    "${MediaStore.Downloads._ID} IN ($placeholders)",
+                    chunk.map { it.toString() }.toTypedArray(),
+                )
+            }.getOrDefault(0)
+        }
+        return deleted
+    }
+
+    /**
+     * Reads MediaStore rows for the sweep. Any query failure returns an empty list
+     * rather than a partial one: an incomplete view must never drive deletions.
+     */
+    private fun queryAccessFileRowsForSweep(
+        resolver: android.content.ContentResolver,
+        relativePath: String?,
+    ): List<MediaStoreEncRow> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return emptyList()
+        val projection = arrayOf(
+            MediaStore.Downloads._ID,
+            MediaStore.Downloads.DISPLAY_NAME,
+            MediaStore.Downloads.RELATIVE_PATH,
+            MediaStore.Downloads.IS_PENDING,
+        )
+        val selection = if (relativePath != null) {
+            "${MediaStore.Downloads.DISPLAY_NAME} LIKE ? AND ${MediaStore.Downloads.RELATIVE_PATH} = ?"
+        } else {
+            "${MediaStore.Downloads.DISPLAY_NAME} LIKE ?"
+        }
+        val args = if (relativePath != null) {
+            arrayOf("$ACCESS_FILE_PREFIX%.enc", relativePath)
+        } else {
+            arrayOf("$ACCESS_FILE_PREFIX%.enc")
+        }
+        return runCatching {
+            val rows = mutableListOf<MediaStoreEncRow>()
+            resolver.query(
+                MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                projection,
+                selection,
+                args,
+                "${MediaStore.Downloads._ID} DESC",
+            )?.use { cursor ->
+                val idIdx = cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID)
+                val nameIdx = cursor.getColumnIndexOrThrow(MediaStore.Downloads.DISPLAY_NAME)
+                val pathIdx = cursor.getColumnIndexOrThrow(MediaStore.Downloads.RELATIVE_PATH)
+                val pendingIdx = cursor.getColumnIndexOrThrow(MediaStore.Downloads.IS_PENDING)
+                while (cursor.moveToNext()) {
+                    val name = cursor.getString(nameIdx) ?: continue
+                    // LIKE treats '_' as a wildcard and is case-insensitive, so the
+                    // exact prefix/extension decision is re-checked here before any
+                    // row can enter the deletion plan.
+                    if (canonicalAccessFileStem(name) == null) continue
+                    rows += MediaStoreEncRow(
+                        id = cursor.getLong(idIdx),
+                        displayName = name,
+                        relativePath = cursor.getString(pathIdx),
+                        isPending = cursor.getInt(pendingIdx) != 0,
+                    )
+                }
+            }
+            rows
+        }.getOrDefault(emptyList())
+    }
+
+    /** Atomic same-directory write: a process kill must not leave a truncated .enc mirror. */
+    private fun writeFileAtomically(target: File, bytes: ByteArray) {
+        val dir = target.parentFile ?: error("No parent directory")
+        if (!dir.exists()) dir.mkdirs()
+        val tmp = File.createTempFile("${target.name}.", ".part", dir)
+        try {
+            tmp.writeBytes(bytes)
+            if (!tmp.renameTo(target)) tmp.copyTo(target, overwrite = true)
+        } finally {
+            tmp.delete()
+        }
     }
 
     private fun queryMediaStoreForEncFiles(): List<File> {
@@ -284,6 +498,7 @@ class WhisperAubupManager @Inject constructor(
             }
 
             val fileName = "${ACCESS_FILE_PREFIX}${accessFileStem(displayName, username)}.enc"
+            val encryptedBytes = encryptedText.toByteArray(Charsets.UTF_8)
             // Try MediaStore public Downloads/Toolz first on Q+ (persistent across uninstall)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val mediaFile = writeViaMediaStore(fileName, encryptedText)
@@ -291,9 +506,7 @@ class WhisperAubupManager @Inject constructor(
                     // Also keep a copy in scoped for immediate scan fallback (best-effort, ignore failures)
                     try {
                         val scopedDir = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir, "Toolz")
-                        if (!scopedDir.exists()) scopedDir.mkdirs()
-                        val scopedFile = File(scopedDir, fileName)
-                        FileOutputStream(scopedFile).use { it.write(encryptedText.toByteArray(Charsets.UTF_8)) }
+                        writeFileAtomically(File(scopedDir, fileName), encryptedBytes)
                     } catch (_: Exception) {}
                     return@runCatching mediaFile
                 }
@@ -302,9 +515,7 @@ class WhisperAubupManager @Inject constructor(
             // P1 privacy: filenames no longer embed a hash of the raw username.
             // V3-FIX (multi-account): the visible stem is now the sanitized display name
             val targetFile = File(toolzDir, fileName)
-            FileOutputStream(targetFile).use { output ->
-                output.write(encryptedText.toByteArray(Charsets.UTF_8))
-            }
+            writeFileAtomically(targetFile, encryptedBytes)
             targetFile
         }
     }
@@ -478,9 +689,17 @@ class WhisperAubupManager @Inject constructor(
         return try {
             val resolver = context.contentResolver
             val projection = arrayOf(MediaStore.Downloads._ID)
-            val selection = "${MediaStore.Downloads.DISPLAY_NAME} = ?"
+            // Pending rows are partly-written and must never be read; newest row wins
+            // so a re-saved access file could not resolve to stale ciphertext.
+            val selection = "${MediaStore.Downloads.DISPLAY_NAME} = ? AND ${MediaStore.Downloads.IS_PENDING} = 0"
             val args = arrayOf(fileName)
-            resolver.query(MediaStore.Downloads.EXTERNAL_CONTENT_URI, projection, selection, args, null)?.use { cursor ->
+            resolver.query(
+                MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                projection,
+                selection,
+                args,
+                "${MediaStore.Downloads._ID} DESC",
+            )?.use { cursor ->
                 if (cursor.moveToFirst()) {
                     val idIdx = cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID)
                     val id = cursor.getLong(idIdx)

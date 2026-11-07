@@ -405,7 +405,10 @@ handshakes. Rotations of the static identity publish a rotation certificate,
 and every peer's policy engine consumes those certificates, so rotation is a
 content-verified event rather than a trust gesture. A process-local
 diagnostics buffer (last 60 protocol events, IDs and key material scrubbed)
-aids support diagnostics without logging secrets.
+aids support diagnostics without logging secrets. Release builds additionally
+never write a raw exception message: `WhisperErrorMapper` logs only the
+exception class, HTTP status and an error token with URLs, e-mails, JWTs,
+UUIDs and long hashes redacted (debug builds keep the full stack trace).
 
 ### 3.8 The self-leg: how you receive your own group messages
 
@@ -720,7 +723,11 @@ re-eligibility, wiped on sign-out): a permanently dead remote avatar (its
 hosted image was deleted) is remembered as failed instead of re-hitting the
 network on every re-render — the honest consequence is a silent
 rendered-initials fallback for at most ten minutes after a transient outage
-or reconnect.
+or reconnect. The sealed-bytes cache is bounded on both axes (32 entries /
+8 MB in memory, 64 entries / 16 MB on disk), all disk I/O runs on
+`Dispatchers.IO`, writes are atomic temp+rename, and the AES-open/bitmap-decode
+step runs on `Dispatchers.Default` so a cold avatar can never stall a frame.
+A `prime()` that races a sign-out is discarded instead of re-seeding the cache.
 
 ---
 
@@ -764,14 +771,27 @@ Local state is split across purpose-built stores, all read in full by the app
 
 | Store | Holds | Notably does NOT hold |
 |---|---|---|
-| Room (messages, local tombstones, outbox) | ciphertext-only messages (latest 500), delete-for-me tombstones, FIFO outbox (cap 100, 200-entry drop ledger) | plaintext before render; no key material |
+| Whisper Room (`toolz_whisper_db`, schema v1; split out of `toolz_db` in AppDatabase v69) | ciphertext-only messages (latest 500; conversation reads are served by the `(senderId, receiverId, sortEpoch)` index added in schema v68), delete-for-me tombstones, FIFO outbox (cap 100, 200-entry drop ledger), group/story caches and self-read copies | plaintext before render; no key material; the whole database is excluded from cloud backup and device transfer |
 | `whisper_sessions/` | one wrapped session snapshot per peer under `<sha256(accountId)>/`, plus read-only superseded sessions under `<sha256(accountId)>/alt/` | anything that cannot be Keystore-wrapped |
 | Self-read store (`whisper_self_read`, Room v66) | the user's OWN sent plaintext, sealed with the Keystore AES key as `SR1\|messageId\|plaintext`, keyed by `(ownerId, messageId)`, with a SHA-256 hash of the wire ciphertext for previews; capped at 1,500 rows per owner | peer-facing ciphertext; incoming messages; anything readable by another account |
 | Key trust store | pinned/verified fingerprints + rotation counters | private halves |
 | Mute/hidden-chats/delete-for-me/undo/preferences stores | UX state with expiries (24h eviction for delete-for-me, 30s undo window, hidden chat auto-return) | — |
 | Daily Ups seen store (`whisper_story_seen`) | opaque `storyId → expiresAtMs` pairs for device-local ring state, capped at 512, expired entries filtered on load and pruned on refresh/write | who viewed what; account id; media or keys |
-| Access-file backup (`WhisperAubupManager`) | credential-only payload (username, auth type, credential, display name) | session/ratchet state, key material — never |
+| Access-file backup (`WhisperAubupManager`) | credential-only payload (username, auth type, credential, display name); public Downloads via MediaStore is replaced idempotently per display name (no `name (1).enc` accretion), superseded pre-existing duplicates are swept on save and daily, atomic scoped mirror | session/ratchet state, key material — never |
 | Sealed image disk caches | encrypted containers keyed by URL hash, generation-guarded | plaintext pixels |
+
+**Backup boundary.** Android Auto Backup is file-level, so Whisper tables were
+moved out of `toolz_db` into the dedicated SQLCipher database
+`toolz_whisper_db` (`WhisperDatabase`). That file (and its `-wal`/`-shm`) is
+explicitly excluded in `backup_rules.xml` and in both the cloud-backup and
+device-transfer sections of `data_extraction_rules.xml`; the rest of
+`toolz_db` stays backed up for PurgeShot/notes/etc. Upgrading installs are
+handled once by `WhisperLegacyImporter`: it copies every row into the new
+database in one committed transaction, then deletes the legacy rows with
+`PRAGMA secure_delete = ON`, drops the now-unmanaged legacy tables and
+best-effort checkpoints/VACUUMs `toolz_db` so freed pages cannot carry old
+metadata into a backup. The importer is idempotent and retries on the next
+launch if anything fails, so no history is lost.
 
 A scoping note on that table, because the row titles hide it. Whisper state is
 split by *what it is*, not uniformly by account. Room message rows are filtered

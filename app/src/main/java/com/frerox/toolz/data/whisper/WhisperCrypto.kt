@@ -426,7 +426,7 @@ class WhisperCrypto @Inject constructor(
      *  - V6-R6 detector: any change of the ACTIVE public key between process starts
      *    is logged loudly (identity churn forensics in diagnostics exports).
      */
-    fun runStartupHealthChecks() {
+    suspend fun runStartupHealthChecks() {
         // P7a: surface retirement readiness in diagnostics exports — when this fires
         // (and counters are ~0), the next release may flip LEGACY_AAD_FALLBACK_ENABLED.
         if (LEGACY_AAD_FALLBACK_ENABLED && legacyFallbackRetireAllowed()) {
@@ -440,7 +440,9 @@ class WhisperCrypto @Inject constructor(
                 if (selfTestRoundTrip()) { ok = true; break }
                 android.util.Log.e(TAG_CRYPTO, "Keystore self-test FAILED (attempt $attempt/3)")
                 ProtocolDiagnostics.increment("keypair.canaryFailed")
-                Thread.sleep(150L * attempt)
+                // Suspend, not Thread.sleep: this runs on the shared app scope and a
+                // blocking sleep would pin one of its Default dispatcher threads.
+                kotlinx.coroutines.delay(150L * attempt)
             }
             if (!ok) {
                 // Degraded-but-stable: keep the identity. Never implicit reset.
