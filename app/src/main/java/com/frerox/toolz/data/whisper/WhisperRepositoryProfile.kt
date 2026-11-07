@@ -77,7 +77,7 @@ suspend fun WhisperRepository.getMyProfile(forceRefresh: Boolean = false): Resul
                 existing.displayName.isNullOrBlank()
 
             val cleanUsername = if (isUglyHexUsername) {
-                android.util.Log.i("WhisperRepo", "Self-healing raw-token username for ${currentId.take(8)}…: renaming to anon_${existing.username.take(6)}")
+                android.util.Log.i("WhisperRepo", "Self-healing raw-token username to an anonymous handle")
                 "anon_${existing.username.take(6)}"
             } else null
             

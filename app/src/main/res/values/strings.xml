@@ -420,7 +420,9 @@
 
     <string name="st_Whisper_Notif_OpenToRead">Open Whisper to read it</string>
 
+    <string name="st_Whisper_Notification_SummaryTitle">Whisper</string>
     <string name="st_Whisper_Notif_SummaryText">New encrypted messages</string>
+    <string name="st_Whisper_Groups_FallbackName">Group</string>
 
     <string name="st_Whisper_Notif_FriendRequest">New friend request</string>
 
@@ -3572,6 +3574,7 @@
     <string name="st_Whisper_Aubup_Continue">Continue to Whisper</string>
     <string name="st_Whisper_Aubup_AccountLabel">Account:</string>
     <string name="st_Whisper_CredentialCopied">Credential copied</string>
+    <string name="st_Whisper_Clipboard_Unavailable">Couldn\'t copy — clipboard is unavailable</string>
         <string name="st_Whisper_AuthType_Token">Token</string>
     <string name="st_Whisper_AuthType_Password">Password</string>
     <string name="st_Whisper_SomeoneDefault">Someone</string>

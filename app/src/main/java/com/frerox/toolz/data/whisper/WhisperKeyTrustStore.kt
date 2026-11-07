@@ -84,7 +84,7 @@ class WhisperKeyTrustStore @Inject constructor(
             val ok = prefs.edit()
                 .putLong("rotation_counter_$userId", counter)
                 .commit()
-            if (!ok) Log.w(TAG, "rememberRotationCounter commit failed for $userId")
+            if (!ok) Log.w(TAG, "rememberRotationCounter commit failed")
         }
     }
 
@@ -98,7 +98,7 @@ class WhisperKeyTrustStore @Inject constructor(
                 .putString("known_$userId", publicKey)
                 .putLong("known_ts_$userId", now)
                 .commit()
-            if (!ok) Log.w(TAG, "rememberKey commit failed for $userId")
+            if (!ok) Log.w(TAG, "rememberKey commit failed")
         }
     }
 
@@ -112,7 +112,7 @@ class WhisperKeyTrustStore @Inject constructor(
                 .putString("verified_$userId", publicKey)
                 .putLong("known_ts_$userId", now)
                 .commit()
-            if (!ok) Log.w(TAG, "markVerified commit failed for $userId")
+            if (!ok) Log.w(TAG, "markVerified commit failed")
         }
     }
 
@@ -124,7 +124,7 @@ class WhisperKeyTrustStore @Inject constructor(
         // V2-FIX (reviewwhisper.md): commit result checked, failure logged once.
         withContext(Dispatchers.IO) {
             val ok = prefs.edit().remove("known_$userId").remove("verified_$userId").remove("known_ts_$userId").remove("rotation_counter_$userId").commit()
-            if (!ok) Log.w(TAG, "forgetUser commit failed for $userId")
+            if (!ok) Log.w(TAG, "forgetUser commit failed")
         }
     }
 

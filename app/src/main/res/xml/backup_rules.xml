@@ -12,5 +12,26 @@
     <include domain="database" path="toolz_db-shm" />
     <include domain="sharedpref" path="." />
     <include domain="file" path="datastore/settings.preferences_pb" />
+    <!-- Whisper account material is Keystore-bound or device-local. It must never
+         travel through cloud backup / device transfer: a restore onto another
+         device cannot decrypt it and would only leak conversation metadata. -->
+    <exclude domain="sharedpref" path="whisper_auth_session.xml" />
+    <exclude domain="sharedpref" path="whisper_crypto_state.xml" />
+    <exclude domain="sharedpref" path="whisper_deleted_msgs.xml" />
+    <exclude domain="sharedpref" path="whisper_group_notif.xml" />
+    <exclude domain="sharedpref" path="whisper_group_read.xml" />
+    <exclude domain="sharedpref" path="whisper_hidden_chats.xml" />
+    <exclude domain="sharedpref" path="whisper_key_rotation.xml" />
+    <exclude domain="sharedpref" path="whisper_key_trust.xml" />
+    <exclude domain="sharedpref" path="whisper_key_trust_enc.xml" />
+    <exclude domain="sharedpref" path="whisper_mute_prefs.xml" />
+    <exclude domain="sharedpref" path="whisper_notif_ids.xml" />
+    <exclude domain="sharedpref" path="whisper_outbox.xml" />
+    <exclude domain="sharedpref" path="whisper_protocol_state.xml" />
+    <exclude domain="sharedpref" path="whisper_push_pending.xml" />
+    <exclude domain="sharedpref" path="whisper_self_leg.xml" />
+    <exclude domain="sharedpref" path="whisper_story_seen.xml" />
+    <exclude domain="sharedpref" path="whisper_undo_buffer.xml" />
+    <exclude domain="file" path="whisper_sessions" />
     <!-- External mirror Documents/Toolz/.purgeshot_queue.json survives clear-data independently (not in backup, persisted via MediaStore) -->
 </full-backup-content>

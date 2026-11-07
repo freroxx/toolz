@@ -143,7 +143,12 @@ class WhisperClipboardClearWorker @AssistedInject constructor(
             val clipboard = context.getSystemService(ClipboardManager::class.java) ?: return@withContext
             val currentClip = clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString()
             if (currentClip == token) {
-                clipboard.setPrimaryClip(ClipData.newPlainText(null, restoreTo ?: ""))
+                // Empty restore means "clear", not "leave an empty clip in history".
+                if (restoreTo.isNullOrEmpty()) {
+                    clipboard.clearPrimaryClip()
+                } else {
+                    clipboard.setPrimaryClip(ClipData.newPlainText(null, restoreTo))
+                }
             }
         }
         return ListenableWorker.Result.success()

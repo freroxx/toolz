@@ -70,6 +70,27 @@ class WhisperPrekeyManager @Inject constructor(
      */
     fun publishedSignerCert(): String? = prefs.getString(KEY_PUBLISHED_SIGNER, null)
 
+    /**
+     * Account-deletion wipe: destroys the software X25519 identity seed, every
+     * persisted SPK/OPK private half, the published-signer anchor and the
+     * rotation counter. Without this a new account on the same install would
+     * inherit the deleted identity's protocol state and could complete
+     * handshakes addressed to the old account.
+     */
+    @Synchronized
+    internal fun clear() {
+        cachedIdentitySeed?.fill(0)
+        cachedIdentitySeed = null
+        cachedIdentityPublicB64 = null
+        privateKeysWrapped.clear()
+        currentSpkKid = null
+        lastPublishedAtMs = 0L
+        lastPublishOk = null
+        lastPublishAttemptAtMs = 0L
+        synchronized(opkOrder) { opkOrder = emptyList() }
+        prefs.edit().clear().apply()
+    }
+
     // V6-R3 FIX (field report "must rotate keys on both devices after restart"):
     // this map used to be RAM-ONLY — every process death lost every SPK/OPK private
     // half, so peers holding an earlier bundle could never complete handshakes (and a

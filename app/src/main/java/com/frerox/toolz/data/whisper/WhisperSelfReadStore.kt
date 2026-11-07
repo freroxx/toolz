@@ -169,7 +169,7 @@ class WhisperSelfReadStore @Inject constructor(
                 )
                 dao.prune(ownerId, MAX_PER_OWNER)
             }.onFailure {
-                Log.w(TAG, "self-read copy skipped for ${messageId.take(8)}… (${it.javaClass.simpleName})")
+                Log.w(TAG, "self-read copy skipped (${it.javaClass.simpleName})")
             }
         }
     }

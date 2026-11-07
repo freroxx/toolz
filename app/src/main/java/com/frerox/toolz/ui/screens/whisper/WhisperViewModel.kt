@@ -50,6 +50,10 @@ class WhisperViewModel @Inject constructor(
     private val aubupManager: WhisperAubupManager,
     private val prekeyManager: com.frerox.toolz.data.whisper.WhisperPrekeyManager,
     private val keyRotationStore: WhisperKeyRotationStore,
+    // Persisted delete-undo rows are ciphertext from THIS account only; leaving
+    // them across sign-out lets the next account resume a countdown it never
+    // started.
+    private val undoBufferStore: WhisperUndoBufferStore,
     private val offlineManager: com.frerox.toolz.util.OfflineManager,
     private val pushTokenStore: com.frerox.toolz.push.WhisperPushTargetStore,
     private val pushRegistrar: com.frerox.toolz.push.WhisperPushRegistrar,
@@ -730,18 +734,20 @@ class WhisperViewModel @Inject constructor(
             return
         }
         viewModelScope.launch {
-            // Delete server push target before the account is deleted
+            // Do NOT delete the push target before the server confirms deletion: a
+            // failed delete would otherwise silently disable notifications for an
+            // account that still exists. The callback below runs with the session
+            // still valid, so the RLS-scoped delete works there.
             val currentUserId = authManager.currentUserId
-            if (!currentUserId.isNullOrBlank()) {
-                runCatching { pushTokenStore.clear(currentUserId) }
-            }
-            authManager.deleteAccount(password)
-                .onSuccess {
-                    // Permanently wipe every local trace of the account after the server
-                    // side confirmed deletion.
-                    repository.clearAllLocalData()
-                    onComplete()
+            authManager.deleteAccount(password) {
+                if (!currentUserId.isNullOrBlank()) {
+                    runCatching { pushTokenStore.clear(currentUserId) }
                 }
+                // Permanently wipe every local trace while the session can still
+                // resolve the profile/avatar being removed.
+                repository.clearAllLocalData()
+            }
+                .onSuccess { onComplete() }
                 .onFailure { handleError(it, "deleteAccount") }
         }
     }
@@ -883,6 +889,7 @@ class WhisperViewModel @Inject constructor(
             repository.clearSessionScopedCaches()
             hiddenChatsStore.clearAll()
             runCatching { mutePrefs.clearAll() }
+            runCatching { undoBufferStore.clear() }
             droppedNotifiedClientIds.clear()
             _uiState.update { WhisperUiState() }
             onComplete()

@@ -49,11 +49,9 @@ import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -72,6 +70,7 @@ import com.frerox.toolz.data.whisper.WhisperAuthState
 import com.frerox.toolz.data.whisper.asString
 import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.toolzBackground
+import com.frerox.toolz.util.SensitiveClipboard
 
 /**
  * Whisper authentication screen — Material 3 Expressive.
@@ -97,7 +96,6 @@ fun WhisperAuthScreen(
     val usernameAvailability by viewModel.usernameAvailability.collectAsStateWithLifecycle()
     val screenshotBypassEnabled by viewModel.screenshotBypassEnabled.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val clipboard = LocalClipboardManager.current
     val toastState = rememberWhisperToastState()
     val haptic = rememberToolzHapticFeedback()
     val scope = rememberCoroutineScope()
@@ -285,7 +283,10 @@ fun WhisperAuthScreen(
                     },
                     onCopyToken = { token, restoreTo ->
                         val systemClipboard = context.getSystemService(android.content.ClipboardManager::class.java)
-                        viewModel.scheduleTokenClipboardExpiry(token, restoreTo, systemClipboard)
+                        // Schedule the durable clear BEFORE the secret reaches the
+                        // clipboard: if encryption/scheduling fails, nothing is copied.
+                        val scheduled = viewModel.scheduleTokenClipboardExpiry(token, restoreTo, systemClipboard)
+                        scheduled && SensitiveClipboard.copy(context, token)
                     },
                     modifier = Modifier.padding(paddingValues),
                 )
@@ -334,11 +335,17 @@ fun WhisperAuthScreen(
             WhisperCredentialRevealedDialog(
                 restored = restoredCredentials!!,
                 onCopyCredential = { credential ->
-                    val previousClip = clipboard.getText()?.text
-                    clipboard.setText(AnnotatedString(credential))
+                    val previousClip = SensitiveClipboard.readText(context)
                     val systemClipboard = context.getSystemService(android.content.ClipboardManager::class.java)
-                    viewModel.scheduleTokenClipboardExpiry(credential, previousClip, systemClipboard)
-                    toastState.show(context.getString(R.string.st_Whisper_CredentialCopied), WhisperToastType.INFO)
+                    val scheduled = viewModel.scheduleTokenClipboardExpiry(credential, previousClip, systemClipboard)
+                    val copied = scheduled && SensitiveClipboard.copy(context, credential)
+                    toastState.show(
+                        context.getString(
+                            if (copied) R.string.st_Whisper_CredentialCopied
+                            else R.string.st_Whisper_Clipboard_Unavailable,
+                        ),
+                        if (copied) WhisperToastType.INFO else WhisperToastType.ERROR,
+                    )
                 },
                 onDismiss = {
                     restoredCredentials = null
@@ -379,7 +386,7 @@ private fun WhisperAuthContent(
     onLoginToken: (String) -> Unit,
     onNormalizeToken: (String) -> String,
     onLostAccountClick: () -> Unit,
-    onCopyToken: (token: String, restoreTo: String?) -> Unit,
+    onCopyToken: (token: String, restoreTo: String?) -> Boolean,
     modifier: Modifier = Modifier,
 ) {
     // 0 = Username, 1 = Token
@@ -892,7 +899,7 @@ private fun TokenAuthSection(
     onRegister: (displayName: String) -> Unit,
     onLogin: (String) -> Unit,
     onNormalizeToken: (String) -> String,
-    onCopyToken: (token: String, restoreTo: String?) -> Unit,
+    onCopyToken: (token: String, restoreTo: String?) -> Boolean,
 ) {
     // V2-FIX AU-M3: mode toggle and field values are hoisted — AnimatedContent only
     // animates between layouts and no longer owns any text state.
@@ -981,7 +988,7 @@ private fun TokenLoginForm(
     onNormalizeToken: (String) -> String,
 ) {
     // V2-FIX AU-M2/AU-M3: tokenInput is hoisted (rememberSaveable in WhisperAuthContent).
-    val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
     val haptic = rememberToolzHapticFeedback()
 
     val cleanRaw = tokenInput.trim()
@@ -998,7 +1005,7 @@ private fun TokenLoginForm(
             trailingIcon = {
                 ToolzExpressiveIconButton(onClick = {
                     haptic.click()
-                    clipboard.getText()?.text?.let { if (it.length <= 80) onTokenInputChange(it) }
+                    SensitiveClipboard.readText(context)?.let { if (it.length <= 80) onTokenInputChange(it) }
                 }) { Icon(Icons.Rounded.ContentPaste, stringResource(R.string.cd_Paste)) }
             },
             isError = hasInvalidChars,
@@ -1040,12 +1047,11 @@ private fun TokenRegisterForm(
     onDisplayNameChange: (String) -> Unit,
     onGenerate: () -> Unit,
     onRegister: (displayName: String) -> Unit,
-    onCopyToken: (token: String, restoreTo: String?) -> Unit,
+    onCopyToken: (token: String, restoreTo: String?) -> Boolean,
 ) {
     var isCopied by remember { mutableStateOf(false) }
     var hasSavedToken by remember { mutableStateOf(false) }
     var revealToken by remember { mutableStateOf(false) }
-    val clipboard = LocalClipboardManager.current
     val haptic = rememberToolzHapticFeedback()
     val nameFocusRequester = remember { FocusRequester() }
     val context = LocalContext.current
@@ -1071,15 +1077,23 @@ private fun TokenRegisterForm(
     // survives rotation and navigation (the old rememberCoroutineScope died with the
     // composable and could leak a live token).
     fun copyTokenWithExpiry(token: String) {
-        val previous = clipboard.getText()?.text
-        clipboard.setText(AnnotatedString(token))
+        val previous = SensitiveClipboard.readText(context)
+        // The callback schedules the durable clear and copies atomically. A false
+        // result means nothing reached the clipboard, so the UI must not claim it did.
+        val copied = onCopyToken(token, previous)
+        if (!copied) {
+            toastState.show(
+                context.getString(R.string.st_Whisper_Clipboard_Unavailable),
+                WhisperToastType.ERROR,
+            )
+            return
+        }
         isCopied = true
         hasSavedToken = true
         toastState.show(
             context.getString(R.string.st_Whisper_Auth_CopyExpiry),
             WhisperToastType.INFO
         )
-        onCopyToken(token, previous)
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {

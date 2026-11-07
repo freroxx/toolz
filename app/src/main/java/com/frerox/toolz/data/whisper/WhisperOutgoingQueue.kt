@@ -82,7 +82,7 @@ class WhisperOutgoingQueue @Inject constructor(
         }.onFailure {
             // A failed local write mirrors the old commit-failure contract: surface
             // the loss instead of silently pretending the message is queued.
-            Log.w(TAG, "Outbox write failed; entry marked dropped: ${entry.clientId}")
+            Log.w(TAG, "Outbox write failed; entry marked dropped")
             noteDroppedInternal(entry.clientId)
         }
     }

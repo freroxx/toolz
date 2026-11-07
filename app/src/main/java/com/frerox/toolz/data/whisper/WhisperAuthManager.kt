@@ -78,7 +78,19 @@ class WhisperAuthManager @Inject constructor(
     @Volatile var pendingLegacyMigration: LegacyTokenLogin.MigrationNeeded? = null
         private set
 
-    suspend fun deleteAccount(password: String? = null): Result<Unit> = runCatching {
+    /**
+     * Deletes the signed-in account.
+     *
+     * [wipeLocalData] runs AFTER the edge function confirms deletion and BEFORE
+     * the session is signed out. That ordering is deliberate: the local wipe
+     * still has a valid `auth.uid()` (remote avatar cleanup, push-target row,
+     * profile lookup) and a failed wipe can never leave the app half-signed-out
+     * on a deleted identity.
+     */
+    suspend fun deleteAccount(
+        password: String? = null,
+        wipeLocalData: suspend () -> Unit = {},
+    ): Result<Unit> = runCatching {
         val user = supabase.auth.currentUserOrNull() ?: error("Not authenticated")
         val email = user.email ?: error("No account associated")
         val isTokenUser = email.endsWith("@whisper.toolz.app")
@@ -90,6 +102,10 @@ class WhisperAuthManager @Inject constructor(
                 this.email = email
                 this.password = password
             }
+        } else {
+            // The edge requires a JWT issued within 5 minutes. Token accounts have
+            // no password grant to refresh that, so rotate the session explicitly.
+            runCatching { supabase.auth.refreshCurrentSession() }
         }
 
         // Ask the edge function (service role, JWT-verified) to permanently delete the
@@ -134,6 +150,13 @@ class WhisperAuthManager @Inject constructor(
         //
         // FK-cascaded tables (whisper_upload_quota, whisper_deleted_tombstones,
         // whisper_discover_quota) clean themselves automatically.
+
+        // Wipe while the session is still valid. A local-wipe failure must not
+        // resurrect the account or strand the UI on a deleted identity, so it is
+        // logged and sign-out still proceeds.
+        runCatching { wipeLocalData() }.onFailure {
+            android.util.Log.e(TAG_AUTH, "Local wipe after account deletion failed", it)
+        }
 
         // Sign out
         supabase.auth.signOut()
@@ -487,6 +510,7 @@ class WhisperAuthManager @Inject constructor(
     private fun ByteArray.toHexString(): String = joinToString("") { "%02x".format(it) }
 
     private companion object {
+        const val TAG_AUTH = "WhisperAuth"
         const val MIN_PASSWORD_LENGTH = 10
         // 20261005-P2: pacing between legacy-derivation probes — one 500ms beat
         // per extra GoTrue attempt keeps the 3-candidate legacy pass from

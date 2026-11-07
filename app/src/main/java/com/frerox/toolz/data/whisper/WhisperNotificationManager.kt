@@ -257,7 +257,7 @@ class WhisperNotificationManager @Inject constructor(
         // be silenced independently of the per-message notifications.
         val summaryNotification = NotificationCompat.Builder(context, SUMMARY_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_whisper_notif).setColor(com.frerox.toolz.util.NotificationHelper.ACCENT_COLOR).setLargeIcon(com.frerox.toolz.util.NotificationHelper.toolzLargeIcon(context))
-            .setContentTitle("Whisper")
+            .setContentTitle(context.getString(R.string.st_Whisper_Notification_SummaryTitle))
             .setContentText(context.getString(R.string.st_Whisper_Notif_SummaryText))
             .setGroup(GROUP_KEY)
             .setGroupSummary(true)
@@ -321,6 +321,29 @@ class WhisperNotificationManager @Inject constructor(
             Log.e(TAG, "Notification permission not granted: ${e.message}")
         } catch (e: Exception) {
             Log.e(TAG, "Error posting notification", e)
+        }
+    }
+
+    /**
+     * Account-deletion wipe: dismiss every Whisper notification, forget the
+     * per-sender id allocation and drop both dedupe maps. A following account
+     * must never inherit notification ids or suppression windows from the
+     * deleted identity.
+     */
+    fun clearAllWhisperNotifications() {
+        runCatching {
+            notifManager.activeNotifications
+                .filter { it.id == SUMMARY_NOTIF_ID || it.notification.group == GROUP_KEY }
+                .forEach { notifManager.cancel(it.id) }
+            notifManager.cancel(SUMMARY_NOTIF_ID)
+        }
+        recentlyNotifiedMessageIds.clear()
+        lastBlankNotifyAt.clear()
+        recentlyNotifiedFriendRequests.clear()
+        synchronized(senderNotifIds) {
+            senderNotifIds.clear()
+            nextMessageId = FIRST_MESSAGE_NOTIF_ID
+            idPrefs.edit().clear().apply()
         }
     }
 

@@ -104,8 +104,6 @@ internal fun ProfileTab(
     val haptic = rememberToolzHapticFeedback()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
-
     val initialDisplayName = profile.displayName ?: ""
     val initialBio = profile.bio ?: ""
     val initialIsPrivate = profile.isPrivate
@@ -327,7 +325,7 @@ internal fun ProfileTab(
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 modifier = Modifier.clickable {
                     haptic.click()
-                    clipboardManager.setText(androidx.compose.ui.text.AnnotatedString("@${profile.effectiveUsername}"))
+                    com.frerox.toolz.util.SensitiveClipboard.copy(context, "@${profile.effectiveUsername}")
                     // V2-FIX M-M8: copy now confirms with haptic (click above) + toast.
                     toastState.show(credentialCopiedMsg, WhisperToastType.SUCCESS)
                 }
@@ -596,7 +594,7 @@ internal fun ProfileTab(
                             )
                             ToolzExpressiveIconButton(onClick = {
                                 haptic.click()
-                                clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(myFingerprint))
+                                com.frerox.toolz.util.SensitiveClipboard.copy(context, myFingerprint)
                                 // V2-FIX M-M8: copy now confirms with haptic (click above) + toast.
                                 toastState.show(credentialCopiedMsg, WhisperToastType.SUCCESS)
                             }) {
@@ -655,14 +653,13 @@ internal fun ProfileTab(
                                 onDismiss = { showProtocolDiagnostics = false },
                                 onCopy = {
                                     haptic.click()
-                                    clipboardManager.setText(
-                                        androidx.compose.ui.text.AnnotatedString(
-                                            buildString {
-                                                com.frerox.toolz.data.whisper.ProtocolDiagnostics.counters.forEach { (k, v) -> appendLine("$k: $v") }
-                                                appendLine()
-                                                com.frerox.toolz.data.whisper.ProtocolDiagnostics.snapshot().forEach { appendLine(it) }
-                                            },
-                                        ),
+                                    com.frerox.toolz.util.SensitiveClipboard.copy(
+                                        context,
+                                        buildString {
+                                            com.frerox.toolz.data.whisper.ProtocolDiagnostics.counters.forEach { (k, v) -> appendLine("$k: $v") }
+                                            appendLine()
+                                            com.frerox.toolz.data.whisper.ProtocolDiagnostics.snapshot().forEach { appendLine(it) }
+                                        },
                                     )
                                     toastState.show(context.getString(R.string.st_Whisper_Diag_Copied), WhisperToastType.SUCCESS)
                                 },

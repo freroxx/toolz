@@ -794,7 +794,11 @@ common "send while online" path in one step.
 Postgres-changes lanes are per chat (`chatpg_<sortedPair>`), plus an inbox
 broadcast lane per user, a per-pair broadcast lane, typing and presence lanes.
 Channels are cached, health-watched, and resubscribed with a backoff ladder;
-an event dedupe window (30 s, max 1024 IDs) neutralizes replays. The realtime
+the app-scoped notification monitor adds a per-lane exponential reconnect
+policy (3 s → 6 s → 12 s → 24 s → 48 s, ≤1 s jitter, 60 s hard cap) so a
+revoked session or backend outage no longer retries every 3 seconds forever,
+and one unhealthy lane (messages vs. friend requests) can no longer cancel
+its sibling. An event dedupe window (30 s, max 1024 IDs) neutralizes replays. The realtime
 channel's last-seen pings map presence to online (≤2 min), recent (≤1 h), and
 offline. The per-user inbox lane scopes itself to the owner's rows via RLS
 plus single-column filters, and deliberately does not consume its message
@@ -828,10 +832,18 @@ documented trade-off of token-style identities.
 
 Support features: restore from the Toolz password vault or an encrypted
 access file plus whisper code; automatic clipboard expiry for displayed
-tokens; username availability checks; signed-out and full-wipe account
-deletion (re-auth for password accounts, edge deletion with a password
-header and a 5-minute confirmation timestamp, then local wipe of sessions,
-Room, trust store, outbox, avatar caches, and push registration).
+tokens (copied as `EXTRA_IS_SENSITIVE`, and the durable clear is scheduled
+*before* the copy so a Keystore/WorkManager failure copies nothing);
+username availability checks; signed-out and full-wipe account deletion.
+Deletion asks the edge function to remove the GoTrue user, proving possession
+with a password grant for password accounts and with a fresh JWT plus a
+mandatory 5-minute confirmation timestamp for token accounts (they have no
+password by construction). The local wipe runs **after** the server confirms
+and **before** sign-out, while `auth.uid()` can still clear the avatar, push
+target and profile. It now covers sessions, Room, the trust store, outbox,
+key-rotation bookkeeping, the undo buffer, group read/notification state,
+prekey/protocol state, self-leg group keys, the hardware signing key,
+notifications and any pending clipboard clear.
 
 **Sign-out is not a wipe, and that difference matters.** Deleting an account
 runs `clearAllLocalData()` — everything above, including the ratchet session

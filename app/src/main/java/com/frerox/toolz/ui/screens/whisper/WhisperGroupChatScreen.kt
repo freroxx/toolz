@@ -42,10 +42,8 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -88,7 +86,6 @@ fun WhisperGroupChatScreen(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val clipboard = LocalClipboardManager.current
     val haptic = rememberToolzHapticFeedback()
     val snackbar = remember { SnackbarHostState() }
 
@@ -447,7 +444,7 @@ fun WhisperGroupChatScreen(
             onReply = { replyTarget = msg },
             onCopy = {
                 if (canCopy) {
-                    clipboard.setText(AnnotatedString(msg.body))
+                    com.frerox.toolz.util.SensitiveClipboard.copy(context, msg.body)
                     scope.launch { snackbar.showGroupNotice(context.getString(R.string.st_Whisper_Groups_Copied)) }
                 }
             },

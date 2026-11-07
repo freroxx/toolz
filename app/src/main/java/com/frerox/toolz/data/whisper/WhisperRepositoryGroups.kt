@@ -1163,7 +1163,7 @@ suspend fun WhisperRepository.syncGroups(): Result<List<WhisperGroupMembership>>
                                 groupDao.clearEvents(row.groupId)
                             }
                         }
-                        android.util.Log.w("WhisperGroups", "syncGroups: skipping ${row.groupId}: ${it.message}")
+                        android.util.Log.w("WhisperGroups", "syncGroups: skipping one group: ${it.message}")
                     }
             }
         }.awaitAll()
@@ -2556,7 +2556,7 @@ suspend fun WhisperRepository.setGroupPicture(
         ),
     )
     deliveryScheduler.scheduleNow()
-    android.util.Log.w("WhisperGroups", "setGroupPicture queued for $groupId: ${published.exceptionOrNull()?.message}")
+    android.util.Log.w("WhisperGroups", "setGroupPicture queued: ${published.exceptionOrNull()?.message}")
     error("group_send_queued")
 }
 
@@ -2661,7 +2661,7 @@ suspend fun WhisperRepository.flushGroupOutbox(): Int {
         var delivered = 0
         outgoingQueue.entries().filter { it.senderId == myId && it.groupId != null }.forEach { queued ->
             if (queued.attempts >= 8) {
-                android.util.Log.w("WhisperGroups", "Dropping undeliverable queued group row after ${queued.attempts} attempts (clientId=${queued.clientId})")
+                android.util.Log.w("WhisperGroups", "Dropping undeliverable queued group row after ${queued.attempts} attempts")
                 outgoingQueue.remove(queued.clientId)
                 outgoingQueue.noteDropped(queued.clientId)
                 return@forEach

@@ -11,7 +11,9 @@ import androidx.work.CoroutineWorker
 import androidx.work.ListenableWorker
 import androidx.work.WorkerParameters
 import com.frerox.toolz.data.whisper.WhisperDeletedMessagesStore
+import com.frerox.toolz.data.whisper.WhisperSelfLegCrypto
 import com.frerox.toolz.data.whisper.WhisperStoryLocalDao
+import com.frerox.toolz.data.whisper.WhisperStorySeenStore
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 
@@ -22,6 +24,8 @@ class WhisperLocalCleanupWorker @AssistedInject constructor(
     @Assisted workerParams: WorkerParameters,
     private val deletedMessagesStore: WhisperDeletedMessagesStore,
     private val storyDao: WhisperStoryLocalDao,
+    private val storySeenStore: WhisperStorySeenStore,
+    private val selfLegCrypto: WhisperSelfLegCrypto,
 ) : CoroutineWorker(context, workerParams) {
     companion object {
         private const val TAG = "WhisperCleanup"
@@ -31,8 +35,15 @@ class WhisperLocalCleanupWorker @AssistedInject constructor(
         // V2-FIX L-?: the body is wrapped so a failure is always LOGGED (observability) —
         // the old bare failure() gave zero signal about recurring local-cleanup breakage.
         runCatching {
+            val now = System.currentTimeMillis()
             deletedMessagesStore.evictOldest()
-            storyDao.deleteDue(System.currentTimeMillis(), limit = 100)
+            storyDao.deleteDue(now, limit = 100)
+            // Both stores grow with feature use, not by explicit user choice:
+            // expired Daily Ups seen markers and one wrapped key per hidden-group
+            // self frame. Keep them bounded even if the user never opens those
+            // surfaces again.
+            storySeenStore.prune(now)
+            selfLegCrypto.pruneAllUsers()
         }.fold(
             onSuccess = { ListenableWorker.Result.success() },
             onFailure = { e ->

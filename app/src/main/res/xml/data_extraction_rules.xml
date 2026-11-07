@@ -9,11 +9,48 @@
         <include domain="database" path="toolz_db" />
         <include domain="sharedpref" path="." />
         <include domain="file" path="datastore/" />
+        <!-- Whisper account material is Keystore-bound and device-local. -->
+        <exclude domain="sharedpref" path="whisper_auth_session.xml" />
+        <exclude domain="sharedpref" path="whisper_crypto_state.xml" />
+        <exclude domain="sharedpref" path="whisper_deleted_msgs.xml" />
+        <exclude domain="sharedpref" path="whisper_group_notif.xml" />
+        <exclude domain="sharedpref" path="whisper_group_read.xml" />
+        <exclude domain="sharedpref" path="whisper_hidden_chats.xml" />
+        <exclude domain="sharedpref" path="whisper_key_rotation.xml" />
+        <exclude domain="sharedpref" path="whisper_key_trust.xml" />
+        <exclude domain="sharedpref" path="whisper_key_trust_enc.xml" />
+        <exclude domain="sharedpref" path="whisper_mute_prefs.xml" />
+        <exclude domain="sharedpref" path="whisper_notif_ids.xml" />
+        <exclude domain="sharedpref" path="whisper_outbox.xml" />
+        <exclude domain="sharedpref" path="whisper_protocol_state.xml" />
+        <exclude domain="sharedpref" path="whisper_push_pending.xml" />
+        <exclude domain="sharedpref" path="whisper_self_leg.xml" />
+        <exclude domain="sharedpref" path="whisper_story_seen.xml" />
+        <exclude domain="sharedpref" path="whisper_undo_buffer.xml" />
+        <exclude domain="file" path="whisper_sessions" />
     </cloud-backup>
     <device-transfer>
         <include domain="database" path="toolz_db" />
         <include domain="sharedpref" path="." />
         <include domain="file" path="datastore/" />
+        <exclude domain="sharedpref" path="whisper_auth_session.xml" />
+        <exclude domain="sharedpref" path="whisper_crypto_state.xml" />
+        <exclude domain="sharedpref" path="whisper_deleted_msgs.xml" />
+        <exclude domain="sharedpref" path="whisper_group_notif.xml" />
+        <exclude domain="sharedpref" path="whisper_group_read.xml" />
+        <exclude domain="sharedpref" path="whisper_hidden_chats.xml" />
+        <exclude domain="sharedpref" path="whisper_key_rotation.xml" />
+        <exclude domain="sharedpref" path="whisper_key_trust.xml" />
+        <exclude domain="sharedpref" path="whisper_key_trust_enc.xml" />
+        <exclude domain="sharedpref" path="whisper_mute_prefs.xml" />
+        <exclude domain="sharedpref" path="whisper_notif_ids.xml" />
+        <exclude domain="sharedpref" path="whisper_outbox.xml" />
+        <exclude domain="sharedpref" path="whisper_protocol_state.xml" />
+        <exclude domain="sharedpref" path="whisper_push_pending.xml" />
+        <exclude domain="sharedpref" path="whisper_self_leg.xml" />
+        <exclude domain="sharedpref" path="whisper_story_seen.xml" />
+        <exclude domain="sharedpref" path="whisper_undo_buffer.xml" />
+        <exclude domain="file" path="whisper_sessions" />
     </device-transfer>
     <!--
     <device-transfer>

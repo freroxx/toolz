@@ -65,7 +65,7 @@ class WhisperHiddenChatsStore @Inject constructor(
         val ok = withContext(Dispatchers.IO) {
             synchronized(lock) { prefs.edit().putLong("hidden_$userId", now).commit() }
         }
-        if (!ok) Log.w(TAG, "hideChat commit failed for $userId")
+        if (!ok) Log.w(TAG, "hideChat commit failed")
         _hiddenChats.update { it + (userId to now) }
     }
 
@@ -75,7 +75,7 @@ class WhisperHiddenChatsStore @Inject constructor(
         val ok = withContext(Dispatchers.IO) {
             synchronized(lock) { prefs.edit().remove("hidden_$userId").commit() }
         }
-        if (!ok) Log.w(TAG, "unhideChat commit failed for $userId")
+        if (!ok) Log.w(TAG, "unhideChat commit failed")
         _hiddenChats.update { it - userId }
     }
 

@@ -134,10 +134,12 @@ class WhisperPushNotifier @Inject constructor(
     private suspend fun resolveFriendName(id: String): String =
         resolveFriendOrNull(id) ?: appContext.getString(com.frerox.toolz.R.string.st_Whisper_SomeoneDefault)
 
-    /** Local group-table name; the hard-coded "Group" fallback matches the legacy wire default. */
-    private suspend fun localGroupName(groupId: String): String =
-        if (groupId.isBlank()) "Group"
-        else groupDao.group(groupId)?.name?.takeIf { it.isNotBlank() } ?: "Group"
+    /** Local group-table name; the localized fallback matches the legacy wire default. */
+    private suspend fun localGroupName(groupId: String): String {
+        val fallback = appContext.getString(com.frerox.toolz.R.string.st_Whisper_Groups_FallbackName)
+        if (groupId.isBlank()) return fallback
+        return groupDao.group(groupId)?.name?.takeIf { it.isNotBlank() } ?: fallback
+    }
 
     private suspend fun render(data: Map<String, String>) {
         val me = supabase.auth.currentUserOrNull()?.id
@@ -258,7 +260,8 @@ class WhisperPushNotifier @Inject constructor(
                     val myRole = members.firstOrNull { it.memberId == me }?.role
                     val amOwner = group?.createdBy == me && me.isNotBlank()
                     val amOwnerOrAdmin = amOwner || myRole == "admin"
-                    val groupName = data["groupName"]?.takeIf { it.isNotBlank() } ?: "Group"
+                    val groupName = data["groupName"]?.takeIf { it.isNotBlank() }
+                        ?: localGroupName(groupId)
                     val actorName = data["actorName"]?.takeIf { it.isNotBlank() }
                         ?: appContext.getString(com.frerox.toolz.R.string.st_Whisper_SomeoneDefault)
                     val subjectId = data["subjectId"].orEmpty()

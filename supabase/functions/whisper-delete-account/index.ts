@@ -22,13 +22,11 @@ function jwks() {
 // sub claim — never from an unverified header.
 //
 // P0-4 FIX (reviewwhisper.md): A stolen JWT alone must NOT delete the account.
-// For non-anon users (email != *@whisper.toolz.app) the client must also send
-// X-Whisper-Password which is verified here by re-authenticating via GoTrue's
-// token endpoint before the service_role delete. V2-FIX (reviewwhisper.md): the
-// code requires BOTH headers from every caller — X-Whisper-Password is mandatory
-// too (it is only *verified* against GoTrue for non-anon accounts); anon-token
-// users additionally rely on X-Whisper-Confirm-Ts (M-6) plus a very fresh
-// (<5 min iat) JWT.
+// Password accounts (email != *@whisper.toolz.app) must also send
+// X-Whisper-Password, verified here by re-authenticating via GoTrue's token
+// endpoint before the service_role delete. Token (anon) accounts have no
+// password by construction: they rely on X-Whisper-Confirm-Ts plus a very fresh
+// (<5 min iat) JWT. X-Whisper-Confirm-Ts is mandatory for every caller.
 //
 // M-5 FIX: ALL application-data cleanup happens HERE, under service role, BEFORE
 // the GoTrue identity is deleted — no more fragile client-side post-delete cleanup.
@@ -60,16 +58,18 @@ serve(async (request) => {
   const iatOk = await isJwtFresh(jwt, 5 * 60 * 1000);
   if (!iatOk) return json({ error: "Session too old — please re-login to delete" }, 401);
 
-  // Confirmation nonce. M-6 FIX (reviewwhisper.md): MANDATORY for anon-token users —
-  // they have no verified password proof, so a fresh confirmation timestamp is the
-  // second factor; an attacker replaying a stolen fresh JWT can no longer simply omit
-  // the header. V2-FIX (reviewwhisper.md): the header comment above used to claim the
-  // password was optional for anon accounts — the code has always required both
-  // headers, so the comments now match the code (required for ALL callers; the GoTrue
-  // password grant below only runs for non-anon accounts).
+  // Confirmation nonce. M-6 FIX (reviewwhisper.md): the timestamp is mandatory for
+  // EVERY caller. Anon-token accounts have no password to prove possession with, so
+  // this fresh nonce is their second factor; a stolen fresh JWT cannot omit it.
+  //
+  // V3-FIX (round 4): X-Whisper-Password is required only for password accounts.
+  // The previous code required it for anon-token users as well, but the client
+  // correctly does not send one — token-account deletion always failed with
+  // "Missing confirmation". The account type is resolved from the verified user id
+  // via the service-role admin lookup below, before password proof is required.
   const password = request.headers.get("X-Whisper-Password");
   const confirmTs = request.headers.get("X-Whisper-Confirm-Ts");
-  if (!password || !confirmTs) {
+  if (!confirmTs) {
     return json({ error: "Missing confirmation" }, 400);
   }
   {
@@ -80,43 +80,44 @@ serve(async (request) => {
       return json({ error: "Invalid confirmation timestamp" }, 400);
     }
   }
-  if (password) {
-    // Verify password by attempting a GoTrue password grant with the caller's email.
-    // We fetch the caller's email via service_role admin getUser.
-    // V3-FIX (round 3): serviceRole/baseUrl are hoisted above (the limiter gate needs
-    // them before any work), so the temporary copies are gone.
-    // FAIL CLOSED: if the admin lookup cannot confirm whether this account even has a
-    // password, deletion must not proceed — a stolen JWT must never be sufficient.
-    let adminRes: Response;
+
+  // FAIL CLOSED: if the admin lookup cannot confirm the account's email we cannot
+  // tell whether password proof applies to this identity, so deletion must stop.
+  let adminRes: Response;
+  try {
+    adminRes = await fetch(`${baseUrl}/auth/v1/admin/users/${userId}`, {
+      headers: { apikey: serviceRole, Authorization: `Bearer ${serviceRole}` },
+    });
+  } catch (_) {
+    return json({ error: "Password verification unavailable" }, 503);
+  }
+  if (!adminRes.ok) {
+    return json({ error: "Password verification unavailable" }, 503);
+  }
+  let email: string | undefined;
+  try {
+    const adminJson = await adminRes.json();
+    email = adminJson?.email as string | undefined;
+  } catch (_) {
+    return json({ error: "Password verification failed" }, 503);
+  }
+  // A missing email means we cannot tell which identity type this is: refuse.
+  if (!email) {
+    return json({ error: "Cannot verify identity type" }, 403);
+  }
+  if (!email.endsWith("@whisper.toolz.app")) {
+    // Password accounts must prove possession. Token (anon) accounts already have
+    // the fresh-JWT + confirmation-timestamp pair above.
+    if (!password) {
+      return json({ error: "Missing confirmation" }, 400);
+    }
     try {
-      adminRes = await fetch(`${baseUrl}/auth/v1/admin/users/${userId}`, {
-        headers: { apikey: serviceRole, Authorization: `Bearer ${serviceRole}` },
+      const verifyRes = await fetch(`${baseUrl}/auth/v1/token?grant_type=password`, {
+        method: "POST",
+        headers: { apikey: Deno.env.get("SUPABASE_ANON_KEY") ?? "", "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
       });
-    } catch (_) {
-      return json({ error: "Password verification unavailable" }, 503);
-    }
-    if (!adminRes.ok) {
-      return json({ error: "Password verification unavailable" }, 503);
-    }
-    try {
-      const adminJson = await adminRes.json();
-      const email = adminJson?.email as string | undefined;
-      // V2-FIX (reviewwhisper.md): FAIL CLOSED — the old `if (email && ...)` skipped
-      // password proof entirely when the lookup returned no email, so any account
-      // GoTrue answered without an email could be deleted with a stolen JWT alone.
-      // A missing email means we cannot tell which identity type this is: refuse.
-      if (!email) {
-        return json({ error: "Cannot verify identity type" }, 403);
-      }
-      if (!email.endsWith("@whisper.toolz.app")) {
-        // Non-anon must have password proof; verify via password grant.
-        const verifyRes = await fetch(`${baseUrl}/auth/v1/token?grant_type=password`, {
-          method: "POST",
-          headers: { apikey: Deno.env.get("SUPABASE_ANON_KEY") ?? "", "Content-Type": "application/json" },
-          body: JSON.stringify({ email, password }),
-        });
-        if (!verifyRes.ok) return json({ error: "Invalid password confirmation" }, 403);
-      }
+      if (!verifyRes.ok) return json({ error: "Invalid password confirmation" }, 403);
     } catch (_) {
       return json({ error: "Password verification failed" }, 503);
     }

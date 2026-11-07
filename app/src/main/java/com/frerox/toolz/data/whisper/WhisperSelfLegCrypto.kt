@@ -117,7 +117,11 @@ class WhisperSelfLegCrypto @Inject constructor(
                 val sid = newSid()
                 val skWrapped = crypto.wrapWithKeystoreAes(sk)
                     ?: error("could not protect self-leg session key")
-                prefs.edit().putString(skKey(uid, sid), skWrapped).apply()
+                prefs.edit()
+                    .putString(skKey(uid, sid), skWrapped)
+                    .putLong(skTimestampKey(uid, sid), System.currentTimeMillis())
+                    .apply()
+                pruneForUserLocked(uid)
                 WhisperV3Codec.encode(sid, sealed.header, sealed.ciphertextPacked, x3dh = null) to sid
             } finally {
                 sk.fill(0)
@@ -155,9 +159,75 @@ class WhisperSelfLegCrypto @Inject constructor(
             }
         }.getOrNull()
 
+    // ------------------------------------------------------------------ wipe
+
+    /**
+     * Forgets every persisted session key this device holds for [uid]. Account
+     * deletion calls this before the identity keypair is destroyed, so a later
+     * account on the same install can never inherit the previous account's
+     * self-leg history.
+     */
+    internal fun clearForUser(uid: String) {
+        if (uid.isBlank()) return
+        synchronized(anchorLock) {
+            val prefixes = listOf(skKeyPrefix(uid), skTimestampPrefix(uid))
+            val doomed = prefs.all.keys.filter { key -> prefixes.any { key.startsWith(it) } }
+            if (doomed.isEmpty()) return
+            val editor = prefs.edit()
+            doomed.forEach { editor.remove(it) }
+            editor.apply()
+        }
+    }
+
+    /**
+     * Bounds the self-leg key store for every account known to this install.
+     * Group frames are sealed with one fresh key each; without a cap a busy
+     * account accumulates wrapped keys forever. Oldest entries are dropped
+     * first (their frames become unreadable, matching the module's accepted
+     * local-history trade-off).
+     */
+    internal fun pruneAllUsers(maxPerUser: Int = MAX_SESSIONS_PER_USER) {
+        synchronized(anchorLock) {
+            val users = prefs.all.keys.asSequence()
+                .filter { it.startsWith(SK_PREFIX) }
+                .mapNotNull { key ->
+                    key.removePrefix(SK_PREFIX)
+                        .substringBefore(':', missingDelimiterValue = "")
+                        .takeIf { it.isNotBlank() }
+                }
+                .toSet()
+            users.forEach { pruneForUserLocked(it, maxPerUser) }
+        }
+    }
+
     // ------------------------------------------------------------- internals
 
-    private fun skKey(uid: String, sid: String): String = "sk:$uid:$sid"
+    private fun pruneForUserLocked(uid: String, maxPerUser: Int = MAX_SESSIONS_PER_USER) {
+        val prefix = skKeyPrefix(uid)
+        val keys = prefs.all.keys.filter { it.startsWith(prefix) }
+        if (keys.size <= maxPerUser) return
+        val tsPrefix = skTimestampPrefix(uid)
+        val ordered = keys.sortedWith(
+            compareBy(
+                { key -> prefs.getLong(tsPrefix + key.removePrefix(prefix), 0L) },
+                { key -> key },
+            ),
+        )
+        val editor = prefs.edit()
+        ordered.take(keys.size - maxPerUser).forEach { key ->
+            editor.remove(key)
+            editor.remove(tsPrefix + key.removePrefix(prefix))
+        }
+        editor.apply()
+    }
+
+    private fun skKeyPrefix(uid: String): String = "sk:$uid:"
+
+    private fun skTimestampPrefix(uid: String): String = "sk_ts:$uid:"
+
+    private fun skKey(uid: String, sid: String): String = skKeyPrefix(uid) + sid
+
+    private fun skTimestampKey(uid: String, sid: String): String = skTimestampPrefix(uid) + sid
 
     private fun newSid(): String {
         val raw = ByteArray(12).also { SecureRandom().nextBytes(it) }
@@ -172,5 +242,7 @@ class WhisperSelfLegCrypto @Inject constructor(
         private const val PREFS_NAME = "whisper_self_leg"
         private const val KEY_ANCHOR_PRIV = "anchor_priv_wrapped"
         private const val SID_PREFIX = "sg1-"
+        private const val SK_PREFIX = "sk:"
+        private const val MAX_SESSIONS_PER_USER = 2_000
     }
 }

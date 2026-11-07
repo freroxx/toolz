@@ -79,11 +79,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -670,7 +668,6 @@ internal fun ShareGroupSheet(
     onMessage: (String) -> Unit,
 ) {
     val context = LocalContext.current
-    val clipboard = LocalClipboardManager.current
     val qr = remember(groupId) {
         runCatching {
             com.frerox.toolz.util.CryptoManager.generateQrCode("WHISPER-GROUP:$groupId", 512)
@@ -707,7 +704,7 @@ internal fun ShareGroupSheet(
             )
             ToolzTonalExpressiveButton(
                 onClick = {
-                    clipboard.setText(AnnotatedString(groupId))
+                    com.frerox.toolz.util.SensitiveClipboard.copy(context, groupId)
                     onMessage(context.getString(R.string.st_Whisper_Groups_Copied))
                     close()
                 },

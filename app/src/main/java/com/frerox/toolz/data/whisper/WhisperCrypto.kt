@@ -860,6 +860,21 @@ class WhisperCrypto @Inject constructor(
         }
     }
 
+    /**
+     * Account-deletion wipe for the hardware P-256 protocol signer. The signing
+     * identity is install-bound, but reusing it after the account that published
+     * its certificate is gone links a fresh account to the deleted one. The next
+     * [ensureSigningKeyExists] lazily creates a clean signer.
+     */
+    fun resetProtocolSigningKey() {
+        runCatching {
+            val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
+            if (keyStore.containsAlias(PROTOCOL_SIGN_ALIAS)) keyStore.deleteEntry(PROTOCOL_SIGN_ALIAS)
+        }.onFailure {
+            android.util.Log.w(TAG_CRYPTO, "Protocol signing key deletion failed", it)
+        }
+    }
+
     fun resetKeyPair() {
         try {
             synchronized(rotationLock) {

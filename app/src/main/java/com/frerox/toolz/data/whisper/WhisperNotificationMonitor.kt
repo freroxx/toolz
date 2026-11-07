@@ -13,19 +13,24 @@ import com.frerox.toolz.di.ApplicationScope
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.retry
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlin.random.Random
 
 /**
  * App-scoped Whisper realtime monitor.
@@ -58,7 +63,8 @@ class WhisperNotificationMonitor @Inject constructor(
 ) {
     private companion object {
         const val TAG = "WhisperNotifMonitor"
-        const val RETRY_DELAY_MS = 3_000L
+        const val MAX_JITTER_MS = 1_000L
+        const val LOG_EVERY_N_ATTEMPTS = 4
     }
 
     private val _messageEvents = MutableSharedFlow<WhisperMessage>(
@@ -116,65 +122,109 @@ class WhisperNotificationMonitor @Inject constructor(
     }
 
     private suspend fun collectMessages(userId: String) {
-        repository.subscribeToIncomingMessages(userId)
-            .retry { cause -> retryable(userId, cause) }
-            .collect { msg ->
-                // Shared flow first: the hub may only be refreshing its list.
-                _messageEvents.tryEmit(msg)
+        collectWithReconnect(
+            userId = userId,
+            lane = "messages",
+            source = { repository.subscribeToIncomingMessages(userId) },
+        ) { msg ->
+            // Shared flow first: the hub may only be refreshing its list.
+            _messageEvents.tryEmit(msg)
 
-                // Same suppression contract as before, now independent of any
-                // screen: read/deleted/own rows never notify.
-                if (msg.isRead || msg.isDeletedForEveryone) return@collect
-                if (msg.senderId == userId) return@collect
-                if (mutePrefs.isMuted(msg.senderId)) return@collect
+            // Same suppression contract as before, now independent of any
+            // screen: read/deleted/own rows never notify.
+            if (msg.isRead || msg.isDeletedForEveryone) return@collectWithReconnect
+            if (msg.senderId == userId) return@collectWithReconnect
+            if (mutePrefs.isMuted(msg.senderId)) return@collectWithReconnect
 
-                notificationManager.showMessageNotification(
-                    senderId = msg.senderId,
-                    // Notification text is intentionally content-free, so the
-                    // sender id is enough for the privacy-safe body.
-                    senderName = msg.senderId,
-                    messageId = msg.id,
-                    isRead = msg.isRead,
-                )
-            }
+            notificationManager.showMessageNotification(
+                senderId = msg.senderId,
+                // Notification text is intentionally content-free, so the
+                // sender id is enough for the privacy-safe body.
+                senderName = msg.senderId,
+                messageId = msg.id,
+                isRead = msg.isRead,
+            )
+        }
     }
 
     private suspend fun collectFriendships(userId: String) {
-        repository.subscribeToFriendUpdates()
-            .retry { cause -> retryable(userId, cause) }
-            .collect { friendship ->
-                _friendshipEvents.tryEmit(friendship)
+        collectWithReconnect(
+            userId = userId,
+            lane = "friendships",
+            source = { repository.subscribeToFriendUpdates() },
+        ) { friendship ->
+            _friendshipEvents.tryEmit(friendship)
 
-                val incomingPending =
-                    friendship.userB == userId && friendship.status == "pending"
-                if (!incomingPending) return@collect
-                if (mutePrefs.isMuted(friendship.userA)) return@collect
+            val incomingPending =
+                friendship.userB == userId && friendship.status == "pending"
+            if (!incomingPending) return@collectWithReconnect
+            if (mutePrefs.isMuted(friendship.userA)) return@collectWithReconnect
 
-                // The notification manager dedupes per sender/friendship id, so
-                // FCM + realtime (and poll seeds) can never double-post.
-                val senderName = repository.getProfile(friendship.userA)
-                    .getOrNull()
-                    ?.effectiveName
-                    ?: context.getString(R.string.st_Whisper_SomeoneDefault)
+            // The notification manager dedupes per sender/friendship id, so
+            // FCM + realtime (and poll seeds) can never double-post.
+            val senderName = repository.getProfile(friendship.userA)
+                .getOrNull()
+                ?.effectiveName
+                ?: context.getString(R.string.st_Whisper_SomeoneDefault)
 
-                notificationManager.showFriendRequestNotification(
-                    fromId = friendship.userA,
-                    fromName = senderName,
-                    friendshipId = friendship.id,
+            notificationManager.showFriendRequestNotification(
+                fromId = friendship.userA,
+                fromName = senderName,
+                friendshipId = friendship.id,
+            )
+        }
+    }
+
+    /**
+     * Reconnects ONE lane with exponential backoff. The previous `.retry` operator
+     * retried forever every 3 s and, worse, an exception escaping this lane
+     * cancelled its sibling via structured concurrency. Catching inside the lane
+     * keeps the friend-request lane alive when the message socket is unhealthy
+     * (and vice versa).
+     */
+    private suspend fun <T> collectWithReconnect(
+        userId: String,
+        lane: String,
+        source: () -> Flow<T>,
+        onItem: suspend (T) -> Unit,
+    ) {
+        var attempt = 0
+        while (currentCoroutineContext().isActive) {
+            try {
+                source().collect { item ->
+                    // A delivered item proves the lane is healthy: restart the
+                    // backoff so the next transient drop retries immediately.
+                    attempt = 0
+                    onItem(item)
+                }
+                // A clean completion is unusual (realtime flows stay open); treat
+                // it like a drop and reconnect with backoff.
+                if (!stillCurrent(userId, null)) return
+            } catch (c: CancellationException) {
+                throw c
+            } catch (cause: Throwable) {
+                if (!stillCurrent(userId, cause)) return
+            }
+
+            val jitter = Random.nextLong(0L, MAX_JITTER_MS)
+            val retryInMs = WhisperRealtimeBackoff.delayMs(attempt, jitter)
+            if (attempt == 0 || attempt % LOG_EVERY_N_ATTEMPTS == 0) {
+                android.util.Log.w(
+                    TAG,
+                    "Realtime lane '$lane' dropped — reconnecting in ${retryInMs}ms (attempt ${attempt + 1})",
                 )
             }
+            attempt++
+            delay(retryInMs)
+        }
     }
 
-    private suspend fun retryable(userId: String, cause: Throwable): Boolean {
-        val stillCurrent =
-            authManager.currentUserId == userId &&
-                !gate.sandboxed(DevToolId.WHISPER) &&
-                !WhisperErrorMapper.isSessionExpired(cause) &&
-                !(cause is io.github.jan.supabase.exceptions.RestException &&
-                    cause.statusCode in 401..403)
-        if (!stillCurrent) return false
-        android.util.Log.e(TAG, "Realtime lane dropped: ${cause.message}. Retrying in ${RETRY_DELAY_MS}ms")
-        delay(RETRY_DELAY_MS)
-        return true
-    }
+    private fun stillCurrent(userId: String, cause: Throwable?): Boolean =
+        authManager.currentUserId == userId &&
+            !gate.sandboxed(DevToolId.WHISPER) &&
+            cause?.let {
+                !WhisperErrorMapper.isSessionExpired(it) &&
+                    !(it is io.github.jan.supabase.exceptions.RestException &&
+                        it.statusCode in 401..403)
+            } != false
 }

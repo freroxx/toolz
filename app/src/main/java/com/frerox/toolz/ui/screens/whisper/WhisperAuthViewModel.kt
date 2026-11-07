@@ -144,20 +144,21 @@ class WhisperAuthViewModel @Inject constructor(
      * If Keystore encryption fails, scheduling is SKIPPED — a reversible copy of
      * the token must never land in WorkData.
      */
-    fun scheduleTokenClipboardExpiry(token: String, restoreTo: String?, clipboard: ClipboardManager) {
+    fun scheduleTokenClipboardExpiry(token: String, restoreTo: String?, clipboard: ClipboardManager): Boolean {
         val encryptedToken = try {
             com.frerox.toolz.worker.WhisperClipboardClearWorker.encryptForStorage(token, getApplication())
         } catch (_: Exception) { null }
-        // Encryption unavailable (or empty): skip the durable clear rather than store
-        // anything reversible. The 60 s clipboard exposure still applies, but no secret
-        // is persisted.
-        if (encryptedToken.isNullOrEmpty()) return
+        // Encryption unavailable (or empty): refuse to schedule. Callers must then
+        // refuse the COPY too — the previous contract copied first and silently
+        // skipped the durable clear, leaving a live credential on the clipboard
+        // forever whenever Keystore was unavailable.
+        if (encryptedToken.isNullOrEmpty()) return false
         val encryptedRestore = if (restoreTo != null) {
             try {
                 com.frerox.toolz.worker.WhisperClipboardClearWorker.encryptForStorage(restoreTo, getApplication())
             } catch (_: Exception) { null }
         } else ""
-        if (restoreTo != null && encryptedRestore.isNullOrEmpty()) return
+        if (restoreTo != null && encryptedRestore.isNullOrEmpty()) return false
         val workRequest = androidx.work.OneTimeWorkRequestBuilder<com.frerox.toolz.worker.WhisperClipboardClearWorker>()
             .setInitialDelay(60, java.util.concurrent.TimeUnit.SECONDS)
             .setInputData(
@@ -168,12 +169,15 @@ class WhisperAuthViewModel @Inject constructor(
             )
             .build()
 
-        androidx.work.WorkManager.getInstance(getApplication())
-            .enqueueUniqueWork(
-                com.frerox.toolz.worker.WhisperClipboardClearWorker.UNIQUE_WORK_NAME,
-                androidx.work.ExistingWorkPolicy.REPLACE,
-                workRequest
-            )
+        return runCatching {
+            androidx.work.WorkManager.getInstance(getApplication())
+                .enqueueUniqueWork(
+                    com.frerox.toolz.worker.WhisperClipboardClearWorker.UNIQUE_WORK_NAME,
+                    androidx.work.ExistingWorkPolicy.REPLACE,
+                    workRequest
+                )
+            true
+        }.getOrDefault(false)
     }
 
     // V3-FIX (multi-account): last completed scan is cached so switching between

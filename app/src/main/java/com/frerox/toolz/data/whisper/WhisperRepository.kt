@@ -110,6 +110,16 @@ class WhisperRepository @Inject constructor(
     private val mutePrefs: WhisperMutePreferences,
     // Daily Ups local seen set: cleared with the rest of the account's local data.
     private val storySeenStore: WhisperStorySeenStore,
+    // Phase-2 groups local UI state (hidden in this release, but must still be
+    // wiped on account deletion so a following account never inherits it).
+    private val groupReadStore: WhisperGroupReadStore,
+    private val groupNotifPrefs: WhisperGroupNotifPrefs,
+    // Rotate-bookkeeping + undo buffer: both survive sign-out by design, but
+    // account deletion is a permanent identity change and must drop them.
+    private val keyRotationStore: WhisperKeyRotationStore,
+    private val undoBufferStore: WhisperUndoBufferStore,
+    // Notification state (ids/dedupe/summary) is account-scoped in practice.
+    private val notificationManager: WhisperNotificationManager,
     // H-1 FIX (reviewwhisper.md): channel teardown must run even though the flow's
     // ProducerScope is already cancelled when awaitClose fires — a plain `launch {}`
     // there never executes. This app-lifetime scope survives collection cancellation.
@@ -2004,7 +2014,11 @@ class WhisperRepository @Inject constructor(
                 }
             }
         }
-        val cipherBytes = WhisperEnvelope.encode(allEntries, crypto.getPublicKeyBase64())!!.toByteArray(Charsets.UTF_8)
+        // Never `!!` on wire encoding: a null envelope must fail the send with a
+        // user-visible error, not crash the process after the upload path begins.
+        val envelope = WhisperEnvelope.encode(allEntries, crypto.getPublicKeyBase64())
+            ?: error("This image could not be encrypted for delivery.")
+        val cipherBytes = envelope.toByteArray(Charsets.UTF_8)
         val iv = IV_ENVELOPE
         
         val (uploadUrl, attachmentId) = encryptedImageHost.upload(
@@ -2194,7 +2208,7 @@ class WhisperRepository @Inject constructor(
             var delivered = 0
             outgoingQueue.entries().filter { it.senderId == myId && it.groupId == null }.forEach { queued ->
                 if (queued.attempts >= 8) {
-                    android.util.Log.w("WhisperRepo", "Dropping undeliverable queued message after ${queued.attempts} attempts (clientId=${queued.clientId})")
+                    android.util.Log.w("WhisperRepo", "Dropping undeliverable queued message after ${queued.attempts} attempts")
                     outgoingQueue.remove(queued.clientId)
                     // Surface the permanent loss so the UI can toast it instead of silently
                     // swallowing the user's message.
@@ -2219,7 +2233,7 @@ class WhisperRepository @Inject constructor(
                     if (result.isFailure) {
                         // The row already exists server-side (a prior attempt delivered it but
                         // the response was lost): treat as delivered, never duplicate.
-                        android.util.Log.i("WhisperRepo", "Queued message ${queued.clientId} already delivered server-side")
+                        android.util.Log.i("WhisperRepo", "Queued message already delivered server-side")
                     }
                     outgoingQueue.remove(queued.clientId)
                     // Remove the pending ghost row from Room and insert authoritative ciphertext
@@ -2351,7 +2365,7 @@ class WhisperRepository @Inject constructor(
             }.getOrNull()
             attachment = remoteRow?.let(::attachmentOf)
             if (remoteRow != null && attachment == null) {
-                android.util.Log.w("WhisperRepo", "deleteMessageForEveryone: attachment content still undecryptable for $messageId; continuing with tombstone only")
+                android.util.Log.w("WhisperRepo", "deleteMessageForEveryone: attachment content still undecryptable; continuing with tombstone only")
             }
         }
         
@@ -2607,7 +2621,7 @@ class WhisperRepository @Inject constructor(
                             // V2-FIX (reviewwhisper.md) R-M4: log failed deliveries instead of dropping silently.
                             if (shouldEmitMessage(msg.id)) {
                                 if (trySend(WhisperChatEvent.DeleteEvent(msg.id)).isFailure) {
-                                    android.util.Log.w("WhisperRepo", "DeleteEvent dropped for ${msg.id} (collector slow or closed)")
+                                    android.util.Log.w("WhisperRepo", "DeleteEvent dropped (collector slow or closed)")
                                 }
                             }
                             return@collect
@@ -2640,7 +2654,7 @@ class WhisperRepository @Inject constructor(
                         if (action is PostgresAction.Update || msg.isDeletedForEveryone || shouldEmitMessage(msg.id)) {
                             // V2-FIX (reviewwhisper.md) R-M4: log failed deliveries instead of dropping silently.
                             if (trySend(WhisperChatEvent.MessageEvent(finalMsg)).isFailure) {
-                                android.util.Log.w("WhisperRepo", "MessageEvent dropped for ${finalMsg.id} (collector slow or closed)")
+                                android.util.Log.w("WhisperRepo", "MessageEvent dropped (collector slow or closed)")
                             }
                         }
                     }
@@ -2667,7 +2681,7 @@ class WhisperRepository @Inject constructor(
                     if (row != null) {
                         // V2-FIX (reviewwhisper.md) R-M4: log failed deliveries instead of dropping silently.
                         if (trySend(WhisperChatEvent.ReactionEvent(row.messageId, row.userId, row.emoji)).isFailure) {
-                            android.util.Log.w("WhisperRepo", "ReactionEvent dropped for ${row.messageId} (collector slow or closed)")
+                            android.util.Log.w("WhisperRepo", "ReactionEvent dropped (collector slow or closed)")
                         }
                     }
                 } catch (e: Exception) {
@@ -2873,7 +2887,7 @@ class WhisperRepository @Inject constructor(
                         // V2-FIX (reviewwhisper.md) R-M4: log failed deliveries instead of dropping silently.
                         if (shouldEmitMessage(msg.id)) {
                             if (trySend(msg.copy(content = decrypted)).isFailure) {
-                                android.util.Log.w("WhisperRepo", "Incoming message event dropped for ${msg.id} (collector slow or closed)")
+                                android.util.Log.w("WhisperRepo", "Incoming message event dropped (collector slow or closed)")
                             }
                         }
                     }
@@ -3385,12 +3399,13 @@ class WhisperRepository @Inject constructor(
                 }
             }
             if (entries.isEmpty()) return
+            // A null envelope means no entry was encodable; skip this typing beat
+            // instead of throwing through the broadcast path.
+            val envelope = WhisperEnvelope.encode(entries, crypto.getPublicKeyBase64()) ?: return
             val channel = getOrJoinBroadcastChannel("typing_" + conversationKey(myId, targetUserId))
             channel.broadcast(
                 event = "typing",
-                payload = BroadcastPayload.Json(buildJsonObject {
-                    put("env", WhisperEnvelope.encode(entries, crypto.getPublicKeyBase64())!!)
-                }),
+                payload = BroadcastPayload.Json(buildJsonObject { put("env", envelope) }),
             )
         }
     }
@@ -3786,6 +3801,15 @@ class WhisperRepository @Inject constructor(
      */
     suspend fun clearAllLocalData() {
         removeAllCachedChannels()
+        // Notifications and the clipboard expiry worker are account-scoped UI state:
+        // nothing from the deleted identity may remain on the shade or in a durable
+        // WorkManager row.
+        notificationManager.clearAllWhisperNotifications()
+        runCatching {
+            androidx.work.WorkManager.getInstance(appContext)
+                .cancelUniqueWork(com.frerox.toolz.worker.WhisperClipboardClearWorker.UNIQUE_WORK_NAME)
+        }
+        runCatching { com.frerox.toolz.util.SensitiveClipboard.clear(appContext) }
         // V3-FIX (task F): drop the encrypted image disk cache with the rest of the
         // account's local data so a following sign-in starts from a clean slate.
         imageDiskCache.clearAll()
@@ -3801,6 +3825,16 @@ class WhisperRepository @Inject constructor(
         hiddenChatsStore.clearAll()
         mutePrefs.clearAll()
         storySeenStore.clearAll()
+        // Hidden groups parity: read watermarks, notification toggles and the undo
+        // buffer are local-only account state; deletion must not leave them behind.
+        groupReadStore.clearAll()
+        groupNotifPrefs.clearAll()
+        keyRotationStore.clear()
+        undoBufferStore.clear()
+        // Protocol state (software X25519 identity seed, SPK/OPK private halves,
+        // published signer) and the group self-leg keys are identity material.
+        prekeyManager.clear()
+        selfLeg.clearForUser(myId)
         profileCache.clear(); profileCacheTs.clear()
         peerKeys.value = emptyMap()
         blockedIds.value = emptySet()
@@ -3831,5 +3865,6 @@ class WhisperRepository @Inject constructor(
             }
         }
         crypto.resetKeyPair()
+        crypto.resetProtocolSigningKey()
     }
 }
