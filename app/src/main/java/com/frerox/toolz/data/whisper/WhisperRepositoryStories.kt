@@ -86,8 +86,18 @@ object WhisperDailyUpsConfig {
     /** Server bound: sealed_descriptor holds 1..32768 chars. */
     const val DESCRIPTOR_MAX_CHARS = 32_768
 
-    /** One fetch page for friends' envelopes; oldest-expiring first. */
+    /** One fetch page for friends' envelopes; newest-first at the SQL layer. */
     const val SYNC_PAGE = 200
+
+    /**
+     * Envelope pages read per reconcile. A busy audience can legitimately hold
+     * more than one page of live stories (a story fans out to up to 96 friends
+     * and each poster may publish 5/UTC-day; a rolling 24h window can span two
+     * UTC days), so one page would silently hide older-but-live friends' ups.
+     * Five pages (1 000 envelopes) covers that ceiling; each page is persisted
+     * before the next is fetched, so peak memory stays one page.
+     */
+    const val SYNC_MAX_PAGES = 5
 
     /** The exact emoji palette the server validates (whisper_story_react). */
     val REACTION_EMOJIS: List<String> = listOf("👍", "❤️", "😂", "😮", "😢", "🙏")
@@ -384,14 +394,47 @@ suspend fun WhisperRepository.syncDailyUps(): Result<Unit> = runCatching {
         //    drop out — nothing unreadable is ever cached.
         // Newest envelopes first: with a page cap, the freshest stories must win
         // the page — oldest-first could permanently starve a busy audience of
-        // everything posted after the first 200 ever-received rows.
-        val myRows = db.from("whisper_story_recipients").select(
-            Columns.raw("story_id,sealed_descriptor,story:whisper_stories!inner(poster_id,state,receipts_enabled,expires_at)"),
-        ) {
-            filter { eq("recipient_id", me) }
-            order("created_at", Order.DESCENDING)
-            limit(WhisperDailyUpsConfig.SYNC_PAGE.toLong())
-        }.decodeList<StoryRecipientJoinedRow>()
+        // everything posted after the first page of ever-received rows. Because
+        // every live story is at most 24h old, all live rows precede every
+        // expired one under this order; the loop keeps paging while a page is
+        // full so a genuinely busy audience is not silently cut at one page.
+        val freshIds = mutableSetOf<String>()
+        var offset = 0L
+        var exhaustivelyRead = false
+        val maxRows = (WhisperDailyUpsConfig.SYNC_PAGE * WhisperDailyUpsConfig.SYNC_MAX_PAGES).toLong()
+        while (offset < maxRows) {
+            val page = db.from("whisper_story_recipients").select(
+                Columns.raw("story_id,sealed_descriptor,story:whisper_stories!inner(poster_id,state,receipts_enabled,expires_at)"),
+            ) {
+                filter { eq("recipient_id", me) }
+                order("created_at", Order.DESCENDING)
+                range(offset, offset + WhisperDailyUpsConfig.SYNC_PAGE - 1)
+            }.decodeList<StoryRecipientJoinedRow>()
+            // Persist this page before decoding the next: peak memory is one
+            // page of descriptors, not the whole 1 000-row window.
+            for (row in page) {
+                val story = row.story ?: continue
+                val serverExpiry = runCatching { Instant.parse(story.expiresAt).toEpochMilli() }
+                    .getOrElse { continue }
+                storyLocalDao.upsert(
+                    WhisperStoryLocalEntity(
+                        storyId = row.storyId,
+                        ownerId = story.posterId,
+                        sealedDescriptor = row.sealedDescriptor,
+                        expiresAtMs = serverExpiry,
+                        receiptsEnabled = story.receiptsEnabled,
+                        state = STORY_STATE_ACTIVE,
+                        updatedAtMs = nowMs,
+                    ),
+                )
+                freshIds += row.storyId
+            }
+            if (page.size < WhisperDailyUpsConfig.SYNC_PAGE) {
+                exhaustivelyRead = true
+                break
+            }
+            offset += WhisperDailyUpsConfig.SYNC_PAGE
+        }
 
         // ── own rows: refresh server-authoritative expiry; NEVER clobber the
         // self-sealed descriptor (it is publish-time-only state).
@@ -406,30 +449,11 @@ suspend fun WhisperRepository.syncDailyUps(): Result<Unit> = runCatching {
             }
         }
 
-        // ── received rows: upsert every still-readable envelope.
-        for (row in myRows) {
-            val story = row.story ?: continue
-            val serverExpiry = runCatching { Instant.parse(story.expiresAt).toEpochMilli() }
-                .getOrElse { continue }
-            storyLocalDao.upsert(
-                WhisperStoryLocalEntity(
-                    storyId = row.storyId,
-                    ownerId = story.posterId,
-                    sealedDescriptor = row.sealedDescriptor,
-                    expiresAtMs = serverExpiry,
-                    receiptsEnabled = story.receiptsEnabled,
-                    state = STORY_STATE_ACTIVE,
-                    updatedAtMs = nowMs,
-                ),
-            )
-        }
-
         // ── prune local rows the server no longer lets us read.
-        // Only prune when the page was NOT truncated: a full page means older
-        // still-readable rows simply fell outside the limit, and deleting them
+        // Only prune after an exhaustive read: hitting the page cap means older
+        // still-readable rows simply fell outside the window, and deleting them
         // would make them vanish until a later sync re-fetched them.
-        if (myRows.size < WhisperDailyUpsConfig.SYNC_PAGE) {
-            val freshIds = myRows.map { it.storyId }.toSet()
+        if (exhaustivelyRead) {
             for (stale in storyLocalDao.listActive(nowMs)) {
                 if (stale.storyId !in freshIds) storyLocalDao.delete(stale.storyId)
             }

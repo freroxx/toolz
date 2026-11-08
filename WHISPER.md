@@ -1621,7 +1621,7 @@ Whisper's cryptography is pinned with a deliberately paranoid test stack:
   client planes gained the missing realtime `subscribe()`, bounded event
   verification, verified-cache group pictures, outbox/blob cleanup, bounded
   fan-out, audience-before-upload story publishing with one ambiguous-retry,
-  absolute story expiry and atomic viewer state. The SQL plane gained a
+  multi-page envelope reconcile, absolute story expiry and atomic viewer state. The SQL plane gained a
   membership requirement on typing writes, invitee events limited to
   `join`/`decline`, a `+1` epoch-jump cap, receipt/reaction message-reference
   triggers, the newest-first story-recipient index, identity-keyed reaction
