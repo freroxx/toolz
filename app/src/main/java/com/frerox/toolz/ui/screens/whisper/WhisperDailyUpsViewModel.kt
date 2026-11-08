@@ -402,18 +402,24 @@ class WhisperDailyUpsViewModel @Inject constructor(
         val item = v.currentStory?.takeIf { it.storyId == storyId } ?: return
         ensureImage(storyId)
         if (item.isMine && item.receiptsEnabled) refreshOwnStats(storyId)
+        // Bound the lookup exactly like the repository's boundedStoryIds():
+        // the read is capped at SYNC_PAGE, and marking MORE ids as "looked up"
+        // would permanently skip every story past the cap for this open.
         val missing = v.segments
             .flatMap { segment -> segment.stories }
             .filter { !it.isMine }
             .map { it.storyId }
             .filter { it !in reactionLookups && it !in _receipts.value.myReactions }
             .distinct()
+            .take(WhisperDailyUpsConfig.SYNC_PAGE)
         if (missing.isEmpty()) return
         reactionLookups += missing
         viewModelScope.launch {
             repository.fetchMyDailyUpReactions(missing)
                 .onSuccess { loaded ->
-                    _receipts.value = _receipts.value.copy(myReactions = _receipts.value.myReactions + loaded)
+                    // update{} (not read-modify-write): a palette toggle
+                    // settling at the same instant must not be overwritten.
+                    _receipts.update { it.copy(myReactions = it.myReactions + loaded) }
                 }
                 .onFailure {
                     // Transient read failure: allow the next page turn to retry.
@@ -442,32 +448,40 @@ class WhisperDailyUpsViewModel @Inject constructor(
 
     /** One story image failed to load; the viewer page offers an inline retry. */
     fun retryImage(storyId: String) {
-        _failedImages.value = _failedImages.value - storyId
+        _failedImages.update { it - storyId }
         ensureImage(storyId)
     }
 
-    /** Decrypt-once per storyId; concurrent loads collapse on [inFlightImages]. */
+    /**
+     * Decrypt-once per storyId; concurrent loads collapse on [inFlightImages].
+     * Every state write is an atomic [update] — the previous
+     * `value = value + x` pattern lost updates when the current page and its
+     * preload settled at the same instant.
+     */
     private fun ensureImage(storyId: String) {
         if (storyId in _images.value) return
         if (storyId in inFlightImages.value) return
-        _failedImages.value = _failedImages.value - storyId
-        inFlightImages.value = inFlightImages.value + storyId
+        _failedImages.update { it - storyId }
+        inFlightImages.update { it + storyId }
         viewModelScope.launch {
-            repository.downloadDailyUpImage(storyId)
-                .onSuccess { image ->
-                    val bmp = withContext(Dispatchers.IO) { decodeDisplayBitmap(image.bytes) }
-                    if (bmp != null) {
-                        insertViewerImage(storyId, bmp)
-                    } else {
-                        _failedImages.value = _failedImages.value + storyId
-                        _viewerError.value = appContext.getString(R.string.st_Whisper_DailyUp_ErrCorrupt)
+            try {
+                repository.downloadDailyUpImage(storyId)
+                    .onSuccess { image ->
+                        val bmp = withContext(Dispatchers.IO) { decodeDisplayBitmap(image.bytes) }
+                        if (bmp != null) {
+                            insertViewerImage(storyId, bmp)
+                        } else {
+                            _failedImages.update { it + storyId }
+                            _viewerError.value = appContext.getString(R.string.st_Whisper_DailyUp_ErrCorrupt)
+                        }
                     }
-                }
-                .onFailure { e ->
-                    _failedImages.value = _failedImages.value + storyId
-                    _viewerError.value = dailyUpErrorText(appContext, e)
-                }
-            inFlightImages.value = inFlightImages.value - storyId
+                    .onFailure { e ->
+                        _failedImages.update { it + storyId }
+                        _viewerError.value = dailyUpErrorText(appContext, e)
+                    }
+            } finally {
+                inFlightImages.update { it - storyId }
+            }
         }
     }
 
@@ -479,11 +493,13 @@ class WhisperDailyUpsViewModel @Inject constructor(
      * (decrypt-once per session trades for memory safety).
      */
     private fun insertViewerImage(storyId: String, bmp: ImageBitmap) {
-        val merged = _images.value + (storyId to bmp)
-        _images.value = if (merged.size > MAX_VIEWER_IMAGES) {
-            merged.entries.drop(merged.size - MAX_VIEWER_IMAGES).associate { it.toPair() }
-        } else {
-            merged
+        _images.update { current ->
+            val merged = current + (storyId to bmp)
+            if (merged.size > MAX_VIEWER_IMAGES) {
+                merged.entries.drop(merged.size - MAX_VIEWER_IMAGES).associate { it.toPair() }
+            } else {
+                merged
+            }
         }
     }
 
@@ -520,14 +536,16 @@ class WhisperDailyUpsViewModel @Inject constructor(
             repository.fetchDailyUpReceipts(listOf(storyId))
                 .onSuccess { list ->
                     val snap = list.firstOrNull() ?: return@onSuccess
-                    _receipts.value = _receipts.value.copy(
-                        ownStats = _receipts.value.ownStats + (
-                            storyId to OwnStoryStats(
-                                views = snap.viewerIds.size,
-                                reactions = snap.reactions.size,
-                            )
-                        ),
-                    )
+                    _receipts.update {
+                        it.copy(
+                            ownStats = it.ownStats + (
+                                storyId to OwnStoryStats(
+                                    views = snap.viewerIds.size,
+                                    reactions = snap.reactions.size,
+                                )
+                            ),
+                        )
+                    }
                 }
         }
     }
@@ -544,23 +562,24 @@ class WhisperDailyUpsViewModel @Inject constructor(
     fun toggleReaction(storyId: String, emoji: String, on: Boolean) {
         if (storyId in reactionInFlight) return
         reactionInFlight += storyId
-        val myReactions = _receipts.value
-        val previous = myReactions.myReactions[storyId]
-        _receipts.value = myReactions.copy(
-            myReactions = myReactions.myReactions +
-                if (on) {
-                    storyId to emoji
-                } else {
-                    storyId to ""
-                },
-        )
+        val previous = _receipts.value.myReactions[storyId]
+        _receipts.update {
+            it.copy(
+                myReactions = it.myReactions +
+                    if (on) {
+                        storyId to emoji
+                    } else {
+                        storyId to ""
+                    },
+            )
+        }
         viewModelScope.launch {
             try {
                 repository.toggleDailyUpReaction(storyId, emoji, on)
                     .onFailure { e ->
-                        _receipts.value = _receipts.value.copy(
-                            myReactions = _receipts.value.myReactions + (storyId to (previous ?: "")),
-                        )
+                        _receipts.update {
+                            it.copy(myReactions = it.myReactions + (storyId to (previous ?: "")))
+                        }
                         _viewerError.value = dailyUpErrorText(appContext, e)
                     }
                     .onSuccess {
@@ -587,11 +606,48 @@ class WhisperDailyUpsViewModel @Inject constructor(
         viewModelScope.launch {
             repository.deleteDailyUp(storyId)
                 .onSuccess {
-                    _images.value = _images.value - storyId
-                    _viewer.value = null
+                    _images.update { it - storyId }
+                    // Only drop THIS page out of the snapshot. Closing the whole
+                    // overlay would yank a reader who swiped on to another
+                    // poster while the delete was still in flight.
+                    dropViewerStory(storyId)
                     _quotaUsed.value = repository.dailyUpsPostedToday()
                 }
                 .onFailure { e -> _viewerError.value = dailyUpErrorText(appContext, e) }
+        }
+    }
+
+    /**
+     * Removes [storyId] from the open viewer snapshot, keeping the reader on
+     * the story they are actually looking at. The deleted page itself closes
+     * the overlay; an emptied poster segment is dropped and the flat position
+     * is re-mapped so no unrelated story jumps under the finger.
+     */
+    private fun dropViewerStory(storyId: String) {
+        val v = _viewer.value ?: return
+        val flatDeleted = v.segments
+            .flatMap { it.stories }
+            .indexOfFirst { it.storyId == storyId }
+        if (flatDeleted < 0) return
+        val currentFlat = v.flatPosition
+        if (flatDeleted == currentFlat) {
+            _viewer.value = null
+            return
+        }
+        val segments = v.segments.mapNotNull { segment ->
+            val stories = segment.stories.filterNot { it.storyId == storyId }
+            if (stories.isEmpty()) null else segment.copy(stories = stories)
+        }
+        if (segments.isEmpty()) {
+            _viewer.value = null
+            return
+        }
+        val target = if (flatDeleted < currentFlat) currentFlat - 1 else currentFlat
+        val position = viewerPositionAtFlat(segments.map { it.stories.size }, target)
+        _viewer.value = if (position == null) {
+            null
+        } else {
+            v.copy(segments = segments, segmentIndex = position.first, storyIndex = position.second)
         }
     }
 

@@ -2422,6 +2422,14 @@ begin
   if new.epoch < v_epoch then
     raise exception 'stale epoch' using errcode = '42501';
   end if;
+  -- Every legitimate client op bumps the epoch by at most one (JOIN / LEAVE /
+  -- REMOVE / role changes / RENAME / ownership transfer). An unbounded jump
+  -- used to let any member write epoch=2^62 once, which ratchets the group row
+  -- past every honest client and permanently rejects their messages at the
+  -- message guard. Bound it; the exact delta stays client-signed and verified.
+  if new.epoch > v_epoch + 1 then
+    raise exception 'epoch jump too large' using errcode = '42501';
+  end if;
   if new.epoch > v_epoch then
     update public.whisper_groups set epoch = new.epoch where id = new.group_id;
   end if;
@@ -2727,6 +2735,13 @@ create policy "whisper_groups_select_member" on public.whisper_groups
         )
     );
 
+-- NON-MEMBERS are invitees only: they may append the two events their own
+-- redemption path owns (JOIN / DECLINE).  The previous OR-branch let an
+-- invitee write ANY event type (create/rename/remove/picture/…) into the
+-- append-only log before ever joining, which every honest client then rejects
+-- and truncates on — burning the group's readable history with one row.
+-- Members keep the full set; their rows are signature/policy checked by every
+-- client (the server has no group public keys and cannot verify them).
 drop policy if exists "whisper_group_events_insert_member" on public.whisper_group_events;
 create policy "whisper_group_events_insert_member" on public.whisper_group_events
     for insert with check (
@@ -2736,9 +2751,12 @@ create policy "whisper_group_events_insert_member" on public.whisper_group_event
                 select 1 from public.whisper_group_members m
                 where m.group_id = whisper_group_events.group_id and m.user_id = auth.uid()
             )
-            or exists (
-                select 1 from public.whisper_group_invites i
-                where i.group_id = whisper_group_events.group_id and i.user_id = auth.uid()
+            or (
+                type in ('join', 'decline')
+                and exists (
+                    select 1 from public.whisper_group_invites i
+                    where i.group_id = whisper_group_events.group_id and i.user_id = auth.uid()
+                )
             )
         )
     );
@@ -2870,10 +2888,25 @@ create policy "whisper_group_typing_select_member" on public.whisper_group_typin
         )
     );
 
+-- Writing a typing row requires membership: without the EXISTS a signed-in
+-- outsider could inject fake "typing…" rows into any group whose id they know
+-- (members read them via the select policy). Mirrors the receipts policy.
 drop policy if exists "whisper_group_typing_write_own" on public.whisper_group_typing;
 create policy "whisper_group_typing_write_own" on public.whisper_group_typing
-    for all using (user_id = auth.uid())
-    with check (user_id = auth.uid());
+    for all using (
+        user_id = auth.uid()
+        and exists (
+            select 1 from public.whisper_group_members m
+            where m.group_id = whisper_group_typing.group_id and m.user_id = auth.uid()
+        )
+    )
+    with check (
+        user_id = auth.uid()
+        and exists (
+            select 1 from public.whisper_group_members m
+            where m.group_id = whisper_group_typing.group_id and m.user_id = auth.uid()
+        )
+    );
 
 -- Realtime: receipts + typing join the publication (idempotent).
 do $$
@@ -3086,6 +3119,39 @@ create policy "whisper_group_reactions_write_own" on public.whisper_group_reacti
 
 create index if not exists whisper_group_reactions_group_idx
     on public.whisper_group_reactions (group_id, at desc);
+
+-- Receipts/reactions may only point at a message that exists in THIS group.
+-- The policies already limit the writer to their own row and membership, but
+-- `message_id` is free text: without this check a member could insert
+-- unlimited rows for invented ids (an unbounded storage DoS with no quota).
+-- The real message row always exists first — receipts are sent after the
+-- receiver decrypts it, and reactions target a rendered message.
+create or replace function public.whisper_group_validate_message_ref()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not exists (
+    select 1 from public.whisper_group_messages m
+     where m.group_id = new.group_id and m.client_id = new.message_id
+  ) then
+    raise exception 'unknown group message' using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_group_receipts_message_ref on public.whisper_group_receipts;
+create trigger trg_group_receipts_message_ref
+  before insert or update on public.whisper_group_receipts
+  for each row execute function public.whisper_group_validate_message_ref();
+
+drop trigger if exists trg_group_reactions_message_ref on public.whisper_group_reactions;
+create trigger trg_group_reactions_message_ref
+  before insert or update on public.whisper_group_reactions
+  for each row execute function public.whisper_group_validate_message_ref();
 
 create table if not exists public.whisper_group_join_requests (
     group_id uuid not null references public.whisper_groups(id) on delete cascade,
@@ -3324,6 +3390,12 @@ create table if not exists public.whisper_story_recipients (
 
 create index if not exists whisper_story_recipients_recipient_idx
     on public.whisper_story_recipients (recipient_id, story_id);
+-- The envelope sync pages NEWEST-first per recipient (Order.DESCENDING +
+-- LIMIT). Without the matching ordering index, a recipient with many
+-- historical rows would sort the whole set on every hub open; this keeps the
+-- page an index scan. (Separate name so existing databases get it too.)
+create index if not exists whisper_story_recipients_recipient_created_idx
+    on public.whisper_story_recipients (recipient_id, created_at desc);
 
 create table if not exists public.whisper_story_views (
     story_id uuid not null references public.whisper_stories(id) on delete cascade,
@@ -3492,6 +3564,21 @@ create policy "whisper_story_publish_quota_select_own"
 
 -- Keep account deletion complete before GoTrue removes the identity.  This replaces
 -- the earlier function body rather than adding a second cleanup path.
+--
+-- GROUP COVERAGE: most group tables key users by a bare uuid with NO FK to
+-- auth.users, so the GoTrue cascade can never reach them.  They must be listed
+-- explicitly.  Groups created by the account are deleted first (cascade removes
+-- their members/events/messages/invites/receipts/reactions/typing/join requests):
+-- the creator is the sole policy owner and, without a signed ownership transfer,
+-- the group would be permanently unmanageable.
+--
+-- The one intentional exception is whisper_group_events for groups that SURVIVE:
+-- the log is a signed, append-only Merkle-style chain and clients rebuild
+-- membership by replaying it (WhisperRepositoryGroups.applyEvents).  Deleting an
+-- actor's individual rows (e.g. their INVITE) makes later events (the invitee's
+-- JOIN) fail verification and truncates the group for every surviving member, so
+-- account purge treats the departure like a LEAVE: membership + authored content
+-- are removed, the signed public event log is retained.
 create or replace function public.whisper_purge_account_data(p_uid uuid)
 returns void
 language plpgsql
@@ -3506,8 +3593,21 @@ begin
     delete from public.whisper_blocks where blocker_id = p_uid or blocked_id = p_uid;
     delete from public.whisper_story_views where viewer_id = p_uid;
     delete from public.whisper_story_recipients where recipient_id = p_uid;
+    delete from public.whisper_story_reactions where user_id = p_uid;
     delete from public.whisper_stories where poster_id = p_uid;
     delete from public.whisper_story_publish_quota where poster_id = p_uid;
+    -- Owned groups go first so the per-table deletes below only touch groups
+    -- owned by somebody else (and never race the cascade).
+    delete from public.whisper_groups where created_by = p_uid;
+    delete from public.whisper_group_messages where sender_id = p_uid;
+    delete from public.whisper_group_members where user_id = p_uid or invited_by = p_uid;
+    delete from public.whisper_group_invites where user_id = p_uid or invited_by = p_uid;
+    delete from public.whisper_group_join_requests where user_id = p_uid;
+    delete from public.whisper_group_receipts where user_id = p_uid;
+    delete from public.whisper_group_reactions where user_id = p_uid;
+    delete from public.whisper_group_typing where user_id = p_uid;
+    delete from public.whisper_group_send_quota where sender_id = p_uid;
+    delete from public.whisper_group_signer_history where user_id = p_uid;
     delete from public.profiles where id = p_uid;
     delete from public.whisper_upload_quota where user_id = p_uid;
     delete from public.whisper_deleted_tombstones where user_id = p_uid;
@@ -3970,8 +4070,12 @@ begin
         on conflict (story_id, user_id)
         do update set emoji = excluded.emoji;
     else
+        -- One reaction row per (story, viewer): "off" is keyed only by the
+        -- identity, never by the emoji the caller happened to render. The old
+        -- `and emoji = p_emoji` left the row behind when another device had
+        -- changed the reaction in between (client shows none, server keeps it).
         delete from public.whisper_story_reactions
-         where story_id = p_story_id and user_id = v_caller and emoji = p_emoji;
+         where story_id = p_story_id and user_id = v_caller;
     end if;
     return true;
 end;

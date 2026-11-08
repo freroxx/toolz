@@ -1038,7 +1038,7 @@ and the UnifiedPush service entry point.
 ## 11. Groups
 
 > [!NOTE]
-> **Update Status:** Whisper Groups are currently hidden from the UI and not accessible in this update (`WhisperGroupsConfig.ENABLED = false`). All backend infrastructure, database tables, edge functions, crypto fan-out routines, and UI screen files are preserved intact for a future release.
+> **Update Status:** Whisper Groups are currently hidden from the UI and not accessible in this update (`WhisperGroupsConfig.ENABLED = false`). All backend infrastructure, database tables, edge functions, crypto fan-out routines, and UI screen files are preserved for a future release, and the client/SQL defects found in the hidden-feature audit have been fixed without enabling the surface (see §13).
 
 Groups are the most intricate subsystem: a cryptographically authenticated
 membership log, pairwise message fan-out, and a permission model, all inside
@@ -1075,6 +1075,20 @@ The same deployment caveat as §9 applies: the archive trigger is the canonical
 SQL baseline and the history serving lives in the deployed
 `whisper-bundle-fetch`; a stale edge deploy silently drops reinstall-proofing.
 The post-deploy smoke runbook verifies this pairing.
+
+**Account-deletion residual (Groups are still disabled).** The signer archive
+rows cascade with the auth user, and `whisper-bundle-fetch` refuses a bundle
+once the account's prekeys are purged. A member who deletes their account
+therefore leaves historical events that a *fresh* peer can no longer verify,
+which truncates that group's log at the deleted member's first event. The
+account purge removes the member's authored messages/rows (see §13) but
+deliberately keeps the signed append-only event log, because deleting
+individual events would break later INVITE→JOIN pairs for every surviving
+member. Before Groups is enabled this needs one explicit decision: retain
+public signer certs in a non-cascading archive and serve a signers-only bundle
+for deleted accounts, or remove/rewrite the departed member's events under a
+protocol-defined tombstone. Doing neither is a launch blocker for Groups, not
+for the currently shipped 1:1 surface.
 
 Applying is **tolerant**: a bad event does not brick the group — the client
 truncates to the verified prefix and flags the membership "degraded"
@@ -1312,7 +1326,7 @@ every group screen without touching the server plane:
 ## 12. Daily Ups
 
 > [!NOTE]
-> **Update Status:** Daily Ups are currently hidden from the UI and not accessible in this update (`WhisperDailyUpsConfig.ENABLED = false`). All backend infrastructure, database tables, edge functions, photo pipelines, and UI screen files are preserved intact for a future release.
+> **Update Status:** Daily Ups are currently hidden from the UI and not accessible in this update (`WhisperDailyUpsConfig.ENABLED = false`). All backend infrastructure, database tables, edge functions, photo pipelines, and UI screen files are preserved for a future release, and the client/SQL defects found in the hidden-feature audit have been fixed without enabling the surface (see §13).
 
 Daily Ups are 24-hour **photo stories** posted to all friends at once — never
 addressed to one person, capped at 5 per poster per UTC day, and bound to the
@@ -1599,13 +1613,21 @@ Whisper's cryptography is pinned with a deliberately paranoid test stack:
   starting point was 530 tests; each wave records its exact total in its gate
   log, and no new name may fail. W5 and W6 land at 561 tests with the same
   frozen seven (W6 adds no tests, so the total is unchanged). Nothing
-  behavioral lands outside that gate;
-  the SQL/edge surfaces were deliberately untouched and still belong to the
-  ship-day runbook (`supabase/POST_DEPLOY_SMOKE.md`).
-- **Server-plane invariants unchanged by the cycle.** Client-side hardening
-  changed no cryptography and no SQL: quotas (600/day fan-out, 5/day/IP
-  story, 5/day/IP signup), signed-log verification, epochs, and descriptor
-  shapes are byte-identical to the release cut — the freeze was deliberate.
+  behavioral lands outside that gate. That UI cycle deliberately left the
+  SQL/edge surfaces untouched; a later, separate Groups/Daily-Ups audit
+  hardened them (next bullet) and they still belong to the ship-day runbook
+  (`supabase/POST_DEPLOY_SMOKE.md`).
+- **Hidden Groups / Daily-Ups hardening (features still disabled).** The
+  client planes gained the missing realtime `subscribe()`, bounded event
+  verification, verified-cache group pictures, outbox/blob cleanup, bounded
+  fan-out, audience-before-upload story publishing with one ambiguous-retry,
+  absolute story expiry and atomic viewer state. The SQL plane gained a
+  membership requirement on typing writes, invitee events limited to
+  `join`/`decline`, a `+1` epoch-jump cap, receipt/reaction message-reference
+  triggers, the newest-first story-recipient index, identity-keyed reaction
+  removal, and complete account-purge coverage of the FK-less group tables.
+  Quotas (600/day fan-out, 5/day/IP story, 5/day/IP signup), signed-log
+  verification and descriptor shapes are unchanged; no cryptography changed.
 - **Regression cover from the October 2026 locked-message defect (§3.9).** The
   existing suite pins copy-commit ratchet behavior and the merger's
   locked → plaintext rule. The fix added `WhisperSelfReadStoreTest`, which
