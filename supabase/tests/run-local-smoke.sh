@@ -4,7 +4,10 @@
 #
 # Starts a throwaway postgres:16-alpine, installs the Supabase shim, applies
 # supabase/migrations/main-whisper-sql.sql TWICE (fresh build + idempotent
-# re-run), then runs the behavioural smoke suite.
+# re-run), runs the behavioural smoke suite, then re-applies the migration
+# once more WITH the suite's data present. That last pass is the one that
+# matches a real production re-deploy: schema objects already exist and rows
+# violate nothing the migration re-creates.
 #
 # Requirements: docker. Nothing here touches a hosted project.
 #
@@ -56,4 +59,7 @@ psql_file whisper.migration "$ROOT/supabase/migrations/main-whisper-sql.sql"
 echo "==> running behavioural smoke suite"
 psql_file whisper.smoke "$ROOT/supabase/tests/main-whisper-smoke.sql"
 
-echo "==> PASS: fresh build, idempotent re-run and behaviour smoke all green"
+echo "==> re-applying main-whisper-sql.sql with smoke data present (production replay)"
+psql_file whisper.migration "$ROOT/supabase/migrations/main-whisper-sql.sql"
+
+echo "==> PASS: fresh build, idempotent re-run, behaviour smoke and data-present replay all green"
