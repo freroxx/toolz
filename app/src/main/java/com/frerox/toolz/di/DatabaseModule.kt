@@ -658,7 +658,7 @@ object DatabaseModule {
             // defence in depth against file-level extraction).
             .addCallback(object : androidx.room.RoomDatabase.Callback() {
                 override fun onOpen(db: SupportSQLiteDatabase) {
-                    db.execSQL("PRAGMA secure_delete = ON")
+                    db.query("PRAGMA secure_delete = ON").close()
                 }
             })
             .build()
