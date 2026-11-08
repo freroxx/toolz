@@ -47,7 +47,9 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import io.github.jan.supabase.realtime.channel
 import io.github.jan.supabase.realtime.decodeOldRecord
 import io.github.jan.supabase.realtime.decodeRecord
@@ -84,8 +86,26 @@ object WhisperGroupsConfig {
     /** Fan-out quota: 50 msgs/day x MAX_MEMBERS (mirrors SQL v_limit 600). */
     const val DAILY_ENVELOPE_BUDGET = 600
 
+    /** Max signed event payload. PICTURE carries one sealed key frame per
+     *  member (12) plus the URL; 64 KiB leaves ample headroom while rejecting
+     *  a hostile multi-megabyte row before it can be parsed or re-signed. */
+    const val MAX_EVENT_PAYLOAD_CHARS = 64 * 1024
+
+    /** Max protocol signature length (base64 P-256/ECDSA). */
+    const val MAX_EVENT_SIGNATURE_CHARS = 4 * 1024
+
+    /** Max published signer cert length (base64 X.509). */
+    const val MAX_EVENT_SIGNER_CERT_CHARS = 16 * 1024
+
+    /** Max event-log rows a single sync will verify (runaway-log guard). */
+    const val MAX_VERIFIED_EVENTS = 5_000
+
     /** Network ceiling per group op: loads always settle (error + retry), never hang. */
     const val OP_TIMEOUT_MS = 30_000L
+
+    /** Concurrent per-group sync legs. Each leg fetches + verifies a full log;
+     *  unbounded fan-out over many groups is a socket/CPU storm. */
+    const val GROUP_SYNC_CONCURRENCY = 4
 
     /** Friend-name cache TTL (every chat load resolves names; avoid refetch). */
     const val FRIEND_NAMES_TTL_MS = 60_000L
@@ -345,6 +365,17 @@ fun applyEvents(
     }
     for (ev in events) {
         require(ev.groupId == groupId) { "event from another group" }
+        require(ev.seq > 0) { "event seq must be positive" }
+        require(ev.actor.isNotBlank()) { "event actor is required" }
+        require(ev.payloadJson.length <= WhisperGroupsConfig.MAX_EVENT_PAYLOAD_CHARS) {
+            "event payload too large"
+        }
+        require(ev.adminSig.length <= WhisperGroupsConfig.MAX_EVENT_SIGNATURE_CHARS) {
+            "event signature too large"
+        }
+        require((ev.signerCert?.length ?: 0) <= WhisperGroupsConfig.MAX_EVENT_SIGNER_CERT_CHARS) {
+            "event signer cert too large"
+        }
         require(ev.epoch >= epoch) { "stale epoch ${ev.epoch} < $epoch" }
         val type = ev.type
         if (type == WhisperGroupEventType.CREATE) {
@@ -572,20 +603,37 @@ fun applyEventsTolerant(
     try {
         return applyEvents(groupId, events, verify, signerCertsOf)
     } catch (first: RuntimeException) {
-        // Linear scan for the first failing prefix. O(k²) signature checks
-        // worst case; admin logs are tens of events, never thousands.
-        for (k in 1..events.size) {
-            val failed = runCatching {
-                applyEvents(groupId, events.subList(0, k), verify, signerCertsOf)
-            }.exceptionOrNull()
-            if (failed != null) {
-                if (k == 1) throw first
-                val good = applyEvents(groupId, events.subList(0, k - 1), verify, signerCertsOf)
-                android.util.Log.w("WhisperGroups", "log truncated at seq ${events[k - 1].seq}: ${failed.message}")
-                return good.copy(degraded = true, badSeq = events[k - 1].seq)
+        // A failing prefix can never become valid by appending more events, so
+        // failure is MONOTONIC in prefix length. Binary-search the first bad
+        // index instead of rescanning every prefix (the old linear scan was
+        // O(k²) signature verifications: a long poisoned log could freeze the
+        // sync/UI for minutes). O(k log k) total.
+        var low = 1
+        var high = events.size
+        var firstBad = -1
+        while (low <= high) {
+            val mid = (low + high) ushr 1
+            val failed = try {
+                applyEvents(groupId, events.subList(0, mid), verify, signerCertsOf)
+                false
+            } catch (_: RuntimeException) {
+                true
+            }
+            if (failed) {
+                firstBad = mid
+                high = mid - 1
+            } else {
+                low = mid + 1
             }
         }
-        throw first
+        // Nothing verifiable exists without a valid CREATE (prefix of length 1).
+        if (firstBad <= 1) throw first
+        val good = applyEvents(groupId, events.subList(0, firstBad - 1), verify, signerCertsOf)
+        android.util.Log.w(
+            "WhisperGroups",
+            "log truncated at seq ${events[firstBad - 1].seq}: ${first.message}",
+        )
+        return good.copy(degraded = true, badSeq = events[firstBad - 1].seq)
     }
 }
 
@@ -1041,6 +1089,9 @@ private suspend fun WhisperRepository.fetchVerifiedMembershipInner(groupId: Stri
     var events = (cached.map { it.toModel() } + fetchFresh(watermark))
         .distinctBy { it.id }.sortedBy { it.seq }
     if (events.isEmpty()) error("Group has no history.")
+    require(events.size <= WhisperGroupsConfig.MAX_VERIFIED_EVENTS) {
+        "Group history is too large to verify safely."
+    }
     suspend fun verifyAll(log: List<WhisperGroupEvent>): WhisperGroupMembership {
         // Pre-fetch every distinct actor's published signer SET (bundle fetch
         // is suspend; the verifier lambda below is a pure map read — never
@@ -1110,6 +1161,9 @@ private suspend fun WhisperRepository.fetchVerifiedMembershipInner(groupId: Stri
         groupDao.clearEvents(groupId)
         events = fetchFresh(0)
         if (events.isEmpty()) error("Group has no history.")
+        require(events.size <= WhisperGroupsConfig.MAX_VERIFIED_EVENTS) {
+            "Group history is too large to verify safely."
+        }
         membership = verifyOrDiagnose(events)
     }
     val verifiedEvents = if (membership.degraded) events.filter { it.seq < (membership.badSeq ?: Long.MAX_VALUE) } else events
@@ -1147,24 +1201,32 @@ suspend fun WhisperRepository.syncGroups(): Result<List<WhisperGroupMembership>>
     val ok = java.util.Collections.synchronizedList(mutableListOf<WhisperGroupMembership>())
     val failures = java.util.concurrent.atomic.AtomicInteger(0)
     val firstFailure = java.util.concurrent.atomic.AtomicReference<Throwable?>(null)
+    // Bounded fan-out: each leg fetches + verifies a full event log (network +
+    // signature checks). Unbounded async over every group let a user in dozens
+    // of groups open as many sockets/verifications at once — a request storm
+    // and memory spike. 4 concurrent legs keeps the list responsive without
+    // starving the pool.
+    val permits = Semaphore(WhisperGroupsConfig.GROUP_SYNC_CONCURRENCY)
     kotlinx.coroutines.coroutineScope {
         myRows.map { row ->
             async {
-                syncGroup(row.groupId)
-                    .onSuccess { ok.add(it) }
-                    .onFailure {
-                        failures.incrementAndGet()
-                        firstFailure.compareAndSet(null, it)
-                        val msg = it.message.orEmpty()
-                        if ("no longer a member" in msg || "Group not found" in msg) {
-                            runCatching {
-                                groupDao.deleteGroup(row.groupId)
-                                groupDao.clearMembers(row.groupId)
-                                groupDao.clearEvents(row.groupId)
+                permits.withPermit {
+                    syncGroup(row.groupId)
+                        .onSuccess { ok.add(it) }
+                        .onFailure {
+                            failures.incrementAndGet()
+                            firstFailure.compareAndSet(null, it)
+                            val msg = it.message.orEmpty()
+                            if ("no longer a member" in msg || "Group not found" in msg) {
+                                runCatching {
+                                    groupDao.deleteGroup(row.groupId)
+                                    groupDao.clearMembers(row.groupId)
+                                    groupDao.clearEvents(row.groupId)
+                                }
                             }
+                            android.util.Log.w("WhisperGroups", "syncGroups: skipping one group: ${it.message}")
                         }
-                        android.util.Log.w("WhisperGroups", "syncGroups: skipping one group: ${it.message}")
-                    }
+                }
             }
         }.awaitAll()
     }
@@ -1218,6 +1280,10 @@ private suspend fun WhisperRepository.persistGroupCache(
             )
         },
     )
+    // A degraded log is persisted as the VERIFIED PREFIX only. Purge any
+    // previously cached rows at/after the break so the local cache can never
+    // be mistaken for a fully verified log (system-event UI, re-verification).
+    membership.badSeq?.let { groupDao.deleteEventsFrom(group.id, it) }
     groupDao.insertEvents(
         events.map {
             WhisperGroupEventEntity(
@@ -1519,9 +1585,13 @@ fun groupErrorText(context: android.content.Context, e: Throwable?): String {
 }
 
 private suspend fun WhisperRepository.nextGroupSeqEpoch(groupId: String): Pair<Long, Long> {
-    val rows = db.from("whisper_group_events").select { filter { eq("group_id", groupId) } }
-        .decodeList<GroupEventRow>()
-    val maxSeq = rows.maxOfOrNull { it.seq } ?: 0L
+    // Only the head row matters. The old query downloaded the ENTIRE event
+    // log (payloads included) on every send/invite/rename/settings op.
+    val maxSeq = db.from("whisper_group_events").select {
+        filter { eq("group_id", groupId) }
+        order("seq", Order.DESCENDING)
+        limit(1)
+    }.decodeSingleOrNull<GroupEventRow>()?.seq ?: 0L
     val group = db.from("whisper_groups").select { filter { eq("id", groupId) } }
         .decodeSingleOrNull<GroupRow>()
     return (maxSeq + 1) to (group?.epoch ?: 0L)
@@ -1610,10 +1680,17 @@ suspend fun WhisperRepository.myGroupInvites(): Result<List<GroupInviteInfo>> = 
     groupIo {
         val rows = db.from("whisper_group_invites").select { filter { eq("user_id", me) } }
             .decodeList<GroupInviteRow>()
+        if (rows.isEmpty()) return@groupIo emptyList()
         val names = friendNameMap()
+        // ONE batched group read: the old per-invite select was N+1 round trips
+        // (a user with many outstanding invites paid a full RTT each).
+        val groupIds = rows.map { it.groupId }.distinct()
+        val groupsById = groupIds.chunked(100).flatMap { chunk ->
+            db.from("whisper_groups").select { filter { isIn("id", chunk) } }
+                .decodeList<GroupRow>()
+        }.associateBy { it.id }
         rows.mapNotNull { row ->
-            val group = db.from("whisper_groups").select { filter { eq("id", row.groupId) } }
-                .decodeSingleOrNull<GroupRow>() ?: return@mapNotNull null
+            val group = groupsById[row.groupId] ?: return@mapNotNull null
             GroupInviteInfo(
                 groupId = row.groupId,
                 groupName = group.name.ifBlank { "Group" },
@@ -1804,6 +1881,7 @@ suspend fun WhisperRepository.sendGroupContent(groupId: String, content: Whisper
     val m = syncGroup(groupId).getOrThrow()
     require(m.isMember(me)) { "You are no longer a member of this group." }
     require(m.allows(me, WhisperGroupCapability.SEND_MESSAGES)) { "You cannot send messages in this group." }
+    validateGroupContent(content)
     if (content.poll != null) {
         require(m.allows(me, WhisperGroupCapability.CREATE_POLLS)) { "You cannot create polls in this group." }
     }
@@ -1819,6 +1897,44 @@ suspend fun WhisperRepository.sendGroupContent(groupId: String, content: Whisper
         else -> "chat"
     }
     sealAndPublishContent(groupId, m, me, buildGroupContentBody(content), kind).getOrThrow()
+}
+
+/**
+ * Bounds every structured frame BEFORE it is sealed N times. The UI is not a
+ * trust boundary: a caller (or a future screen) could otherwise fan a
+ * multi-megabyte caption, a 10k-option poll or a crafted attachment ref out
+ * to all 12 members. Kept generous so every legitimate UI value passes.
+ */
+private fun validateGroupContent(content: WhisperGroupContent) {
+    require(
+        content.t.isNotBlank() || content.img != null || content.poll != null ||
+            content.vote != null || content.pollClose != null,
+    ) { "Message is empty." }
+    require(content.t.length <= WhisperRepository.MAX_MESSAGE_CHARS) { "Message is too long." }
+    require(content.mentions.size <= WhisperGroupsConfig.MAX_MEMBERS) { "Too many mentions." }
+    require(content.mentions.all { it.isNotBlank() }) { "Invalid mention." }
+    content.reply?.let { reply ->
+        require(reply.id.isNotBlank() && reply.sender.isNotBlank()) { "Invalid reply." }
+        require(reply.text.length <= WhisperRepository.MAX_MESSAGE_CHARS) { "Reply quote is too long." }
+    }
+    content.poll?.let { poll ->
+        require(poll.id.isNotBlank() && poll.q.isNotBlank()) { "Poll question is required." }
+        require(poll.q.length <= 500) { "Poll question is too long." }
+        require(poll.opts.size in 2..6) { "Polls need 2 to 6 options." }
+        require(poll.opts.all { it.isNotBlank() && it.length <= 200 }) { "Poll options are invalid." }
+    }
+    content.vote?.let { vote ->
+        require(vote.poll.isNotBlank()) { "Poll id is required." }
+        require(vote.opt in 0 until 6) { "Invalid poll option." }
+    }
+    content.pollClose?.let { pollId -> require(pollId.isNotBlank()) { "Poll id is required." } }
+    content.img?.let { img ->
+        require(img.url.startsWith("https://")) { "Invalid image URL." }
+        require(img.key.length == 44) { "Invalid image key." }
+        require(img.mime in setOf("image/jpeg", "image/png", "image/webp")) { "Unsupported image format." }
+        require(img.exp == null || img.exp > 0) { "Invalid image expiry." }
+        require((img.att?.length ?: 0) <= 512) { "Invalid image reference." }
+    }
 }
 
 /**
@@ -1844,6 +1960,10 @@ suspend fun WhisperRepository.sendGroupImage(
     ) { "Disappearing images must expire between 1 minute and 180 days." }
     val m = syncGroup(groupId).getOrThrow()
     require(m.isMember(me)) { "You are no longer a member of this group." }
+    // Permission check BEFORE the upload: a revoked sender must not burn a
+    // hosted blob (there is no outbox row to own it afterwards).
+    require(m.allows(me, WhisperGroupCapability.SEND_MESSAGES)) { "You cannot send messages in this group." }
+    require(caption.trim().length <= WhisperRepository.MAX_MESSAGE_CHARS) { "Message is too long." }
     // Chat photos keep aspect ratio (the picture path square-crops for avatars).
     val (compressed, outMime) = compressGroupChatImage(imageBytes, mimeType)
     require(compressed.isNotEmpty()) { "Could not read that image." }
@@ -1861,7 +1981,17 @@ suspend fun WhisperRepository.sendGroupImage(
         mime = outMime,
         exp = expiresAfterSeconds?.let { (System.currentTimeMillis() / 1000) + it },
     )
-    sendGroupContent(groupId, WhisperGroupContent(t = caption.trim(), img = ref)).getOrThrow()
+    val sent = sendGroupContent(groupId, WhisperGroupContent(t = caption.trim(), img = ref))
+    if (sent.isFailure) {
+        val cause = sent.exceptionOrNull()
+        // A queued send already carries this URL+key in its outbox row, so the
+        // blob must stay. Any other failure means no row will reference it —
+        // delete best-effort instead of leaking an unreachable upload.
+        if (cause?.message?.contains("group_send_queued") != true) {
+            runCatching { encryptedImageHost.delete(url, att) }
+        }
+        throw cause ?: error("Message not sent.")
+    }
     // sendGroupContent returns the row's clientId now; image sends only need
     // the success/failure boundary, so the block still closes as Unit.
     Unit
@@ -2151,13 +2281,20 @@ suspend fun WhisperRepository.markGroupSeen(groupId: String, clientIds: List<Str
     if (groupId.isBlank() || clientIds.isEmpty()) return@runCatching
     // Upserts are idempotent (PK covers group+message+user); failures are
     // best-effort — receipts are presence metadata, never load-bearing.
-    clientIds.distinct().take(100).forEach { cid ->
-        runCatching {
-            db.from("whisper_group_receipts").upsert(
-                GroupReceiptInsert(groupId = groupId, messageId = cid, userId = me),
-            )
+    // ONE batched upsert per 100 ids: the old per-id loop did up to 100
+    // sequential round trips on every chat open.
+    clientIds.asSequence()
+        .filter { it.isNotBlank() }
+        .distinct()
+        .take(100)
+        .chunked(50)
+        .forEach { chunk ->
+            runCatching {
+                db.from("whisper_group_receipts").upsert(
+                    chunk.map { cid -> GroupReceiptInsert(groupId = groupId, messageId = cid, userId = me) },
+                )
+            }
         }
-    }
 }
 
 /** Live seen receipts for one group (the "seen by n" ticks update in place). */
@@ -2165,7 +2302,8 @@ internal fun WhisperRepository.observeGroupReceiptEvents(groupId: String): kotli
     kotlinx.coroutines.flow.callbackFlow {
         requireGroupsEnabled()
         if (groupId.isBlank()) { close(); return@callbackFlow }
-        val channel = groupChannel("grouppg_receipt_$groupId")
+        val channelName = "grouppg_receipt_$groupId"
+        val channel = groupChannel(channelName)
         val changes = channel.postgresChangeFlow<io.github.jan.supabase.realtime.PostgresAction>(schema = "public") {
             table = "whisper_group_receipts"
             filter("group_id", io.github.jan.supabase.postgrest.query.filter.FilterOperator.EQ, groupId)
@@ -2182,9 +2320,10 @@ internal fun WhisperRepository.observeGroupReceiptEvents(groupId: String): kotli
                 if (row != null) trySend(row)
             }
         }
+        joinGroupChannel(channelName, channel)
         awaitClose {
             job.cancel()
-            launch { runCatchingCE { realtime.removeChannel(channel) } }
+            launch { leaveGroupChannel(channelName, channel) }
         }
     }
 
@@ -2271,7 +2410,8 @@ internal fun WhisperRepository.observeGroupReactionEvents(groupId: String): kotl
     kotlinx.coroutines.flow.callbackFlow {
         requireGroupsEnabled()
         if (groupId.isBlank()) { close(); return@callbackFlow }
-        val channel = groupChannel("grouppg_react_$groupId")
+        val channelName = "grouppg_react_$groupId"
+        val channel = groupChannel(channelName)
         val changes = channel.postgresChangeFlow<io.github.jan.supabase.realtime.PostgresAction>(schema = "public") {
             table = "whisper_group_reactions"
             filter("group_id", io.github.jan.supabase.postgrest.query.filter.FilterOperator.EQ, groupId)
@@ -2297,9 +2437,10 @@ internal fun WhisperRepository.observeGroupReactionEvents(groupId: String): kotl
                 trySend(event)
             }
         }
+        joinGroupChannel(channelName, channel)
         awaitClose {
             job.cancel()
-            launch { runCatchingCE { realtime.removeChannel(channel) } }
+            launch { leaveGroupChannel(channelName, channel) }
         }
     }
 
@@ -2379,7 +2520,8 @@ fun WhisperRepository.observeGroupJoinRequests(groupId: String): kotlinx.corouti
     kotlinx.coroutines.flow.callbackFlow {
         requireGroupsEnabled()
         if (groupId.isBlank()) { close(); return@callbackFlow }
-        val channel = groupChannel("grouppg_reqs_$groupId")
+        val channelName = "grouppg_reqs_$groupId"
+        val channel = groupChannel(channelName)
         val changes = channel.postgresChangeFlow<io.github.jan.supabase.realtime.PostgresAction>(schema = "public") {
             table = "whisper_group_join_requests"
             filter("group_id", io.github.jan.supabase.postgrest.query.filter.FilterOperator.EQ, groupId)
@@ -2387,9 +2529,10 @@ fun WhisperRepository.observeGroupJoinRequests(groupId: String): kotlinx.corouti
         val job = launch {
             changes.collect { trySend(Unit) }
         }
+        joinGroupChannel(channelName, channel)
         awaitClose {
             job.cancel()
-            launch { runCatchingCE { realtime.removeChannel(channel) } }
+            launch { leaveGroupChannel(channelName, channel) }
         }
     }
 
@@ -2451,7 +2594,8 @@ fun WhisperRepository.observeGroupTyping(groupId: String): kotlinx.coroutines.fl
         requireGroupsEnabled()
         if (groupId.isBlank()) { close(); return@callbackFlow }
         val me = myId
-        val channel = groupChannel("grouppg_typing_$groupId")
+        val channelName = "grouppg_typing_$groupId"
+        val channel = groupChannel(channelName)
         suspend fun current(): List<String> {
             val cutoff = System.currentTimeMillis() - GROUP_TYPING_FRESH_MS
             return runCatching {
@@ -2481,9 +2625,10 @@ fun WhisperRepository.observeGroupTyping(groupId: String): kotlinx.coroutines.fl
                 trySend(current())
             }
         }
+        joinGroupChannel(channelName, channel)
         awaitClose {
             job.cancel()
-            launch { runCatchingCE { realtime.removeChannel(channel) } }
+            launch { leaveGroupChannel(channelName, channel) }
         }
     }
 
@@ -2525,6 +2670,13 @@ suspend fun WhisperRepository.setGroupPicture(
     groupId: String,
     imageBytes: ByteArray,
     mimeType: String,
+    /**
+     * False when replaying a queued picture row. The drain must NOT enqueue
+     * another row on failure: the old retry path enqueued a fresh row every
+     * attempt, so one failure doubled the outbox on each flush (unbounded
+     * growth). The original row's attempt counter is the only retry budget.
+     */
+    enqueueOnFailure: Boolean = true,
 ): Result<Unit> = runCatching {
     requireGroupsEnabled()
     val me = requireMe()
@@ -2538,6 +2690,12 @@ suspend fun WhisperRepository.setGroupPicture(
     if (published.isSuccess) {
         syncGroup(groupId).getOrThrow()
         return@runCatching
+    }
+    val cause = published.exceptionOrNull()
+    // Permission/state rejections will fail identically on every replay.
+    // Surface them now instead of parking an undeliverable row in the outbox.
+    if (!enqueueOnFailure || isPermanentGroupPictureFailure(cause)) {
+        throw cause ?: error("Picture not changed.")
     }
     // Offline/mid-flight failure: queue the ORIGINAL bytes — the drain
     // re-runs compress/seal/upload/publish from scratch.
@@ -2556,8 +2714,23 @@ suspend fun WhisperRepository.setGroupPicture(
         ),
     )
     deliveryScheduler.scheduleNow()
-    android.util.Log.w("WhisperGroups", "setGroupPicture queued: ${published.exceptionOrNull()?.message}")
+    android.util.Log.w("WhisperGroups", "setGroupPicture queued: ${cause?.message}")
     error("group_send_queued")
+}
+
+/** Failures that a queued picture replay can never overcome. */
+private fun isPermanentGroupPictureFailure(e: Throwable?): Boolean {
+    val msg = e?.message.orEmpty().lowercase()
+    return "not a member" in msg ||
+        "no longer a member" in msg ||
+        "cannot change the picture" in msg ||
+        "not permitted" in msg ||
+        "group not found" in msg ||
+        "group full" in msg ||
+        "quota exceeded" in msg ||
+        "stale epoch" in msg ||
+        "last admin" in msg ||
+        "only the group owner" in msg
 }
 
 /** Seal-per-member + upload + signed PICTURE event (shared by set + drain). */
@@ -2568,13 +2741,10 @@ private suspend fun WhisperRepository.publishPictureFrames(
     compressed: ByteArray,
 ): Result<Unit> = runCatching {
     val (sealed, key) = newGroupPictureSeal(compressed)
-    // Pass RAW sealed bytes — the host wraps WZ1/PNG exactly once; the open
-    // side (openGroupPictureInner) decodes once. Double-wrapping (pre-wrap +
-    // host wrap) made the hosted blob undecodable: the picture change landed
-    // but no member could ever display it (V6-R7b avatar precedent).
-    val (url, _) = encryptedImageHost.upload(sealed, "group-$groupId", null).getOrThrow()
-    require(url.isNotBlank()) { "Picture upload failed." }
     val keyB64 = java.util.Base64.getEncoder().encodeToString(key)
+    // Seal EVERY key frame BEFORE uploading. Uploading first meant an
+    // unreachable member aborted the publish after the hosted blob existed —
+    // an orphan with no signed event referencing it, leaked forever.
     val frames = mutableMapOf<String, String>()
     val failed = mutableListOf<String>()
     for (memberId in m.members.keys.sorted()) {
@@ -2587,30 +2757,62 @@ private suspend fun WhisperRepository.publishPictureFrames(
     require(failed.isEmpty()) {
         "Could not reach ${failed.size} member(s) — picture not changed. Retry when they're reachable."
     }
+    // Pass RAW sealed bytes — the host wraps WZ1/PNG exactly once; the open
+    // side (openGroupPictureInner) decodes once. Double-wrapping (pre-wrap +
+    // host wrap) made the hosted blob undecodable: the picture change landed
+    // but no member could ever display it (V6-R7b avatar precedent).
+    val (url, attachmentId) = encryptedImageHost.upload(sealed, "group-$groupId", null).getOrThrow()
+    require(url.isNotBlank()) { "Picture upload failed." }
     val (seq, epoch) = nextGroupSeqEpoch(groupId)
-    publishGroupEvent(
-        groupId, seq, epoch, WhisperGroupEventType.PICTURE, me,
-        buildGroupPicturePayload(url, frames),
-    ).getOrThrow()
+    val published = runCatching {
+        publishGroupEvent(
+            groupId, seq, epoch, WhisperGroupEventType.PICTURE, me,
+            buildGroupPicturePayload(url, frames),
+        ).getOrThrow()
+    }
+    if (published.isFailure) {
+        // No signed event refers to this blob: remove it best-effort rather
+        // than leaving an unreachable hosted copy behind.
+        runCatching { encryptedImageHost.delete(url, attachmentId) }
+        throw published.exceptionOrNull() ?: error("Picture not changed.")
+    }
 }
 
 /** Opens the current picture for me (null = none set / not for me). */
-suspend fun WhisperRepository.openGroupPicture(groupId: String): Result<ByteArray?> = runCatching {
+suspend fun WhisperRepository.openGroupPicture(
+    groupId: String,
+    /** Freshly synced membership: avoids re-verifying the whole event log. */
+    membership: WhisperGroupMembership? = null,
+): Result<ByteArray?> = runCatching {
     requireGroupsEnabled()
     requireMe()
-    groupIo { openGroupPictureInner(groupId).getOrThrow() }
+    groupIo { openGroupPictureInner(groupId, membership).getOrThrow() }
 }
 
-private suspend fun WhisperRepository.openGroupPictureInner(groupId: String): Result<ByteArray?> =
+private suspend fun WhisperRepository.openGroupPictureInner(
+    groupId: String,
+    membership: WhisperGroupMembership? = null,
+): Result<ByteArray?> =
     runCatching {
     requireGroupsEnabled()
     val me = requireMe()
-    val m = syncGroup(groupId).getOrThrow()
+    val m = membership ?: syncGroup(groupId).getOrThrow()
     require(m.isMember(me)) { "You are no longer a member of this group." }
-    val rows = db.from("whisper_group_events").select {
-        filter { eq("group_id", groupId); eq("type", "picture") }
-    }.decodeList<GroupEventRow>()
-    val latest = rows.maxByOrNull { it.seq } ?: return@runCatching null
+    // ONLY the verified local prefix may supply the picture event. Querying
+    // the server directly used to bypass applyEvents entirely: an event past
+    // a poisoned/degraded boundary (unverifiable, never persisted) could still
+    // be opened and displayed. The membership's picture is the latest VERIFIED
+    // PICTURE event; resolve its cached row (frames + actor) by URL+epoch.
+    val verifiedPicture = m.picture ?: return@runCatching null
+    val latest = groupDao.events(groupId)
+        .asSequence()
+        .filter { it.type == WhisperGroupEventType.PICTURE.wire }
+        .sortedByDescending { it.seq }
+        .firstOrNull { row ->
+            val parsed = parseGroupPicturePayload(row.payload) ?: return@firstOrNull false
+            row.epoch == verifiedPicture.epoch && parsed.first == verifiedPicture.url
+        }
+        ?: return@runCatching null
     val (url, frames) = parseGroupPicturePayload(latest.payload) ?: error("Bad picture data.")
     val frame = frames[me] ?: return@runCatching null
     // A picture set by me opens my self-leg frame (no ratchet session with self).
@@ -2620,6 +2822,7 @@ private suspend fun WhisperRepository.openGroupPictureInner(groupId: String): Re
     val keyB64 = openGroupFrameBody(groupId, latest.epoch, inner) ?: error("Could not open the picture key.")
     val key = runCatching { java.util.Base64.getDecoder().decode(keyB64) }.getOrNull()
         ?: error("Bad picture key.")
+    require(key.size == 32) { "Bad picture key." }
     val png = encryptedImageHost.download(url).getOrThrow()
     val sealed = WhisperImageCipherTransport.decode(png) ?: error("Bad picture data.")
     openGroupPictureBytes(sealed, key) ?: error("Could not decrypt the picture.")
@@ -2706,7 +2909,7 @@ private suspend fun WhisperRepository.drainGroupPicture(groupId: String, packed:
     val bytes = runCatching {
         java.util.Base64.getDecoder().decode(packed.substring(split + 1))
     }.getOrNull() ?: error("Bad queued group picture.")
-    setGroupPicture(groupId, bytes, mime).getOrThrow()
+    setGroupPicture(groupId, bytes, mime, enqueueOnFailure = false).getOrThrow()
 }
 
 /** True on unique(client_id) replays (a prior attempt delivered, response lost). */
@@ -2730,13 +2933,41 @@ private suspend fun WhisperRepository.groupChannel(name: String): io.github.jan.
     return supabase.channel(name)
 }
 
+/**
+ * Subscribes a group realtime channel AFTER its Postgres change filters are
+ * registered — `postgresChangeFlow` refuses to register on an already-joined
+ * channel. The channel is cached so account teardown can remove it.
+ *
+ * Previously none of the group observables ever called `subscribe()`, so
+ * every live lane (messages, typing, receipts, reactions, deletes, invites,
+ * join requests, group log) silently delivered nothing.
+ */
+private suspend fun WhisperRepository.joinGroupChannel(
+    name: String,
+    channel: io.github.jan.supabase.realtime.RealtimeChannel,
+) {
+    channel.subscribe()
+    channelMutex.withLock { broadcastChannelCache[name] = channel }
+}
+
+private suspend fun WhisperRepository.leaveGroupChannel(
+    name: String,
+    channel: io.github.jan.supabase.realtime.RealtimeChannel,
+) {
+    channelMutex.withLock {
+        if (broadcastChannelCache[name] === channel) broadcastChannelCache.remove(name)
+    }
+    runCatchingCE { realtime.removeChannel(channel) }
+}
+
 /** Fires on every invite-row insert/delete visible to me (my invites only, via RLS). */
 fun WhisperRepository.observeMyGroupInvites(): kotlinx.coroutines.flow.Flow<Unit> =
     kotlinx.coroutines.flow.callbackFlow {
         requireGroupsEnabled()
         val me = myId
         if (me.isBlank()) { close(); return@callbackFlow }
-        val channel = groupChannel("grouppg_invites_$me")
+        val channelName = "grouppg_invites_$me"
+        val channel = groupChannel(channelName)
         val changes = channel.postgresChangeFlow<io.github.jan.supabase.realtime.PostgresAction>(schema = "public") {
             table = "whisper_group_invites"
             filter("user_id", io.github.jan.supabase.postgrest.query.filter.FilterOperator.EQ, me)
@@ -2746,9 +2977,10 @@ fun WhisperRepository.observeMyGroupInvites(): kotlinx.coroutines.flow.Flow<Unit
                 trySend(Unit)
             }
         }
+        joinGroupChannel(channelName, channel)
         awaitClose {
             job.cancel()
-            launch { runCatchingCE { realtime.removeChannel(channel) } }
+            launch { leaveGroupChannel(channelName, channel) }
         }
     }
 
@@ -2757,7 +2989,8 @@ internal fun WhisperRepository.observeGroupLog(groupId: String): kotlinx.corouti
     kotlinx.coroutines.flow.callbackFlow {
         requireGroupsEnabled()
         if (groupId.isBlank()) { close(); return@callbackFlow }
-        val channel = groupChannel("grouppg_log_$groupId")
+        val channelName = "grouppg_log_$groupId"
+        val channel = groupChannel(channelName)
         val changes = channel.postgresChangeFlow<io.github.jan.supabase.realtime.PostgresAction>(schema = "public") {
             table = "whisper_group_events"
             filter("group_id", io.github.jan.supabase.postgrest.query.filter.FilterOperator.EQ, groupId)
@@ -2772,9 +3005,10 @@ internal fun WhisperRepository.observeGroupLog(groupId: String): kotlinx.corouti
                 if (row != null) trySend(row)
             }
         }
+        joinGroupChannel(channelName, channel)
         awaitClose {
             job.cancel()
-            launch { runCatchingCE { realtime.removeChannel(channel) } }
+            launch { leaveGroupChannel(channelName, channel) }
         }
     }
 
@@ -2798,7 +3032,8 @@ internal fun WhisperRepository.observeGroupMessagesLive(groupId: String): kotlin
     kotlinx.coroutines.flow.callbackFlow {
         requireGroupsEnabled()
         if (groupId.isBlank()) { close(); return@callbackFlow }
-        val channel = groupChannel("grouppg_msg_$groupId")
+        val channelName = "grouppg_msg_$groupId"
+        val channel = groupChannel(channelName)
         val changes = channel.postgresChangeFlow<io.github.jan.supabase.realtime.PostgresAction>(schema = "public") {
             table = "whisper_group_messages"
             filter("group_id", io.github.jan.supabase.postgrest.query.filter.FilterOperator.EQ, groupId)
@@ -2815,9 +3050,10 @@ internal fun WhisperRepository.observeGroupMessagesLive(groupId: String): kotlin
                 }
             }
         }
+        joinGroupChannel(channelName, channel)
         awaitClose {
             job.cancel()
-            launch { runCatchingCE { realtime.removeChannel(channel) } }
+            launch { leaveGroupChannel(channelName, channel) }
         }
     }
 
@@ -2849,7 +3085,8 @@ fun WhisperRepository.observeGroupMessageDeletes(groupId: String): kotlinx.corou
     kotlinx.coroutines.flow.callbackFlow {
         requireGroupsEnabled()
         if (groupId.isBlank()) { close(); return@callbackFlow }
-        val channel = groupChannel("grouppg_msgdel_$groupId")
+        val channelName = "grouppg_msgdel_$groupId"
+        val channel = groupChannel(channelName)
         val changes = channel.postgresChangeFlow<io.github.jan.supabase.realtime.PostgresAction>(schema = "public") {
             table = "whisper_group_messages"
             filter("group_id", io.github.jan.supabase.postgrest.query.filter.FilterOperator.EQ, groupId)
@@ -2866,8 +3103,9 @@ fun WhisperRepository.observeGroupMessageDeletes(groupId: String): kotlinx.corou
                 if (id != null) trySend(id)
             }
         }
+        joinGroupChannel(channelName, channel)
         awaitClose {
             job.cancel()
-            launch { runCatchingCE { realtime.removeChannel(channel) } }
+            launch { leaveGroupChannel(channelName, channel) }
         }
     }

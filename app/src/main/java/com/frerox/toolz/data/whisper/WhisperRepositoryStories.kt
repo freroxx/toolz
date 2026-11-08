@@ -234,6 +234,17 @@ suspend fun WhisperRepository.publishDailyUp(
     requireDailyUpsEnabled()
     val me = requireStoryMe()
     storyIo(WhisperDailyUpsConfig.PUBLISH_TIMEOUT_MS) {
+        // Audience FIRST: a too-large audience (or no friends to send to) must
+        // fail closed BEFORE the expensive preprocess + upload. Otherwise a
+        // rejected publish left an orphaned hosted blob with no story row.
+        val friends = getFriends().getOrThrow()
+        val audience = friends.map { it.id }
+            .filter { it != me && it !in excludedFriendIds }
+            .distinct()
+        check(audience.size <= WhisperDailyUpsConfig.MAX_RECIPIENTS) {
+            "audience too large (${audience.size})"
+        }
+
         val prep = preprocessDailyUpPhoto(appContext, photoBytes, mimeType)
         val photo = when (prep) {
             is DailyUpPhotoPreparation.Ready -> prep.photo
@@ -247,16 +258,6 @@ suspend fun WhisperRepository.publishDailyUp(
             .upload(png, "story-$me-${System.currentTimeMillis()}", WhisperDailyUpsConfig.UPLOAD_TTL_SECONDS)
             .getOrThrow()
         require(hostUrl.isNotBlank() && !attachmentId.isNullOrBlank()) { "Picture upload failed." }
-
-        // Audience = CURRENT accepted friends minus exclusions (server
-        // re-validates against friendships + the block ledger atomically).
-        val friends = getFriends().getOrThrow()
-        val audience = friends.map { it.id }
-            .filter { it != me && it !in excludedFriendIds }
-            .distinct()
-        check(audience.size <= WhisperDailyUpsConfig.MAX_RECIPIENTS) {
-            "audience too large (${audience.size})"
-        }
 
         // One descriptor per friend; story id comes later from the RPC (rows
         // carry it), so the leg payload stays key/host-facts only.
@@ -272,24 +273,34 @@ suspend fun WhisperRepository.publishDailyUp(
             friendId to sealedDescriptor
         }
 
-        val published = db.rpc(
-            "whisper_story_publish",
-            buildJsonObject {
-                put("p_client_id", UUID.randomUUID().toString())
-                put("p_host_url", hostUrl)
-                put("p_host_object_id", attachmentId)
-                put("p_receipts_enabled", receiptsEnabled)
-                put("p_recipients", buildJsonArray {
-                    legs.forEach { (rid, sealed) ->
-                        add(buildJsonObject {
-                            put("r", rid)
-                            put("d", sealed)
-                        })
-                    }
-                })
-                put("p_client_version_code", BuildConfig.VERSION_CODE)
-            },
-        ).decodeAs<StoryServerRow>()
+        // ONE stable client id for every attempt: the server's idempotency
+        // probe (poster_id, client_id) returns the live story without touching
+        // quota or the audience snapshot, so an ambiguous timeout can be
+        // retried safely instead of double-posting or orphaning the upload.
+        val clientId = UUID.randomUUID().toString()
+        val publishBody = buildJsonObject {
+            put("p_client_id", clientId)
+            put("p_host_url", hostUrl)
+            put("p_host_object_id", attachmentId)
+            put("p_receipts_enabled", receiptsEnabled)
+            put("p_recipients", buildJsonArray {
+                legs.forEach { (rid, sealed) ->
+                    add(buildJsonObject {
+                        put("r", rid)
+                        put("d", sealed)
+                    })
+                }
+            })
+            put("p_client_version_code", BuildConfig.VERSION_CODE)
+        }
+        val published = runCatching {
+            db.rpc("whisper_story_publish", publishBody).decodeAs<StoryServerRow>()
+        }.getOrElse { first ->
+            // Retry once unless the server gave a deterministic rejection
+            // (validation/quota/version): those fail identically on replay.
+            if (!isRetryableStoryPublishFailure(first)) throw first
+            db.rpc("whisper_story_publish", publishBody).decodeAs<StoryServerRow>()
+        }
 
         val expiresAtMs = runCatching { Instant.parse(published.expiresAt).toEpochMilli() }
             .getOrElse { System.currentTimeMillis() + WhisperDailyUpsConfig.TTL_MS }
@@ -312,6 +323,20 @@ suspend fun WhisperRepository.publishDailyUp(
         kickDailyUpSweep()
         baseDescriptor
     }
+}
+
+/**
+ * True when a publish RPC failure may be a lost/ambiguous response rather than
+ * a deterministic rejection. Only these are retried with the SAME client id;
+ * validation/quota/version failures would fail identically on replay.
+ */
+private fun isRetryableStoryPublishFailure(e: Throwable): Boolean {
+    val msg = e.message.orEmpty().lowercase()
+    return listOf(
+        "timed out", "timeout", "connection", "socket", "network", "unable to resolve",
+        "eof", "unexpected end", "502", "503", "504", "bad gateway", "service unavailable",
+        "gateway timeout",
+    ).any { it in msg }
 }
 
 /** Stable failure vocabulary for preprocessing (mapped by [mapDailyUpError]). */
@@ -357,11 +382,14 @@ suspend fun WhisperRepository.syncDailyUps(): Result<Unit> = runCatching {
         // 2. My addressed envelopes joined with their story row. Inner join:
         //    RLS-invisible stories (unpublished/expired/blocked/vanished)
         //    drop out — nothing unreadable is ever cached.
+        // Newest envelopes first: with a page cap, the freshest stories must win
+        // the page — oldest-first could permanently starve a busy audience of
+        // everything posted after the first 200 ever-received rows.
         val myRows = db.from("whisper_story_recipients").select(
             Columns.raw("story_id,sealed_descriptor,story:whisper_stories!inner(poster_id,state,receipts_enabled,expires_at)"),
         ) {
             filter { eq("recipient_id", me) }
-            order("created_at", Order.ASCENDING)
+            order("created_at", Order.DESCENDING)
             limit(WhisperDailyUpsConfig.SYNC_PAGE.toLong())
         }.decodeList<StoryRecipientJoinedRow>()
 
@@ -397,13 +425,20 @@ suspend fun WhisperRepository.syncDailyUps(): Result<Unit> = runCatching {
         }
 
         // ── prune local rows the server no longer lets us read.
-        val freshIds = myRows.map { it.storyId }.toSet()
-        for (stale in storyLocalDao.listActive(nowMs)) {
-            if (stale.storyId !in freshIds) storyLocalDao.delete(stale.storyId)
+        // Only prune when the page was NOT truncated: a full page means older
+        // still-readable rows simply fell outside the limit, and deleting them
+        // would make them vanish until a later sync re-fetched them.
+        if (myRows.size < WhisperDailyUpsConfig.SYNC_PAGE) {
+            val freshIds = myRows.map { it.storyId }.toSet()
+            for (stale in storyLocalDao.listActive(nowMs)) {
+                if (stale.storyId !in freshIds) storyLocalDao.delete(stale.storyId)
+            }
         }
-        val ownIds = ownRows.map { it.id }.toSet()
-        for (stale in storyLocalDao.listOwn(nowMs)) {
-            if (stale.storyId !in ownIds) storyLocalDao.delete(stale.storyId)
+        if (ownRows.size < WhisperDailyUpsConfig.SYNC_PAGE) {
+            val ownIds = ownRows.map { it.id }.toSet()
+            for (stale in storyLocalDao.listOwn(nowMs)) {
+                if (stale.storyId !in ownIds) storyLocalDao.delete(stale.storyId)
+            }
         }
         storyLocalDao.deleteDue(nowMs, 50)
 
@@ -433,11 +468,25 @@ suspend fun WhisperRepository.downloadDailyUpImage(storyId: String): Result<Whis
     requireDailyUpsEnabled()
     storyIo(WhisperDailyUpsConfig.IMAGE_TIMEOUT_MS) {
         val row = storyLocalDao.byId(storyId) ?: throw IllegalStateException("no such story")
-        val desc = storyDescriptor(row) ?: throw IllegalStateException("locked story")
+        // Local expiry is authoritative for the UI: never spend a download +
+        // decrypt on a row whose 24h window already closed (the sweep may not
+        // have pruned it yet on this device).
+        if (row.expiresAtMs <= System.currentTimeMillis()) {
+            throw IllegalStateException("no such story")
+        }
+        val desc = storyDescriptor(row)
+            ?: throw IllegalStateException(if (row.sealedDescriptor.isBlank()) "no such story" else "locked story")
+        // The sealed descriptor carries its own expiry; reject an expired or
+        // malformed key before touching the host.
+        if (desc.expiresAtMs in 1..System.currentTimeMillis()) {
+            throw IllegalStateException("no such story")
+        }
+        val key = runCatching { Base64.getDecoder().decode(desc.imageKeyB64) }.getOrNull()
+        require(key != null && key.size == 32) { "corrupt story image" }
         val hosted = encryptedImageHost.download(desc.hostUrl).getOrThrow()
         val sealed = WhisperImageCipherTransport.decode(hosted)
             ?: throw IllegalStateException("corrupt story image")
-        val plain = openGroupPictureBytes(sealed, Base64.getDecoder().decode(desc.imageKeyB64))
+        val plain = openGroupPictureBytes(sealed, key)
             ?: throw IllegalStateException("corrupt story image")
         WhisperStoryImage(plain)
     }
@@ -498,10 +547,11 @@ suspend fun WhisperRepository.fetchMyDailyUpReactions(
 ): Result<Map<String, String>> = runCatching {
     requireDailyUpsEnabled()
     val me = requireStoryMe()
-    if (storyIds.isEmpty()) return@runCatching emptyMap()
+    val ids = boundedStoryIds(storyIds)
+    if (ids.isEmpty()) return@runCatching emptyMap()
     storyIo(WhisperDailyUpsConfig.SYNC_TIMEOUT_MS) {
         db.from("whisper_story_reactions").select {
-            filter { isIn("story_id", storyIds); eq("user_id", me) }
+            filter { isIn("story_id", ids); eq("user_id", me) }
         }.decodeList<StoryReactionRow>().associate { it.storyId to it.emoji }
     }
 }
@@ -515,23 +565,39 @@ suspend fun WhisperRepository.fetchDailyUpReceipts(
 ): Result<List<WhisperStoryReceiptSnapshot>> = runCatching {
     requireDailyUpsEnabled()
     val me = requireStoryMe()
-    if (storyIds.isEmpty()) return@runCatching emptyList()
+    val ids = boundedStoryIds(storyIds)
+    if (ids.isEmpty()) return@runCatching emptyList()
     storyIo(WhisperDailyUpsConfig.SYNC_TIMEOUT_MS) {
         val views = db.from("whisper_story_views").select {
-            filter { isIn("story_id", storyIds) }
+            filter { isIn("story_id", ids) }
         }.decodeList<StoryViewRow>()
         val reactions = db.from("whisper_story_reactions").select {
-            filter { isIn("story_id", storyIds) }
+            filter { isIn("story_id", ids) }
         }.decodeList<StoryReactionRow>()
-        storyIds.map { id ->
+        val viewsByStory = views.groupBy { it.storyId }
+        val reactionsByStory = reactions.groupBy { it.storyId }
+        ids.map { id ->
             WhisperStoryReceiptSnapshot(
                 storyId = id,
-                viewerIds = views.filter { it.storyId == id }.map { it.viewerId },
-                reactions = reactions.filter { it.storyId == id }.associate { it.userId to it.emoji },
+                viewerIds = viewsByStory[id].orEmpty().map { it.viewerId },
+                reactions = reactionsByStory[id].orEmpty().associate { it.userId to it.emoji },
             )
         }
     }
 }
+
+/**
+ * Dedupes + caps caller-supplied story ids to one server page. The UI can
+ * hand over an entire combined list; an uncapped `in.(...)` filter would blow
+ * past the URL/row budget once a user follows many posters.
+ */
+private fun boundedStoryIds(storyIds: List<String>): List<String> =
+    storyIds.asSequence()
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .distinct()
+        .take(WhisperDailyUpsConfig.SYNC_PAGE)
+        .toList()
 
 /** Stories I posted so far TODAY (server quota: 5 per UTC day). */
 suspend fun WhisperRepository.dailyUpsPostedToday(): Int {
@@ -625,23 +691,41 @@ private fun WhisperRepository.sealDescriptorToSelf(descriptor: WhisperStoryDescr
     return WhisperEnvelope.encode(listOf(Triple(WhisperEnvelope.keyId(pub), iv, ct)), pub)
 }
 
+// Sweep ping throttle: publish + every hub open call [kickDailyUpSweep], and
+// the edge function is attest-gated + billed per invocation. One ping per
+// minute with a single in-flight call is plenty — the SQL watchdog/ImgBB
+// expiry are the real backstops.
+private const val SWEEP_MIN_INTERVAL_MS = 60_000L
+private val sweepInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
+
+@Volatile
+private var lastSweepPingAtMs = 0L
+
 /**
  * Fire-and-forget sweep ping (attest-gated edge). The SQL watchdog and
  * ImgBB expiration both degrade gracefully, so a failure here is invisible:
  * logged at info, never thrown, never awaited by callers.
  */
 private fun WhisperRepository.kickDailyUpSweep() {
+    val now = System.currentTimeMillis()
+    if (now - lastSweepPingAtMs < SWEEP_MIN_INTERVAL_MS) return
+    if (!sweepInFlight.compareAndSet(false, true)) return
+    lastSweepPingAtMs = now
     appScope.launch {
-        runCatching {
-            edgeFunctions.execute(
-                EdgeFunctionClient.Request(
-                    function = "whisper-story-sweep",
-                    jsonBody = "{}",
-                    authMode = EdgeFunctionClient.AuthMode.USER,
-                ),
-            )
-        }.onFailure { e ->
-            android.util.Log.i("WhisperStories", "sweep ping skipped: ${e.message}")
+        try {
+            runCatching {
+                edgeFunctions.execute(
+                    EdgeFunctionClient.Request(
+                        function = "whisper-story-sweep",
+                        jsonBody = "{}",
+                        authMode = EdgeFunctionClient.AuthMode.USER,
+                    ),
+                )
+            }.onFailure { e ->
+                android.util.Log.i("WhisperStories", "sweep ping skipped: ${e.message}")
+            }
+        } finally {
+            sweepInFlight.set(false)
         }
     }
 }

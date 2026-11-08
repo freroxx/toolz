@@ -62,6 +62,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import javax.inject.Inject
 
 /**
@@ -330,30 +332,46 @@ class WhisperGroupsViewModel @Inject constructor(
     private fun refreshPreviews(groups: List<WhisperGroupEntity>) {
         viewModelScope.launch {
             val me = repository.myId
+            // Reuse the memberships just verified by load()'s syncGroups() pass:
+            // fetchGroupMessages/openGroupPicture would otherwise each re-fetch
+            // and re-verify every group's full event log a second time.
+            val memberships = lastMemberships.associateBy { it.groupId }
+            // Bounded fan-out: one leg per group (network + decrypts). Unbounded
+            // async over many groups is a request storm on hub open.
+            val permits = kotlinx.coroutines.sync.Semaphore(4)
             val results = coroutineScope {
                 groups.map { g ->
                     async {
-                        runCatching {
-                            val recent = repository.fetchGroupMessages(g.id, 20).getOrThrow()
-                            val mark = readStore.readAt(g.id)
-                            // Votes / poll-close rows are tally data, never a preview line.
-                            val last = recent.lastOrNull { it.vote == null && it.pollClose == null }
-                            val unread = repository.countGroupUnread(g.id, mark, me)
-                            val preview = GroupPreview(
-                                text = last?.let { previewText(it) }.orEmpty(),
-                                time = last?.createdAt.orEmpty(),
-                                senderName = last?.senderName.orEmpty(),
-                                unread = if (last == null) 0 else unread,
-                                hasImage = last?.image != null,
-                                hasPoll = last?.poll != null,
-                                mentionedMe = recent.any {
-                                    me in it.mentions && it.senderId != me && it.createdAt > mark
-                                },
-                            )
-                            // Picture thumb (content-guarded at merge time).
-                            val bytes = repository.openGroupPicture(g.id).getOrNull()
-                            Triple(g.id, preview, bytes)
-                        }.getOrNull()
+                        permits.withPermit {
+                            runCatching {
+                                val recent = repository.fetchGroupMessages(
+                                    g.id,
+                                    20,
+                                    membership = memberships[g.id],
+                                ).getOrThrow()
+                                val mark = readStore.readAt(g.id)
+                                // Votes / poll-close rows are tally data, never a preview line.
+                                val last = recent.lastOrNull { it.vote == null && it.pollClose == null }
+                                val unread = repository.countGroupUnread(g.id, mark, me)
+                                val preview = GroupPreview(
+                                    text = last?.let { previewText(it) }.orEmpty(),
+                                    time = last?.createdAt.orEmpty(),
+                                    senderName = last?.senderName.orEmpty(),
+                                    unread = if (last == null) 0 else unread,
+                                    hasImage = last?.image != null,
+                                    hasPoll = last?.poll != null,
+                                    mentionedMe = recent.any {
+                                        me in it.mentions && it.senderId != me && it.createdAt > mark
+                                    },
+                                )
+                                // Picture thumb (content-guarded at merge time).
+                                val bytes = repository.openGroupPicture(
+                                    g.id,
+                                    membership = memberships[g.id],
+                                ).getOrNull()
+                                Triple(g.id, preview, bytes)
+                            }.getOrNull()
+                        }
                     }
                 }.awaitAll().filterNotNull()
             }

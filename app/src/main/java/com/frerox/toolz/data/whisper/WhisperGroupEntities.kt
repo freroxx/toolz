@@ -104,6 +104,15 @@ interface WhisperGroupDao {
     @Query("DELETE FROM whisper_group_events_local WHERE groupId = :groupId")
     suspend fun clearEvents(groupId: String)
 
+    /**
+     * Drops every cached event at/after [seq]. Called when verification
+     * truncates the log: the cache must only ever hold the verified prefix,
+     * so a poisoned row can never leak into system-event rendering or a later
+     * re-verification after the local cache is read back.
+     */
+    @Query("DELETE FROM whisper_group_events_local WHERE groupId = :groupId AND seq >= :seq")
+    suspend fun deleteEventsFrom(groupId: String, seq: Long)
+
     /** Full cache wipe (account-delete/sign-out): all three group tables. */
     @Query("DELETE FROM whisper_groups_local")
     suspend fun clearAllGroups()

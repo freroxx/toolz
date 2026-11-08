@@ -3837,6 +3837,12 @@ class WhisperRepository @Inject constructor(
         imageDiskCache.clearAll()
         messageDao.clearAll()
         storyLocalDao.clearAll()
+        // The group cache is local-only metadata (group names, members, signed
+        // event log). Account deletion must not leave it in toolz_whisper_db,
+        // even while the Groups UI stays disabled.
+        groupDao.clearAllMembers()
+        groupDao.clearAllEvents()
+        groupDao.clearAllGroups()
         selfReadStore.clearAll()
         deletedStore.clearAll()
         // V6 (planwhisper.md §3.1): ratchet sessions die with the account — a later

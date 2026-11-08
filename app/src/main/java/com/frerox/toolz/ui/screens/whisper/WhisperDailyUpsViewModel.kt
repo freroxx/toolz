@@ -81,7 +81,9 @@ class WhisperDailyUpsViewModel @Inject constructor(
         val ownerName: String,
         val isMine: Boolean,
         val receiptsEnabled: Boolean,
-        /** Time still on the story clock (server-reconciled local ms). */
+        /** Absolute server-reconciled expiry; the only safe seen-clock anchor. */
+        val expiresAtMs: Long,
+        /** Time still on the story clock at snapshot time (for the progress UI). */
         val remainingMs: Long,
     )
 
@@ -331,6 +333,7 @@ class WhisperDailyUpsViewModel @Inject constructor(
                 ownerName = if (row.ownerId == myId) "" else ownerName.orEmpty(),
                 isMine = isMine,
                 receiptsEnabled = row.receiptsEnabled,
+                expiresAtMs = row.expiresAtMs,
                 remainingMs = (row.expiresAtMs - nowMs).coerceAtLeast(0L),
             )
         }
@@ -428,7 +431,12 @@ class WhisperDailyUpsViewModel @Inject constructor(
         val item = _viewer.value?.currentStory ?: return
         if (item.isMine) return
         val nowMs = System.currentTimeMillis()
-        seenStore.markSeen(item.storyId, nowMs + item.remainingMs, nowMs)
+        // Anchor the seen-clock to the story's ABSOLUTE expiry. The old
+        // `now + remainingMs` re-based the snapshot's remaining time onto the
+        // marking instant: a viewer who opened the ring minutes after the hub
+        // snapshot would keep an already-expired story "unseen" far past its
+        // real 24h window.
+        seenStore.markSeen(item.storyId, item.expiresAtMs, nowMs)
         if (receiptedStories.add(item.storyId)) markViewedOnce(item.storyId)
     }
 

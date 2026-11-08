@@ -784,8 +784,10 @@ Local state is split across purpose-built stores, all read in full by the app
 moved out of `toolz_db` into the dedicated SQLCipher database
 `toolz_whisper_db` (`WhisperDatabase`). That file (and its `-wal`/`-shm`) is
 explicitly excluded in `backup_rules.xml` and in both the cloud-backup and
-device-transfer sections of `data_extraction_rules.xml`; the rest of
-`toolz_db` stays backed up for PurgeShot/notes/etc. Upgrading installs are
+device-transfer sections of `data_extraction_rules.xml`. The manifest currently
+sets `android:allowBackup="false"`, so backup is disabled app-wide; the split
+keeps Whisper out even if backup is re-enabled or an OEM migration path honors
+the extraction rules. Upgrading installs are
 handled once by `WhisperLegacyImporter`: it copies every row into the new
 database in one committed transaction, then deletes the legacy rows with
 `PRAGMA secure_delete = ON`, drops the now-unmanaged legacy tables and

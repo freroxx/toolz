@@ -651,6 +651,16 @@ object DatabaseModule {
         )
             .openHelperFactory(factory)
             .fallbackToDestructiveMigrationOnDowngrade()
+            // Privacy: a messenger deletes messages, tombstones, expired stories
+            // and soon-expired self-read copies. secure_delete makes SQLite
+            // overwrite those cells/pages instead of leaving recoverable bytes in
+            // free pages (the database is already SQLCipher-encrypted; this is
+            // defence in depth against file-level extraction).
+            .addCallback(object : androidx.room.RoomDatabase.Callback() {
+                override fun onOpen(db: SupportSQLiteDatabase) {
+                    db.execSQL("PRAGMA secure_delete = ON")
+                }
+            })
             .build()
 
         var db = build()

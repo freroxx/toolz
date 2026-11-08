@@ -17,9 +17,7 @@
 
 package com.frerox.toolz.data.whisper
 
-import android.content.ContentValues
 import android.database.Cursor
-import android.database.sqlite.SQLiteDatabase
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 /**
@@ -88,47 +86,58 @@ internal object WhisperLegacyImporter {
         // missing one (should be impossible at WhisperDatabase v1), leaving the
         // legacy table untouched is safer than deleting data we did not copy.
         val movable = present.filter { tableExists(target, it) }
-        val nonEmpty = movable.filter { tableHasRows(legacy, it) }
+
+        // A row-bearing table is drainable only if the two schemas actually share
+        // a column. A non-empty table with zero shared columns is left completely
+        // untouched rather than being deleted/dropped without a successful copy.
+        val emptyTables = movable.filterNot { tableHasRows(legacy, it) }
+        val copyable = movable
+            .filter { tableHasRows(legacy, it) }
+            .mapNotNull { table ->
+                val columns = sharedColumns(
+                    target = columnsOf(target, table),
+                    legacy = columnsOf(legacy, table),
+                )
+                if (columns.isEmpty()) null else table to columns
+            }
+        val drainable = emptyTables + copyable.map { it.first }
 
         var copied = 0
-        if (nonEmpty.isNotEmpty()) {
+        if (copyable.isNotEmpty()) {
             target.beginTransaction()
             try {
-                for (table in nonEmpty) {
-                    val columns = sharedColumns(
-                        target = columnsOf(target, table),
-                        legacy = columnsOf(legacy, table),
-                    )
-                    if (columns.isEmpty()) continue
+                for ((table, columns) in copyable) {
                     copied += copyTable(legacy, target, table, columns)
                 }
                 target.setTransactionSuccessful()
             } finally {
                 target.endTransaction()
             }
+        }
 
-            // The whisper copy is committed. Now it is safe to remove the source
-            // rows; secure_delete zeroes the freed bytes so the backup cannot
-            // recover them even before VACUUM runs.
+        if (drainable.isNotEmpty()) {
+            // The whisper copy is committed (or the table was already empty).
+            // Now it is safe to remove the source rows; secure_delete zeroes the
+            // freed bytes so the backup cannot recover them even before VACUUM.
             legacy.beginTransaction()
             try {
                 legacy.execSQL("PRAGMA secure_delete = ON")
-                for (table in nonEmpty) legacy.execSQL("DELETE FROM `$table`")
+                for (table in drainable) legacy.execSQL("DELETE FROM `$table`")
                 legacy.execSQL("PRAGMA secure_delete = OFF")
                 legacy.setTransactionSuccessful()
             } finally {
                 legacy.endTransaction()
             }
-        }
 
-        // AppDatabase v69 no longer manages these tables, so drop them outright
-        // rather than leaving empty-but-present tables in every backup.
-        legacy.beginTransaction()
-        try {
-            for (table in movable) legacy.execSQL("DROP TABLE IF EXISTS `$table`")
-            legacy.setTransactionSuccessful()
-        } finally {
-            legacy.endTransaction()
+            // AppDatabase v69 no longer manages these tables, so drop them
+            // outright rather than leaving empty-but-present tables in backup.
+            legacy.beginTransaction()
+            try {
+                for (table in drainable) legacy.execSQL("DROP TABLE IF EXISTS `$table`")
+                legacy.setTransactionSuccessful()
+            } finally {
+                legacy.endTransaction()
+            }
         }
 
         // Best-effort: some Room connection pools reject VACUUM while another
@@ -146,23 +155,31 @@ internal object WhisperLegacyImporter {
         columns: List<String>,
     ): Int {
         val projection = columns.joinToString(", ") { "`$it`" }
-        val values = ContentValues(columns.size)
+        val insertSql = "INSERT OR REPLACE INTO `$table` (" +
+            columns.joinToString(", ") { "`$it`" } +
+            ") VALUES (" + columns.joinToString(", ") { "?" } + ")"
+        val statement = target.compileStatement(insertSql)
         var count = 0
-        legacy.query("SELECT $projection FROM `$table`").use { cursor ->
-            while (cursor.moveToNext()) {
-                values.clear()
-                for (index in columns.indices) {
-                    when (cursor.getType(index)) {
-                        Cursor.FIELD_TYPE_NULL -> values.putNull(columns[index])
-                        Cursor.FIELD_TYPE_INTEGER -> values.put(columns[index], cursor.getLong(index))
-                        Cursor.FIELD_TYPE_FLOAT -> values.put(columns[index], cursor.getDouble(index))
-                        Cursor.FIELD_TYPE_BLOB -> values.put(columns[index], cursor.getBlob(index))
-                        else -> values.put(columns[index], cursor.getString(index))
+        try {
+            legacy.query("SELECT $projection FROM `$table`").use { cursor ->
+                while (cursor.moveToNext()) {
+                    statement.clearBindings()
+                    for (index in columns.indices) {
+                        val bind = index + 1
+                        when (cursor.getType(index)) {
+                            Cursor.FIELD_TYPE_NULL -> statement.bindNull(bind)
+                            Cursor.FIELD_TYPE_INTEGER -> statement.bindLong(bind, cursor.getLong(index))
+                            Cursor.FIELD_TYPE_FLOAT -> statement.bindDouble(bind, cursor.getDouble(index))
+                            Cursor.FIELD_TYPE_BLOB -> statement.bindBlob(bind, cursor.getBlob(index))
+                            else -> statement.bindString(bind, cursor.getString(index))
+                        }
                     }
+                    statement.executeInsert()
+                    count++
                 }
-                target.insert(table, SQLiteDatabase.CONFLICT_REPLACE, values)
-                count++
             }
+        } finally {
+            statement.close()
         }
         return count
     }
