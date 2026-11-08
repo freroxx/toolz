@@ -607,6 +607,10 @@ class WhisperDailyUpsViewModel @Inject constructor(
             repository.deleteDailyUp(storyId)
                 .onSuccess {
                     _images.update { it - storyId }
+                    _failedImages.update { it - storyId }
+                    inFlightImages.update { it - storyId }
+                    receiptedStories -= storyId
+                    reactionLookups -= storyId
                     // Only drop THIS page out of the snapshot. Closing the whole
                     // overlay would yank a reader who swiped on to another
                     // poster while the delete was still in flight.
