@@ -339,6 +339,16 @@ Toolz is an independent project, made substantially better by early adopters and
 
 ---
 
+## ⭐ Star History
+
+<a href="https://www.star-history.com/?repos=freroxx%2Ftoolz&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=freroxx/toolz&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=freroxx/toolz&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=freroxx/toolz&type=date&legend=top-left" />
+ </picture>
+</a>
+
 ## 📄 License
 
 Licensed under the **GNU General Public License v3.0** — see the [LICENSE](LICENSE) file for details.
