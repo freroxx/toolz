@@ -1088,7 +1088,9 @@ member. Before Groups is enabled this needs one explicit decision: retain
 public signer certs in a non-cascading archive and serve a signers-only bundle
 for deleted accounts, or remove/rewrite the departed member's events under a
 protocol-defined tombstone. Doing neither is a launch blocker for Groups, not
-for the currently shipped 1:1 surface.
+for the currently shipped 1:1 surface. The cascade is reproduced by check 8 of
+`supabase/tests/main-whisper-smoke.sql`: after the `auth.users` delete, the
+departed actor's events remain while the signer archive is empty.
 
 Applying is **tolerant**: a bad event does not brick the group — the client
 truncates to the verified prefix and flags the membership "degraded"
@@ -1628,6 +1630,21 @@ Whisper's cryptography is pinned with a deliberately paranoid test stack:
   removal, and complete account-purge coverage of the FK-less group tables.
   Quotas (600/day fan-out, 5/day/IP story, 5/day/IP signup), signed-log
   verification and descriptor shapes are unchanged; no cryptography changed.
+- **The SQL baseline is now executed, not just reviewed.**
+  `supabase/tests/run-local-smoke.sh` boots a disposable
+  `postgres:16-alpine`, installs a shim for the hosted baseline the repo does
+  not vendor (auth/storage schemas, API roles, pgcrypto in `extensions`, base
+  tables, realtime publication), applies `main-whisper-sql.sql` twice (fresh
+  build + idempotent re-run), and runs the behaviour suite. That run found and
+  fixed four replay defects that a fresh project would have hit:
+  `whisper_blocks` was policied before it was created,
+  `whisper_discover_profiles`/`whisper_bypass_attempt`/
+  `whisper_purge_account_data` had grants before their (pruned) definitions,
+  and `gen_random_bytes` was not schema-qualified. The smoke suite also
+  reproduces the deleted-account signer cascade (below) so the Groups launch
+  blocker is a demonstrated fact rather than a suspicion. The hosted runbook
+  (`supabase/POST_DEPLOY_SMOKE.md`) still owns checks that need real keys and
+  edge deployments.
 - **Regression cover from the October 2026 locked-message defect (§3.9).** The
   existing suite pins copy-commit ratchet behavior and the merger's
   locked → plaintext rule. The fix added `WhisperSelfReadStoreTest`, which

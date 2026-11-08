@@ -167,6 +167,21 @@ create policy "profiles_update_own"
 -- Blocking is private: a user may only see blocks they are part of (either side),
 -- never enumerate who blocks whom. Both parties are filtered out of each other's
 -- message flows client-side.
+--
+-- FIX (fresh-project replay): this section used to ALTER a table that is not
+-- created until the 20260904 block further down, so the advertised
+-- "fresh project → builds the full final schema" path died here with
+-- `relation "public.whisper_blocks" does not exist`. Create it idempotently
+-- first; the later guarded CREATE is then a no-op, and hosted re-runs are
+-- unaffected.
+create table if not exists public.whisper_blocks (
+    blocker_id  uuid not null references public.profiles(id) on delete cascade,
+    blocked_id  uuid not null references public.profiles(id) on delete cascade,
+    created_at  timestamptz not null default now(),
+    primary key (blocker_id, blocked_id),
+    constraint no_self_block check (blocker_id <> blocked_id)
+);
+
 alter table public.whisper_blocks enable row level security;
 
 drop policy if exists "whisper_blocks_select_participant" on public.whisper_blocks;
@@ -463,9 +478,19 @@ create policy "whisper_discover_quota_owner"
 -- after enforcing rate-limit. Errors with code 'rate_limited'
 -- if the caller exceeds 60 pages within a 1-hour window.
 -- ─────────────────────────────────────────────────────────────
--- Grant execute to authenticated role only
-REVOKE ALL ON FUNCTION whisper_discover_profiles(int, int) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION whisper_discover_profiles(int, int) TO authenticated;
+-- Grant execute to authenticated role only.
+-- FIX (fresh-project replay): the original function body from this migration was
+-- pruned when later sections superseded it, so on a brand-new project the
+-- signature does not exist yet and a bare REVOKE aborted the whole file. The
+-- final definition (20260827 section) re-applies these grants; this guarded
+-- version preserves the historical intent on projects that already have it.
+do $$
+begin
+    if to_regprocedure('public.whisper_discover_profiles(int, int)') is not null then
+        execute 'revoke all on function public.whisper_discover_profiles(int, int) from public';
+        execute 'grant execute on function public.whisper_discover_profiles(int, int) to authenticated';
+    end if;
+end $$;
 
 -- ═══════════════ 20260824_whisper_bypass_rate_limit.sql ══
 -- whisper_bypass_rate_limit.sql
@@ -514,9 +539,18 @@ create index if not exists whisper_bypass_attempts_identity_idx
 -- Also self-heals table growth: every call prunes rows older than 24h, removing the
 -- dependency on pg_cron being installed.
 
-revoke all on function public.whisper_bypass_attempt(text, boolean) from public;
-revoke all on function public.whisper_bypass_attempt(text, boolean) from anon;
-grant execute on function public.whisper_bypass_attempt(text, boolean) to service_role;
+-- FIX (fresh-project replay): the function is defined below in this same
+-- section. A bare REVOKE/GRANT before its first CREATE aborted a brand-new
+-- project. The definition is followed by the same grants; guard the early
+-- copy so hosted re-runs keep their historical ordering.
+do $$
+begin
+    if to_regprocedure('public.whisper_bypass_attempt(text, boolean)') is not null then
+        execute 'revoke all on function public.whisper_bypass_attempt(text, boolean) from public';
+        execute 'revoke all on function public.whisper_bypass_attempt(text, boolean) from anon';
+        execute 'grant execute on function public.whisper_bypass_attempt(text, boolean) to service_role';
+    end if;
+end $$;
 
 -- ═══════════════ 20260827_whisper_review_v2_hardening.sql
 -- whisper_review_v2_hardening.sql (20260827)
@@ -747,10 +781,17 @@ create policy "friends_update_participants"
 -- exactly (messages/reactions/friends/blocks/profiles + the quota/tombstone/discover
 -- tables + the new ownership ledger). Fail-closed: the edge function refuses to delete
 -- the GoTrue identity unless this succeeds.
-revoke all on function public.whisper_purge_account_data(uuid) from public;
-revoke all on function public.whisper_purge_account_data(uuid) from anon;
-revoke all on function public.whisper_purge_account_data(uuid) from authenticated;
-grant execute on function public.whisper_purge_account_data(uuid) to service_role;
+-- FIX (fresh-project replay): the body is created later (20260901 section), so
+-- guard these grants; the same revokes/grants follow the definition.
+do $$
+begin
+    if to_regprocedure('public.whisper_purge_account_data(uuid)') is not null then
+        execute 'revoke all on function public.whisper_purge_account_data(uuid) from public';
+        execute 'revoke all on function public.whisper_purge_account_data(uuid) from anon';
+        execute 'revoke all on function public.whisper_purge_account_data(uuid) from authenticated';
+        execute 'grant execute on function public.whisper_purge_account_data(uuid) to service_role';
+    end if;
+end $$;
 
 -- ── 8. whisper_bypass_attempt atomicity ──────────────────────────────────
 -- The count→lockout→insert sequence inside one transaction is still not enough under
@@ -796,8 +837,16 @@ grant execute on function public.whisper_bypass_attempt(text, boolean) to servic
 -- ── 9. whisper_discover_profiles input clamps ────────────────────────────
 -- Negative p_page previously produced a negative OFFSET (SQL error); absurd page sizes
 -- were already capped at 30 but negatives slipped through. Clamp both up front.
-REVOKE ALL ON FUNCTION whisper_discover_profiles(int, int) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION whisper_discover_profiles(int, int) TO authenticated;
+-- FIX (fresh-project replay): the rewritten body is created later in this same
+-- section; guard the grants so a brand-new project does not abort here. The
+-- grants are re-applied unconditionally right after that definition.
+do $$
+begin
+    if to_regprocedure('public.whisper_discover_profiles(int, int)') is not null then
+        execute 'revoke all on function public.whisper_discover_profiles(int, int) from public';
+        execute 'grant execute on function public.whisper_discover_profiles(int, int) to authenticated';
+    end if;
+end $$;
 
 -- ═══════════════ 20260828_whisper_destructive_rate_limit.sql
 -- whisper_destructive_rate_limit.sql (20260828)
@@ -1177,7 +1226,10 @@ create extension if not exists pgcrypto;
 create table if not exists public.whisper_typing_signals (
   sender_id   uuid not null references auth.users(id) on delete cascade,
   receiver_id uuid not null references auth.users(id) on delete cascade,
-  signal      text not null default encode(gen_random_bytes(12), 'hex'),
+  -- Explicit schema: hosted Supabase installs pgcrypto in `extensions`, which
+  -- is not guaranteed to be on every role's search_path (and is absent on a
+  -- plain-Postgres replay). `extensions.digest` below is qualified the same way.
+  signal      text not null default encode(extensions.gen_random_bytes(12), 'hex'),
   updated_at  timestamptz not null default now(),
   primary key (sender_id, receiver_id)
 );
