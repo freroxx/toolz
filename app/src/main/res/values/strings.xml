@@ -4087,6 +4087,8 @@
     <string name="st_Whisper_DailyUp_AudienceAll">Send to all friends</string>
     <string name="st_Whisper_DailyUp_AudienceSummary">Send to %1$d friends</string>
     <string name="st_Whisper_DailyUp_AudienceHint">Friends added later won\'t see this.</string>
+    <string name="st_Whisper_DailyUp_AudienceCapped">You have %1$d friends. A Daily Up can reach up to %2$d — tap Edit to choose who sees it.</string>
+    <string name="st_Whisper_DailyUp_AudienceLimitReached">You can include up to %1$d friends.</string>
     <string name="st_Whisper_DailyUp_NoFriends">No friends yet — add some to share Daily Ups.</string>
     <string name="st_Whisper_DailyUp_PostLabel">Share</string>
     <string name="st_Whisper_DailyUp_Posting">Sharing…</string>
@@ -4101,6 +4103,7 @@
     <string name="st_Whisper_DailyUp_AudienceSelected">%1$d selected</string>
     <string name="st_Whisper_DailyUp_AudienceSearchHint">Search friends</string>
     <string name="st_Whisper_DailyUp_AudienceSelectAll">Select all</string>
+    <string name="st_Whisper_DailyUp_AudienceSelectMax">Select up to %1$d</string>
     <string name="st_Whisper_DailyUp_AudienceDone">Done</string>
     <string name="st_Whisper_DailyUp_NeedPhoto">Choose a photo to share.</string>
     <string name="st_Whisper_DailyUp_NoUpsLeft">No ups left today.</string>

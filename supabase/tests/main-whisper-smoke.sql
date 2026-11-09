@@ -445,9 +445,15 @@ begin
      where user_id = '00000000-0000-0000-0000-000000000001';
     if v_n <> 0 then raise exception 'SMOKE FAIL: purge kept group reactions'; end if;
 
+    -- The public signer archive is deliberately RETAINED on account
+    -- deletion: surviving groups keep signed events the departed account
+    -- authored, and peers verify them against this set (signers-only
+    -- bundle). It is public-key material only, never content.
     select count(*) into v_n from public.whisper_group_signer_history
      where user_id = '00000000-0000-0000-0000-000000000001';
-    if v_n <> 0 then raise exception 'SMOKE FAIL: purge kept signer history'; end if;
+    if v_n = 0 then
+        raise exception 'SMOKE FAIL: purge deleted the public signer archive';
+    end if;
 
     -- 1:1 / profile / quota / story coverage.
     select count(*) into v_n from public.messages
@@ -521,9 +527,9 @@ begin
     end if;
 end $$;
 
--- 8. Reproduce the documented Groups launch blocker: GoTrue deleting an
---    account cascades its public signer archive, while the surviving group's
---    append-only log (including events that account authored) is retained.
+-- 8. Account deletion must NOT cascade the public signer archive: the
+--    surviving group keeps signed events the departed account authored, and
+--    fresh peers verify them against the archived cert (signers-only bundle).
 do $$
 declare
     v_before int;
@@ -554,10 +560,34 @@ begin
     end if;
     select count(*) into v_hist from public.whisper_group_signer_history
      where user_id = '00000000-0000-0000-0000-000000000003';
-    if v_hist <> 0 then
-        raise exception 'SMOKE FAIL: signer archive did not cascade with the auth user';
+    if v_hist = 0 then
+        raise exception 'SMOKE FAIL: signer archive cascaded with the auth user';
+    end if;
+    if not exists (
+        select 1 from public.whisper_group_signer_history
+         where user_id = '00000000-0000-0000-0000-000000000003'
+           and signer_cert = 'CERT-U3')
+    then
+        raise exception 'SMOKE FAIL: the departed account''s signer cert is missing';
     end if;
 end $$;
 
-\echo 'SMOKE NOTE: deleted-account signer cascade reproduced — events by the deleted actor remain but the certs needed to verify them are gone (documented Groups launch blocker).'
+-- 9. The signer archive has no FK to auth.users, so no future GoTrue cascade
+--    can silently delete the material surviving groups verify against.
+do $$
+begin
+    if exists (
+        select 1
+          from pg_constraint c
+          join pg_class t on t.oid = c.conrelid
+          join pg_namespace n on n.oid = t.relnamespace
+         where n.nspname = 'public'
+           and t.relname = 'whisper_group_signer_history'
+           and c.contype = 'f')
+    then
+        raise exception 'SMOKE FAIL: whisper_group_signer_history still has a foreign key';
+    end if;
+end $$;
+
+\echo 'SMOKE NOTE: deleted-account signer archive is retained — surviving groups stay verifiable after account deletion.'
 \echo 'SMOKE PASS: all Whisper SQL behaviour checks passed'

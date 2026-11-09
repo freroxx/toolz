@@ -376,6 +376,17 @@ private fun AudienceSummaryRow(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        if (state.audienceCapped && !state.friendsLoading && !state.friendsFailed) {
+            Text(
+                text = stringResource(
+                    R.string.st_Whisper_DailyUp_AudienceCapped,
+                    state.friends.size,
+                    WhisperDailyUpsConfig.MAX_RECIPIENTS,
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         when {
             // Loading wins over a stale failure while a retry is in flight.
             state.friendsLoading -> Unit
@@ -498,7 +509,16 @@ private fun AudienceSheet(
                             onClick = onSelectAll,
                             enabled = state.excluded.isNotEmpty(),
                         ) {
-                            Text(stringResource(R.string.st_Whisper_DailyUp_AudienceSelectAll))
+                            Text(
+                                if (state.audienceCapped) {
+                                    stringResource(
+                                        R.string.st_Whisper_DailyUp_AudienceSelectMax,
+                                        WhisperDailyUpsConfig.MAX_RECIPIENTS,
+                                    )
+                                } else {
+                                    stringResource(R.string.st_Whisper_DailyUp_AudienceSelectAll)
+                                },
+                            )
                         }
                     }
                     LazyColumn(
@@ -566,6 +586,7 @@ private fun ComposeShareBar(
     val reason: String? = when (block) {
         ShareBlock.NoPhoto -> stringResource(R.string.st_Whisper_DailyUp_NeedPhoto)
         ShareBlock.NoQuota -> stringResource(R.string.st_Whisper_DailyUp_NoUpsLeft)
+        ShareBlock.TooManyPeople -> stringResource(R.string.st_Whisper_DailyUp_ErrAudience)
         ShareBlock.NoAudience -> if (
             !state.friendsLoading &&
             !state.friendsFailed &&
@@ -580,6 +601,7 @@ private fun ComposeShareBar(
     val enabled = state.photo != null &&
         state.remaining > 0 &&
         state.audienceSize > 0 &&
+        !state.audienceOverLimit &&
         !state.publishing &&
         !state.published
 

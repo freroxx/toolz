@@ -110,7 +110,7 @@ class WhisperRepository @Inject constructor(
     private val mutePrefs: WhisperMutePreferences,
     // Daily Ups local seen set: cleared with the rest of the account's local data.
     private val storySeenStore: WhisperStorySeenStore,
-    // Phase-2 groups local UI state (hidden in this release, but must still be
+    // Phase-2 groups local UI state (ships in v1.1.8, but must still be
     // wiped on account deletion so a following account never inherits it).
     private val groupReadStore: WhisperGroupReadStore,
     private val groupNotifPrefs: WhisperGroupNotifPrefs,

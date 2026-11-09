@@ -535,6 +535,9 @@ class WhisperNotificationManager @Inject constructor(
             action = "com.frerox.toolz.OPEN_WHISPER_DAILY_UPS",
             identity = "dailyup:$posterId",
         ) {
+            // Open THIS poster's ring, not the generic hub. The route validates
+            // the id and falls back to the hub if the story expired meanwhile.
+            putExtra("ownerId", posterId)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
         val pendingIntent = PendingIntent.getActivity(

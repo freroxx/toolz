@@ -201,13 +201,18 @@ class WhisperSessionFactory @Inject constructor(
         val binding = requireNotNull(identity_binding) {
             "Peer has no identity binding (pre-Phase-2 client)"
         }
-        val spkSignature = requireNotNull(spk.signature) { "Unsigned SPK rejected" }
+        // spk is null for a signers-only bundle (deleted account): X3DH cannot
+        // start, but verifiedSignerCerts handles that shape without calling us.
+        val signedPrekey = requireNotNull(spk) {
+            "Peer has no prekey bundle (account may be deleted)"
+        }
+        val spkSignature = requireNotNull(signedPrekey.signature) { "Unsigned SPK rejected" }
         check(
-            verifyBundleSignature(spk.public_key, spk.kid, spkSignature, binding.signer)
+            verifyBundleSignature(signedPrekey.public_key, signedPrekey.kid, spkSignature, binding.signer)
         ) { "Prekey bundle signature invalid for this contact." }
         return VerifiedBundle(
-            spkKid = spk.kid,
-            spkPubB64 = spk.public_key,
+            spkKid = signedPrekey.kid,
+            spkPubB64 = signedPrekey.public_key,
             opkKid = opk?.kid,
             opkPubB64 = opk?.public_key,
             identityIkB64 = binding.ik,
@@ -257,7 +262,10 @@ class WhisperSessionFactory @Inject constructor(
     @Serializable
     internal data class BundleDto(
         @SerialName("identity_binding") val identity_binding: BindingDto? = null,
-        @SerialName("spk") val spk: SpkDto,
+        // Null in a SIGNERS-ONLY response: the account was deleted (prekeys
+        // purged) but its public signer archive survives so surviving groups
+        // can still verify events it authored.
+        @SerialName("spk") val spk: SpkDto? = null,
         @SerialName("opk") val opk: OpkDto? = null,
         // ROTv2 rotation-cert transport: the peer's published
         // certificate + counter (null until their first signer
@@ -345,6 +353,18 @@ class WhisperSessionFactory @Inject constructor(
         } catch (_: Throwable) {
             // Transport — the pin was verified against the trusted edge before.
             return signerCache[peerId]?.certs
+        }
+        // Signers-only bundle (deleted account): there is no SPK to verify, but
+        // the service-role archive is exactly the material group verification
+        // needs. Without this branch the fetch would fail on the missing SPK
+        // and any fresh peer would truncate the departed member's events.
+        if (raw.spk == null) {
+            val certs = (listOfNotNull(raw.identity_binding?.signer) + (raw.signer_history ?: emptyList()))
+                .filter { it.isNotBlank() }
+                .distinct()
+            if (certs.isEmpty()) return null
+            signerCache[peerId] = SignerCacheEntry(System.currentTimeMillis(), certs)
+            return certs
         }
         val verified = runCatching { raw.verified() }.getOrNull() ?: return null
         signerCache[peerId] = SignerCacheEntry(System.currentTimeMillis(), verified.signerCertsB64)

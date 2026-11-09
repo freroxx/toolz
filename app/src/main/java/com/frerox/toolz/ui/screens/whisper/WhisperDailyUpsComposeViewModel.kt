@@ -40,6 +40,7 @@ internal enum class ShareBlock {
     None,
     NoPhoto,
     NoAudience,
+    TooManyPeople,
     NoQuota,
     Busy,
 }
@@ -50,10 +51,14 @@ internal fun dailyUpShareBlock(
     audienceSize: Int,
     publishing: Boolean,
     published: Boolean,
+    maxAudience: Int = WhisperDailyUpsConfig.MAX_RECIPIENTS,
 ): ShareBlock = when {
     publishing || published -> ShareBlock.Busy
     !hasPhoto -> ShareBlock.NoPhoto
     audienceSize <= 0 -> ShareBlock.NoAudience
+    // The server hard-caps the audience; surface it BEFORE the expensive
+    // preprocess/upload instead of failing after the photo was prepared.
+    audienceSize > maxAudience -> ShareBlock.TooManyPeople
     remaining <= 0 -> ShareBlock.NoQuota
     else -> ShareBlock.None
 }
@@ -97,6 +102,13 @@ class WhisperDailyUpsComposeViewModel @Inject constructor(
         val remaining: Int get() = (WhisperDailyUpsConfig.DAILY_LIMIT - quotaUsed).coerceAtLeast(0)
         val audienceSize: Int get() = maxOf(friends.size - excluded.size, 0)
 
+        /** True when the friend list is longer than one Daily Up may reach. */
+        val audienceCapped: Boolean get() = friends.size > WhisperDailyUpsConfig.MAX_RECIPIENTS
+
+        /** True while the selection is above the server's hard cap. */
+        val audienceOverLimit: Boolean
+            get() = audienceSize > WhisperDailyUpsConfig.MAX_RECIPIENTS
+
         /** A live draft worth protecting from an accidental back gesture. */
         val hasDraft: Boolean get() = photo != null && !published
 
@@ -119,12 +131,29 @@ class WhisperDailyUpsComposeViewModel @Inject constructor(
 
     private suspend fun loadFriends() {
         repository.getFriends()
-            .onSuccess { friends ->
+            .onSuccess { loaded ->
+                // Stable order so the capped default audience is deterministic
+                // across devices and runs (the DB row order is not).
+                val friends = loaded.sortedWith(
+                    compareBy({ it.effectiveName.lowercase() }, { it.id }),
+                )
+                // A Daily Up may reach at most MAX_RECIPIENTS people. Rather
+                // than letting Share fail after the upload, default to the
+                // first capped slice and say so in the audience row; Edit lets
+                // the user swap people in/out. Never silently drop anyone:
+                // [audienceCapped] drives an explicit note.
+                val cap = WhisperDailyUpsConfig.MAX_RECIPIENTS
+                val capExclusions = if (friends.size > cap) {
+                    friends.drop(cap).mapTo(mutableSetOf()) { it.id }
+                } else {
+                    emptySet()
+                }
                 _state.update {
                     it.copy(
                         friends = friends,
                         friendsLoading = false,
                         friendsFailed = false,
+                        excluded = it.excluded + capExclusions,
                         quotaUsed = repository.dailyUpsPostedToday(),
                     )
                 }
@@ -185,19 +214,34 @@ class WhisperDailyUpsComposeViewModel @Inject constructor(
 
     fun toggleAudience(friendId: String) {
         _state.update {
-            it.copy(
-                excluded = if (friendId in it.excluded) {
-                    it.excluded - friendId
-                } else {
-                    it.excluded + friendId
-                },
-            )
+            val included = friendId !in it.excluded
+            when {
+                // Re-including: refuse past the server cap and say why.
+                !included && it.audienceSize >= WhisperDailyUpsConfig.MAX_RECIPIENTS ->
+                    it.copy(
+                        error = appContext.getString(
+                            R.string.st_Whisper_DailyUp_AudienceLimitReached,
+                            WhisperDailyUpsConfig.MAX_RECIPIENTS,
+                        ),
+                    )
+                included -> it.copy(excluded = it.excluded + friendId)
+                else -> it.copy(excluded = it.excluded - friendId)
+            }
         }
     }
 
-    /** Restore the all-friends audience from the sheet's Select all action. */
+    /** Select as many friends as the server allows, never more. */
     fun selectAllAudience() {
-        _state.update { it.copy(excluded = emptySet()) }
+        _state.update {
+            val cap = WhisperDailyUpsConfig.MAX_RECIPIENTS
+            val keep = it.friends.take(cap).mapTo(mutableSetOf()) { friend -> friend.id }
+            it.copy(
+                excluded = it.friends
+                    .map { friend -> friend.id }
+                    .filterNot { id -> id in keep }
+                    .toSet(),
+            )
+        }
     }
 
     fun clearError() {

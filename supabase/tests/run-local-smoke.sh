@@ -59,7 +59,38 @@ psql_file whisper.migration "$ROOT/supabase/migrations/main-whisper-sql.sql"
 echo "==> running behavioural smoke suite"
 psql_file whisper.smoke "$ROOT/supabase/tests/main-whisper-smoke.sql"
 
+echo "==> simulating the legacy cascade FK before the data-present replay"
+docker exec -i "$NAME" psql -U postgres -d whisper -v ON_ERROR_STOP=1 -q <<'SQL'
+do $$
+begin
+    -- Every hosted deployment created this constraint; a fresh build does not.
+    -- NOT VALID lets the simulation succeed even though the smoke suite left
+    -- archived signers for a deleted auth user (exactly the real upgrade case).
+    if not exists (
+        select 1 from pg_constraint
+         where conname = 'whisper_group_signer_history_user_id_fkey')
+    then
+        alter table public.whisper_group_signer_history
+            add constraint whisper_group_signer_history_user_id_fkey
+            foreign key (user_id) references auth.users (id) on delete cascade not valid;
+    end if;
+end $$;
+SQL
+
 echo "==> re-applying main-whisper-sql.sql with smoke data present (production replay)"
 psql_file whisper.migration "$ROOT/supabase/migrations/main-whisper-sql.sql"
 
-echo "==> PASS: fresh build, idempotent re-run, behaviour smoke and data-present replay all green"
+echo "==> verifying the legacy cascade FK was dropped"
+docker exec -i "$NAME" psql -U postgres -d whisper -v ON_ERROR_STOP=1 -q <<'SQL'
+do $$
+begin
+    if exists (
+        select 1 from pg_constraint
+         where conname = 'whisper_group_signer_history_user_id_fkey')
+    then
+        raise exception 'legacy cascade FK survived the migration';
+    end if;
+end $$;
+SQL
+
+echo "==> PASS: fresh build, idempotent re-run, behaviour smoke, legacy-FK upgrade and data-present replay all green"

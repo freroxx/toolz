@@ -388,8 +388,8 @@ class WhisperGroupsTest {
     }
 
     @Test
-    fun `flag off when hidden from UI`() {
-        assertFalse(groupsEnabled())
+    fun `groups ship enabled in v1_1_8`() {
+        assertTrue(groupsEnabled())
     }
 
     @Test

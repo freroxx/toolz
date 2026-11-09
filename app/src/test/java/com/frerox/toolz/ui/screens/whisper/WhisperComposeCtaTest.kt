@@ -67,6 +67,31 @@ class WhisperComposeCtaTest {
     }
 
     @Test
+    fun audienceOverServerCapBlocksBeforeQuota() {
+        assertEquals(
+            ShareBlock.TooManyPeople,
+            dailyUpShareBlock(
+                hasPhoto = true,
+                remaining = 3,
+                audienceSize = 97,
+                publishing = false,
+                published = false,
+            ),
+        )
+        // Exactly at the cap is allowed.
+        assertEquals(
+            ShareBlock.None,
+            dailyUpShareBlock(
+                hasPhoto = true,
+                remaining = 3,
+                audienceSize = 96,
+                publishing = false,
+                published = false,
+            ),
+        )
+    }
+
+    @Test
     fun busyWinsWhilePublishingOrAfterPublish() {
         assertEquals(
             ShareBlock.Busy,

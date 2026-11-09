@@ -925,8 +925,8 @@ private fun MergedChatsAndFriendsTab(
                 )
             }
         }
-        // Phase-2 groups: section lives at the top of Chats; renders nothing
-        // while the flag is off, so 1:1 layout is byte-identical until ship.
+        // Phase-2 groups: section lives at the top of Chats. It renders nothing
+        // while the kill switch is off, so 1:1 layout stays byte-identical.
         if (com.frerox.toolz.data.whisper.groupsEnabled()) {
             item {
                 WhisperGroupsSection(

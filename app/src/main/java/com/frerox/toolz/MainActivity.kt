@@ -1197,10 +1197,15 @@ fun ToolzNavHost(
         }
 
         // 2c. Handle Whisper Group Deep Links (Phase-2 groups).
-        // Groups are hidden in this release. The group surfaces stay in the
-        // codebase, but no deep link or push tap may reach them: both actions
-        // fall back to the Whisper hub, which no longer renders the section.
+        // Groups ship in v1.1.8; the flag remains a one-line kill switch that
+        // falls back to the Whisper hub when off.
         if (latestIntent.action == "com.frerox.toolz.OPEN_WHISPER_GROUP_INVITES") {
+            if (!com.frerox.toolz.data.whisper.groupsEnabled()) {
+                navController.navigate(Screen.Whisper.route) {
+                    launchSingleTop = true
+                }
+                return@LaunchedEffect
+            }
             navController.navigate(Screen.Whisper.route)
             return@LaunchedEffect
         }
@@ -1219,11 +1224,19 @@ fun ToolzNavHost(
                 android.util.Log.w("MainActivity", "Invalid OPEN_WHISPER_GROUP groupId: $groupId")
             }
         }
-        // 2d. Daily Ups deep link. Hidden in this release: the routes stay
-        // registered, but the link lands on the hub instead of a blank screen.
+        // 2d. Daily Ups deep link. The notification carries the poster id so a
+        // tap opens that ring directly; an id-less link (or an expired poster,
+        // handled by the screen) still lands on the hub.
         if (latestIntent.action == "com.frerox.toolz.OPEN_WHISPER_DAILY_UPS") {
             if (com.frerox.toolz.data.whisper.WhisperDailyUpsConfig.ENABLED) {
-                navController.navigate(Screen.WhisperDailyUps.createRoute())
+                val ownerId = latestIntent.getStringExtra("ownerId")?.trim()
+                if (!ownerId.isNullOrBlank() && ownerId.length in 10..64 &&
+                    ownerId.all { it.isLetterOrDigit() || it == '-' }
+                ) {
+                    navController.navigate(Screen.WhisperDailyUps.createRoute(ownerId))
+                } else {
+                    navController.navigate(Screen.WhisperDailyUps.createRoute())
+                }
             } else {
                 navController.navigate(Screen.Whisper.route) {
                     launchSingleTop = true

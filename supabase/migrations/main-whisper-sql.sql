@@ -3659,7 +3659,10 @@ begin
     delete from public.whisper_group_reactions where user_id = p_uid;
     delete from public.whisper_group_typing where user_id = p_uid;
     delete from public.whisper_group_send_quota where sender_id = p_uid;
-    delete from public.whisper_group_signer_history where user_id = p_uid;
+    -- The signer archive is intentionally NOT deleted: it is public-key
+    -- material and the only way surviving groups can verify events this
+    -- account authored before deletion. Content/membership rows above are
+    -- still removed, so no private data survives.
     delete from public.profiles where id = p_uid;
     delete from public.whisper_upload_quota where user_id = p_uid;
     delete from public.whisper_deleted_tombstones where user_id = p_uid;
@@ -4415,14 +4418,28 @@ alter table public.whisper_story_reactions replica identity full;
 --   current-bundle-only behavior (pre-1.1.7 rows only — groups were not
 --   publicly shipped before this release).
 
+-- The archive deliberately has NO FK to auth.users. A surviving group keeps
+-- signed events authored by a departed account, and every peer verifies those
+-- signatures against this set. Cascading the archive with the GoTrue identity
+-- would therefore silently truncate that group's history for every fresh
+-- client (the documented Groups launch blocker). It holds public-key material
+-- only, never content, and the purge path leaves it in place on purpose.
+--
+-- Hosted re-runs: the original definition carried
+-- `references auth.users(id) on delete cascade`; drop that constraint so the
+-- archive survives account deletion. Fresh installs already use the plain
+-- uuid shape below and the drop is a no-op.
+alter table if exists public.whisper_group_signer_history
+    drop constraint if exists whisper_group_signer_history_user_id_fkey;
+
 create table if not exists public.whisper_group_signer_history (
-    user_id     uuid not null references auth.users (id) on delete cascade,
+    user_id     uuid not null,
     signer_cert text not null,
     first_seen  timestamptz not null default now(),
     primary key (user_id, signer_cert)
 );
 comment on table public.whisper_group_signer_history is
-  'Every protocol signer the account ever published in identity_binding (archived by trigger). Public-key material only. INSERT-only; clients read their OWN rows; peers read via whisper-bundle-fetch (service role).';
+  'Every protocol signer the account ever published in identity_binding (archived by trigger). Public-key material only, intentionally NOT cascaded with auth.users so surviving groups stay verifiable after account deletion. INSERT-only; clients read their OWN rows; peers read via whisper-bundle-fetch (service role).';
 
 alter table public.whisper_group_signer_history enable row level security;
 drop policy if exists "whisper signer history self read" on public.whisper_group_signer_history;

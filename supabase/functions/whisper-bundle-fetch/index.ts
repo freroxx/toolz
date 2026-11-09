@@ -243,12 +243,21 @@ serve(async (request) => {
     // verify it against THIS set — that is what lets a reinstall
     // (new device key, old private key gone) still replay a group's
     // full history. Public-key material, served like the binding.
+    //
+    // The archive deliberately OUTLIVES the account: after deletion the
+    // prekeys/profile are gone but surviving groups still contain events
+    // this account signed. Bound the response at 100 certs (each is a few
+    // hundred bytes); the archive only grows on signer rotation/reinstall.
     const { data: histRows } = await admin
       .from("whisper_group_signer_history")
       .select("signer_cert")
       .eq("user_id", account)
       .order("first_seen", { ascending: false })
-      .limit(20);
+      .limit(100);
+
+    const signerHistory = (histRows ?? [])
+      .map((r) => r.signer_cert)
+      .filter((c): c is string => typeof c === "string" && c.length > 0);
 
     // Signed prekey: most recent SPK.
     const { data: spks } = await admin
@@ -260,6 +269,21 @@ serve(async (request) => {
       .limit(1);
 
     if (!spks || spks.length === 0 || !spks[0].signature) {
+      // Account deletion removes the prekey bundle but intentionally keeps
+      // the public signer archive. A surviving group still needs those
+      // certs to verify historical events, so serve a SIGNERS-ONLY bundle
+      // (spk/opk null) instead of a 404. X3DH callers fail on the null SPK
+      // with a clear message; the signer path uses signer_history directly.
+      if (signerHistory.length > 0) {
+        return json({
+          identity_binding: profile?.identity_binding ?? null,
+          rotation_cert: profile?.rotation_cert ?? null,
+          rotation_counter: profile?.rotation_counter ?? null,
+          signer_history: signerHistory,
+          spk: null,
+          opk: null,
+        });
+      }
       return json({ error: "No prekey bundle published" }, 404);
     }
 
@@ -289,7 +313,7 @@ serve(async (request) => {
       identity_binding: profile?.identity_binding ?? null,
       rotation_cert: profile?.rotation_cert ?? null,
       rotation_counter: profile?.rotation_counter ?? null,
-      signer_history: (histRows ?? []).map((r) => r.signer_cert),
+      signer_history: signerHistory,
       spk: spks[0],
       opk,
     });
