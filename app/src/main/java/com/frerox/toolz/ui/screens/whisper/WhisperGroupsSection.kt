@@ -173,10 +173,13 @@ fun WhisperGroupsSection(
     }
 
     LaunchedEffect(state.createdGroupId) {
-        state.createdGroupId?.let {
+        state.createdGroupId?.let { id ->
             viewModel.consumeCreated()
             showCreate = false
-            onNavigateToGroup(it)
+            // With a warning (partial invites / picture), stay on Chats: the
+            // banner explains what to retry and the new group is already in the
+            // list. Auto-navigating would carry the banner off-screen.
+            if (state.notice == null) onNavigateToGroup(id)
         }
     }
     // The "request sent" notice clears itself; it never needs a manual dismiss.

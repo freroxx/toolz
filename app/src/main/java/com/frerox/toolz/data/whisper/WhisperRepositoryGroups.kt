@@ -1096,8 +1096,19 @@ private suspend fun WhisperRepository.fetchVerifiedMembershipInner(groupId: Stri
         // is suspend; the verifier lambda below is a pure map read — never
         // blocks). Reinstall-proof: sets carry past certs, not just current.
         val actors = log.map { it.actor }.distinct()
-        suspend fun fetchAll(): Map<String, List<String>> = buildMap {
-            actors.forEach { uid -> put(uid, signerCertsOf(uid)) }
+        suspend fun fetchAll(): Map<String, List<String>> {
+            // Actor count is bounded by group membership (≤ MAX_MEMBERS) but the
+            // fetches are independent network round-trips: sequential prefetch
+            // multiplied first-open latency by the member count and could blow
+            // the whole-group timeout. Same bounded fan-out as group sync.
+            val permits = Semaphore(WhisperGroupsConfig.GROUP_SYNC_CONCURRENCY)
+            return kotlinx.coroutines.coroutineScope {
+                actors.map { uid ->
+                    async {
+                        permits.withPermit { uid to signerCertsOf(uid) }
+                    }
+                }.awaitAll().toMap()
+            }
         }
         val cold = runCatching {
             val keys = fetchAll()
@@ -1308,11 +1319,23 @@ suspend fun WhisperRepository.cachedGroupMembers(groupId: String): List<WhisperG
     groupDao.members(groupId)
 
 /** Creates a group: row + own admin row + persistent INVITEs (join starts membership). */
+/**
+ * Outcome of [createGroup]. The group exists as soon as this is returned;
+ * [failedInvites] names the friends whose invite could not be delivered so the
+ * creator can retry them from group info. A partial fan-out must NOT fail the
+ * create: the CREATE event is already committed and reporting failure would
+ * leave an invisible group behind (and tempt a duplicate retry).
+ */
+data class GroupCreation(
+    val groupId: String,
+    val failedInvites: List<String>,
+)
+
 suspend fun WhisperRepository.createGroup(
     name: String,
     memberIds: List<String>,
     inviteAdminsOnly: Boolean,
-): Result<String> = runCatching {
+): Result<GroupCreation> = runCatching {
     requireGroupsEnabled()
     val me = requireMe()
     val cleanName = name.trim().take(WhisperGroupsConfig.MAX_GROUP_NAME_CHARS)
@@ -1385,27 +1408,29 @@ suspend fun WhisperRepository.createGroup(
         throw e
     }
     var seq = 2L
-    val attempted = mutableListOf<String>()
-    try {
-        others.forEach { uid ->
-            attempted.add(uid)
+    val failedInvites = mutableListOf<String>()
+    others.forEach { uid ->
+        try {
             db.from("whisper_group_invites").insert(
                 GroupInviteInsert(groupId = groupId, userId = uid, invitedBy = me, clientVersionCode = groupClientVersion()),
             )
             publishGroupEvent(groupId, seq, 0, WhisperGroupEventType.INVITE, me, "\"$uid\"").getOrThrow()
-            seq += 1
-        }
-    } catch (e: Throwable) {
-        // Partial fan-out: withdraw every invite row this loop touched
-        // (completed AND in-flight — rows land before their events) so nobody
-        // holds a phantom invite card the log never recorded.
-        attempted.forEach { uid ->
+        } catch (e: Throwable) {
+            // Best-effort per invitee: the group itself is already committed.
+            // Withdraw the row this leg wrote (if any) so the friend never sees
+            // a phantom invite the log did not record, and let the creator retry
+            // from group info.
+            failedInvites += uid
+            android.util.Log.w("WhisperGroups", "createGroup: invite leg failed: ${e.message}")
             runCatching { db.from("whisper_group_invites").delete { filter { eq("group_id", groupId); eq("user_id", uid) } } }
         }
-        throw e
+        seq += 1
     }
-    syncGroup(groupId).getOrThrow()
-    groupId
+    // The group is usable even if this closing sync is offline; opening the
+    // chat retries the full verified sync.
+    runCatching { syncGroup(groupId).getOrThrow() }
+        .onFailure { android.util.Log.w("WhisperGroups", "createGroup: closing sync soft-failed: ${it.message}") }
+    GroupCreation(groupId = groupId, failedInvites = failedInvites.distinct())
 }
 
 private suspend fun WhisperRepository.publishGroupEvent(

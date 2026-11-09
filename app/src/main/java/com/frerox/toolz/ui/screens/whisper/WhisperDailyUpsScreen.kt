@@ -109,6 +109,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.WhisperDailyUpsConfig
@@ -170,9 +172,12 @@ fun WhisperDailyUpsScreen(
         }
     }
 
-    // Pull-driven feature: entering the hub (every time) reconciles with the
-    // server — deletes, new friend ups, expiry — before anything renders.
-    LaunchedEffect(Unit) { viewModel.refresh() }
+    // Pull-driven feature: every time the hub becomes RESUMED it reconciles
+    // with the server — deletes, new friend ups, expiry. ON_RESUME (not a
+    // one-shot LaunchedEffect) also covers returning from the composer with
+    // launchSingleTop, where the destination is reused and would otherwise
+    // keep showing a list that predates the just-published Up.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refresh() }
 
     // A stories-bar tap routes straight at that poster. Wait for the first
     // reconcile so a cold open can resolve the owner; consume the hand-off

@@ -2025,9 +2025,8 @@ fun ToolzNavHost(
                     onNavigateToProfile = { userId ->
                         navController.navigate(Screen.WhisperUserProfile.createRoute(userId))
                     },
-                    // Hidden in this release: the callbacks stay wired so the
-                    // screens can be re-enabled from the compile flag alone,
-                    // but they can never be reached from the visible UI.
+                    // Groups and Daily Ups ship in v1.1.8; both callbacks stay
+                    // flag-guarded so a one-line kill switch closes the routes.
                     onNavigateToGroup = { groupId ->
                         if (com.frerox.toolz.data.whisper.groupsEnabled()) {
                             navController.navigate(Screen.WhisperGroupChat.createRoute(groupId))

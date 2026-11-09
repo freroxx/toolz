@@ -60,17 +60,15 @@ Feature surface at 1.1.8:
   timers), replies, reactions, read receipts, typing and presence, in-chat
   search, clear-chat with undo, per-chat muting, blocking. Every message is
   end-to-end encrypted on top of a Signal-style session protocol.
-- **Groups** *(Hidden from UI in this update)* — up to 12 members with owner/admin/member roles. Group history
+- **Groups** *(shipped in v1.1.8)* — up to 12 members with owner/admin/member roles. Group history
   is an admin-**signed event log** that every client verifies independently;
   membership changes, polls, mentions, invites, and permission changes are all
   events in that log. Messages fan out pairwise: every member's copy is sealed
-  through *their own* 1:1-quality session with the sender. (Note: Groups are
-  currently not accessible in the UI; all backend and files remain preserved).
-- **Daily Ups** *(Hidden from UI in this update)* — 24-hour photo stories posted to all friends at once, capped
-  at 5 per UTC day per poster, with optional view receipts and a six-emoji
+  through *their own* 1:1-quality session with the sender.
+- **Daily Ups** *(shipped in v1.1.8)* — 24-hour photo stories posted to up to 96 friends at once,
+  capped at 5 per UTC day per poster, with optional view receipts and a six-emoji
   reaction vocabulary. Photos are stripped of GPS/EXIF metadata before they
-  ever leave the device. (Note: Daily Ups are currently not accessible in the
-  UI; all backend and files remain preserved).
+  ever leave the device.
 - **Cross-cutting** — offline-first (history reads from a local encrypted
   store; sends queue and drain), push notifications whose payloads never carry
   message content, screenshot protection with a server-gated bypass for
@@ -1038,7 +1036,7 @@ and the UnifiedPush service entry point.
 ## 11. Groups
 
 > [!NOTE]
-> **Update Status:** Whisper Groups are currently hidden from the UI and not accessible in this update (`WhisperGroupsConfig.ENABLED = false`). All backend infrastructure, database tables, edge functions, crypto fan-out routines, and UI screen files are preserved for a future release, and the client/SQL defects found in the hidden-feature audit have been fixed without enabling the surface (see §13).
+> **Update Status:** Whisper Groups ship in v1.1.8 (`WhisperGroupsConfig.ENABLED = true`). The flag remains as a one-line emergency kill switch; backend infrastructure, database tables, edge functions, crypto fan-out routines, and UI screens are live. The deleted-signer launch blocker is resolved (see §11.1).
 
 Groups are the most intricate subsystem: a cryptographically authenticated
 membership log, pairwise message fan-out, and a permission model, all inside
@@ -1076,21 +1074,19 @@ SQL baseline and the history serving lives in the deployed
 `whisper-bundle-fetch`; a stale edge deploy silently drops reinstall-proofing.
 The post-deploy smoke runbook verifies this pairing.
 
-**Account-deletion residual (Groups are still disabled).** The signer archive
-rows cascade with the auth user, and `whisper-bundle-fetch` refuses a bundle
-once the account's prekeys are purged. A member who deletes their account
-therefore leaves historical events that a *fresh* peer can no longer verify,
-which truncates that group's log at the deleted member's first event. The
-account purge removes the member's authored messages/rows (see §13) but
-deliberately keeps the signed append-only event log, because deleting
-individual events would break later INVITE→JOIN pairs for every surviving
-member. Before Groups is enabled this needs one explicit decision: retain
-public signer certs in a non-cascading archive and serve a signers-only bundle
-for deleted accounts, or remove/rewrite the departed member's events under a
-protocol-defined tombstone. Doing neither is a launch blocker for Groups, not
-for the currently shipped 1:1 surface. The cascade is reproduced by check 8 of
-`supabase/tests/main-whisper-smoke.sql`: after the `auth.users` delete, the
-departed actor's events remain while the signer archive is empty.
+**Account deletion (resolved for the v1.1.8 launch).** The signer archive
+deliberately has **no FK to `auth.users`**, is retained by
+`whisper_purge_account_data`, and `whisper-bundle-fetch` serves a **signers-only
+bundle** (`spk: null`, `opk: null`, `signer_history`) once an account's prekeys
+are gone. A fresh peer can therefore still verify events authored by a deleted
+member, so the group log is never silently truncated. The archive holds
+public-key material only — never content, media or private keys — and the purge
+still removes the departed member's messages, membership rows and reactions.
+Check 8 of `supabase/tests/main-whisper-smoke.sql` asserts the archive survives
+the `auth.users` delete (including `CERT-U3`), and check 9 asserts the table has
+no foreign key at all. X3DH callers fail on the null SPK with an explicit
+"account may be deleted" error; group verification uses the archive directly.
+Rotating the archive is bounded at 100 certs per bundle response.
 
 Applying is **tolerant**: a bad event does not brick the group — the client
 truncates to the verified prefix and flags the membership "degraded"
@@ -1328,13 +1324,15 @@ every group screen without touching the server plane:
 ## 12. Daily Ups
 
 > [!NOTE]
-> **Update Status:** Daily Ups are currently hidden from the UI and not accessible in this update (`WhisperDailyUpsConfig.ENABLED = false`). All backend infrastructure, database tables, edge functions, photo pipelines, and UI screen files are preserved for a future release, and the client/SQL defects found in the hidden-feature audit have been fixed without enabling the surface (see §13).
+> **Update Status:** Daily Ups ship in v1.1.8 (`WhisperDailyUpsConfig.ENABLED = true`). The flag remains as a one-line emergency kill switch; the hub, composer, stories bar, routes, deep links and backend are live.
 
-Daily Ups are 24-hour **photo stories** posted to all friends at once — never
+Daily Ups are 24-hour **photo stories** posted to up to 96 friends at once — never
 addressed to one person, capped at 5 per poster per UTC day, and bound to the
 friend graph **at publish time** (friends added later literally have no row to
 read; the server validates the audience against the live friend graph and the
-block ledger).
+block ledger). The composer defaults to the whole friend list when it fits and
+otherwise to a deterministic 96-person slice with an explicit note; the server
+rejects more than 96 recipients.
 
 ### 12.1 What a story is
 
@@ -1619,7 +1617,7 @@ Whisper's cryptography is pinned with a deliberately paranoid test stack:
   SQL/edge surfaces untouched; a later, separate Groups/Daily-Ups audit
   hardened them (next bullet) and they still belong to the ship-day runbook
   (`supabase/POST_DEPLOY_SMOKE.md`).
-- **Hidden Groups / Daily-Ups hardening (features still disabled).** The
+- **Groups / Daily-Ups hardening, then enablement (v1.1.8).** The
   client planes gained the missing realtime `subscribe()`, bounded event
   verification, verified-cache group pictures, outbox/blob cleanup, bounded
   fan-out, audience-before-upload story publishing with one ambiguous-retry,
@@ -1628,8 +1626,14 @@ Whisper's cryptography is pinned with a deliberately paranoid test stack:
   `join`/`decline`, a `+1` epoch-jump cap, receipt/reaction message-reference
   triggers, the newest-first story-recipient index, identity-keyed reaction
   removal, and complete account-purge coverage of the FK-less group tables.
-  Quotas (600/day fan-out, 5/day/IP story, 5/day/IP signup), signed-log
-  verification and descriptor shapes are unchanged; no cryptography changed.
+  v1.1.8 then flipped both compile flags on and resolved the deleted-signer
+  blocker: the signer archive no longer cascades with `auth.users`, the purge
+  keeps it, and `whisper-bundle-fetch` returns a signers-only bundle for
+  deleted accounts. The Daily Ups composer also caps its default audience
+  deterministically, explains the 96-person ceiling, blocks adding past it,
+  and refuses to upload for an over-cap audience. Quotas (600/day fan-out,
+  5/day/IP story, 5/day/IP signup), signed-log verification and descriptor
+  shapes are unchanged; no cryptography changed.
 - **The SQL baseline is now executed, not just reviewed.**
   `supabase/tests/run-local-smoke.sh` boots a disposable
   `postgres:16-alpine`, installs a shim for the hosted baseline the repo does
@@ -1640,9 +1644,11 @@ Whisper's cryptography is pinned with a deliberately paranoid test stack:
   `whisper_blocks` was policied before it was created,
   `whisper_discover_profiles`/`whisper_bypass_attempt`/
   `whisper_purge_account_data` had grants before their (pruned) definitions,
-  and `gen_random_bytes` was not schema-qualified. The smoke suite also
-  reproduces the deleted-account signer cascade (below) so the Groups launch
-  blocker is a demonstrated fact rather than a suspicion. The hosted runbook
+  and `gen_random_bytes` was not schema-qualified. The smoke suite also runs
+  the data-present replay and a legacy cascade-FK upgrade simulation, and now
+  asserts the *intended* post-fix behavior: the public signer archive survives
+  account deletion (check 8) and the table carries no FK (check 9), so the
+  Groups launch blocker is pinned as a regression test. The hosted runbook
   (`supabase/POST_DEPLOY_SMOKE.md`) still owns checks that need real keys and
   edge deployments.
 - **Regression cover from the October 2026 locked-message defect (§3.9).** The

@@ -657,23 +657,31 @@ class WhisperGroupsViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
             val created = repository.createGroup(name, memberIds, inviteAdminsOnly)
-            created.onSuccess { groupId ->
+            created.onSuccess { creation ->
+                val groupId = creation.groupId
                 // Picture is best-effort after the group exists (needs the id);
                 // a picture failure must not lose the created group.
                 val pictureFailed = pictureBytes?.let {
                     repository.setGroupPicture(groupId, it, pictureMime).isFailure
                 } == true
                 load()
-                // The failure text rides `notice`, NOT `error`: `load()`'s every
-                // pass clears `error` (single-flight queued re-runs included),
-                // which used to wipe the warn before it ever rendered. Notice
+                // Failures ride `notice`, NOT `error`: `load()`'s every pass
+                // clears `error` (single-flight queued re-runs included), which
+                // used to wipe the warn before it ever rendered. Notice
                 // self-clears in the UI and is untouched by load().
+                val notice = when {
+                    creation.failedInvites.isNotEmpty() -> appContext.getString(
+                        com.frerox.toolz.R.string.st_Whisper_Groups_InviteFailSome,
+                        creation.failedInvites.size,
+                        memberIds.filter { it != repository.myId }.distinct().size,
+                    )
+                    pictureFailed -> appContext.getString(com.frerox.toolz.R.string.st_Whisper_Groups_PictureWarn)
+                    else -> null
+                }
                 _uiState.update {
                     it.copy(
                         createdGroupId = groupId,
-                        notice = if (pictureFailed) {
-                            appContext.getString(com.frerox.toolz.R.string.st_Whisper_Groups_PictureWarn)
-                        } else null,
+                        notice = notice,
                     )
                 }
             }
