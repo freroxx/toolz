@@ -1219,7 +1219,10 @@ verified log.
 
 **Entry.** The Chats tab's Groups section lists rows with picture,
 time-stamped last-message preview, unread badge, an "@You" mention chip, and
-pinned invite cards. A stories bar above it shows my "Daily Ups" bubble with
+pinned invite cards. Row pictures are keyed by the verified PICTURE event's
+URL (uploads are immutable), so an unchanged avatar is never re-downloaded on
+hub open — only a genuinely new picture refetches. A stories bar above it
+shows my "Daily Ups" bubble with
 a bottom-right `+`, then one bubble per live friend poster — unseen rings
 bright, ≥2-unseen count badge — horizontally scrollable (§12.4). Both Daily
 Ups rails expose each friend bubble as one merged TalkBack node labelled

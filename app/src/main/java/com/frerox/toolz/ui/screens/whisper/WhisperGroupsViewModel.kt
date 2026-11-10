@@ -212,6 +212,8 @@ class WhisperGroupsViewModel @Inject constructor(
     private var lastMemberships: List<WhisperGroupMembership> = emptyList()
     private var lastFriendNames: Map<String, String> = emptyMap()
     private var lastGroups: List<WhisperGroupEntity> = emptyList()
+    // Group-picture URL whose bytes are already resident in [_pictures].
+    private val pictureUrls = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     init {
         if (groupsEnabled()) {
@@ -365,10 +367,31 @@ class WhisperGroupsViewModel @Inject constructor(
                                     },
                                 )
                                 // Picture thumb (content-guarded at merge time).
-                                val bytes = repository.openGroupPicture(
-                                    g.id,
-                                    membership = memberships[g.id],
-                                ).getOrNull()
+                                // Avatar uploads are immutable (a new picture is a
+                                // new URL), so when the verified PICTURE event's
+                                // URL is unchanged we already hold the exact
+                                // bytes: skip the download. Without this every
+                                // hub load re-downloaded every group avatar.
+                                val pictureUrl = memberships[g.id]?.picture?.url
+                                val cached = _pictures.value[g.id]
+                                val bytes = if (
+                                    pictureUrl != null &&
+                                    cached != null &&
+                                    pictureUrls[g.id] == pictureUrl
+                                ) {
+                                    cached
+                                } else {
+                                    repository.openGroupPicture(
+                                        g.id,
+                                        membership = memberships[g.id],
+                                    ).getOrNull().also { fetched ->
+                                        if (fetched != null && pictureUrl != null) {
+                                            pictureUrls[g.id] = pictureUrl
+                                        } else {
+                                            pictureUrls.remove(g.id)
+                                        }
+                                    }
+                                }
                                 Triple(g.id, preview, bytes)
                             }.getOrNull()
                         }
@@ -391,7 +414,11 @@ class WhisperGroupsViewModel @Inject constructor(
             }
             // Drop thumbs for groups that left the list (evicted/kicked).
             val stalePics = pics.keys - groups.map { it.id }.toSet()
-            stalePics.forEach { pics.remove(it).let { picsChanged = true } }
+            stalePics.forEach {
+                pics.remove(it)
+                pictureUrls.remove(it)
+                picsChanged = true
+            }
             if (picsChanged) _pictures.value = pics
             Unit
         }
