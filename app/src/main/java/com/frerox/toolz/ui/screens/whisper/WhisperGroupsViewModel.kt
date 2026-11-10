@@ -220,6 +220,8 @@ class WhisperGroupsViewModel @Inject constructor(
         java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.Job>()
     private var hubReloadJob: kotlinx.coroutines.Job? = null
     private var logWatchJobs: List<kotlinx.coroutines.Job> = emptyList()
+    /** Group ids whose live watchers are installed (restart only when this changes). */
+    private var watchedGroupIds: Set<String> = emptySet()
     private var lastMemberships: List<WhisperGroupMembership> = emptyList()
     private var lastFriendNames: Map<String, String> = emptyMap()
     private var lastGroups: List<WhisperGroupEntity> = emptyList()
@@ -618,27 +620,39 @@ class WhisperGroupsViewModel @Inject constructor(
 
     /** One log watcher per group: join/leave/decline pings for opted-in roles. */
     private fun watchGroupLogs() {
-        logWatchJobs.forEach { it.cancel() }
         val me = repository.myId
-        if (me.isBlank()) return
+        val ids = if (me.isBlank()) emptySet() else lastMemberships.map { it.groupId }.toSet()
+        // Every load used to cancel and recreate 2 realtime channels per group,
+        // even when nothing about membership changed — a reconnect storm (and
+        // missed events while resubscribing) on every hub refresh. Only a
+        // changed SET restarts; handlers resolve the current membership, group
+        // and names at event time instead of capturing a snapshot.
+        val alive = logWatchJobs.isNotEmpty() && logWatchJobs.all { it.isActive }
+        if (ids == watchedGroupIds && alive) return
+        logWatchJobs.forEach { it.cancel() }
+        watchedGroupIds = ids
+        if (me.isBlank()) {
+            logWatchJobs = emptyList()
+            return
+        }
         val defaultGroupName =
             appContext.getString(com.frerox.toolz.R.string.st_Whisper_Groups_DefaultName)
-        logWatchJobs = lastMemberships.flatMap { m ->
+        logWatchJobs = ids.flatMap { groupId ->
             listOf(
-                watchLiveForever("groupl:${m.groupId}") {
-                    repository.observeGroupLog(m.groupId).collect { row ->
+                watchLiveForever("groupl:$groupId") {
+                    repository.observeGroupLog(groupId).collect { row ->
                         if (!markSeenEventOnce("evt:${row.id}")) return@collect
-                        onGroupEventRow(m, row, me)
+                        onGroupEventRow(groupId, row, me)
                     }
                 },
-                watchLiveForever("pings:${m.groupId}") {
-                    repository.observeGroupMessagesLive(m.groupId).collect { ping ->
+                watchLiveForever("pings:$groupId") {
+                    repository.observeGroupMessagesLive(groupId).collect { ping ->
                         if (ping.senderId == me) return@collect
                         // Votes are tally data: open chats refresh silently
                         // via load(), but they never ping (push layer agrees).
                         if (ping.kind == "vote") return@collect
                         if (!markSeenEventOnce("msg:${ping.clientId}")) return@collect
-                        val group = lastGroups.firstOrNull { it.id == m.groupId }
+                        val group = lastGroups.firstOrNull { it.id == groupId }
                         val sender = lastFriendNames[ping.senderId]?.takeIf { it.isNotBlank() }
                         val text = if (sender != null) {
                             appContext.getString(
@@ -649,14 +663,14 @@ class WhisperGroupsViewModel @Inject constructor(
                             appContext.getString(com.frerox.toolz.R.string.st_Whisper_Notif_NewMessage)
                         }
                         notificationManager.showGroupEventNotification(
-                            groupId = m.groupId,
+                            groupId = groupId,
                             title = group?.name?.ifBlank { defaultGroupName } ?: defaultGroupName,
                             text = text,
                             dedupeKey = "msg:${ping.clientId}",
                         )
                         // A visible hub moves the row (preview + unread badge)
                         // exactly like a 1:1 chat; voting traffic stays silent.
-                        if (ping.kind != "vote") schedulePreviewRefresh(m.groupId)
+                        schedulePreviewRefresh(groupId)
                     }
                 },
             )
@@ -664,16 +678,19 @@ class WhisperGroupsViewModel @Inject constructor(
     }
 
     private fun onGroupEventRow(
-        m: WhisperGroupMembership,
+        groupId: String,
         row: com.frerox.toolz.data.whisper.GroupEventRow,
         me: String,
     ) {
         if (row.actor == me) return
+        // Resolve the CURRENT membership: the watcher outlives individual
+        // loads, so a captured snapshot could report stale admin/notif state.
+        val m = lastMemberships.firstOrNull { it.groupId == groupId } ?: return
         // Structural events (rename, picture, roles, join/leave) change what
         // the hub row shows. While the tab is visible, coalesce a full pass so
         // it never goes stale; the notification below still fires per event.
         scheduleHubReload()
-        val group = lastGroups.firstOrNull { it.id == m.groupId }
+        val group = lastGroups.firstOrNull { it.id == groupId }
         val defaultGroupName =
             appContext.getString(com.frerox.toolz.R.string.st_Whisper_Groups_DefaultName)
         val someoneName =
