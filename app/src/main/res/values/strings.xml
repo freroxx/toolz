@@ -370,6 +370,7 @@
     <string name="st_Whisper_Error_Network">Network error — check your connection</string>
     <string name="st_Whisper_Error_ReadImage">Couldn’t read that image.</string>
     <string name="st_Whisper_Error_ImageTooLarge">Choose an image smaller than 22 MB.</string>
+    <string name="st_Whisper_Error_UploadLimit">You\'ve reached today\'s photo upload limit. Try again tomorrow.</string>
     <string name="st_Whisper_Error_EmptyName">Enter a display name before saving.</string>
     <string name="st_Whisper_Error_EmailNotConfirmed">Please confirm your email before signing in.</string>
     <string name="st_Whisper_Error_SignupDisabled">Sign-up is temporarily unavailable. Try again later.</string>
@@ -3824,6 +3825,7 @@
     <string name="st_Whisper_Groups_SearchGroupsHint">Search groups</string>
     <string name="st_Whisper_Groups_NoGroupsFound">No groups match your search.</string>
     <string name="st_Whisper_Groups_ImageLoadFailed">Couldn\'t load this photo.</string>
+    <string name="st_Whisper_Groups_ImgUploadFail">Couldn\'t upload that photo. Check your connection and retry.</string>
     <string name="st_Whisper_Groups_CreateTitle">New group</string>
     <string name="st_Whisper_Groups_NameHint">Group name</string>
     <string name="st_Whisper_Groups_AddMembers">Add members (friends only)</string>

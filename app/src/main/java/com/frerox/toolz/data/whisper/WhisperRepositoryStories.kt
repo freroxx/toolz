@@ -803,7 +803,14 @@ fun mapDailyUpError(raw: String?): Int? {
             R.string.st_Whisper_DailyUp_ErrCorrupt
         "no such story" in msg ->
             R.string.st_Whisper_DailyUp_ErrExpired
+        // The host wraps its own rejection (e.g. the edge 429 daily cap). The
+        // specific cap must outrank the generic host phrases below, which would
+        // otherwise turn a non-retryable quota stop into "check your connection".
+        "daily upload limit" in msg ->
+            R.string.st_Whisper_Error_UploadLimit
         "picture upload failed" in msg ->
+            R.string.st_Whisper_DailyUp_ErrUpload
+        "encrypted image upload failed" in msg ->
             R.string.st_Whisper_DailyUp_ErrUpload
         "could not start your secure session" in msg ->
             R.string.st_Whisper_DailyUp_ErrUnreachable

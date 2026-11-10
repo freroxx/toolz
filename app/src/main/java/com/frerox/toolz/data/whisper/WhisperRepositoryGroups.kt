@@ -1562,6 +1562,12 @@ fun mapGroupError(raw: String?): Int? {
             com.frerox.toolz.R.string.st_Whisper_Groups_ErrFull
         "quota exceeded" in msg ->
             com.frerox.toolz.R.string.st_Whisper_Groups_ErrQuota
+        // The daily image-upload cap (edge 429) reaches the chat as a wrapped
+        // host error; check it before the generic upload phrase.
+        "daily upload limit" in msg ->
+            com.frerox.toolz.R.string.st_Whisper_Error_UploadLimit
+        "encrypted image upload failed" in msg || "picture upload failed" in msg ->
+            com.frerox.toolz.R.string.st_Whisper_Groups_ImgUploadFail
         "stale epoch" in msg ->
             com.frerox.toolz.R.string.st_Whisper_Groups_ErrStale
         "no invite" in msg ->

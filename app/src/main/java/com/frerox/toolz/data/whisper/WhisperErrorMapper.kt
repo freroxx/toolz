@@ -132,6 +132,11 @@ object WhisperErrorMapper {
             // Permission must also outrank generic 4xx/5xx
             msg.contains("row-level security", ignoreCase = true) || msg.contains("42501") ->
                 UiText.StringResource(R.string.st_Whisper_Error_NotPermitted)
+            // Daily image-upload cap (edge HTTP 429). Outranks the generic buckets
+            // so the user sees the real, non-retryable reason instead of raw
+            // server English or "request failed".
+            msg.contains("Daily upload limit reached", ignoreCase = true) ->
+                UiText.StringResource(R.string.st_Whisper_Error_UploadLimit)
             // Anti-mod gate (edge HTTP 428): unofficial build — never retry, point
             // at the official APK. Outranks the generic 4xx bucket below.
             throwable is RestException && throwable.statusCode == 428 ->
