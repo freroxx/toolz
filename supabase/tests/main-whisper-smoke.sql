@@ -195,6 +195,9 @@ insert into public.whisper_stories (id, poster_id, client_id, host_url, host_obj
 
 insert into public.whisper_story_recipients (story_id, recipient_id, sealed_descriptor) values
   ('30000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', 'd'),
+  -- Second recipient on the SAME story: proves recipients cannot enumerate
+  -- each other (check 7b).
+  ('30000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000003', 'd'),
   ('30000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001', 'd'),
   ('30000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000001', 'd');
 
@@ -366,6 +369,33 @@ begin
                 where story_id = '30000000-0000-0000-0000-000000000003'
                   and user_id = '00000000-0000-0000-0000-000000000001') then
         raise exception 'SMOKE FAIL: reaction removal left the row behind (emoji-keyed delete)';
+    end if;
+end $$;
+rollback;
+
+-- 5b. A story recipient may read ONLY their own address row. The old policy
+--     used can_read(story_id) alone, so any audience member could enumerate
+--     the poster's entire audience (an audience / friend-graph leak the
+--     client never needed). Runs before check 6 purges the poster's stories.
+begin;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000002', true);
+select set_config('request.jwt.claim.role', 'authenticated', true);
+set local role authenticated;
+do $$
+declare
+    v_visible int;
+    v_foreign int;
+begin
+    select count(*) into v_visible from public.whisper_story_recipients
+     where story_id = '30000000-0000-0000-0000-000000000001';
+    if v_visible <> 1 then
+        raise exception 'SMOKE FAIL: recipient sees % rows of the story audience (expected only their own)', v_visible;
+    end if;
+    select count(*) into v_foreign from public.whisper_story_recipients
+     where story_id = '30000000-0000-0000-0000-000000000001'
+       and recipient_id <> '00000000-0000-0000-0000-000000000002';
+    if v_foreign <> 0 then
+        raise exception 'SMOKE FAIL: recipient can enumerate other recipients';
     end if;
 end $$;
 rollback;

@@ -1390,7 +1390,12 @@ even when their own viewing receipts are off; whitelist- and audience-checked);
 read helpers + RLS mirrors. There is deliberately **no raw delete URL** on
 story rows: the ledger key resolves through the image-ownership ledger, so
 even a forged story row can only point at a hosting capability Supabase
-itself recorded.
+itself recorded. The recipient-row policy is **self-only** (`recipient_id =
+auth.uid()` *and* the story still readable): an audience member can read the
+sealed descriptor addressed to them, never the rest of the audience, so a
+story cannot be used to enumerate a poster's friend list. The sealed
+descriptor for the poster's own copy exists **only on the device** (it is
+sealed before the publish RPC so a self-seal failure publishes nothing).
 
 ### 12.4 Viewing, receipts, reactions
 
@@ -1625,15 +1630,21 @@ Whisper's cryptography is pinned with a deliberately paranoid test stack:
   membership requirement on typing writes, invitee events limited to
   `join`/`decline`, a `+1` epoch-jump cap, receipt/reaction message-reference
   triggers, the newest-first story-recipient index, identity-keyed reaction
-  removal, and complete account-purge coverage of the FK-less group tables.
+  removal, the recipient-row policy narrowed to self-only (an audience member
+  could previously enumerate a poster's whole audience), and complete
+  account-purge coverage of the FK-less group tables.
   v1.1.8 then flipped both compile flags on and resolved the deleted-signer
   blocker: the signer archive no longer cascades with `auth.users`, the purge
   keeps it, and `whisper-bundle-fetch` returns a signers-only bundle for
   deleted accounts. The Daily Ups composer also caps its default audience
   deterministically, explains the 96-person ceiling, blocks adding past it,
-  and refuses to upload for an over-cap audience. Quotas (600/day fan-out,
-  5/day/IP story, 5/day/IP signup), signed-log verification and descriptor
-  shapes are unchanged; no cryptography changed.
+  and refuses to upload for an over-cap audience; the poster's self copy is
+  sealed before the publish RPC (a self-seal failure publishes nothing) and a
+  local self-row write failure can no longer turn an already-published story
+  into a "retry" that double-posts. Group/story push fan-out now runs with
+  bounded concurrency instead of one sequential round-trip chain per member.
+  Quotas (600/day fan-out, 5/day/IP story, 5/day/IP signup), signed-log
+  verification and descriptor shapes are unchanged; no cryptography changed.
 - **The SQL baseline is now executed, not just reviewed.**
   `supabase/tests/run-local-smoke.sh` boots a disposable
   `postgres:16-alpine`, installs a shim for the hosted baseline the repo does

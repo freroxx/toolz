@@ -365,16 +365,19 @@ async function handleGroupPush(
       senderId,
       clientId: clientId.slice(0, 64),
     };
-    let sent = 0;
-    let pruned = 0;
-    for (const m of members) {
-      const uid = str(m?.user_id);
-      if (!uid || uid === senderId) continue;
-      const r = await deliverToUser(env, uid, dataPayload);
-      sent += r.sent;
-      pruned += r.pruned;
-    }
-    return { sent, pruned };
+    const recipients = members
+      .map((m) => str(m?.user_id))
+      .filter((uid) => !!uid && uid !== senderId);
+    const results = await mapWithConcurrency(
+      recipients,
+      PUSH_FANOUT_CONCURRENCY,
+      (uid) => deliverToUser(env, uid, dataPayload).catch(() => ({
+        sent: 0,
+        pruned: 0,
+        skipped: "delivery_threw",
+      })),
+    );
+    return mergeDeliveryResults(results);
   }
   if (table === "whisper_group_events") {
     const kind = str(record?.type);
@@ -435,14 +438,16 @@ async function handleGroupPush(
       subjectName,
       eventId: eventId.slice(0, 64),
     };
-    let sent = 0;
-    let pruned = 0;
-    for (const t of targets) {
-      const r = await deliverToUser(env, t.id, dataPayload);
-      sent += r.sent;
-      pruned += r.pruned;
-    }
-    return { sent, pruned };
+    const results = await mapWithConcurrency(
+      targets,
+      PUSH_FANOUT_CONCURRENCY,
+      (t) => deliverToUser(env, t.id, dataPayload).catch(() => ({
+        sent: 0,
+        pruned: 0,
+        skipped: "delivery_threw",
+      })),
+    );
+    return mergeDeliveryResults(results);
   }
   return { sent: 0, pruned: 0, skipped: "not_a_pushable_event" };
 }
@@ -487,6 +492,45 @@ async function handleStoryPush(
     posterName,
     storyId: storyId.slice(0, 64),
   });
+}
+
+/** Group/story fan-out legs run concurrently: a 12-member group used to cost
+ *  up to 11 sequential (presence + targets + push) round trips, which is slow
+ *  enough to hit the edge wall-clock on a slow distributor — the tail members
+ *  then never got their ping. Bounded so we never open dozens of sockets. */
+const PUSH_FANOUT_CONCURRENCY = 6;
+
+/** Runs `fn` over `items` with at most `limit` in flight, preserving order. */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const workers = Array.from(
+    { length: Math.min(limit, items.length) },
+    async () => {
+      while (true) {
+        const index = next++;
+        if (index >= items.length) return;
+        results[index] = await fn(items[index]);
+      }
+    },
+  );
+  await Promise.all(workers);
+  return results;
+}
+
+/** Sums per-member delivery counts without letting one leg void the rest. */
+function mergeDeliveryResults(results: DeliveryResult[]): DeliveryResult {
+  let sent = 0;
+  let pruned = 0;
+  for (const r of results) {
+    sent += r.sent;
+    pruned += r.pruned;
+  }
+  return { sent, pruned };
 }
 
 /**

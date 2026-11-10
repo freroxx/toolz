@@ -3597,7 +3597,16 @@ create policy "whisper_stories_select_live_audience"
 drop policy if exists "whisper_story_recipients_select_live_audience" on public.whisper_story_recipients;
 create policy "whisper_story_recipients_select_live_audience"
     on public.whisper_story_recipients for select to authenticated
-    using (public.whisper_story_can_read(story_id, auth.uid()));
+    using (
+        -- A recipient may read ONLY their own address row (the sealed
+        -- descriptor they need to open the photo). The previous predicate was
+        -- can_read(story_id) alone, which let any member of an audience list
+        -- every other recipient — a friend-graph/audience leak that never had
+        -- a client use (the hub only reads `recipient_id = me` rows). The
+        -- poster reads views/reactions for receipts, never this table.
+        recipient_id = auth.uid()
+        and public.whisper_story_can_read(story_id, auth.uid())
+    );
 
 drop policy if exists "whisper_story_views_select_live_authorized" on public.whisper_story_views;
 create policy "whisper_story_views_select_live_authorized"

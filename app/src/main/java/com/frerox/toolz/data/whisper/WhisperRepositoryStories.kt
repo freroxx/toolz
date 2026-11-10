@@ -281,6 +281,15 @@ suspend fun WhisperRepository.publishDailyUp(
             friendId to sealedDescriptor
         }
 
+        // Seal the poster's own copy BEFORE the publish RPC. If this fails the
+        // story would be live for the audience but unreadable (and unrecoverable:
+        // the server never stores the poster's descriptor) for its author, and a
+        // retry would double-post a second story. Fail closed here instead —
+        // nothing is published and the uploaded blob is the caller's to retry.
+        val selfDescriptor = sealDescriptorToSelf(
+            baseDescriptor.copy(attachmentId = attachmentId),
+        ) ?: throw IllegalStateException("could not start your secure session")
+
         // ONE stable client id for every attempt: the server's idempotency
         // probe (poster_id, client_id) returns the live story without touching
         // quota or the audience snapshot, so an ambiguous timeout can be
@@ -315,19 +324,28 @@ suspend fun WhisperRepository.publishDailyUp(
 
         // Self leg: same facts + delete capability, sealed to myself, so My
         // Ups re-opens locally and can still whisper-image-delete early.
-        storyLocalDao.upsert(
-            WhisperStoryLocalEntity(
-                storyId = published.id,
-                ownerId = me,
-                sealedDescriptor = sealDescriptorToSelf(
-                    baseDescriptor.copy(attachmentId = attachmentId),
-                ) ?: throw IllegalStateException("could not start your secure session"),
-                expiresAtMs = expiresAtMs,
-                receiptsEnabled = receiptsEnabled,
-                state = STORY_STATE_OWN,
-                updatedAtMs = System.currentTimeMillis(),
-            ),
-        )
+        // The story is ALREADY published at this point: a local write failure
+        // must never be reported as a publish failure. Reporting one would
+        // invite a retry that posts a SECOND live story and burns another
+        // quota slot; the audience copy is what matters and it exists.
+        runCatching {
+            storyLocalDao.upsert(
+                WhisperStoryLocalEntity(
+                    storyId = published.id,
+                    ownerId = me,
+                    sealedDescriptor = selfDescriptor,
+                    expiresAtMs = expiresAtMs,
+                    receiptsEnabled = receiptsEnabled,
+                    state = STORY_STATE_OWN,
+                    updatedAtMs = System.currentTimeMillis(),
+                ),
+            )
+        }.onFailure { e ->
+            android.util.Log.e(
+                "WhisperStories",
+                "published story local self-row write failed (story ${published.id}): ${e.message}",
+            )
+        }
         kickDailyUpSweep()
         baseDescriptor
     }
