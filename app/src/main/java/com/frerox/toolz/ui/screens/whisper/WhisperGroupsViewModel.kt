@@ -207,7 +207,18 @@ class WhisperGroupsViewModel @Inject constructor(
     private val _workingInvites = MutableStateFlow<Set<String>>(emptySet())
     val workingInvites: StateFlow<Set<String>> = _workingInvites.asStateFlow()
     // Event ids already seen (join/leave/decline pings fire once per event).
-    private val seenEventIds = mutableSetOf<String>()
+    // Capped: a busy group would otherwise grow this set for the whole process
+    // lifetime (one string per message and per group event).
+    private val seenEventIds = java.util.LinkedHashSet<String>()
+    // True only while the Chats/Groups section is actually composed. Live hub
+    // refreshes are gated on it so traffic arriving while the user is elsewhere
+    // costs no extra reads.
+    @Volatile
+    private var hubVisible = false
+    // Debounced per-group preview refresh (a burst of messages = one read).
+    private val previewRefreshJobs =
+        java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.Job>()
+    private var hubReloadJob: kotlinx.coroutines.Job? = null
     private var logWatchJobs: List<kotlinx.coroutines.Job> = emptyList()
     private var lastMemberships: List<WhisperGroupMembership> = emptyList()
     private var lastFriendNames: Map<String, String> = emptyMap()
@@ -220,6 +231,33 @@ class WhisperGroupsViewModel @Inject constructor(
             load()
             watchInvites()
         }
+    }
+
+    /**
+     * The Groups section is composed only on the Chats tab. While it is, new
+     * traffic must move the row (preview + unread badge) the way 1:1 chats do;
+     * while it is not, the notification alone is enough and the next open
+     * reloads. Returning to the tab refreshes once so nothing went stale.
+     */
+    fun setHubVisible(visible: Boolean) {
+        val was = hubVisible
+        hubVisible = visible
+        if (visible && !was) load()
+    }
+
+    /** Adds [key] once; trims the oldest half when the dedupe set grows too big. */
+    private fun markSeenEventOnce(key: String): Boolean {
+        val added = seenEventIds.add(key)
+        if (added && seenEventIds.size > MAX_SEEN_NOTIF_KEYS) {
+            val drop = seenEventIds.size - MAX_SEEN_NOTIF_KEYS / 2
+            val iterator = seenEventIds.iterator()
+            repeat(drop) {
+                if (!iterator.hasNext()) return@repeat
+                iterator.next()
+                iterator.remove()
+            }
+        }
+        return added
     }
 
     private var loadJob: Job? = null
@@ -320,6 +358,64 @@ class WhisperGroupsViewModel @Inject constructor(
         quietResyncAttempts++
         viewModelScope.launch {
             delay(minOf(30_000L * quietResyncAttempts, 120_000L))
+            load()
+        }
+    }
+
+    /**
+     * Debounced per-group preview refresh used by the live ping lane while the
+     * hub is visible. A burst of messages collapses into one read.
+     */
+    private fun schedulePreviewRefresh(groupId: String) {
+        if (!hubVisible || groupId.isBlank()) return
+        previewRefreshJobs.remove(groupId)?.cancel()
+        val job = viewModelScope.launch {
+            delay(PREVIEW_REFRESH_DEBOUNCE_MS)
+            refreshPreviewFor(groupId)
+        }
+        previewRefreshJobs[groupId] = job
+        job.invokeOnCompletion {
+            // ConcurrentHashMap: completion may run on any dispatcher.
+            if (previewRefreshJobs[groupId] === job) previewRefreshJobs.remove(groupId)
+        }
+    }
+
+    /** Recomputes ONE row's preview + unread without touching the whole hub. */
+    private suspend fun refreshPreviewFor(groupId: String) {
+        val g = lastGroups.firstOrNull { it.id == groupId } ?: return
+        val membership = lastMemberships.firstOrNull { it.groupId == groupId }
+        if (membership == null) {
+            // The verified log changed shape (join/epoch) — only a full pass
+            // can decrypt the new rows.
+            load()
+            return
+        }
+        val recent = repository.fetchGroupMessages(groupId, 20, membership = membership)
+            .getOrNull() ?: return
+        val me = repository.myId
+        val mark = readStore.readAt(g.id)
+        val last = recent.lastOrNull { it.vote == null && it.pollClose == null }
+        val unread = repository.countGroupUnread(g.id, mark, me)
+        val preview = GroupPreview(
+            text = last?.let { previewText(it) }.orEmpty(),
+            time = last?.createdAt.orEmpty(),
+            senderName = last?.senderName.orEmpty(),
+            unread = if (last == null) 0 else unread,
+            hasImage = last?.image != null,
+            hasPoll = last?.poll != null,
+            mentionedMe = recent.any {
+                me in it.mentions && it.senderId != me && it.createdAt > mark
+            },
+        )
+        _uiState.update { it.copy(previews = it.previews + (g.id to preview)) }
+    }
+
+    /** Debounced full pass for structural events (rename/picture/roles) while visible. */
+    private fun scheduleHubReload() {
+        if (!hubVisible) return
+        hubReloadJob?.cancel()
+        hubReloadJob = viewModelScope.launch {
+            delay(HUB_RELOAD_DEBOUNCE_MS)
             load()
         }
     }
@@ -531,7 +627,7 @@ class WhisperGroupsViewModel @Inject constructor(
             listOf(
                 watchLiveForever("groupl:${m.groupId}") {
                     repository.observeGroupLog(m.groupId).collect { row ->
-                        if (!seenEventIds.add("evt:${row.id}")) return@collect
+                        if (!markSeenEventOnce("evt:${row.id}")) return@collect
                         onGroupEventRow(m, row, me)
                     }
                 },
@@ -541,7 +637,7 @@ class WhisperGroupsViewModel @Inject constructor(
                         // Votes are tally data: open chats refresh silently
                         // via load(), but they never ping (push layer agrees).
                         if (ping.kind == "vote") return@collect
-                        if (!seenEventIds.add("msg:${ping.clientId}")) return@collect
+                        if (!markSeenEventOnce("msg:${ping.clientId}")) return@collect
                         val group = lastGroups.firstOrNull { it.id == m.groupId }
                         val sender = lastFriendNames[ping.senderId]?.takeIf { it.isNotBlank() }
                         val text = if (sender != null) {
@@ -558,6 +654,9 @@ class WhisperGroupsViewModel @Inject constructor(
                             text = text,
                             dedupeKey = "msg:${ping.clientId}",
                         )
+                        // A visible hub moves the row (preview + unread badge)
+                        // exactly like a 1:1 chat; voting traffic stays silent.
+                        if (ping.kind != "vote") schedulePreviewRefresh(m.groupId)
                     }
                 },
             )
@@ -570,6 +669,10 @@ class WhisperGroupsViewModel @Inject constructor(
         me: String,
     ) {
         if (row.actor == me) return
+        // Structural events (rename, picture, roles, join/leave) change what
+        // the hub row shows. While the tab is visible, coalesce a full pass so
+        // it never goes stale; the notification below still fires per event.
+        scheduleHubReload()
         val group = lastGroups.firstOrNull { it.id == m.groupId }
         val defaultGroupName =
             appContext.getString(com.frerox.toolz.R.string.st_Whisper_Groups_DefaultName)
@@ -765,4 +868,15 @@ class WhisperGroupsViewModel @Inject constructor(
 
     private fun err(e: Throwable?): String =
         com.frerox.toolz.data.whisper.groupErrorText(appContext, e)
+
+    private companion object {
+        /** Ping dedupe cap (see [seenEventIds]); trimmed to half when exceeded. */
+        const val MAX_SEEN_NOTIF_KEYS = 2_000
+
+        /** A burst of messages in one group is one preview read. */
+        const val PREVIEW_REFRESH_DEBOUNCE_MS = 700L
+
+        /** A burst of structural events is one full hub pass. */
+        const val HUB_RELOAD_DEBOUNCE_MS = 1_200L
+    }
 }

@@ -74,6 +74,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -153,6 +154,11 @@ fun WhisperGroupsSection(
     val mutedIds by viewModel.mutedGroupIds.collectAsStateWithLifecycle()
     val workingInvites by viewModel.workingInvites.collectAsStateWithLifecycle()
     val pictures by viewModel.pictures.collectAsStateWithLifecycle()
+    // Live hub updates only while this section is on screen (see setHubVisible).
+    DisposableEffect(viewModel) {
+        viewModel.setHubVisible(true)
+        onDispose { viewModel.setHubVisible(false) }
+    }
     var showCreate by remember { mutableStateOf(false) }
     var showJoinId by remember { mutableStateOf(false) }
     var showMore by remember { mutableStateOf(false) }
