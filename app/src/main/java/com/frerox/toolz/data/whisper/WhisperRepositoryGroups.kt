@@ -1636,7 +1636,15 @@ suspend fun WhisperRepository.inviteGroupMember(groupId: String, userId: String)
     db.from("whisper_group_invites").insert(
         GroupInviteInsert(groupId = groupId, userId = userId, invitedBy = me, clientVersionCode = groupClientVersion()),
     )
-    publishGroupEvent(groupId, seq, epoch, WhisperGroupEventType.INVITE, me, "\"$userId\"").getOrThrow()
+    try {
+        publishGroupEvent(groupId, seq, epoch, WhisperGroupEventType.INVITE, me, "\"$userId\"").getOrThrow()
+    } catch (e: Throwable) {
+        // The row was written before the signed event. Without the event the
+        // invite does not exist in the verified log, so a lingering row would
+        // show a card whose Join fails with "no invite". Withdraw it.
+        runCatching { db.from("whisper_group_invites").delete { filter { eq("group_id", groupId); eq("user_id", userId) } } }
+        throw e
+    }
     syncGroup(groupId).getOrThrow()
 }
 
@@ -1691,9 +1699,18 @@ suspend fun WhisperRepository.cancelGroupInvite(groupId: String, userId: String)
     val m = syncGroup(groupId).getOrThrow()
     require(m.allows(me, WhisperGroupCapability.INVITE_MEMBERS)) { "You cannot cancel invites in this group." }
     require(userId in m.pendingInvites) { "No invite to cancel." }
-    db.from("whisper_group_invites").delete { filter { eq("group_id", groupId); eq("user_id", userId) } }
+    // Event FIRST: a failed CANCEL leaves the invite fully intact (row + log),
+    // so a retry is clean. Row-first could delete the card while the log still
+    // advertises a pending invite the invitee could never accept.
     val (seq, epoch) = nextGroupSeqEpoch(groupId)
     publishGroupEvent(groupId, seq, epoch, WhisperGroupEventType.CANCEL, me, "\"$userId\"").getOrThrow()
+    runCatching {
+        db.from("whisper_group_invites").delete { filter { eq("group_id", groupId); eq("user_id", userId) } }
+    }.onFailure {
+        // Log already says canceled; a stale row is cosmetic and the invitee's
+        // Join still fails closed. The next cancel/sync retry re-runs the delete.
+        android.util.Log.w("WhisperGroups", "cancel invite row delete failed: ${it.message}")
+    }
     syncGroup(groupId).getOrThrow()
 }
 
@@ -1731,12 +1748,21 @@ suspend fun WhisperRepository.removeGroupMember(groupId: String, userId: String)
     val me = requireMe()
     val m = syncGroup(groupId).getOrThrow()
     require(m.allows(me, WhisperGroupCapability.REMOVE_MEMBERS)) { "You cannot remove members in this group." }
-    require(m.isMember(userId)) { "Not a member." }
+    if (!m.isMember(userId)) {
+        // The verified log already has the REMOVE (a previous attempt got the
+        // event out but the row delete failed). Finish the residual cleanup so
+        // a removed member never keeps RLS read access. Idempotent.
+        db.from("whisper_group_members").delete { filter { eq("group_id", groupId); eq("user_id", userId) } }
+        return@runCatching
+    }
     require(!(m.members[userId] == WhisperGroupRole.ADMIN && m.admins.size <= 1)) {
         "Cannot remove the last admin."
     }
     val (seq, epoch) = nextGroupSeqEpoch(groupId)
     publishGroupEvent(groupId, seq, epoch + 1, WhisperGroupEventType.REMOVE, me, "\"$userId\"").getOrThrow()
+    // Delete the convenience row immediately: RLS membership checks read THIS
+    // table, so a lingering row keeps the server letting the removed member
+    // read group content even though the signed log says they are out.
     db.from("whisper_group_members").delete { filter { eq("group_id", groupId); eq("user_id", userId) } }
     syncGroup(groupId).getOrThrow()
 }
@@ -1746,6 +1772,14 @@ suspend fun WhisperRepository.promoteGroupMember(groupId: String, userId: String
     val me = requireMe()
     val m = syncGroup(groupId).getOrThrow()
     require(m.allows(me, WhisperGroupCapability.PROMOTE_DEMOTE)) { "You cannot change member roles in this group." }
+    if (m.members[userId] == WhisperGroupRole.ADMIN) {
+        // Log already promoted (previous attempt's row update was interrupted):
+        // heal the convenience row idempotently instead of refusing the retry.
+        db.from("whisper_group_members").update({ set("role", "admin") }) {
+            filter { eq("group_id", groupId); eq("user_id", userId) }
+        }
+        return@runCatching
+    }
     require(m.members[userId] == WhisperGroupRole.MEMBER) { "Not a promotable member." }
     val (seq, epoch) = nextGroupSeqEpoch(groupId)
     publishGroupEvent(groupId, seq, epoch + 1, WhisperGroupEventType.PROMOTE, me, "\"$userId\"").getOrThrow()
@@ -1760,6 +1794,12 @@ suspend fun WhisperRepository.demoteGroupMember(groupId: String, userId: String)
     val me = requireMe()
     val m = syncGroup(groupId).getOrThrow()
     require(m.allows(me, WhisperGroupCapability.PROMOTE_DEMOTE)) { "You cannot change member roles in this group." }
+    if (m.members[userId] == WhisperGroupRole.MEMBER) {
+        db.from("whisper_group_members").update({ set("role", "member") }) {
+            filter { eq("group_id", groupId); eq("user_id", userId) }
+        }
+        return@runCatching
+    }
     require(m.members[userId] == WhisperGroupRole.ADMIN) { "Not an admin." }
     require(m.admins.size > 1) { "Cannot demote the last admin." }
     val (seq, epoch) = nextGroupSeqEpoch(groupId)
@@ -1856,8 +1896,18 @@ suspend fun WhisperRepository.renameGroup(groupId: String, name: String): Result
 suspend fun WhisperRepository.leaveGroup(groupId: String): Result<Unit> = runCatching {
     requireGroupsEnabled()
     val me = requireMe()
-    val m = syncGroup(groupId).getOrThrow()
-    require(m.isMember(me)) { "You are not a member." }
+    // No membership requirement here: a retry after a partially failed leave
+    // (LEAVE event published, row delete interrupted) must still finish the
+    // server-side row cleanup; otherwise the departed member keeps RLS read
+    // access despite the log saying they are gone.
+    val m = fetchVerifiedMembership(groupId).getOrThrow()
+    if (!m.isMember(me)) {
+        db.from("whisper_group_members").delete { filter { eq("group_id", groupId); eq("user_id", me) } }
+        groupDao.deleteGroup(groupId)
+        groupDao.clearMembers(groupId)
+        groupDao.clearEvents(groupId)
+        return@runCatching
+    }
     require(!(m.isAdmin(me) && m.admins.size <= 1)) { "The last admin cannot leave — promote someone first." }
     val (seq, epoch) = nextGroupSeqEpoch(groupId)
     publishGroupEvent(groupId, seq, epoch + 1, WhisperGroupEventType.LEAVE, me, "\"\"").getOrThrow()
