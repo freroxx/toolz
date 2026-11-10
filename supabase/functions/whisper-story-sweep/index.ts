@@ -173,24 +173,53 @@ serve(async (request) => {
   }
 
   // 2. Work the lease: delete the hosted copy, then record the outcome.
-  let deleted = 0;
-  let failed = 0;
-  for (const story of leased) {
-    const failureClass = await deleteHostedCopy(supabaseUrl, serviceHeaders, story);
-    if (failureClass === null) {
-      if (await reportResult(supabaseUrl, serviceHeaders, story.story_id, true)) {
-        deleted++;
-      } else {
-        failed++;
+  //    Bounded concurrency: a fully sequential pass could spend up to
+  //    10 × (ledger + delete + report) on 8-second timeouts and hit the edge
+  //    wall-clock, abandoning the tail of the lease (the rows are re-claimed
+  //    after the 10-minute lease, but the backlog then drains slower than it
+  //    grows). 4 in flight keeps the worst case well inside the limit.
+  const outcomes = await mapWithConcurrency(
+    leased,
+    SWEEP_CONCURRENCY,
+    async (story) => {
+      const failureClass = await deleteHostedCopy(supabaseUrl, serviceHeaders, story);
+      if (failureClass === null) {
+        return (await reportResult(supabaseUrl, serviceHeaders, story.story_id, true)) ? "deleted" : "failed";
       }
-    } else {
       await reportResult(supabaseUrl, serviceHeaders, story.story_id, false, failureClass);
-      failed++;
-    }
-  }
+      return "failed";
+    },
+  );
+  const deleted = outcomes.filter((o) => o === "deleted").length;
+  const failed = outcomes.length - deleted;
 
   return json({ claimed: leased.length, deleted, failed }, 200);
 });
+
+/** How many leased cleanup rows may be processed in parallel. */
+const SWEEP_CONCURRENCY = 4;
+
+/** Runs `fn` over `items` with at most `limit` in flight, preserving order. */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const workers = Array.from(
+    { length: Math.min(limit, items.length) },
+    async () => {
+      while (true) {
+        const index = next++;
+        if (index >= items.length) return;
+        results[index] = await fn(items[index]);
+      }
+    },
+  );
+  await Promise.all(workers);
+  return results;
+}
 
 /**
  * Resolves the hosted copy through the ownership ledger and deletes it.

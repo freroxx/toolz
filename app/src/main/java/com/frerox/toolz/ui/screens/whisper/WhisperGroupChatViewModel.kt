@@ -315,7 +315,10 @@ class WhisperGroupChatViewModel @Inject constructor(
         val markBefore = readStore.readAt(groupId)
         val membership = repository.syncGroup(groupId)
         membership.onSuccess { m ->
-            val messages = repository.fetchGroupMessages(groupId)
+            // Pass the membership we just verified: without it this fetch
+            // re-fetches AND re-verifies the whole signed event log a second
+            // time on every single load/realtime trigger.
+            val messages = repository.fetchGroupMessages(groupId, membership = m)
             messages.onSuccess { list ->
                 val names = repository.friendNameMap()
                 val receipts = repository.fetchGroupReceipts(groupId).getOrNull().orEmpty()
@@ -374,11 +377,20 @@ class WhisperGroupChatViewModel @Inject constructor(
     suspend fun searchAll(query: String): List<WhisperGroupChatMessage> {
         val q = query.trim().lowercase()
         if (q.isBlank()) return emptyList()
+        // One verified membership for the whole page walk. Previously every
+        // page re-fetched and re-verified the entire signed event log (up to
+        // ten times for one search). The server still enforces membership RLS.
+        val membership = _uiState.value.membership
         val out = mutableListOf<WhisperGroupChatMessage>()
         var cursor: String? = null
         var guard = 0
         while (guard++ < 10) {
-            val page = repository.fetchGroupMessages(groupId, PAGE_SIZE, before = cursor)
+            val page = repository.fetchGroupMessages(
+                groupId,
+                PAGE_SIZE,
+                before = cursor,
+                membership = membership,
+            )
                 .getOrNull().orEmpty()
             if (page.isEmpty()) break
             out.addAll(page.filter { it.vote == null && it.pollClose == null && it.body.lowercase().contains(q) })
@@ -395,7 +407,14 @@ class WhisperGroupChatViewModel @Inject constructor(
         val oldest = cur.messages.firstOrNull()?.createdAt ?: return
         viewModelScope.launch {
             _uiState.update { it.copy(loadingMore = true) }
-            repository.fetchGroupMessages(groupId, PAGE_SIZE, before = oldest)
+            // Reuse the already-verified membership: pagination used to
+            // re-fetch and re-verify the full event log for every page.
+            repository.fetchGroupMessages(
+                groupId,
+                PAGE_SIZE,
+                before = oldest,
+                membership = cur.membership,
+            )
                 .onSuccess { older ->
                     _uiState.update {
                         val merged = (older + it.messages).distinctBy { msg -> msg.id }

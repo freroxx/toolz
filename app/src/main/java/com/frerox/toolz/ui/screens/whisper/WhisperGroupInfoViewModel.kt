@@ -181,7 +181,7 @@ class WhisperGroupInfoViewModel @Inject constructor(
                         degraded = m.degraded,
                     )
                 }
-                loadPicture()
+                loadPicture(m)
                 loadRequests()
             }.onFailure { e ->
                 _uiState.update { it.copy(isLoading = false, isWorking = false, error = err(e)) }
@@ -321,10 +321,26 @@ class WhisperGroupInfoViewModel @Inject constructor(
         }
     }
 
-    private fun loadPicture() {
+    /** URL of the picture whose bytes are already in the state (uploads are
+     *  immutable: a new picture is a new URL). */
+    private var loadedPictureUrl: String? = null
+
+    private fun loadPicture(membership: WhisperGroupMembership) {
         viewModelScope.launch {
-            val bytes = repository.openGroupPicture(groupId).getOrNull()
-            _uiState.update { it.copy(pictureBytes = bytes) }
+            val url = membership.picture?.url
+            val current = _uiState.value.pictureBytes
+            // An unchanged verified picture needs no second download — the
+            // bytes in state are exactly these. Passing the synced membership
+            // also avoids re-fetching and re-verifying the whole event log a
+            // second time on every info-screen load.
+            if (url != null && loadedPictureUrl == url && current != null) return@launch
+            val bytes = repository.openGroupPicture(groupId, membership).getOrNull()
+            if (bytes != null) {
+                loadedPictureUrl = url
+                _uiState.update { it.copy(pictureBytes = bytes) }
+            }
+            // A transient download failure keeps the previous avatar instead of
+            // blanking the hero (the opens are idempotent; a later load retries).
         }
     }
 
@@ -377,7 +393,11 @@ class WhisperGroupInfoViewModel @Inject constructor(
     /** Loads shared-photo refs (newest 100 rows); bytes stay lazy per thumb. */
     fun loadGallery() {
         viewModelScope.launch {
-            val res = repository.fetchGroupMessages(groupId, 100)
+            // Reuse the membership the screen already verified: without it this
+            // call re-fetches and re-verifies the whole signed event log just to
+            // read message rows (the gallery opens from an already-loaded screen).
+            val membership = _uiState.value.membership
+            val res = repository.fetchGroupMessages(groupId, 100, membership = membership)
             val items = res.getOrNull().orEmpty()
                 .filter { it.image != null }
                 .map { GalleryItem(rowId = it.id, ref = it.image!!, caption = it.body) }
