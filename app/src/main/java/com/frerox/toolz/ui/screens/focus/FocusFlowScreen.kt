@@ -831,27 +831,36 @@ fun FocusSessionHeader(
     val isRunning = session.state == FocusSessionState.RUNNING
     val sessionAccentColor = MaterialTheme.colorScheme.primary
 
-    // Optimized animations
+    // Optimized animations. Infinite animations are skipped entirely in performance mode:
+    // an infiniteRepeatable with a snap() (0-duration) spec throws
+    // "Animation to be infinitely repeated cannot have a 0-duration".
     val infiniteTransition = rememberInfiniteTransition(label = "focus_refined")
-    val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.03f,
-        animationSpec = infiniteRepeatable(
-            animation = if (performanceMode) snap() else tween(1800, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "pulse"
-    )
 
-    val gradientShift by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 600f,
-        animationSpec = infiniteRepeatable(
-            animation = if (performanceMode) snap() else tween(6000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "gradient"
-    )
+    val pulseScale = if (performanceMode) 1f else {
+        val scale by infiniteTransition.animateFloat(
+            initialValue = 1f,
+            targetValue = 1.03f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(1800, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "pulse"
+        )
+        scale
+    }
+
+    val gradientShift = if (performanceMode) 0f else {
+        val shift by infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 600f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(6000, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "gradient"
+        )
+        shift
+    }
 
     val activeBrush = if (isSessionActive && !performanceMode) {
         Brush.linearGradient(
