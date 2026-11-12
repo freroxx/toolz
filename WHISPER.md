@@ -1199,6 +1199,11 @@ does something smarter than "refetch on ping":
   as the 1:1 chat) and catch up on resume. Own rows are never given a seen
   receipt — the UI excludes the sender from "seen by", so those rows were
   only a DB write and a realtime broadcast per message.
+- **Crypto and media decoding never run on Main.** A group timeline page opens
+  up to 100 sealed rows (envelope decode, AEAD open, content parse) and a group
+  photo/story opens a multi-megabyte PNG plus AES-GCM; both ran on the caller's
+  dispatcher, i.e. the view-model's Main. They now run on
+  `Dispatchers.Default`, matching the 1:1 decode and avatar-loader discipline.
 
 ### 11.6 Server rules
 

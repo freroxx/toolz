@@ -524,11 +524,15 @@ suspend fun WhisperRepository.downloadDailyUpImage(storyId: String): Result<Whis
         val key = runCatching { Base64.getDecoder().decode(desc.imageKeyB64) }.getOrNull()
         require(key != null && key.size == 32) { "corrupt story image" }
         val hosted = encryptedImageHost.download(desc.hostUrl).getOrThrow()
-        val sealed = WhisperImageCipherTransport.decode(hosted)
-            ?: throw IllegalStateException("corrupt story image")
-        val plain = openGroupPictureBytes(sealed, key)
-            ?: throw IllegalStateException("corrupt story image")
-        WhisperStoryImage(plain)
+        // The viewer collects on Main: unwrap + AES-GCM (several megabytes)
+        // belongs off the UI thread, like the avatar loader already does.
+        withContext(Dispatchers.Default) {
+            val sealed = WhisperImageCipherTransport.decode(hosted)
+                ?: throw IllegalStateException("corrupt story image")
+            val plain = openGroupPictureBytes(sealed, key)
+                ?: throw IllegalStateException("corrupt story image")
+            WhisperStoryImage(plain)
+        }
     }
 }
 

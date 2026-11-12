@@ -53,6 +53,7 @@ import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
@@ -2222,9 +2223,16 @@ private suspend fun WhisperRepository.fetchGroupMessagesInner(
     // Names ride the 60s TTL map: getFriends() costs two server round trips
     // and timeline refreshes fire far more often than friendships change.
     val names = friendNameMap()
-    rows.sortedWith(compareBy({ it.createdAt ?: "" }, { it.id }))
-        .distinctBy { it.id }
-        .mapNotNull { row -> openGroupRowToMessage(row, groupId, m, me, names) }
+    // Opening a row runs the full crypto path (decode envelope, ECDH/AEAD open,
+    // content parse). A 100-row page used to do that on the CALLER's dispatcher
+    // — the chat VM's viewModelScope, i.e. Main — so a busy group (or a 500-row
+    // search walk) blocked the UI thread for hundreds of milliseconds. Decode
+    // on Default exactly like the 1:1 timeline does.
+    kotlinx.coroutines.withContext(Dispatchers.Default) {
+        rows.sortedWith(compareBy({ it.createdAt ?: "" }, { it.id }))
+            .distinctBy { it.id }
+            .mapNotNull { row -> openGroupRowToMessage(row, groupId, m, me, names) }
+    }
 }
 
 /**
@@ -2758,10 +2766,15 @@ suspend fun WhisperRepository.openGroupImage(ref: GroupImageRef, cacheId: String
     val key = runCatching { java.util.Base64.getDecoder().decode(ref.key) }.getOrNull()
         ?: error("Bad image key.")
     val png = encryptedImageHost.download(ref.url).getOrThrow()
-    val sealed = WhisperImageCipherTransport.decode(png) ?: error("Bad image data.")
-    val plain = openGroupPictureBytes(sealed, key) ?: error("Could not decrypt the image.")
-    runCatching { imageDiskCache.put(cacheId, fp, plain) }
-    plain
+    // PNG unwrap + AES-GCM over up to several megabytes must not run on the
+    // caller's dispatcher (the chat VM collects on Main): a photo open used to
+    // block the UI thread through the whole decrypt.
+    withContext(Dispatchers.Default) {
+        val sealed = WhisperImageCipherTransport.decode(png) ?: error("Bad image data.")
+        val plain = openGroupPictureBytes(sealed, key) ?: error("Could not decrypt the image.")
+        runCatching { imageDiskCache.put(cacheId, fp, plain) }
+        plain
+    }
 }
 
 // ── Group picture (encrypted, same stack as chat images) ────────────────
@@ -2929,8 +2942,10 @@ private suspend fun WhisperRepository.openGroupPictureInner(
         ?: error("Bad picture key.")
     require(key.size == 32) { "Bad picture key." }
     val png = encryptedImageHost.download(url).getOrThrow()
-    val sealed = WhisperImageCipherTransport.decode(png) ?: error("Bad picture data.")
-    openGroupPictureBytes(sealed, key) ?: error("Could not decrypt the picture.")
+    withContext(Dispatchers.Default) {
+        val sealed = WhisperImageCipherTransport.decode(png) ?: error("Bad picture data.")
+        openGroupPictureBytes(sealed, key) ?: error("Could not decrypt the picture.")
+    }
 }
 
 // ── Group outbox drain (offline sends + pictures) ───────────────────────
