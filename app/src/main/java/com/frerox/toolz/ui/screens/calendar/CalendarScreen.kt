@@ -417,6 +417,28 @@ fun CalendarScreen(viewModel: CalendarViewModel = hiltViewModel()) {
     val isTodaySelected = isSameDay(uiState.selectedDate, System.currentTimeMillis())
     val scrollBehavior  = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
 
+    val currentVisibleEventIds = remember(isMonthView, uiState.events, uiState.selectedDate, isSelectionMode) {
+        if (isMonthView) {
+            uiState.events.filter { isSameDay(it.timestamp, uiState.selectedDate) }.map { it.id }.toSet()
+        } else {
+            val windowStart = if (isSelectionMode) {
+                Calendar.getInstance().apply {
+                    add(Calendar.DAY_OF_YEAR, -730)
+                    set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
+                    set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+                }.timeInMillis
+            } else {
+                Calendar.getInstance().apply {
+                    add(Calendar.DAY_OF_YEAR, -30)
+                    set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
+                    set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+                }.timeInMillis
+            }
+            uiState.events.filter { it.timestamp >= windowStart }.map { it.id }.toSet()
+        }
+    }
+    val isAllVisibleSelected = currentVisibleEventIds.isNotEmpty() && currentVisibleEventIds.all { it in selectedEventIds }
+
     // Expressive background
     Box(
         modifier = Modifier
@@ -433,11 +455,15 @@ fun CalendarScreen(viewModel: CalendarViewModel = hiltViewModel()) {
                 if (isSelectionMode) {
                     CalendarSelectionTopBar(
                         selectedCount = selectedEventIds.size,
-                        totalCount = uiState.events.size,
+                        totalCount = currentVisibleEventIds.size,
+                        isAllSelected = isAllVisibleSelected,
                         onSelectAll = {
                             vibrationManager?.vibrateTick()
-                            val allIds = uiState.events.map { it.id }.toSet()
-                            selectedEventIds = if (selectedEventIds.size == allIds.size) emptySet() else allIds
+                            selectedEventIds = if (isAllVisibleSelected) {
+                                selectedEventIds - currentVisibleEventIds
+                            } else {
+                                selectedEventIds + currentVisibleEventIds
+                            }
                         },
                         onDeleteSelected = {
                             vibrationManager?.vibrateClick()
@@ -962,6 +988,7 @@ private fun CalendarTopBar(
 private fun CalendarSelectionTopBar(
     selectedCount: Int,
     totalCount: Int,
+    isAllSelected: Boolean = selectedCount >= totalCount && totalCount > 0,
     onSelectAll: () -> Unit,
     onDeleteSelected: () -> Unit,
     onCloseSelection: () -> Unit,
@@ -982,8 +1009,8 @@ private fun CalendarSelectionTopBar(
         actions = {
             IconButton(onClick = onSelectAll) {
                 Icon(
-                    imageVector = if (selectedCount == totalCount && totalCount > 0) Icons.Rounded.Deselect else Icons.Rounded.SelectAll,
-                    contentDescription = "Select or deselect all"
+                    imageVector = if (isAllSelected) Icons.Rounded.Deselect else Icons.Rounded.SelectAll,
+                    contentDescription = if (isAllSelected) "Deselect all" else "Select all"
                 )
             }
             IconButton(
@@ -1260,14 +1287,18 @@ fun MonthViewSection(
 
         // ── Persistent day panel ──────────────────────────────────────────────
         DayPreviewPanel(
-            selectedDate  = uiState.selectedDate,
-            events        = selectedDayEvents,
-            tasks         = selectedDayTasks,
-            onEventToggle = onEventToggle,
-            onEventEdit   = onEventEdit,
-            onEventDelete = onEventDelete,
-            onTaskToggle  = onTaskToggle,
-            modifier      = Modifier.weight(1f)
+            selectedDate     = uiState.selectedDate,
+            events           = selectedDayEvents,
+            tasks            = selectedDayTasks,
+            isSelectionMode  = isSelectionMode,
+            selectedEventIds = selectedEventIds,
+            onEventSelect    = onEventSelect,
+            onEventLongClick = onEventLongClick,
+            onEventToggle    = onEventToggle,
+            onEventEdit      = onEventEdit,
+            onEventDelete    = onEventDelete,
+            onTaskToggle     = onTaskToggle,
+            modifier         = Modifier.weight(1f)
         )
     }
 }
@@ -1543,6 +1574,10 @@ private fun DayPreviewPanel(
     selectedDate: Long,
     events: List<EventEntry>,
     tasks: List<TaskEntry>,
+    isSelectionMode: Boolean = false,
+    selectedEventIds: Set<Int> = emptySet(),
+    onEventSelect: (EventEntry) -> Unit = {},
+    onEventLongClick: (EventEntry) -> Unit = {},
     onEventToggle: (EventEntry) -> Unit,
     onEventEdit: (EventEntry) -> Unit,
     onEventDelete: (EventEntry) -> Unit,
@@ -1653,10 +1688,14 @@ private fun DayPreviewPanel(
                                     modifier = Modifier.animateItem()
                                 ) {
                                     CompactEventItem(
-                                        event    = event,
-                                        onTap    = { onEventEdit(event) },
-                                        onToggle = { onEventToggle(event) },
-                                        onDelete = { onEventDelete(event) }
+                                        event           = event,
+                                        isSelectionMode = isSelectionMode,
+                                        isSelected      = event.id in selectedEventIds,
+                                        onSelect        = { onEventSelect(event) },
+                                        onLongClick     = { onEventLongClick(event) },
+                                        onTap           = { onEventEdit(event) },
+                                        onToggle        = { onEventToggle(event) },
+                                        onDelete        = { onEventDelete(event) }
                                     )
                                 }
                             }
@@ -1717,6 +1756,10 @@ private fun CompactEventItem(
     onTap: () -> Unit,
     onToggle: () -> Unit,
     onDelete: () -> Unit,
+    isSelectionMode: Boolean = false,
+    isSelected: Boolean = false,
+    onSelect: () -> Unit = {},
+    onLongClick: () -> Unit = {},
 ) {
     val vibrationManager = LocalVibrationManager.current
     val accentColor  = remember(event.subjectColor) { eventColor(event.subjectColor) }
@@ -1729,15 +1772,15 @@ private fun CompactEventItem(
     var showMenu by remember { mutableStateOf(false) }
 
     val dismissState = rememberSwipeToDismissBoxState(
-        confirmValueChange = { it == SwipeToDismissBoxValue.EndToStart },
+        confirmValueChange = { value ->
+            if (!isSelectionMode && value == SwipeToDismissBoxValue.EndToStart) {
+                vibrationManager?.vibrateTick()
+                onDelete()
+                true
+            } else false
+        },
         positionalThreshold = { it * 0.38f }
     )
-    LaunchedEffect(dismissState.currentValue) {
-        if (dismissState.currentValue == SwipeToDismissBoxValue.EndToStart) {
-            vibrationManager?.vibrateTick()
-            onDelete()
-        }
-    }
 
     SwipeToDismissBox(
         state = dismissState,
@@ -1764,13 +1807,20 @@ private fun CompactEventItem(
                 )
             }
         },
-        enableDismissFromStartToEnd = false
+        enableDismissFromStartToEnd = false,
+        enableDismissFromEndToStart = !isSelectionMode
     ) {
         Surface(
-            onClick = onTap,
-            color   = MaterialTheme.colorScheme.surfaceContainer,
+            color   = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+                      else MaterialTheme.colorScheme.surfaceContainer,
             shape   = SmallExpressiveShape,
-            modifier = Modifier.fillMaxWidth()
+            border  = if (isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)) else null,
+            modifier = Modifier
+                .fillMaxWidth()
+                .combinedClickable(
+                    onClick = if (isSelectionMode) onSelect else onTap,
+                    onLongClick = onLongClick
+                )
         ) {
             Row(modifier = Modifier.height(IntrinsicSize.Min)) {
                 // Left color bar
@@ -1844,57 +1894,75 @@ private fun CompactEventItem(
                             }
                         }
                     }
-                    // Toggle button
-                    // CAL-P2-04: explicit toggle control — card tap edits (onTap), never toggles.
-                    FilledTonalIconButton(
-                        onClick = {
-                            vibrationManager?.vibrateTick()
-                            onToggle()
-                        },
-                        modifier = Modifier.size(30.dp),
-                        colors = IconButtonDefaults.filledTonalIconButtonColors(
-                            containerColor = if (event.isCompleted)
-                                resolved.copy(alpha = 0.15f) else Color.Transparent,
-                            contentColor = if (event.isCompleted) resolved
-                            else MaterialTheme.colorScheme.outlineVariant
-                        )
-                    ) {
-                        Icon(
-                            if (event.isCompleted) Icons.Rounded.CheckCircle
-                            else Icons.Rounded.RadioButtonUnchecked,
-                            null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                    // More menu
-                    Box {
-                        IconButton(onClick = { showMenu = true }, Modifier.size(30.dp)) {
+                    if (isSelectionMode) {
+                        IconButton(
+                            onClick = {
+                                vibrationManager?.vibrateTick()
+                                onSelect()
+                            },
+                            modifier = Modifier.size(30.dp)
+                        ) {
                             Icon(
-                                Icons.Rounded.MoreVert, null,
-                                modifier = Modifier.size(14.dp),
-                                tint     = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.4f)
+                                imageVector = if (isSelected) Icons.Rounded.CheckCircle else Icons.Rounded.RadioButtonUnchecked,
+                                contentDescription = if (isSelected) "Deselect ${event.title}" else "Select ${event.title}",
+                                tint = if (isSelected) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                modifier = Modifier.size(22.dp)
                             )
                         }
-                        DropdownMenu(
-                            expanded = showMenu,
-                            onDismissRequest = { showMenu = false },
-                            shape = SmallExpressiveShape
+                    } else {
+                        // Toggle button
+                        // CAL-P2-04: explicit toggle control — card tap edits (onTap), never toggles.
+                        FilledTonalIconButton(
+                            onClick = {
+                                vibrationManager?.vibrateTick()
+                                onToggle()
+                            },
+                            modifier = Modifier.size(30.dp),
+                            colors = IconButtonDefaults.filledTonalIconButtonColors(
+                                containerColor = if (event.isCompleted)
+                                    resolved.copy(alpha = 0.15f) else Color.Transparent,
+                                contentColor = if (event.isCompleted) resolved
+                                else MaterialTheme.colorScheme.outlineVariant
+                            )
                         ) {
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.st_CalendarScreen_9f0a)) },
-                                onClick = { onTap(); showMenu = false },
-                                leadingIcon = { Icon(Icons.Rounded.Edit, null, modifier = Modifier.size(16.dp)) }
+                            Icon(
+                                if (event.isCompleted) Icons.Rounded.CheckCircle
+                                else Icons.Rounded.RadioButtonUnchecked,
+                                null,
+                                modifier = Modifier.size(16.dp)
                             )
-                            HorizontalDivider()
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.st_CalendarScreen_a1b2), color = MaterialTheme.colorScheme.error) },
-                                onClick = { onDelete(); showMenu = false },
-                                leadingIcon = {
-                                    Icon(Icons.Rounded.Delete, null,
-                                        tint = MaterialTheme.colorScheme.error,
-                                        modifier = Modifier.size(16.dp))
-                                }
-                            )
+                        }
+                        // More menu
+                        Box {
+                            IconButton(onClick = { showMenu = true }, Modifier.size(30.dp)) {
+                                Icon(
+                                    Icons.Rounded.MoreVert, null,
+                                    modifier = Modifier.size(14.dp),
+                                    tint     = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.4f)
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = showMenu,
+                                onDismissRequest = { showMenu = false },
+                                shape = SmallExpressiveShape
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.st_CalendarScreen_9f0a)) },
+                                    onClick = { onTap(); showMenu = false },
+                                    leadingIcon = { Icon(Icons.Rounded.Edit, null, modifier = Modifier.size(16.dp)) }
+                                )
+                                HorizontalDivider()
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.st_CalendarScreen_a1b2), color = MaterialTheme.colorScheme.error) },
+                                    onClick = { onDelete(); showMenu = false },
+                                    leadingIcon = {
+                                        Icon(Icons.Rounded.Delete, null,
+                                            tint = MaterialTheme.colorScheme.error,
+                                            modifier = Modifier.size(16.dp))
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -1984,11 +2052,11 @@ fun AgendaView(
     onTaskToggle: (TaskEntry) -> Unit = {},
     offlineMode: Boolean = false,
 ) {
-    // CAL-P2-10: never load entire history from oldest — window to last 30d.
-    val windowStart = remember {
+    // CAL-P2-10: never load entire history from oldest — window to last 30d in normal view, 2 years in selection mode.
+    val windowStart = remember(isSelectionMode) {
         Calendar.getInstance().apply {
             timeInMillis = System.currentTimeMillis()
-            add(Calendar.DAY_OF_YEAR, -30)
+            add(Calendar.DAY_OF_YEAR, if (isSelectionMode) -730 else -30)
             set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
             set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
         }.timeInMillis

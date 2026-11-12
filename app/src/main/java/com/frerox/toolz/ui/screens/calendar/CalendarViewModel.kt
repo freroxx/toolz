@@ -1215,12 +1215,15 @@ Please output ONLY the corrected raw JSON array now. No markdown, no prose.
         viewModelScope.launch(Dispatchers.IO) {
             runCatching {
                 val allEvents = repository.getAllEventsSync()
-                val eventsToExport = if (calendarCategory.isNullOrBlank() || calendarCategory == "All") {
+                val isAll = calendarCategory.isNullOrBlank() ||
+                        calendarCategory.equals("All", ignoreCase = true) ||
+                        calendarCategory.equals("All Events", ignoreCase = true)
+                val eventsToExport = if (isAll) {
                     allEvents
                 } else {
                     allEvents.filter { it.eventType.equals(calendarCategory, ignoreCase = true) }
                 }
-                val calName = calendarCategory?.takeIf { it != "All" } ?: "Toolz Calendar"
+                val calName = if (!isAll && !calendarCategory.isNullOrBlank()) calendarCategory else "Toolz Calendar"
                 val icsText = IcsParser.serialize(eventsToExport, calName)
 
                 val exportDir = File(context.cacheDir, "exports").apply { mkdirs() }

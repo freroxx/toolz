@@ -40,6 +40,20 @@ class EventRepository @Inject constructor(
          */
         fun occurrenceKey(event: EventEntry): String = "${event.id}@${event.timestamp}"
 
+        /**
+         * Stable deduplication key based on normalized title, minute-bucket timestamp, and event type.
+         */
+        fun deduplicationKey(title: String, timestamp: Long, eventType: String = ""): String {
+            val normTitle = title.trim().lowercase()
+            val minuteBucket = timestamp / 60_000L
+            val normType = eventType.trim().uppercase()
+            return if (normType.isNotBlank() && normType != "GENERAL") {
+                "$normTitle@$minuteBucket@$normType"
+            } else {
+                "$normTitle@$minuteBucket"
+            }
+        }
+
         /** Single rule-resolution used by every expansion path (never fork). */
         fun recurrenceRuleOf(event: EventEntry): String? {
             event.recurringRule.takeIf { it != Recurrence.NONE }?.let { return it.name }
@@ -204,15 +218,9 @@ class EventRepository @Inject constructor(
 
         val existingEvents = eventDao.getAllEventsSync()
 
-        fun dedupeKey(title: String, ts: Long): String {
-            val normTitle = title.trim().lowercase()
-            val minuteBucket = ts / 60_000L
-            return "$normTitle@$minuteBucket"
-        }
-
         val existingMap = mutableMapOf<String, EventEntry>()
         for (e in existingEvents) {
-            existingMap[dedupeKey(e.title, e.timestamp)] = e
+            existingMap[deduplicationKey(e.title, e.timestamp, e.eventType)] = e
         }
 
         val toInsert = mutableListOf<EventEntry>()
@@ -223,7 +231,7 @@ class EventRepository @Inject constructor(
         val distinctIncoming = mutableListOf<EventEntry>()
         val seenInBatch = mutableSetOf<String>()
         for (event in incoming) {
-            val key = dedupeKey(event.title, event.timestamp)
+            val key = deduplicationKey(event.title, event.timestamp, event.eventType)
             if (seenInBatch.add(key)) {
                 distinctIncoming.add(event)
             } else {
@@ -233,7 +241,7 @@ class EventRepository @Inject constructor(
 
         // 2. Match against existing DB records
         for (event in distinctIncoming) {
-            val key = dedupeKey(event.title, event.timestamp)
+            val key = deduplicationKey(event.title, event.timestamp, event.eventType)
             val matched = existingMap[key]
             if (matched != null) {
                 // Check if attributes changed (description, color, recurrence, etc.)
@@ -277,17 +285,11 @@ class EventRepository @Inject constructor(
         val allEvents = eventDao.getAllEventsSync()
         if (allEvents.size <= 1) return 0
 
-        fun dedupeKey(e: EventEntry): String {
-            val normTitle = e.title.trim().lowercase()
-            val minuteBucket = e.timestamp / 60_000L
-            return "$normTitle@$minuteBucket"
-        }
-
         val seen = mutableSetOf<String>()
         val duplicateIds = mutableListOf<Int>()
 
         for (e in allEvents) {
-            val key = dedupeKey(e)
+            val key = deduplicationKey(e.title, e.timestamp, e.eventType)
             if (!seen.add(key)) {
                 duplicateIds.add(e.id)
             }
