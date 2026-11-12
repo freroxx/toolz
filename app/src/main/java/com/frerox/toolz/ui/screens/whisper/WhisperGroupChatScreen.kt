@@ -46,6 +46,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.GroupReplyRef
@@ -83,6 +85,12 @@ fun WhisperGroupChatScreen(
     // password-approved setting so the two surface behave identically.
     val screenshotBypassEnabled by viewModel.screenshotBypassEnabled.collectAsStateWithLifecycle()
     SecureWindow(bypassEnabled = screenshotBypassEnabled)
+    // Seen receipts / the read watermark only advance while this chat is on
+    // screen — same V-1 boundary as the 1:1 chat. A backgrounded chat keeps
+    // receiving realtime rows, and marking those read was invisible to the user
+    // while telling the group otherwise.
+    LifecycleEventEffect(Lifecycle.Event.ON_START) { viewModel.onChatVisibilityChanged(true) }
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { viewModel.onChatVisibilityChanged(false) }
     var draft by rememberSaveable(viewModel.groupId) { mutableStateOf("") }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()

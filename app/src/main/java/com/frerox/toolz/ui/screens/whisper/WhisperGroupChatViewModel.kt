@@ -163,6 +163,46 @@ class WhisperGroupChatViewModel @Inject constructor(
     private var watchJobs: List<Job> = emptyList()
     private var lastTypingSentMs = 0L
 
+    /**
+     * V-1 parity with the 1:1 chat: seen receipts and the read watermark only
+     * advance while this chat is actually on screen. Realtime log pings keep
+     * reloading in the background, and marking then told the group the user
+     * had read messages they never saw (and silently cleared the unread
+     * separator/badge on return).
+     */
+    @Volatile private var isChatVisible = false
+
+    /** Wired from the Screen's ON_START/ON_STOP. */
+    fun onChatVisibilityChanged(visible: Boolean) {
+        val becameVisible = visible && !isChatVisible
+        isChatVisible = visible
+        if (!becameVisible) return
+        // Catch up: rows that arrived while backgrounded were never marked.
+        val list = _uiState.value.messages
+        if (list.isNotEmpty()) markSeenAndRead(list)
+    }
+
+    /** Fire-and-forget receipts + read watermark for visible rows only. */
+    private fun markSeenAndRead(list: List<WhisperGroupChatMessage>) {
+        if (!isChatVisible) return
+        // Receipts for my OWN rows are meaningless (the UI excludes the sender
+        // from "seen by"), yet each was a DB write plus a realtime event fanned
+        // out to every member. Only mark everyone else's rows.
+        val ids = list.asSequence()
+            .filter { !it.mine && it.clientId.isNotBlank() }
+            .map { it.clientId }
+            .distinct()
+            .take(100)
+            .toList()
+        viewModelScope.launch {
+            if (!isChatVisible) return@launch
+            if (ids.isNotEmpty()) runCatching { repository.markGroupSeen(groupId, ids) }
+            list.lastOrNull()?.createdAt?.takeIf { it.isNotBlank() }?.let {
+                readStore.markRead(groupId, it)
+            }
+        }
+    }
+
     /** Text sends go out strictly in order (parallel seals could reorder). */
     private val sendMutex = Mutex()
 
@@ -349,11 +389,9 @@ class WhisperGroupChatViewModel @Inject constructor(
                         unreadCount = unread.size,
                     )
                 }
-                // Seen receipts + read watermark (fire-and-forget).
-                viewModelScope.launch {
-                    runCatching { repository.markGroupSeen(groupId, list.map { msg -> msg.clientId }) }
-                    list.lastOrNull()?.createdAt?.let { readStore.markRead(groupId, it) }
-                }
+                // Seen receipts + read watermark — only while this chat is on
+                // screen (see onChatVisibilityChanged), and never for my own rows.
+                markSeenAndRead(list)
             }.onFailure { e ->
                 _uiState.update {
                     it.copy(
@@ -497,12 +535,14 @@ class WhisperGroupChatViewModel @Inject constructor(
                             )
                         }
                         if (real == null) refreshTimelineHead()
-                        // The open screen counts MY message as seen, exactly
-                        // like a reload used to do.
-                        real?.clientId?.let {
-                            runCatching { repository.markGroupSeen(groupId, listOf(it)) }
+                        // My own row needs no seen receipt (the UI excludes the
+                        // sender from "seen by"); advance the watermark only
+                        // while the chat is actually on screen.
+                        if (isChatVisible) {
+                            real?.createdAt?.takeIf { it.isNotBlank() }?.let {
+                                readStore.markRead(groupId, it)
+                            }
                         }
-                        real?.createdAt?.takeIf { it.isNotBlank() }?.let { readStore.markRead(groupId, it) }
                     }
                 }
                 .onFailure { e ->
@@ -676,9 +716,9 @@ class WhisperGroupChatViewModel @Inject constructor(
                     unreadCount = unread.size,
                 )
             }
-            // The open screen counts as read, same as a reload does.
-            runCatching { repository.markGroupSeen(groupId, listOf(msg.clientId)) }
-            msg.createdAt.takeIf { it.isNotBlank() }?.let { readStore.markRead(groupId, it) }
+            // Only advance seen/read state while this chat is on screen (and
+            // only for other people's rows) — same boundary as a reload.
+            markSeenAndRead(listOf(msg))
         }
     }
 

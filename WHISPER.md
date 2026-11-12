@@ -1193,6 +1193,12 @@ does something smarter than "refetch on ping":
   channel. The channel count for a user in N groups is therefore bounded by
   2N group lanes plus the invite lane, not 2N per surface, which keeps a
   heavy user under Supabase's default `max_channels_per_client`.
+- **Seen/read state follows the screen, not the socket.** The open chat keeps
+  receiving rows while the app is backgrounded, but receipts and the read
+  watermark only advance while the screen is STARTED (the same V-1 boundary
+  as the 1:1 chat) and catch up on resume. Own rows are never given a seen
+  receipt — the UI excludes the sender from "seen by", so those rows were
+  only a DB write and a realtime broadcast per message.
 
 ### 11.6 Server rules
 
