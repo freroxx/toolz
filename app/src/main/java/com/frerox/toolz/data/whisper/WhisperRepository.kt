@@ -34,6 +34,7 @@ import io.github.jan.supabase.realtime.realtime
 import io.github.jan.supabase.storage.storage
 import io.github.jan.supabase.storage.upload
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -1326,6 +1327,11 @@ class WhisperRepository @Inject constructor(
     // so we don't subscribe to a brand-new channel object for each outgoing event.
     internal val broadcastChannelCache = mutableMapOf<String, io.github.jan.supabase.realtime.RealtimeChannel>()
     internal val channelMutex = Mutex()
+    // Reference-counted group change lanes keyed by channel name. The hub and an
+    // open chat must share one realtime channel instead of evicting each other
+    // (see GroupChangeLane in WhisperRepositoryGroups.kt).
+    internal val groupChangeLanes = mutableMapOf<String, GroupChangeLane>()
+    internal val groupLaneMutex = Mutex()
     // Serializes outbox flushes so concurrent worker lanes can never double-insert a row.
     private val flushMutex = Mutex()
     private val recentlyEmittedMessageIds = ConcurrentHashMap<String, Long>()
@@ -3781,6 +3787,14 @@ class WhisperRepository @Inject constructor(
     suspend fun removeAllCachedChannels() {
         val toRemove = channelMutex.withLock { broadcastChannelCache.values.toList() }
         broadcastChannelCache.clear()
+        // Shared group change lanes own a background collect job: cancel them so a
+        // removed channel is never observed by a live producer after sign-out.
+        val lanes = groupLaneMutex.withLock {
+            val snapshot = groupChangeLanes.values.toList()
+            groupChangeLanes.clear()
+            snapshot
+        }
+        lanes.forEach { it.scope.cancel() }
         // V2-FIX (reviewwhisper.md) L-13: CE-safe runCatching around suspend call.
         ProtocolDiagnostics.log("rt.teardown[all]: signout-wipe (${toRemove.size} channels)")
         toRemove.forEach { runCatchingCE { realtime.removeChannel(it) } }

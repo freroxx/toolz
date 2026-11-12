@@ -1184,6 +1184,15 @@ does something smarter than "refetch on ping":
   The six realtime collectors in the group chat (log, messages, deletes,
   typing, reactions, receipts) resubscribe in a capped-backoff loop after any
   error instead of going silently dead after the first throw.
+- **The hub and an open chat share one subscription.** The Chats-tab hub keeps
+  one log lane and one message lane per joined group while a chat opened on top
+  of it keeps the same two. Those channels are reference-counted
+  (`GroupChangeLane`) and shared, so opening or closing a chat can no longer
+  evict the hub's watcher (or be evicted by it) — the previous code built the
+  same channel name from both surfaces and each build removed the other's
+  channel. The channel count for a user in N groups is therefore bounded by
+  2N group lanes plus the invite lane, not 2N per surface, which keeps a
+  heavy user under Supabase's default `max_channels_per_client`.
 
 ### 11.6 Server rules
 

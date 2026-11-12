@@ -43,9 +43,15 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
@@ -2403,7 +2409,10 @@ internal fun WhisperRepository.observeGroupReceiptEvents(groupId: String): kotli
         joinGroupChannel(channelName, channel)
         awaitClose {
             job.cancel()
-            launch { leaveGroupChannel(channelName, channel) }
+            // appScope, not the producer scope: this callback runs while the
+            // flow scope is already cancelled, so a plain launch would never
+            // execute and the channel would stay subscribed for the session.
+            appScope.launch { leaveGroupChannel(channelName, channel) }
         }
     }
 
@@ -2520,7 +2529,10 @@ internal fun WhisperRepository.observeGroupReactionEvents(groupId: String): kotl
         joinGroupChannel(channelName, channel)
         awaitClose {
             job.cancel()
-            launch { leaveGroupChannel(channelName, channel) }
+            // appScope, not the producer scope: this callback runs while the
+            // flow scope is already cancelled, so a plain launch would never
+            // execute and the channel would stay subscribed for the session.
+            appScope.launch { leaveGroupChannel(channelName, channel) }
         }
     }
 
@@ -2612,7 +2624,10 @@ fun WhisperRepository.observeGroupJoinRequests(groupId: String): kotlinx.corouti
         joinGroupChannel(channelName, channel)
         awaitClose {
             job.cancel()
-            launch { leaveGroupChannel(channelName, channel) }
+            // appScope, not the producer scope: this callback runs while the
+            // flow scope is already cancelled, so a plain launch would never
+            // execute and the channel would stay subscribed for the session.
+            appScope.launch { leaveGroupChannel(channelName, channel) }
         }
     }
 
@@ -2708,7 +2723,10 @@ fun WhisperRepository.observeGroupTyping(groupId: String): kotlinx.coroutines.fl
         joinGroupChannel(channelName, channel)
         awaitClose {
             job.cancel()
-            launch { leaveGroupChannel(channelName, channel) }
+            // appScope, not the producer scope: this callback runs while the
+            // flow scope is already cancelled, so a plain launch would never
+            // execute and the channel would stay subscribed for the session.
+            appScope.launch { leaveGroupChannel(channelName, channel) }
         }
     }
 
@@ -3040,6 +3058,86 @@ private suspend fun WhisperRepository.leaveGroupChannel(
     runCatchingCE { realtime.removeChannel(channel) }
 }
 
+/**
+ * One shared realtime subscription for a group change channel. The Chats hub
+ * and an open chat both watch the same group's messages and event log; before
+ * this lane existed each collector built the SAME channel name through
+ * [groupChannel], which removes an existing channel of that name. Opening a
+ * chat therefore tore down the hub's watcher (whose self-heal then tore down
+ * the chat's), so live delivery flapped on both surfaces.
+ *
+ * [refs] is guarded by [WhisperRepository.groupLaneMutex].
+ */
+internal class GroupChangeLane(
+    val channelName: String,
+    val channel: io.github.jan.supabase.realtime.RealtimeChannel,
+    val actions: MutableSharedFlow<io.github.jan.supabase.realtime.PostgresAction>,
+    val scope: CoroutineScope,
+) {
+    var refs: Int = 1
+}
+
+/**
+ * Acquires the shared change lane for [channelName], creating and subscribing
+ * it on the first collector. All collectors of the same table+group share one
+ * channel and one change flow, so the hub and a chat can coexist without
+ * evicting each other. The mutex is held across subscribe() so creation happens
+ * exactly once; it is dedicated to lanes (never the broadcast-channel mutex).
+ */
+private suspend fun WhisperRepository.acquireGroupChangeLane(
+    channelName: String,
+    table: String,
+    groupId: String,
+): GroupChangeLane = groupLaneMutex.withLock {
+    groupChangeLanes[channelName]?.let {
+        it.refs++
+        return@withLock it
+    }
+    val channel = groupChannel(channelName)
+    // Owned outside the try so a failed creation can cancel the collector job.
+    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    val lane = try {
+        val changes = channel.postgresChangeFlow<io.github.jan.supabase.realtime.PostgresAction>(schema = "public") {
+            this.table = table
+            filter("group_id", io.github.jan.supabase.postgrest.query.filter.FilterOperator.EQ, groupId)
+        }
+        // extraBufferCapacity keeps a slow collector from back-pressuring the
+        // change flow; when full, the oldest action is dropped (a later full
+        // reload reconciles anything that is missed).
+        val actions = MutableSharedFlow<io.github.jan.supabase.realtime.PostgresAction>(
+            extraBufferCapacity = 128,
+            onBufferOverflow = BufferOverflow.DROP_OLDEST,
+        )
+        scope.launch { changes.collect { actions.emit(it) } }
+        channel.subscribe()
+        GroupChangeLane(channelName, channel, actions, scope)
+    } catch (e: Exception) {
+        scope.cancel()
+        runCatchingCE { realtime.removeChannel(channel) }
+        throw e
+    }
+    groupChangeLanes[channelName] = lane
+    lane
+}
+
+/** Releases one collector; the channel is removed only when the last leaves. */
+private suspend fun WhisperRepository.releaseGroupChangeLane(lane: GroupChangeLane) {
+    val remove = groupLaneMutex.withLock {
+        lane.refs--
+        if (lane.refs > 0) {
+            false
+        } else {
+            if (groupChangeLanes[lane.channelName] === lane) groupChangeLanes.remove(lane.channelName)
+            true
+        }
+    }
+    if (!remove) return
+    lane.scope.cancel()
+    // leaveGroupChannel also drops the stale broadcastChannelCache entry, so a
+    // later re-acquire never removes an already-dead channel twice.
+    leaveGroupChannel(lane.channelName, lane.channel)
+}
+
 /** Fires on every invite-row insert/delete visible to me (my invites only, via RLS). */
 fun WhisperRepository.observeMyGroupInvites(): kotlinx.coroutines.flow.Flow<Unit> =
     kotlinx.coroutines.flow.callbackFlow {
@@ -3060,7 +3158,10 @@ fun WhisperRepository.observeMyGroupInvites(): kotlinx.coroutines.flow.Flow<Unit
         joinGroupChannel(channelName, channel)
         awaitClose {
             job.cancel()
-            launch { leaveGroupChannel(channelName, channel) }
+            // appScope, not the producer scope: this callback runs while the
+            // flow scope is already cancelled, so a plain launch would never
+            // execute and the channel would stay subscribed for the session.
+            appScope.launch { leaveGroupChannel(channelName, channel) }
         }
     }
 
@@ -3069,14 +3170,10 @@ internal fun WhisperRepository.observeGroupLog(groupId: String): kotlinx.corouti
     kotlinx.coroutines.flow.callbackFlow {
         requireGroupsEnabled()
         if (groupId.isBlank()) { close(); return@callbackFlow }
-        val channelName = "grouppg_log_$groupId"
-        val channel = groupChannel(channelName)
-        val changes = channel.postgresChangeFlow<io.github.jan.supabase.realtime.PostgresAction>(schema = "public") {
-            table = "whisper_group_events"
-            filter("group_id", io.github.jan.supabase.postgrest.query.filter.FilterOperator.EQ, groupId)
-        }
+        // Shared lane: the Chats hub and an open chat watch this same channel.
+        val lane = acquireGroupChangeLane("grouppg_log_$groupId", "whisper_group_events", groupId)
         val job = launch {
-            changes.collect { action ->
+            lane.actions.collect { action ->
                 val row = when (action) {
                     is io.github.jan.supabase.realtime.PostgresAction.Insert ->
                         runCatching { action.decodeRecord<GroupEventRow>() }.getOrNull()
@@ -3085,10 +3182,9 @@ internal fun WhisperRepository.observeGroupLog(groupId: String): kotlinx.corouti
                 if (row != null) trySend(row)
             }
         }
-        joinGroupChannel(channelName, channel)
         awaitClose {
             job.cancel()
-            launch { leaveGroupChannel(channelName, channel) }
+            appScope.launch { releaseGroupChangeLane(lane) }
         }
     }
 
@@ -3112,14 +3208,10 @@ internal fun WhisperRepository.observeGroupMessagesLive(groupId: String): kotlin
     kotlinx.coroutines.flow.callbackFlow {
         requireGroupsEnabled()
         if (groupId.isBlank()) { close(); return@callbackFlow }
-        val channelName = "grouppg_msg_$groupId"
-        val channel = groupChannel(channelName)
-        val changes = channel.postgresChangeFlow<io.github.jan.supabase.realtime.PostgresAction>(schema = "public") {
-            table = "whisper_group_messages"
-            filter("group_id", io.github.jan.supabase.postgrest.query.filter.FilterOperator.EQ, groupId)
-        }
+        // Shared lane: the Chats hub and an open chat watch this same channel.
+        val lane = acquireGroupChangeLane("grouppg_msg_$groupId", "whisper_group_messages", groupId)
         val job = launch {
-            changes.collect { action ->
+            lane.actions.collect { action ->
                 val row = when (action) {
                     is io.github.jan.supabase.realtime.PostgresAction.Insert ->
                         runCatching { action.decodeRecord<GroupMessageRow>() }.getOrNull()
@@ -3130,10 +3222,9 @@ internal fun WhisperRepository.observeGroupMessagesLive(groupId: String): kotlin
                 }
             }
         }
-        joinGroupChannel(channelName, channel)
         awaitClose {
             job.cancel()
-            launch { leaveGroupChannel(channelName, channel) }
+            appScope.launch { releaseGroupChangeLane(lane) }
         }
     }
 
@@ -3186,6 +3277,9 @@ fun WhisperRepository.observeGroupMessageDeletes(groupId: String): kotlinx.corou
         joinGroupChannel(channelName, channel)
         awaitClose {
             job.cancel()
-            launch { leaveGroupChannel(channelName, channel) }
+            // appScope, not the producer scope: this callback runs while the
+            // flow scope is already cancelled, so a plain launch would never
+            // execute and the channel would stay subscribed for the session.
+            appScope.launch { leaveGroupChannel(channelName, channel) }
         }
     }

@@ -230,7 +230,9 @@ class WhisperGroupsViewModel @Inject constructor(
 
     init {
         if (groupsEnabled()) {
-            load()
+            // The section's DisposableEffect drives the first load via
+            // setHubVisible(true). Loading here as well would run a second full
+            // sync pass the moment the tab is composed.
             watchInvites()
         }
     }
