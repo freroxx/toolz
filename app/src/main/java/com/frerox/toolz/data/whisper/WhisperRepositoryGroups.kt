@@ -1574,6 +1574,13 @@ fun mapGroupError(raw: String?): Int? {
             com.frerox.toolz.R.string.st_Whisper_Error_UploadLimit
         "encrypted image upload failed" in msg || "picture upload failed" in msg ->
             com.frerox.toolz.R.string.st_Whisper_Groups_ImgUploadFail
+        // Picker-side local failures (bounded read / decode). These are thrown
+        // before any network call and used to reach the UI as raw English.
+        "too large to send" in msg ->
+            com.frerox.toolz.R.string.st_Whisper_Groups_ImgPickTooLarge
+        "could not read that image" in msg || "could not process this image" in msg ||
+            "empty image" in msg ->
+            com.frerox.toolz.R.string.st_Whisper_Groups_ImgPickFailed
         "stale epoch" in msg ->
             com.frerox.toolz.R.string.st_Whisper_Groups_ErrStale
         "no invite" in msg ->
@@ -3110,6 +3117,12 @@ private suspend fun WhisperRepository.acquireGroupChangeLane(
         )
         scope.launch { changes.collect { actions.emit(it) } }
         channel.subscribe()
+        // Same silent-drop recovery as the 1:1 lanes: a socket switch/doze can
+        // leave a subscribed group channel delivering nothing, and the self-heal
+        // loop only restarts on an exception, not on a silent stall. The job is
+        // a child of [scope], so releasing the lane cancels it before the channel
+        // is removed (it must never resurrect a removed channel).
+        watchChannelHealth(scope, channelName, channel)
         GroupChangeLane(channelName, channel, actions, scope)
     } catch (e: Exception) {
         scope.cancel()

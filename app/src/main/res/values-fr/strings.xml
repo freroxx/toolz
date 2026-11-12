@@ -4367,6 +4367,8 @@ La plupart des optimisations nécessitent Shizuku pour un accès shell privilég
     <string name="st_Whisper_Groups_GalleryFail">Impossible de charger la galerie. Vérifiez votre connexion et réessayez.</string>
     <string name="st_Whisper_Groups_ImageLoadFailed">Impossible de charger cette photo.</string>
     <string name="st_Whisper_Groups_ImgFailed">Impossible de charger cette photo.</string>
+    <string name="st_Whisper_Groups_ImgPickTooLarge">Cette photo est trop grande pour être envoyée — choisissez-en une plus petite.</string>
+    <string name="st_Whisper_Groups_ImgPickFailed">Impossible de lire cette photo — choisissez-en une autre.</string>
     <string name="st_Whisper_Groups_Info">Infos du groupe</string>
     <string name="st_Whisper_Groups_InvalidId">Cet identifiant de groupe semble invalide.</string>
     <string name="st_Whisper_Groups_InviteAdmins">Administrateurs uniquement</string>

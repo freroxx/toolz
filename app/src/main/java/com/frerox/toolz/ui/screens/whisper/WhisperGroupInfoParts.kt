@@ -90,6 +90,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.WhisperProfile
+import com.frerox.toolz.data.whisper.mapGroupError
 import com.frerox.toolz.data.whisper.readBoundedGroupImageBytes
 import com.frerox.toolz.ui.components.ExpressiveCard
 import com.frerox.toolz.ui.components.ExpressiveSwitch
@@ -203,7 +204,6 @@ internal fun GroupHero(
 ) {
     val scheme = MaterialTheme.colorScheme
     val context = LocalContext.current
-    val tooBig = stringResource(R.string.st_Whisper_Error_ImageTooLarge)
     val pictureLabel = GroupCd.picture()
     val editDescriptionLabel = stringResource(R.string.st_Whisper_Groups_EditDescription)
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -211,9 +211,18 @@ internal fun GroupHero(
         runCatching {
             val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
             val bytes = context.contentResolver.openInputStream(uri)?.use { readBoundedGroupImageBytes(it) }
-                ?: error("empty")
+                ?: error("empty image")
             onPickPicture(bytes, mime)
-        }.onFailure { onPictureError(tooBig) }
+        }.onFailure { e ->
+            // "Too large" only when the bounded read actually tripped; a
+            // corrupt/unreadable pick gets its own copy instead of the
+            // misleading size warning.
+            onPictureError(
+                context.getString(
+                    mapGroupError(e.message) ?: R.string.st_Whisper_Groups_ImgPickFailed,
+                ),
+            )
+        }
     }
     Column(
         modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 4.dp),

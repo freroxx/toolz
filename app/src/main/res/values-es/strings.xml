@@ -4366,6 +4366,8 @@
     <string name="st_Whisper_Groups_GalleryFail">No se pudo cargar la galería. Verifica tu conexión y vuelve a intentarlo.</string>
     <string name="st_Whisper_Groups_ImageLoadFailed">No se pudo cargar esta foto.</string>
     <string name="st_Whisper_Groups_ImgFailed">No se pudo cargar esta foto.</string>
+    <string name="st_Whisper_Groups_ImgPickTooLarge">Esa foto es demasiado grande para enviarla — elige una más pequeña.</string>
+    <string name="st_Whisper_Groups_ImgPickFailed">No se pudo leer esa foto — elige otra.</string>
     <string name="st_Whisper_Groups_Info">Información del grupo</string>
     <string name="st_Whisper_Groups_InvalidId">Eso no parece un ID de grupo.</string>
     <string name="st_Whisper_Groups_InviteAdmins">Solo administradores</string>

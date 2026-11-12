@@ -3826,6 +3826,8 @@
     <string name="st_Whisper_Groups_NoGroupsFound">No groups match your search.</string>
     <string name="st_Whisper_Groups_ImageLoadFailed">Couldn\'t load this photo.</string>
     <string name="st_Whisper_Groups_ImgUploadFail">Couldn\'t upload that photo. Check your connection and retry.</string>
+    <string name="st_Whisper_Groups_ImgPickTooLarge">That photo is too large to send — pick a smaller one.</string>
+    <string name="st_Whisper_Groups_ImgPickFailed">Couldn\'t read that photo — pick a different one.</string>
     <string name="st_Whisper_Groups_CreateTitle">New group</string>
     <string name="st_Whisper_Groups_NameHint">Group name</string>
     <string name="st_Whisper_Groups_AddMembers">Add members (friends only)</string>

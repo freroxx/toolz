@@ -110,6 +110,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.GroupInviteInfo
 import com.frerox.toolz.data.whisper.groupsEnabled
+import com.frerox.toolz.data.whisper.mapGroupError
 import com.frerox.toolz.data.whisper.readBoundedGroupImageBytes
 import com.frerox.toolz.ui.components.ExpressiveCard
 import com.frerox.toolz.ui.components.ToolzConnectedButtonGroup
@@ -638,21 +639,22 @@ private fun CreateGroupSheet(
     }
     val friendsById = remember(state.friends) { state.friends.associateBy { it.id } }
 
-    val pictureTooBig = stringResource(R.string.st_Whisper_Error_ImageTooLarge)
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         pictureError = null
         runCatching {
             val mime = context.contentResolver.getType(uri)
             val bytes = context.contentResolver.openInputStream(uri)?.use { readBoundedGroupImageBytes(it) }
+                ?: error("empty image")
             mime to bytes
         }.onSuccess { (mime, bytes) ->
-            if (bytes != null) {
-                pictureBytes = bytes
-                if (mime != null) pictureMime = mime
-            }
-        }.onFailure {
-            pictureError = pictureTooBig
+            pictureBytes = bytes
+            if (mime != null) pictureMime = mime
+        }.onFailure { e ->
+            // Map the real failure: an unreadable pick is not a size problem.
+            pictureError = context.getString(
+                mapGroupError(e.message) ?: R.string.st_Whisper_Groups_ImgPickFailed,
+            )
         }
     }
 

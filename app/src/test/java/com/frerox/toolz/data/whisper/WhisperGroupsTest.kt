@@ -478,6 +478,11 @@ class WhisperGroupsTest {
         assertTrue(mapGroupError("some random network failure") == null)
         assertTrue(mapGroupError(null) == null)
         assertTrue(mapGroupError("") == null)
+        // Picker-side local failures are localized instead of surfacing raw
+        // English from the preprocess layer.
+        assertNotNull(mapGroupError("That image is too large to send."))
+        assertNotNull(mapGroupError("Could not read that image."))
+        assertNotNull(mapGroupError("Could not process this image."))
     }
 
     @Test

@@ -52,6 +52,7 @@ import com.frerox.toolz.data.whisper.GroupReplyRef
 import com.frerox.toolz.data.whisper.WhisperGroupCapability
 import com.frerox.toolz.data.whisper.WhisperGroupChatMessage
 import com.frerox.toolz.data.whisper.groupsEnabled
+import com.frerox.toolz.data.whisper.mapGroupError
 import com.frerox.toolz.data.whisper.readBoundedGroupImageBytes
 import com.frerox.toolz.ui.components.rememberToolzHapticFeedback
 import com.frerox.toolz.ui.theme.toolzBackground
@@ -226,9 +227,15 @@ fun WhisperGroupChatScreen(
         runCatching {
             val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
             val bytes = context.contentResolver.openInputStream(uri)?.use { readBoundedGroupImageBytes(it) }
-            if (bytes != null) pendingImage = bytes to mime
+                ?: error("empty image")
+            pendingImage = bytes to mime
         }.onFailure { e ->
-            scope.launch { snackbar.showGroupNotice(e.message.orEmpty()) }
+            // Localized: the bounded read throws English ("That image is too
+            // large to send.") and the raw text must never reach the UI.
+            val text = context.getString(
+                mapGroupError(e.message) ?: R.string.st_Whisper_Groups_ImgPickFailed,
+            )
+            scope.launch { snackbar.showGroupNotice(text) }
         }
     }
 
