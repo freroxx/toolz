@@ -248,6 +248,7 @@ import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.components.ToolzExpressiveIconButton
 import com.frerox.toolz.ui.components.ToolzLargeExtendedFloatingActionButton
 import com.frerox.toolz.ui.components.ToolzOutlinedExpressiveButton
+import com.frerox.toolz.ui.components.ToolzTonalExpressiveIconButton
 import com.frerox.toolz.ui.components.ToolzWavyCircularProgressIndicator
 import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
@@ -452,66 +453,84 @@ fun CalendarScreen(viewModel: CalendarViewModel = hiltViewModel()) {
             snackbarHost     = { SnackbarHost(snackbarHostState) },
             containerColor   = Color.Transparent,
             topBar = {
-                if (isSelectionMode) {
-                    CalendarSelectionTopBar(
-                        selectedCount = selectedEventIds.size,
-                        totalCount = currentVisibleEventIds.size,
-                        isAllSelected = isAllVisibleSelected,
-                        onSelectAll = {
-                            vibrationManager?.vibrateTick()
-                            selectedEventIds = if (isAllVisibleSelected) {
-                                selectedEventIds - currentVisibleEventIds
-                            } else {
-                                selectedEventIds + currentVisibleEventIds
-                            }
-                        },
-                        onDeleteSelected = {
-                            vibrationManager?.vibrateClick()
-                            showBatchDeleteConfirmation = true
-                        },
-                        onCloseSelection = {
-                            vibrationManager?.vibrateTick()
-                            isSelectionMode = false
-                            selectedEventIds = emptySet()
+                AnimatedContent(
+                    targetState = isSelectionMode,
+                    transitionSpec = {
+                        if (targetState) {
+                            (slideInVertically(spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)) { -it } + fadeIn())
+                                .togetherWith(slideOutVertically { -it / 2 } + fadeOut())
+                        } else {
+                            (slideInVertically { -it / 2 } + fadeIn())
+                                .togetherWith(slideOutVertically(spring(dampingRatio = 0.8f)) { -it } + fadeOut())
                         }
-                    )
-                } else {
-                    CalendarTopBar(
-                        selectedDate       = uiState.selectedDate,
-                        isAcademicMode     = uiState.isAcademicMode,
-                        isMonthView        = isMonthView,
-                        isTodaySelected    = isTodaySelected,
-                        onPrevious         = {
-                            vibrationManager?.vibrateTick()
-                            viewModel.previousMonth()
-                        },
-                        onNext             = {
-                            vibrationManager?.vibrateTick()
-                            viewModel.nextMonth()
-                        },
-                        onToday            = {
-                            vibrationManager?.vibrateClick()
-                            viewModel.goToToday()
-                        },
-                        onMonthPickerClick = { showMonthPicker = true },
-                        onToggleView       = {
-                            vibrationManager?.vibrateTick()
-                            isMonthView = !isMonthView
-                        },
-                        onSelectModeClick  = {
-                            vibrationManager?.vibrateTick()
-                            isSelectionMode = true
-                        },
-                        onSettingsClick    = {
-                            vibrationManager?.vibrateTick()
-                            showSettingsSheet = true
-                        },
-                        scrollBehavior     = scrollBehavior
-                    )
+                    },
+                    label = "CalendarTopBarTransition"
+                ) { selectionActive ->
+                    if (selectionActive) {
+                        CalendarSelectionTopBar(
+                            selectedCount = selectedEventIds.size,
+                            totalCount = currentVisibleEventIds.size,
+                            isAllSelected = isAllVisibleSelected,
+                            onSelectAll = {
+                                vibrationManager?.vibrateTick()
+                                selectedEventIds = if (isAllVisibleSelected) {
+                                    selectedEventIds - currentVisibleEventIds
+                                } else {
+                                    selectedEventIds + currentVisibleEventIds
+                                }
+                            },
+                            onDeleteSelected = {
+                                vibrationManager?.vibrateClick()
+                                showBatchDeleteConfirmation = true
+                            },
+                            onCloseSelection = {
+                                vibrationManager?.vibrateTick()
+                                isSelectionMode = false
+                                selectedEventIds = emptySet()
+                            }
+                        )
+                    } else {
+                        CalendarTopBar(
+                            selectedDate       = uiState.selectedDate,
+                            isAcademicMode     = uiState.isAcademicMode,
+                            isMonthView        = isMonthView,
+                            isTodaySelected    = isTodaySelected,
+                            onPrevious         = {
+                                vibrationManager?.vibrateTick()
+                                viewModel.previousMonth()
+                            },
+                            onNext             = {
+                                vibrationManager?.vibrateTick()
+                                viewModel.nextMonth()
+                            },
+                            onToday            = {
+                                vibrationManager?.vibrateClick()
+                                viewModel.goToToday()
+                            },
+                            onMonthPickerClick = { showMonthPicker = true },
+                            onToggleView       = {
+                                vibrationManager?.vibrateTick()
+                                isMonthView = !isMonthView
+                            },
+                            onSelectModeClick  = {
+                                vibrationManager?.vibrateTick()
+                                isSelectionMode = true
+                            },
+                            onSettingsClick    = {
+                                vibrationManager?.vibrateTick()
+                                showSettingsSheet = true
+                            },
+                            scrollBehavior     = scrollBehavior
+                        )
+                    }
                 }
             },
             floatingActionButton = {
-                if (!isSelectionMode) {
+                AnimatedVisibility(
+                    visible = !isSelectionMode,
+                    enter = scaleIn(spring(dampingRatio = Spring.DampingRatioLowBouncy)) + fadeIn(),
+                    exit = scaleOut(tween(160)) + fadeOut(tween(140))
+                ) {
                     CalendarFabMenu(
                         offlineMode   = uiState.offlineModeEnabled,
                         onAiClick     = { showAiSheet = true },
@@ -735,6 +754,8 @@ fun CalendarScreen(viewModel: CalendarViewModel = hiltViewModel()) {
         if (showBatchDeleteConfirmation) {
             AlertDialog(
                 onDismissRequest = { showBatchDeleteConfirmation = false },
+                shape = MediumExpressiveShape,
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                 icon = {
                     Icon(
                         Icons.Rounded.DeleteForever,
@@ -757,7 +778,7 @@ fun CalendarScreen(viewModel: CalendarViewModel = hiltViewModel()) {
                     )
                 },
                 confirmButton = {
-                    Button(
+                    ToolzExpressiveButton(
                         onClick = {
                             val count = selectedEventIds.size
                             viewModel.deleteSelectedEvents(selectedEventIds)
@@ -777,7 +798,7 @@ fun CalendarScreen(viewModel: CalendarViewModel = hiltViewModel()) {
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showBatchDeleteConfirmation = false }) {
+                    ToolzOutlinedExpressiveButton(onClick = { showBatchDeleteConfirmation = false }) {
                         Text("Cancel")
                     }
                 }
@@ -917,61 +938,39 @@ private fun CalendarTopBar(
             ) {
                 ExpressiveNavIconButton(icon = Icons.Rounded.ChevronRight, desc = stringResource(R.string.st_CalendarScreen_9e2c), onClick = onNext)
                 // View toggle
-                val toggleScale = remember { Animatable(1f) }
-                val toggleScope = rememberCoroutineScope()
-                Surface(
-                    onClick = {
-                        toggleScope.launch {
-                            toggleScale.animateTo(0.88f, spring(Spring.DampingRatioLowBouncy, Spring.StiffnessMedium))
-                            toggleScale.animateTo(1f, spring(Spring.DampingRatioLowBouncy))
-                        }
-                        onToggleView()
-                    },
-                    shape   = SmallExpressiveShape,
-                    color   = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    modifier = Modifier
-                        .size(36.dp)
-                        .graphicsLayer { scaleX = toggleScale.value; scaleY = toggleScale.value }
+                ToolzTonalExpressiveIconButton(
+                    onClick = onToggleView,
+                    modifier = Modifier.size(36.dp)
                 ) {
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                        Crossfade(targetState = isMonthView, label = "view_icon") { month ->
-                            Icon(
-                                if (month) Icons.Rounded.ViewAgenda else Icons.Rounded.CalendarMonth,
-                                stringResource(R.string.st_CalendarScreen_1a2b),
-                                modifier = Modifier.size(17.dp)
-                            )
-                        }
+                    Crossfade(targetState = isMonthView, label = "view_icon") { month ->
+                        Icon(
+                            if (month) Icons.Rounded.ViewAgenda else Icons.Rounded.CalendarMonth,
+                            stringResource(R.string.st_CalendarScreen_1a2b),
+                            modifier = Modifier.size(17.dp)
+                        )
                     }
                 }
                 // Select Mode button
-                Surface(
+                ToolzTonalExpressiveIconButton(
                     onClick = onSelectModeClick,
-                    shape   = SmallExpressiveShape,
-                    color   = MaterialTheme.colorScheme.surfaceContainerHigh,
                     modifier = Modifier.size(36.dp)
                 ) {
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                        Icon(
-                            Icons.Rounded.Checklist,
-                            contentDescription = "Select Mode",
-                            modifier = Modifier.size(17.dp)
-                        )
-                    }
+                    Icon(
+                        Icons.Rounded.Checklist,
+                        contentDescription = "Select Mode",
+                        modifier = Modifier.size(17.dp)
+                    )
                 }
                 // Settings button
-                Surface(
+                ToolzTonalExpressiveIconButton(
                     onClick = onSettingsClick,
-                    shape   = SmallExpressiveShape,
-                    color   = MaterialTheme.colorScheme.surfaceContainerHigh,
                     modifier = Modifier.size(36.dp)
                 ) {
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                        Icon(
-                            Icons.Rounded.Settings,
-                            contentDescription = "Calendar Settings",
-                            modifier = Modifier.size(17.dp)
-                        )
-                    }
+                    Icon(
+                        Icons.Rounded.Settings,
+                        contentDescription = "Calendar Settings",
+                        modifier = Modifier.size(17.dp)
+                    )
                 }
             }
         },
@@ -993,35 +992,70 @@ private fun CalendarSelectionTopBar(
     onDeleteSelected: () -> Unit,
     onCloseSelection: () -> Unit,
 ) {
-    TopAppBar(
+    ExpressiveTopAppBar(
         title = {
-            Text(
-                text = if (selectedCount == 0) "Select events" else "$selectedCount selected",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-            )
+            AnimatedContent(
+                targetState = selectedCount,
+                transitionSpec = {
+                    if (targetState > initialState) {
+                        (slideInVertically { it } + fadeIn()).togetherWith(slideOutVertically { -it } + fadeOut())
+                    } else {
+                        (slideInVertically { -it } + fadeIn()).togetherWith(slideOutVertically { it } + fadeOut())
+                    }
+                },
+                label = "selected_count_anim"
+            ) { count ->
+                Text(
+                    text = if (count == 0) "Select events" else "$count selected",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
         },
+        titleHorizontalAlignment = Alignment.Start,
         navigationIcon = {
-            IconButton(onClick = onCloseSelection) {
-                Icon(Icons.Rounded.Close, contentDescription = "Close selection")
+            Row(modifier = Modifier.padding(start = 8.dp)) {
+                ToolzTonalExpressiveIconButton(
+                    onClick = onCloseSelection,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(Icons.Rounded.Close, contentDescription = "Close selection", modifier = Modifier.size(18.dp))
+                }
             }
         },
         actions = {
-            IconButton(onClick = onSelectAll) {
-                Icon(
-                    imageVector = if (isAllSelected) Icons.Rounded.Deselect else Icons.Rounded.SelectAll,
-                    contentDescription = if (isAllSelected) "Deselect all" else "Select all"
-                )
-            }
-            IconButton(
-                onClick = onDeleteSelected,
-                enabled = selectedCount > 0
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(end = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Rounded.Delete,
-                    contentDescription = "Delete selected",
-                    tint = if (selectedCount > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-                )
+                ToolzTonalExpressiveIconButton(
+                    onClick = onSelectAll,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isAllSelected) Icons.Rounded.Deselect else Icons.Rounded.SelectAll,
+                        contentDescription = if (isAllSelected) "Deselect all" else "Select all",
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                ToolzExpressiveIconButton(
+                    onClick = onDeleteSelected,
+                    enabled = selectedCount > 0,
+                    modifier = Modifier.size(36.dp),
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                        disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
+                        disabledContentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Delete,
+                        contentDescription = "Delete selected",
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
             }
         },
         colors = TopAppBarDefaults.topAppBarColors(
@@ -1811,10 +1845,10 @@ private fun CompactEventItem(
         enableDismissFromEndToStart = !isSelectionMode
     ) {
         Surface(
-            color   = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+            color   = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.32f)
                       else MaterialTheme.colorScheme.surfaceContainer,
             shape   = SmallExpressiveShape,
-            border  = if (isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)) else null,
+            border  = if (isSelected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
             modifier = Modifier
                 .fillMaxWidth()
                 .combinedClickable(
@@ -1895,19 +1929,23 @@ private fun CompactEventItem(
                         }
                     }
                     if (isSelectionMode) {
-                        IconButton(
-                            onClick = {
-                                vibrationManager?.vibrateTick()
-                                onSelect()
-                            },
-                            modifier = Modifier.size(30.dp)
+                        val checkScale by animateFloatAsState(
+                            targetValue = if (isSelected) 1.15f else 1f,
+                            animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow),
+                            label = "compactCheckScale"
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .graphicsLayer { scaleX = checkScale; scaleY = checkScale },
+                            contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = if (isSelected) Icons.Rounded.CheckCircle else Icons.Rounded.RadioButtonUnchecked,
                                 contentDescription = if (isSelected) "Deselect ${event.title}" else "Select ${event.title}",
                                 tint = if (isSelected) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                modifier = Modifier.size(22.dp)
+                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
+                                modifier = Modifier.size(24.dp)
                             )
                         }
                     } else {
@@ -2266,10 +2304,10 @@ fun AgendaEventCard(
     Surface(
         // CAL-P2-04: agenda tap EDITS (accidental toggles had no undo); toggle via checkbox/menu.
         // Selection mode reroutes taps to selection and exposes a long-press entry point.
-        color    = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+        color    = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.32f)
         else MaterialTheme.colorScheme.surfaceContainerLow,
         shape    = SquircleShape,
-        border   = if (selected) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)) else null,
+        border   = if (selected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
         modifier = Modifier
             .fillMaxWidth()
             .combinedClickable(
@@ -2360,15 +2398,27 @@ fun AgendaEventCard(
                     }
                 }
                 // CAL-P2-04: explicit checkbox toggles (tap on card edits).
-                // Selection mode replaces it with a plain selection indicator.
+                // Selection mode replaces it with an animated selection indicator.
                 if (selectionMode) {
-                    Icon(
-                        imageVector = if (selected) Icons.Rounded.CheckCircle else Icons.Rounded.RadioButtonUnchecked,
-                        contentDescription = if (selected) "Deselect ${event.title}" else "Select ${event.title}",
-                        tint = if (selected) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                        modifier = Modifier.size(24.dp),
+                    val checkScale by animateFloatAsState(
+                        targetValue = if (selected) 1.15f else 1f,
+                        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow),
+                        label = "agendaCheckScale"
                     )
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .graphicsLayer { scaleX = checkScale; scaleY = checkScale },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (selected) Icons.Rounded.CheckCircle else Icons.Rounded.RadioButtonUnchecked,
+                            contentDescription = if (selected) "Deselect ${event.title}" else "Select ${event.title}",
+                            tint = if (selected) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
                 } else {
                     Checkbox(
                         checked = event.isCompleted,

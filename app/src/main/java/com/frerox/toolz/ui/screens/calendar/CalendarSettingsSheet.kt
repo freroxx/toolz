@@ -28,8 +28,13 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -51,6 +56,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -62,12 +68,17 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.frerox.toolz.data.calendar.CalDavSyncClient
 import com.frerox.toolz.data.calendar.UserCalendar
+import com.frerox.toolz.ui.components.ExpressiveFilterChip
+import com.frerox.toolz.ui.components.ExpressiveSwitch
 import com.frerox.toolz.ui.components.MediumExpressiveShape
 import com.frerox.toolz.ui.components.SmallExpressiveShape
+import com.frerox.toolz.ui.components.ToolzConnectedButtonGroup
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.components.ToolzExpressiveIconButton
 import com.frerox.toolz.ui.components.ToolzOutlinedExpressiveButton
+import com.frerox.toolz.ui.components.ToolzTonalExpressiveIconButton
 import com.frerox.toolz.ui.components.ToolzWavyCircularProgressIndicator
+import com.frerox.toolz.ui.components.ToolzWavyLinearProgressIndicator
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -192,18 +203,20 @@ fun CalendarSettingsSheet(
                         )
                     }
                 }
-                IconButton(onClick = onDismiss) {
-                    Icon(Icons.Rounded.Close, contentDescription = "Close")
+                ToolzTonalExpressiveIconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(Icons.Rounded.Close, contentDescription = "Close", modifier = Modifier.size(18.dp))
                 }
             }
 
             // Syncing bar indicator
             AnimatedVisibility(visible = uiState.isSyncing) {
-                LinearProgressIndicator(
+                ToolzWavyLinearProgressIndicator(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(bottom = 12.dp)
-                        .clip(CircleShape)
                 )
             }
 
@@ -440,11 +453,12 @@ fun CalendarSettingsSheet(
                                             shape = SmallExpressiveShape,
                                             colors = CardDefaults.cardColors(
                                                 containerColor = if (isSelected) {
-                                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.32f)
                                                 } else {
                                                     MaterialTheme.colorScheme.surfaceContainer
                                                 }
                                             ),
+                                            border = if (isSelected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .clickable { viewModel.togglePhoneCalendar(pCal.id) }
@@ -554,8 +568,8 @@ fun CalendarSettingsSheet(
                                             )
                                         }
 
-                                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                            IconButton(
+                                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            ToolzTonalExpressiveIconButton(
                                                 onClick = { viewModel.syncCalDavAccount(acc) },
                                                 modifier = Modifier.size(36.dp)
                                             ) {
@@ -566,14 +580,17 @@ fun CalendarSettingsSheet(
                                                     modifier = Modifier.size(18.dp)
                                                 )
                                             }
-                                            IconButton(
+                                            ToolzTonalExpressiveIconButton(
                                                 onClick = { viewModel.removeCalDavAccount(acc.id) },
-                                                modifier = Modifier.size(36.dp)
+                                                modifier = Modifier.size(36.dp),
+                                                colors = IconButtonDefaults.filledTonalIconButtonColors(
+                                                    containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f),
+                                                    contentColor = MaterialTheme.colorScheme.onErrorContainer
+                                                )
                                             ) {
                                                 Icon(
                                                     Icons.Rounded.Delete,
                                                     contentDescription = "Delete",
-                                                    tint = MaterialTheme.colorScheme.error,
                                                     modifier = Modifier.size(18.dp)
                                                 )
                                             }
@@ -640,7 +657,7 @@ fun CalendarSettingsSheet(
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
-                                    Switch(
+                                    ExpressiveSwitch(
                                         checked = uiState.autoSyncEnabled,
                                         onCheckedChange = { viewModel.setAutoSyncEnabled(it) }
                                     )
@@ -669,10 +686,10 @@ fun CalendarSettingsSheet(
                                     ) {
                                         intervals.forEach { (hrs, label) ->
                                             val isSelected = uiState.autoSyncIntervalHours == hrs
-                                            FilterChip(
+                                            ExpressiveFilterChip(
                                                 selected = isSelected,
                                                 onClick = { viewModel.setAutoSyncInterval(hrs) },
-                                                label = { Text(label) },
+                                                label = { Text(label, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium) },
                                                 leadingIcon = if (isSelected) {
                                                     { Icon(Icons.Rounded.Check, null, modifier = Modifier.size(16.dp)) }
                                                 } else null
@@ -800,31 +817,25 @@ fun CalendarSettingsSheet(
                                 modifier = Modifier.padding(14.dp),
                                 verticalArrangement = Arrangement.spacedBy(14.dp)
                             ) {
-                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Text(
                                         text = "First day of week",
                                         fontWeight = FontWeight.SemiBold,
                                         style = MaterialTheme.typography.bodyMedium
                                     )
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        val days = listOf(
-                                            Calendar.MONDAY to "Monday",
-                                            Calendar.SUNDAY to "Sunday",
-                                            Calendar.SATURDAY to "Saturday"
-                                        )
-                                        days.forEach { (dayInt, label) ->
-                                            val isSel = uiState.firstDayOfWeek == dayInt
-                                            FilterChip(
-                                                selected = isSel,
-                                                onClick = { viewModel.setFirstDayOfWeek(dayInt) },
-                                                label = { Text(label, fontSize = 12.sp) },
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                        }
-                                    }
+                                    val days = listOf(
+                                        Calendar.MONDAY,
+                                        Calendar.SUNDAY,
+                                        Calendar.SATURDAY
+                                    )
+                                    val dayLabels = listOf("Monday", "Sunday", "Saturday")
+                                    val selectedIndex = days.indexOf(uiState.firstDayOfWeek).coerceAtLeast(0)
+                                    ToolzConnectedButtonGroup(
+                                        selectedIndex = selectedIndex,
+                                        options = dayLabels,
+                                        onOptionSelected = { idx -> viewModel.setFirstDayOfWeek(days[idx]) },
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
                                 }
 
                                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
@@ -846,7 +857,7 @@ fun CalendarSettingsSheet(
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
-                                    Switch(
+                                    ExpressiveSwitch(
                                         checked = uiState.showWeekNumbers,
                                         onCheckedChange = { viewModel.setShowWeekNumbers(it) }
                                     )
@@ -862,6 +873,8 @@ fun CalendarSettingsSheet(
     if (showClearAllDialog) {
         AlertDialog(
             onDismissRequest = { showClearAllDialog = false },
+            shape = MediumExpressiveShape,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             icon = {
                 Icon(
                     Icons.Rounded.DeleteForever,
@@ -884,7 +897,7 @@ fun CalendarSettingsSheet(
                 )
             },
             confirmButton = {
-                Button(
+                ToolzExpressiveButton(
                     onClick = {
                         viewModel.clearAllEvents()
                         showClearAllDialog = false
@@ -898,7 +911,7 @@ fun CalendarSettingsSheet(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showClearAllDialog = false }) {
+                ToolzOutlinedExpressiveButton(onClick = { showClearAllDialog = false }) {
                     Text("Cancel")
                 }
             }
@@ -917,28 +930,37 @@ private fun SettingsSection(
     subtitle: String,
     content: @Composable () -> Unit
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Icon(
-                icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(20.dp)
-            )
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
-            )
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+            Column {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
-        Text(
-            text = subtitle,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
         Spacer(Modifier.height(2.dp))
         content()
     }
@@ -961,7 +983,7 @@ private fun CalendarRowItem(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(12.dp),
+                .padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
@@ -981,8 +1003,8 @@ private fun CalendarRowItem(
                 )
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                IconButton(
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                ToolzTonalExpressiveIconButton(
                     onClick = onExport,
                     modifier = Modifier.size(36.dp)
                 ) {
@@ -994,14 +1016,17 @@ private fun CalendarRowItem(
                     )
                 }
                 if (onDelete != null) {
-                    IconButton(
+                    ToolzTonalExpressiveIconButton(
                         onClick = onDelete,
-                        modifier = Modifier.size(36.dp)
+                        modifier = Modifier.size(36.dp),
+                        colors = IconButtonDefaults.filledTonalIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f),
+                            contentColor = MaterialTheme.colorScheme.onErrorContainer
+                        )
                     ) {
                         Icon(
                             Icons.Rounded.Delete,
                             contentDescription = "Delete",
-                            tint = MaterialTheme.colorScheme.error,
                             modifier = Modifier.size(18.dp)
                         )
                     }
@@ -1024,7 +1049,9 @@ private fun CreateCalendarCard(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
         ),
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize(spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow))
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             if (!expanded) {
@@ -1081,13 +1108,19 @@ private fun CreateCalendarCard(
                         EventColorPalette.forEach { hex ->
                             val color = Color(android.graphics.Color.parseColor(hex))
                             val isSelected = selectedColor == hex
+                            val dotScale by animateFloatAsState(
+                                targetValue = if (isSelected) 1.15f else 1f,
+                                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow),
+                                label = "calColorScale"
+                            )
                             Box(
                                 modifier = Modifier
                                     .size(32.dp)
+                                    .graphicsLayer { scaleX = dotScale; scaleY = dotScale }
                                     .clip(CircleShape)
                                     .background(color)
                                     .border(
-                                        width = if (isSelected) 3.dp else 1.dp,
+                                        width = if (isSelected) 2.5.dp else 1.dp,
                                         color = if (isSelected) MaterialTheme.colorScheme.onSurface else Color.Transparent,
                                         shape = CircleShape
                                     )
@@ -1108,9 +1141,10 @@ private fun CreateCalendarCard(
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        TextButton(onClick = { expanded = false }) {
+                        ToolzOutlinedExpressiveButton(onClick = { expanded = false }) {
                             Text("Cancel")
                         }
                         Spacer(Modifier.width(8.dp))
@@ -1152,7 +1186,9 @@ private fun AddCalDavCard(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
         ),
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize(spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow))
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             if (!expanded) {
@@ -1234,11 +1270,30 @@ private fun AddCalDavCard(
                     )
 
                     testResult?.let { msg ->
-                        Text(
-                            text = msg,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (msg.startsWith("Connected")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-                        )
+                        val isSuccess = msg.startsWith("Connected")
+                        Surface(
+                            color = if (isSuccess) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer,
+                            shape = SmallExpressiveShape,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isSuccess) Icons.Rounded.CheckCircle else Icons.Rounded.ErrorOutline,
+                                    contentDescription = null,
+                                    tint = if (isSuccess) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onErrorContainer,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = msg,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (isSuccess) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onErrorContainer
+                                )
+                            }
+                        }
                     }
 
                     Row(
@@ -1246,7 +1301,7 @@ private fun AddCalDavCard(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        TextButton(
+                        ToolzOutlinedExpressiveButton(
                             onClick = {
                                 if (url.isNotBlank() && username.isNotBlank()) {
                                     isTesting = true
@@ -1259,14 +1314,16 @@ private fun AddCalDavCard(
                             },
                             enabled = url.isNotBlank() && username.isNotBlank() && !isTesting
                         ) {
-                            Text("Test Connection")
+                            Text(if (isTesting) "Connecting..." else "Test Connection")
                         }
 
-                        Row {
-                            TextButton(onClick = { expanded = false }) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            ToolzOutlinedExpressiveButton(onClick = { expanded = false }) {
                                 Text("Cancel")
                             }
-                            Spacer(Modifier.width(8.dp))
                             ToolzExpressiveButton(
                                 onClick = {
                                     if (url.isNotBlank() && username.isNotBlank()) {
