@@ -26,6 +26,7 @@ import com.frerox.toolz.data.whisper.fetchGroupReceipts
 import com.frerox.toolz.data.whisper.friendNameMap
 import com.frerox.toolz.data.whisper.flushGroupOutbox
 import com.frerox.toolz.data.whisper.groupsEnabled
+import com.frerox.toolz.data.whisper.mapGroupError
 import com.frerox.toolz.data.whisper.markGroupSeen
 import com.frerox.toolz.data.whisper.observeGroupLog
 import com.frerox.toolz.data.whisper.observeGroupMessageDeletes
@@ -132,6 +133,13 @@ class WhisperGroupChatViewModel @Inject constructor(
         /** Optimistic outgoing text rows (shown until the real row lands). */
         val pending: List<PendingMessage> = emptyList(),
         val error: String? = null,
+        /**
+         * Set when the server says this group no longer exists or I was
+         * removed. Both cases are unrecoverable from this screen (RLS hides
+         * the row first, so the read fails as "Group not found."), so the
+         * screen exits instead of leaving the user on a dead timeline.
+         */
+        val removed: Boolean = false,
     )
 
     /** A text message that is sending (or failed) and not in the log yet. */
@@ -402,9 +410,19 @@ class WhisperGroupChatViewModel @Inject constructor(
             }
         }.onFailure { e ->
             _uiState.update {
-                it.copy(isLoading = false, isSending = false, isUploadingImage = false, error = err(e))
+                it.copy(
+                    isLoading = false, isSending = false, isUploadingImage = false,
+                    error = err(e), removed = isGoneError(e),
+                )
             }
         }
+    }
+
+    /** True when the group is gone (I was removed, or it was disbanded). */
+    private fun isGoneError(e: Throwable?): Boolean {
+        val res = mapGroupError(e?.message)
+        return res == R.string.st_Whisper_Groups_ErrNotMember ||
+            res == R.string.st_Whisper_Groups_ErrGone
     }
 
     /**

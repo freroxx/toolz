@@ -91,12 +91,27 @@ fun WhisperGroupChatScreen(
     // while telling the group otherwise.
     LifecycleEventEffect(Lifecycle.Event.ON_START) { viewModel.onChatVisibilityChanged(true) }
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) { viewModel.onChatVisibilityChanged(false) }
+
     var draft by rememberSaveable(viewModel.groupId) { mutableStateOf("") }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val haptic = rememberToolzHapticFeedback()
     val snackbar = remember { SnackbarHostState() }
+
+    // Removed from the group / group disbanded while this chat was open: the
+    // server hides the row from every read, so the timeline can never recover.
+    // Say why once, then leave instead of showing a dead chat that keeps
+    // erroring on every send.
+    LaunchedEffect(state.removed) {
+        if (state.removed) {
+            // Let the sentence be read before the surface disappears; the hub
+            // (whose row is already gone) is the honest destination.
+            snackbar.showGroupNotice(context.getString(R.string.st_Whisper_Groups_ErrGone))
+            delay(1_200)
+            onNavigateBack()
+        }
+    }
 
     var searching by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }

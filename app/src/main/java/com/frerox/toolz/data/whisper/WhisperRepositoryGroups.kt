@@ -1588,6 +1588,10 @@ fun mapGroupError(raw: String?): Int? {
             com.frerox.toolz.R.string.st_Whisper_Groups_ErrNoInvite
         "no longer a member" in msg || "not a member" in msg || "not_member" in msg ->
             com.frerox.toolz.R.string.st_Whisper_Groups_ErrNotMember
+        // After a removal the group row itself is RLS-invisible, so every read
+        // fails with "Group not found." before membership is ever checked.
+        "group not found" in msg ->
+            com.frerox.toolz.R.string.st_Whisper_Groups_ErrGone
         "could not reach" in msg ->
             com.frerox.toolz.R.string.st_Whisper_Groups_ErrUnreachable
         "signing key is not published" in msg ->

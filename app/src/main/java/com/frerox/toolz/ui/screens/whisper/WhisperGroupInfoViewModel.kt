@@ -184,9 +184,23 @@ class WhisperGroupInfoViewModel @Inject constructor(
                 loadPicture(m)
                 loadRequests()
             }.onFailure { e ->
-                _uiState.update { it.copy(isLoading = false, isWorking = false, error = err(e)) }
+                _uiState.update {
+                    it.copy(
+                        isLoading = false, isWorking = false, error = err(e),
+                        // Gone = removed or disbanded: the whole surface is
+                        // dead, so reuse the existing `left` exit path.
+                        left = isGoneError(e),
+                    )
+                }
             }
         }
+    }
+
+    /** True when the group is gone (I was removed, or it was disbanded). */
+    private fun isGoneError(e: Throwable?): Boolean {
+        val res = com.frerox.toolz.data.whisper.mapGroupError(e?.message)
+        return res == R.string.st_Whisper_Groups_ErrNotMember ||
+            res == R.string.st_Whisper_Groups_ErrGone
     }
 
     /**

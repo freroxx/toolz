@@ -483,6 +483,8 @@ class WhisperGroupsTest {
         assertNotNull(mapGroupError("That image is too large to send."))
         assertNotNull(mapGroupError("Could not read that image."))
         assertNotNull(mapGroupError("Could not process this image."))
+        // RLS hides a removed/disbanded group before membership is checked.
+        assertNotNull(mapGroupError("Group not found."))
     }
 
     @Test
