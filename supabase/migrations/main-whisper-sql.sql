@@ -2225,6 +2225,12 @@ create table if not exists public.whisper_group_members (
     primary key (group_id, user_id)
 );
 
+-- The PK leads with group_id, so a per-user lookup (syncGroups, and the
+-- self-readable policy below) would scan the whole membership table as it
+-- grows. Index the user side explicitly.
+create index if not exists whisper_group_members_user_idx
+    on public.whisper_group_members (user_id);
+
 alter table public.whisper_groups enable row level security;
 alter table public.whisper_group_members enable row level security;
 

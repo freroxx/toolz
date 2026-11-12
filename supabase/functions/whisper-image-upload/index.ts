@@ -349,6 +349,17 @@ serve(async (request) => {
     return json({ error: "Encrypted image upload failed" }, 502);
   }
 
+  // A success response without a usable URL (or without the delete capability)
+  // must not be reported as an upload: the client would store an attachment it
+  // can never open or delete, and the quota slot would be spent for nothing.
+  const uploadedUrl = typeof result?.data?.url === "string" ? result.data.url : "";
+  const deleteUrl = typeof result?.data?.delete_url === "string" ? result.data.delete_url : "";
+  if (!uploadedUrl || !deleteUrl) {
+    console.error("ImgBB upload returned an incomplete payload", upstream.status);
+    await refundQuota(supabaseUrl, serviceRoleKey, userId, today);
+    return json({ error: "Encrypted image upload failed" }, 502);
+  }
+
   // V2-FIX (reviewwhisper.md): record ownership so whisper-image-delete can authorize
   // deletions object-level (the delete capability alone was a bearer token anyone could
   // replay). Best-effort: a bookkeeping failure must never fail a completed upload.
@@ -364,8 +375,8 @@ serve(async (request) => {
       body: JSON.stringify({
         user_id: userId,
         image_id: result.data.id ?? null,
-        delete_url: result.data.delete_url,
-        url: result.data.url,
+        delete_url: deleteUrl,
+        url: uploadedUrl,
       }),
     });
     if (!ownershipRes.ok) console.error("whisper_image_ownership insert failed", ownershipRes.status);
@@ -374,9 +385,9 @@ serve(async (request) => {
   }
 
   return json({
-    url: result.data.url,
+    url: uploadedUrl,
     // This capability URL is encrypted inside the Whisper attachment envelope.
-    id: result.data.delete_url
+    id: deleteUrl
   }, 200);
 });
 
