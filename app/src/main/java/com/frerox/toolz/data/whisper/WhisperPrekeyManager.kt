@@ -87,7 +87,7 @@ class WhisperPrekeyManager @Inject constructor(
         lastPublishedAtMs = 0L
         lastPublishOk = null
         lastPublishAttemptAtMs = 0L
-        synchronized(opkOrder) { opkOrder = emptyList() }
+        synchronized(opkLock) { opkOrder = emptyList() }
         prefs.edit().clear().apply()
     }
 
@@ -102,11 +102,20 @@ class WhisperPrekeyManager @Inject constructor(
     /** Insertion order of persisted OPK kids so the local pool stays bounded. */
     @Volatile private var opkOrder: List<String> = emptyList()
 
+    /**
+     * Locks every opkOrder read-modify-write. It must be a STABLE object:
+     * `synchronized(opkOrder)` locked whichever list instance happened to be
+     * current, and the assignment inside the block swaps that instance, so two
+     * concurrent generators could enter the critical section together and lose
+     * an eviction (or persist an order that no longer matches the prefs).
+     */
+    private val opkLock = Any()
+
     private fun persistPrivate(kid: String, kind: String, wrapped: String) {
         privateKeysWrapped[kid] = wrapped
         prefs.edit().putString(KEY_PRIV_PREFIX + kid, wrapped).apply()
         if (kind == "OPK") {
-            synchronized(opkOrder) {
+            synchronized(opkLock) {
                 opkOrder = opkOrder + kid
                 while (opkOrder.size > OPK_PERSIST_CAP) {
                     val oldest = opkOrder.first()
@@ -149,7 +158,10 @@ class WhisperPrekeyManager @Inject constructor(
         if (currentSpkKid == null) {
             currentSpkKid = prefs.getString(KEY_CURRENT_SPK, null)
             lastPublishedAtMs = prefs.getLong(KEY_SPK_PUBLISHED_AT, 0L)
-            opkOrder = prefs.getString(KEY_OPK_ORDER, null)?.split(',')?.filter { it.isNotBlank() }.orEmpty()
+            synchronized(opkLock) {
+                opkOrder = prefs.getString(KEY_OPK_ORDER, null)
+                    ?.split(',')?.filter { it.isNotBlank() }.orEmpty()
+            }
         }
 
         // -- 1. Identity binding + rotation certificate -------------------
