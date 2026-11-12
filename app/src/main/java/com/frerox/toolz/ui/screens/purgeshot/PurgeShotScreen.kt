@@ -68,6 +68,8 @@ fun PurgeShotScreen(
     val smartAuto by viewModel.smartAuto.collectAsStateWithLifecycle()
     val autoDuration by viewModel.autoDurationMs.collectAsStateWithLifecycle()
     val notificationsEnabled by viewModel.notificationsEnabled.collectAsStateWithLifecycle()
+    val strictMode by viewModel.strictMode.collectAsStateWithLifecycle()
+    val reconciledMissing by viewModel.reconciledMissing.collectAsStateWithLifecycle()
     val presets by viewModel.activePresets.collectAsStateWithLifecycle()
     val pending by viewModel.pendingQueue.collectAsStateWithLifecycle()
     val totalDeleted by viewModel.totalDeleted.collectAsStateWithLifecycle()
@@ -86,6 +88,16 @@ fun PurgeShotScreen(
     var showClearConfirm by remember { mutableStateOf(false) }
     var showPermissionsSheet by remember { mutableStateOf(false) }
     val snackbarHost = remember { SnackbarHostState() }
+
+    LaunchedEffect(reconciledMissing) {
+        if (reconciledMissing > 0) {
+            snackbarHost.showSnackbar(
+                message = context.getString(R.string.st_PurgeShot_AlreadyGone, reconciledMissing),
+                duration = SnackbarDuration.Short,
+            )
+            viewModel.acknowledgeReconciledMissing()
+        }
+    }
 
     LaunchedEffect(undoItem) {
         undoItem?.let {
@@ -138,6 +150,9 @@ fun PurgeShotScreen(
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
                 refreshAllStates()
+                // Catch screenshots the user deleted in their gallery while
+                // the queue was counting down.
+                viewModel.reconcileNow()
                 viewModel.refreshShizukuStatus {
                     refreshAllStates()
                 }
@@ -333,6 +348,13 @@ fun PurgeShotScreen(
                                     durationMillis = autoDuration,
                                     durationLabel = durationLabel(autoDuration),
                                     onClick = { showAutoPicker = true }
+                                )
+                                ToggleRow(
+                                    title = stringResource(R.string.st_PurgeShot_StrictMode_Toggle),
+                                    subtitle = stringResource(R.string.st_PurgeShot_StrictMode_Toggle_Desc),
+                                    icon = Icons.Rounded.Lock,
+                                    checked = strictMode,
+                                    onCheckedChange = { viewModel.setStrictMode(it) }
                                 )
                                 ToggleRow(
                                     title = stringResource(R.string.st_PurgeShot_Notifications),

@@ -62,28 +62,24 @@ class PurgeShotDeletionWorker @AssistedInject constructor(
                 }
                 val ok = repository.deleteFile(entity)
                 if (ok) {
-                    purgeDao.updateStatus(id, PurgeShotEntity.STATUS_DELETED)
+                    repository.markTerminal(id, PurgeShotEntity.STATUS_DELETED)
                     Log.i(TAG, "Deleted screenshot id=$id uri=${entity.fileUriString}")
                     Result.success()
                 } else {
-                    // Check if file gone via external query
-                    val stillExists = try {
-                        val resolver = applicationContext.contentResolver
-                        val uri = android.net.Uri.parse(entity.fileUriString)
-                        resolver.query(uri, arrayOf(android.provider.MediaStore.MediaColumns._ID), null, null, null)?.use { it.moveToFirst() } ?: false
-                    } catch (_: Exception) { false }
+                    // Check if the file is gone (deleted by the user or another app).
+                    val stillExists = repository.isFilePresent(entity)
                     if (!stillExists) {
-                        purgeDao.updateStatus(id, PurgeShotEntity.STATUS_EXPIRED)
+                        repository.markTerminal(id, PurgeShotEntity.STATUS_EXPIRED, "file missing")
                         Log.i(TAG, "File already gone, marking expired id=$id")
                         Result.success()
                     } else {
-                        purgeDao.incrementAttempts(id, "delete failed")
                         val attempts = entity.attempts + 1
                         if (attempts >= 5) {
-                            purgeDao.updateStatus(id, PurgeShotEntity.STATUS_FAILED)
+                            repository.markTerminal(id, PurgeShotEntity.STATUS_FAILED, "delete failed")
                             Log.w(TAG, "Failed 5 times, marking FAILED id=$id")
                             Result.failure()
                         } else {
+                            purgeDao.incrementAttempts(id, "delete failed")
                             Log.w(TAG, "Delete failed attempt $attempts id=$id, retry")
                             Result.retry()
                         }

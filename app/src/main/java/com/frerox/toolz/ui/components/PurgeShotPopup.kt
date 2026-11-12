@@ -69,31 +69,64 @@ fun PurgeShotPopup(
     onKeepForever: () -> Unit = onDismiss,
     onOpenSettings: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
-    screenshotUris: List<Uri> = listOfNotNull(screenshotUri)
+    screenshotUris: List<Uri> = listOfNotNull(screenshotUri),
+    /** Strict mode locks the prompt until the user picks an action. */
+    strictMode: Boolean = true,
+    /** Bumped by the host activity when a back press is blocked. */
+    strictBlockPulse: Int = 0,
 ) {
     val haptic = rememberToolzHapticFeedback()
     val isMultiple = screenshotUris.size > 1
     var dragOffsetY by remember { mutableFloatStateOf(0f) }
+    var showBlockedHint by remember { mutableStateOf(false) }
+    val shakeOffset = remember { Animatable(0f) }
+    val scrimInteraction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
     val popupDescription = stringResource(R.string.st_PurgeShot_Popup_Desc)
     val keepForeverDescription = stringResource(R.string.st_PurgeShot_KeepForever_Desc)
     val autoTimeDescription = stringResource(R.string.st_PurgeShot_AutoTime_Desc)
     val deleteNowDescription = stringResource(R.string.st_PurgeShot_DeleteImmediately_Desc)
+    val strictModeDescription = stringResource(R.string.st_PurgeShot_StrictMode_Desc)
+
+    // Feedback when strict mode blocks a back gesture.
+    LaunchedEffect(strictBlockPulse) {
+        if (strictBlockPulse > 0 && strictMode) {
+            haptic.tick()
+            showBlockedHint = true
+            repeat(2) {
+                shakeOffset.animateTo(1f, tween(55))
+                shakeOffset.animateTo(-1f, tween(55))
+            }
+            shakeOffset.animateTo(0f, tween(55))
+            kotlinx.coroutines.delay(2_200)
+            showBlockedHint = false
+        }
+    }
 
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black.copy(alpha = 0.52f))
+            // Consume taps on the scrim. When strict mode is off the scrim is
+            // an explicit "tap outside to keep" action; when it is on the tap
+            // does nothing, so the screen is locked until a choice is made.
+            .clickable(
+                interactionSource = scrimInteraction,
+                indication = null,
+            ) { if (!strictMode) onDismiss() }
             .semantics { contentDescription = popupDescription },
         contentAlignment = Alignment.Center
     ) {
         // Card with vertical drag gesture to dismiss
         Box(
             modifier = Modifier
-                .offset(y = dragOffsetY.dp)
+                .offset(x = shakeOffset.value.dp, y = dragOffsetY.dp)
                 .graphicsLayer {
                     alpha = (1f - (kotlin.math.abs(dragOffsetY) / 520f)).coerceIn(0.6f, 1f)
                 }
-                .pointerInput(Unit) {
+                .pointerInput(strictMode) {
+                    // Swipe-to-dismiss is an implicit action; strict mode keeps
+                    // the prompt until the user taps a real button.
+                    if (strictMode) return@pointerInput
                     detectVerticalDragGestures(
                         onDragEnd = {
                             if (kotlin.math.abs(dragOffsetY) > 120) {
@@ -176,6 +209,71 @@ fun PurgeShotPopup(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                                         maxLines = 1,
                                         fontSize = 11.sp
+                                    )
+                                }
+                            }
+                        }
+
+                        if (strictMode) {
+                            Spacer(Modifier.height(10.dp))
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .semantics { contentDescription = strictModeDescription }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(7.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.Lock,
+                                        null,
+                                        modifier = Modifier.size(13.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        stringResource(R.string.st_PurgeShot_StrictMode),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Black,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        maxLines = 1
+                                    )
+                                    Text(
+                                        stringResource(R.string.st_PurgeShot_StrictMode_Desc),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+
+                        AnimatedVisibility(visible = showBlockedHint) {
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = MaterialTheme.colorScheme.errorContainer,
+                                modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(7.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.Lock,
+                                        null,
+                                        modifier = Modifier.size(14.dp),
+                                        tint = MaterialTheme.colorScheme.onErrorContainer
+                                    )
+                                    Text(
+                                        stringResource(R.string.st_PurgeShot_StrictMode_Blocked),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onErrorContainer
                                     )
                                 }
                             }

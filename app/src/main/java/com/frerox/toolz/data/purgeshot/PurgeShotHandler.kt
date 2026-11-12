@@ -51,7 +51,17 @@ object PurgeShotHandler {
      */
     private const val PROMPT_FALLBACK_DELAY_MS = 900L
 
+    /**
+     * Grace period before strict mode re-surfaces a prompt that was left
+     * without a decision. Long enough to absorb a rotation / quick system
+     * dialog, short enough that leaving the popup feels locked.
+     */
+    private const val STRICT_RESHOW_DELAY_MS = 1_200L
+
     private val fallbackScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** Invalidates in-flight strict re-shows when a decision is made. */
+    private val strictReshowGeneration = java.util.concurrent.atomic.AtomicInteger(0)
 
     /**
      * Serializes the persisted pending-prompt list. Detection can run from the
@@ -229,6 +239,8 @@ object PurgeShotHandler {
         candidates: List<PopupCandidate>,
     ) {
         if (candidates.isEmpty()) return
+        // Any pending strict-mode re-show is now obsolete: the user chose.
+        cancelStrictReshow()
         markAllHandled(candidates.map { it.uri.toString() })
         candidates.forEach { it.filePath?.let(::markUriHandled) }
         pendingMutex.withLock {
@@ -259,6 +271,46 @@ object PurgeShotHandler {
     }
 
     /**
+     * Strict mode: the user left the popup (home, recents, outside click on a
+     * desktop-style window) without picking a timer. Re-present the prompt
+     * after a short grace period, but only if the pending queue is still
+     * unresolved and no popup is already visible.
+     */
+    fun scheduleStrictReshow(
+        context: Context,
+        settingsRepository: SettingsRepository,
+        reason: String = "popup left",
+    ) {
+        val appContext = context.applicationContext
+        val generation = strictReshowGeneration.incrementAndGet()
+        fallbackScope.launch {
+            delay(STRICT_RESHOW_DELAY_MS)
+            if (generation != strictReshowGeneration.get()) return@launch
+            val strict = runCatching { settingsRepository.purgeShotStrictMode.first() }.getOrDefault(true)
+            if (!strict) return@launch
+            if (_isPopupActive.value) return@launch
+            val pending = pendingMutex.withLock { readPendingLocked(settingsRepository) }
+            if (pending.isEmpty()) return@launch
+            Log.i(TAG, "Strict mode re-showing prompt ($reason, ${pending.size} pending)")
+            pending.forEach(::addCandidateDirectly)
+            val latest = pending.last()
+            if (launchPopup(appContext, latest)) {
+                schedulePromptFallback(appContext, settingsRepository)
+            } else {
+                // Background activity starts are commonly blocked; the
+                // high-priority notification (full-screen intent where allowed)
+                // is the reliable way back to the prompt.
+                showPromptNotification(appContext, settingsRepository, pending)
+            }
+        }
+    }
+
+    /** Cancels an in-flight strict re-show (the user made a choice). */
+    fun cancelStrictReshow() {
+        strictReshowGeneration.incrementAndGet()
+    }
+
+    /**
      * Re-arms pending prompts after a process restart / service restart. Safe
      * to call repeatedly: the in-memory batch and notification are idempotent.
      */
@@ -283,9 +335,45 @@ object PurgeShotHandler {
             cancelPromptNotification(context)
             return
         }
-        pending.forEach(::addCandidateDirectly)
+        // A screenshot may have been deleted from the gallery while the prompt
+        // was pending. Never surface a prompt for a file that no longer exists.
+        val (missing, alive) = pending.partition { !candidateExists(context, it) }
+        if (missing.isNotEmpty()) {
+            Log.i(TAG, "Dropping ${missing.size} pending prompt(s): file gone")
+            resolvePending(settingsRepository, missing)
+        }
+        if (alive.isEmpty()) {
+            cancelPromptNotification(context)
+            return
+        }
+        alive.forEach(::addCandidateDirectly)
         if (!_isPopupActive.value) {
-            showPromptNotification(context, settingsRepository, pending)
+            showPromptNotification(context, settingsRepository, alive)
+        }
+    }
+
+    /** Conservative existence check: unknown/permission failures count as present. */
+    private fun candidateExists(context: Context, candidate: PopupCandidate): Boolean {
+        candidate.filePath?.let { path ->
+            if (runCatching { java.io.File(path).exists() }.getOrDefault(false)) return true
+        }
+        if (candidate.uri.scheme == "file") {
+            return runCatching {
+                candidate.uri.path?.let { java.io.File(it).exists() } == true
+            }.getOrDefault(false)
+        }
+        return try {
+            context.contentResolver.query(
+                candidate.uri,
+                arrayOf(MediaStore.MediaColumns._ID),
+                null,
+                null,
+                null,
+            )?.use { it.moveToFirst() } ?: false
+        } catch (_: SecurityException) {
+            true
+        } catch (_: Exception) {
+            true
         }
     }
 

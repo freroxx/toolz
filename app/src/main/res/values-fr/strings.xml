@@ -3520,6 +3520,12 @@ La plupart des optimisations nécessitent Shizuku pour un accès shell privilég
     <string name="st_PurgeShot_EnablePurgeShot_Desc">Détecter les captures et proposer des minuteries</string>
     <string name="st_PurgeShot_SmartAuto">Auto intelligent</string>
     <string name="st_PurgeShot_SmartAuto_Desc">Suppression auto après %1$s sans popup</string>
+    <string name="st_PurgeShot_StrictMode_Toggle">Mode strict</string>
+    <string name="st_PurgeShot_StrictMode_Toggle_Desc">Verrouille le popup jusqu\'à ton choix — retour et clics extérieurs ne le ferment pas</string>
+    <string name="st_PurgeShot_StrictMode">Mode strict</string>
+    <string name="st_PurgeShot_StrictMode_Desc">choisis une option pour fermer</string>
+    <string name="st_PurgeShot_StrictMode_Blocked">Choisis un minuteur, Garder ou Supprimer pour continuer</string>
+    <string name="st_PurgeShot_AlreadyGone">%1$d capture(s) déjà supprimée(s) hors de Toolz</string>
     <string name="st_PurgeShot_Notifications">Notifications</string>
     <string name="st_PurgeShot_Notifications_Enabled">Afficher une notification lors de la programmation</string>
     <string name="st_PurgeShot_Notifications_Disabled">Silencieux (sans notifications)</string>
@@ -4369,6 +4375,7 @@ La plupart des optimisations nécessitent Shizuku pour un accès shell privilég
     <string name="st_Whisper_Groups_ImgFailed">Impossible de charger cette photo.</string>
     <string name="st_Whisper_Groups_ImgPickTooLarge">Cette photo est trop grande pour être envoyée — choisissez-en une plus petite.</string>
     <string name="st_Whisper_Groups_ImgPickFailed">Impossible de lire cette photo — choisissez-en une autre.</string>
+    <string name="st_Whisper_Groups_ErrGone">Ce groupe n\'est plus disponible.</string>
     <string name="st_Whisper_Groups_Info">Infos du groupe</string>
     <string name="st_Whisper_Groups_InvalidId">Cet identifiant de groupe semble invalide.</string>
     <string name="st_Whisper_Groups_InviteAdmins">Administrateurs uniquement</string>

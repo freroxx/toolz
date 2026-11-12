@@ -51,7 +51,7 @@ class PurgeShotService : Service() {
         private const val NOTIF_ID = 4100
         const val CHANNEL_ID = "purgeshot_channel"
         const val ALERTS_CHANNEL_ID = "purgeshot_alerts_v3"
-        private const val OBSERVER_DEBOUNCE_MS = 800L
+        private const val OBSERVER_DEBOUNCE_MS = 500L
     }
 
     /**

@@ -8,7 +8,9 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import androidx.activity.ComponentActivity
+import androidx.activity.addCallback
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -20,6 +22,7 @@ import androidx.core.view.WindowCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.flow.collect
 import com.frerox.toolz.MainActivity
 import com.frerox.toolz.R
 import com.frerox.toolz.data.purgeshot.PopupCandidate
@@ -56,8 +59,34 @@ class PurgeShotPopupActivity : ComponentActivity() {
     /** True once pending prompts have been read from disk (or after a failed read). */
     private val promptsLoaded = androidx.compose.runtime.mutableStateOf(false)
 
+    /** Mirrors the DataStore setting so back-press handling can read it synchronously. */
+    @Volatile private var strictModeEnabled = true
+
+    /** True once a button was pressed; prevents strict-mode re-show/cleanup races. */
+    @Volatile private var decisionMade = false
+
+    /** Incremented when strict mode blocks a back gesture; drives the inline hint. */
+    private val strictBlockPulse = androidx.compose.runtime.mutableIntStateOf(0)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Defaults to strict (on) and updates as soon as DataStore emits.
+        lifecycleScope.launch {
+            runCatching {
+                settingsRepository.purgeShotStrictMode.collect { strictModeEnabled = it }
+            }
+        }
+
+        // Back is only a dismissal when strict mode is off. With strict mode on
+        // the prompt stays until the user makes an explicit choice.
+        onBackPressedDispatcher.addCallback(this) {
+            if (strictModeEnabled) {
+                strictBlockPulse.intValue++
+            } else {
+                resolveAndFinish(currentItems(PurgeShotHandler.activeBatchFlow.value))
+            }
+        }
 
         PurgeShotHandler.setPopupActive(true)
         // The notification has done its job: the popup is now on screen.
@@ -79,6 +108,10 @@ class PurgeShotPopupActivity : ComponentActivity() {
         window.statusBarColor = android.graphics.Color.TRANSPARENT
         window.navigationBarColor = android.graphics.Color.TRANSPARENT
         window.setBackgroundDrawableResource(android.R.color.transparent)
+        // Never let a stray outside tap close the prompt at the window level.
+        // Outside taps are handled explicitly in Compose and are ignored while
+        // strict mode is enabled.
+        setFinishOnTouchOutside(false)
 
         seedFromIntent(intent)
 
@@ -101,6 +134,8 @@ class PurgeShotPopupActivity : ComponentActivity() {
                 val presets: List<PurgeShotPreset> by viewModel.activePresets.collectAsStateWithLifecycle(initialValue = PurgeShotPreset.defaults())
                 val autoDuration: Long by viewModel.autoDurationMs.collectAsStateWithLifecycle(initialValue = 15 * 60_000L)
                 val activeBatch: List<PopupCandidate> by PurgeShotHandler.activeBatchFlow.collectAsStateWithLifecycle()
+                val strictMode: Boolean by settingsRepository.purgeShotStrictMode
+                    .collectAsStateWithLifecycle(initialValue = true)
 
                 if (!promptsLoaded.value && activeBatch.isEmpty()) {
                     // Brief gate while the persisted prompt queue loads. Avoids
@@ -130,7 +165,10 @@ class PurgeShotPopupActivity : ComponentActivity() {
                     autoDurationMillis = autoDuration,
                     fileSizeLabel = sizeLabel,
                     screenshotUris = uris,
+                    strictMode = strictMode,
+                    strictBlockPulse = strictBlockPulse.intValue,
                     onSelectDuration = { preset ->
+                        decisionMade = true
                         val items = currentItems(activeBatch)
                         viewModel.enqueueMultiple(
                             items.map { it.uri.toString() },
@@ -142,6 +180,7 @@ class PurgeShotPopupActivity : ComponentActivity() {
                         resolveAndFinish(items)
                     },
                     onDeleteNow = {
+                        decisionMade = true
                         val items = currentItems(activeBatch)
                         viewModel.deleteMultiple(
                             items.map { it.uri.toString() },
@@ -152,12 +191,16 @@ class PurgeShotPopupActivity : ComponentActivity() {
                     onDismiss = {
                         // Dismiss intentionally keeps the file. Remember the
                         // decision so the same screenshot never prompts again.
+                        decisionMade = true
                         resolveAndFinish(currentItems(activeBatch))
                     },
                     onKeepForever = {
+                        decisionMade = true
                         resolveAndFinish(currentItems(activeBatch))
                     },
                     onOpenSettings = {
+                        decisionMade = true
+                        PurgeShotHandler.cancelStrictReshow()
                         val items = currentItems(activeBatch)
                         PurgeShotHandler.resolvePendingAsync(settingsRepository, items)
                         PurgeShotHandler.clearActiveBatch()
@@ -208,6 +251,9 @@ class PurgeShotPopupActivity : ComponentActivity() {
      * cancel the DataStore write and resurrect the prompt later.
      */
     private fun resolveAndFinish(items: List<PopupCandidate>) {
+        decisionMade = true
+        PurgeShotHandler.cancelStrictReshow()
+        PurgeShotHandler.setPopupActive(false)
         PurgeShotHandler.resolvePendingAsync(settingsRepository, items)
         PurgeShotHandler.clearActiveBatch()
         finish()
@@ -216,6 +262,7 @@ class PurgeShotPopupActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        decisionMade = false
         PurgeShotHandler.setPopupActive(true)
         seedFromIntent(intent)
     }
@@ -223,6 +270,51 @@ class PurgeShotPopupActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         PurgeShotHandler.setPopupActive(true)
+        // If we were backgrounded, the popup is visible again — cancel a
+        // pending strict re-show.
+        PurgeShotHandler.cancelStrictReshow()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Strict mode: leaving the prompt without choosing must not silently
+        // dismiss it. Re-surface it once the app is in the background, unless
+        // the screen is off (the task will simply reappear on unlock) or a
+        // configuration change is recreating the activity.
+        if (decisionMade || !strictModeEnabled || isChangingConfigurations) return
+        if (isFinishing) return
+        val powerManager = getSystemService(POWER_SERVICE) as? PowerManager
+        if (powerManager?.isInteractive == false) return
+        if (PurgeShotHandler.activeBatchFlow.value.isEmpty()) return
+        PurgeShotHandler.setPopupActive(false)
+        PurgeShotHandler.scheduleStrictReshow(
+            this,
+            settingsRepository,
+            reason = "popup left without a choice",
+        )
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) {
+            PurgeShotHandler.setPopupActive(true)
+            PurgeShotHandler.cancelStrictReshow()
+            return
+        }
+        // Desktop-style windowing (ChromeOS, freeform, split-screen) can leave
+        // the activity RESUMED while another window takes focus — `onStop`
+        // never fires there, so strict mode also watches focus.
+        if (decisionMade || !strictModeEnabled || isFinishing || isChangingConfigurations) return
+        if (lifecycle.currentState != androidx.lifecycle.Lifecycle.State.RESUMED) return
+        val powerManager = getSystemService(POWER_SERVICE) as? PowerManager
+        if (powerManager?.isInteractive == false) return
+        if (PurgeShotHandler.activeBatchFlow.value.isEmpty()) return
+        PurgeShotHandler.setPopupActive(false)
+        PurgeShotHandler.scheduleStrictReshow(
+            this,
+            settingsRepository,
+            reason = "window lost focus without a choice",
+        )
     }
 
     override fun onDestroy() {
@@ -234,11 +326,5 @@ class PurgeShotPopupActivity : ComponentActivity() {
         if (isFinishing) {
             PurgeShotHandler.clearActiveBatch()
         }
-    }
-
-    @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
-    override fun onBackPressed() {
-        // Back is a dismissal: keep the file, remember the decision, close.
-        resolveAndFinish(currentItems(PurgeShotHandler.activeBatchFlow.value))
     }
 }

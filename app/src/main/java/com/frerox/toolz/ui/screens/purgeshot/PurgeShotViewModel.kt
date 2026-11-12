@@ -49,6 +49,7 @@ class PurgeShotViewModel @Inject constructor(
     val smartAuto = settingsRepository.purgeShotSmartAuto.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
     val autoDurationMs = settingsRepository.purgeShotAutoDuration.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 15 * 60_000L)
     val notificationsEnabled = settingsRepository.purgeShotNotificationsEnabled.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+    val strictMode = settingsRepository.purgeShotStrictMode.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
     val pendingCount = repository.pendingCountFlow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
     val pendingQueue: StateFlow<List<PurgeShotEntity>> = repository.pendingFlow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -74,9 +75,12 @@ class PurgeShotViewModel @Inject constructor(
     private val _isRefreshing = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing
 
-    // Polished stats — computed from queues (10x: storage saved, next purge, deleted count)
-    val totalDeleted: StateFlow<Int> = allQueue.map { list -> list.count { it.status == PurgeShotEntity.STATUS_DELETED } }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+    // Polished stats — computed from queues (10x: storage saved, next purge, deleted count).
+    // EXPIRED rows are files that are gone (deleted outside Toolz or already
+    // missing), so they count toward "cleaned" too.
+    val totalDeleted: StateFlow<Int> = allQueue.map { list ->
+        list.count { it.status == PurgeShotEntity.STATUS_DELETED || it.status == PurgeShotEntity.STATUS_EXPIRED }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
     val nextPurgeEntity: StateFlow<PurgeShotEntity?> = pendingQueue.map { it.minByOrNull { e -> e.scheduledDeleteAtMs } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
@@ -94,7 +98,9 @@ class PurgeShotViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
 
     val estimatedSavedBytes: StateFlow<Long> = allQueue.map { list ->
-        val deleted = list.filter { it.status == PurgeShotEntity.STATUS_DELETED }
+        val deleted = list.filter {
+            it.status == PurgeShotEntity.STATUS_DELETED || it.status == PurgeShotEntity.STATUS_EXPIRED
+        }
         var sum = 0L
         for (e in deleted) {
             val sz = queryMediaSize(e.fileUriString) ?: 2_800_000L
@@ -109,9 +115,15 @@ class PurgeShotViewModel @Inject constructor(
     private val _undoAvailable = MutableStateFlow<PurgeShotEntity?>(null)
     val undoAvailable: StateFlow<PurgeShotEntity?> = _undoAvailable
 
+    /** Number of queued screenshots found already deleted, shown once as a snackbar. */
+    private val _reconciledMissing = MutableStateFlow(0)
+    val reconciledMissing: StateFlow<Int> = _reconciledMissing
+
     init {
         viewModelScope.launch {
             repository.ensureRestoredAndRescheduled()
+            val missing = repository.reconcilePending()
+            if (missing > 0) _reconciledMissing.value = missing
         }
         // If Shizuku is authorized on start, automatically force all permissions
         if (com.frerox.toolz.util.shizuku.ShizukuHelper.isAuthorized()) {
@@ -226,6 +238,27 @@ class PurgeShotViewModel @Inject constructor(
 
     fun setNotificationsEnabled(value: Boolean) {
         viewModelScope.launch { settingsRepository.setPurgeShotNotificationsEnabled(value) }
+    }
+
+    fun setStrictMode(value: Boolean) {
+        viewModelScope.launch { settingsRepository.setPurgeShotStrictMode(value) }
+    }
+
+    /**
+     * Re-checks queued files against the filesystem. Called when the screen
+     * resumes so deleting a screenshot from the gallery immediately updates the
+     * queue instead of leaving a countdown for a missing file.
+     */
+    fun reconcileNow() {
+        viewModelScope.launch {
+            val missing = repository.reconcilePending()
+            if (missing > 0) _reconciledMissing.value = missing
+        }
+    }
+
+    /** Consumes the "already deleted outside Toolz" notice after showing it. */
+    fun acknowledgeReconciledMissing() {
+        _reconciledMissing.value = 0
     }
 
     fun enqueueForPopup(uriStr: String?, displayName: String, path: String?, duration: Long, label: String) {

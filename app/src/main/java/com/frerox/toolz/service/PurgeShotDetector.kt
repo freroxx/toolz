@@ -39,11 +39,16 @@ import kotlinx.coroutines.flow.first
 object PurgeShotDetector {
     private const val TAG = "PurgeShotDetector"
 
-    /** How long to wait for MediaStore to settle (IS_PENDING -> 0) after a change notification. */
-    const val SETTLE_DELAY_MS = 550L
+    /**
+     * How long to wait for MediaStore to settle (IS_PENDING -> 0) after a
+     * change notification. The first query is also retried with growing delays
+     * below, so a short initial wait keeps the common case fast without
+     * sacrificing slow OEM indexing.
+     */
+    const val SETTLE_DELAY_MS = 250L
 
-    /** Extra wait before re-querying when the first attempt sees no screenshot row. */
-    private const val INDEX_RETRY_DELAY_MS = 1_200L
+    /** Backoff between re-queries when the first attempt sees no screenshot row. */
+    private val INDEX_RETRY_DELAYS_MS = longArrayOf(450L, 1_100L)
 
     /** A candidate must be newer than "now - this" and not further than 2s in the future (clock skew).
      *  90s tolerates JobScheduler batching, Doze, OEM killers and MediaStore indexing delay
@@ -333,9 +338,9 @@ object PurgeShotDetector {
         // the content-observer callback therefore sometimes finds nothing and
         // the prompt never appears. Retry once for live events; polls already
         // run late enough that a second attempt would just double the work.
-        val attempts = if (isPoll) 1 else 2
+        val attempts = if (isPoll) 1 else INDEX_RETRY_DELAYS_MS.size + 1
         for (attempt in 0 until attempts) {
-            if (attempt > 0) delay(INDEX_RETRY_DELAY_MS)
+            if (attempt > 0) delay(INDEX_RETRY_DELAYS_MS[attempt - 1])
 
             val recent = try {
                 // A burst of photos can push a screenshot out of a tiny window.

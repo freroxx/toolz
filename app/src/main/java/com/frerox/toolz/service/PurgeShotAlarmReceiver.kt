@@ -30,8 +30,15 @@ class PurgeShotAlarmReceiver : BroadcastReceiver() {
             val req = OneTimeWorkRequestBuilder<PurgeShotDeletionWorker>()
                 .setInputData(data)
                 .addTag("purgeshot")
+                .addTag("purgeshot_$id")
                 .build()
-            WorkManager.getInstance(context).enqueue(req)
+            // Same unique name as the scheduled job: alarm + WorkManager are two
+            // triggers for one deletion, never two parallel deletions.
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                com.frerox.toolz.data.purgeshot.PurgeShotRepository.WORK_PREFIX + id,
+                androidx.work.ExistingWorkPolicy.REPLACE,
+                req,
+            )
         } catch (e: Exception) {
             Log.w(TAG, "enqueue failed", e)
         }

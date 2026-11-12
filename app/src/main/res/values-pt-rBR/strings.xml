@@ -3513,6 +3513,12 @@
     <string name="st_PurgeShot_EnablePurgeShot_Desc">Detectar capturas e sugerir temporizadores</string>
     <string name="st_PurgeShot_SmartAuto">Automático Inteligente</string>
     <string name="st_PurgeShot_SmartAuto_Desc">Autoexcluir após %1$s sem pop-up</string>
+    <string name="st_PurgeShot_StrictMode_Toggle">Modo estrito</string>
+    <string name="st_PurgeShot_StrictMode_Toggle_Desc">Bloqueia o pop-up até você escolher — voltar e toques fora não fecham</string>
+    <string name="st_PurgeShot_StrictMode">Modo estrito</string>
+    <string name="st_PurgeShot_StrictMode_Desc">escolha uma opção para fechar</string>
+    <string name="st_PurgeShot_StrictMode_Blocked">Escolha um timer, Manter ou Excluir para continuar</string>
+    <string name="st_PurgeShot_AlreadyGone">%1$d captura(s) já excluídas fora do Toolz</string>
     <string name="st_PurgeShot_Notifications">Notificações</string>
     <string name="st_PurgeShot_Notifications_Enabled">Exibir notificação quando a exclusão for agendada</string>
     <string name="st_PurgeShot_Notifications_Disabled">Silencioso (sem notificações)</string>
@@ -4362,6 +4368,7 @@
     <string name="st_Whisper_Groups_ImgFailed">Não foi possível carregar esta foto.</string>
     <string name="st_Whisper_Groups_ImgPickTooLarge">Essa foto é grande demais para enviar — escolha uma menor.</string>
     <string name="st_Whisper_Groups_ImgPickFailed">Não foi possível ler essa foto — escolha outra.</string>
+    <string name="st_Whisper_Groups_ErrGone">Este grupo não está mais disponível.</string>
     <string name="st_Whisper_Groups_Info">Informações do grupo</string>
     <string name="st_Whisper_Groups_InvalidId">Isso não parece um ID de grupo.</string>
     <string name="st_Whisper_Groups_InviteAdmins">Somente administradores</string>

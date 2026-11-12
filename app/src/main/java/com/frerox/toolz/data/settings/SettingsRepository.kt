@@ -85,6 +85,10 @@ class SettingsRepository @Inject constructor(
     private val PURGESHOT_CUSTOM_PRESETS = stringPreferencesKey("purgeshot_custom_presets")
     private val PURGESHOT_LAST_SCREENSHOT_URI = stringPreferencesKey("purgeshot_last_screenshot_uri")
     private val PURGESHOT_NOTIFICATIONS_ENABLED = booleanPreferencesKey("purgeshot_notifications_enabled")
+    // Strict mode keeps the prompt on screen until the user makes an explicit
+    // choice. It blocks back/outside taps and re-surfaces the prompt if the
+    // activity is left without a decision. Enabled by default.
+    private val PURGESHOT_STRICT_MODE = booleanPreferencesKey("purgeshot_strict_mode")
     // Screenshots currently waiting for the user's decision. Persisted so the
     // prompt is never lost when the process dies between detection and the
     // popup appearing, or when background-activity launch is blocked.
@@ -505,6 +509,7 @@ class SettingsRepository @Inject constructor(
     val purgeShotCustomPresets: Flow<String?> = dataStore.data.map { it[PURGESHOT_CUSTOM_PRESETS] }
     val purgeShotLastScreenshotUri: Flow<String?> = dataStore.data.map { it[PURGESHOT_LAST_SCREENSHOT_URI] }
     val purgeShotNotificationsEnabled: Flow<Boolean> = dataStore.data.map { it[PURGESHOT_NOTIFICATIONS_ENABLED] ?: true }
+    val purgeShotStrictMode: Flow<Boolean> = dataStore.data.map { it[PURGESHOT_STRICT_MODE] ?: true }
     val purgeShotPendingPrompts: Flow<String?> = dataStore.data.map { it[PURGESHOT_PENDING_PROMPTS] }
     val purgeShotResolvedUris: Flow<Set<String>> = dataStore.data.map { it[PURGESHOT_RESOLVED_URIS] ?: emptySet() }
 
@@ -512,6 +517,7 @@ class SettingsRepository @Inject constructor(
     suspend fun setPurgeShotSmartAuto(enabled: Boolean) { dataStore.edit { it[PURGESHOT_SMART_AUTO] = enabled } }
     suspend fun setPurgeShotAutoDuration(duration: Long) { dataStore.edit { it[PURGESHOT_AUTO_DURATION] = duration } }
     suspend fun setPurgeShotNotificationsEnabled(enabled: Boolean) { dataStore.edit { it[PURGESHOT_NOTIFICATIONS_ENABLED] = enabled } }
+    suspend fun setPurgeShotStrictMode(enabled: Boolean) { dataStore.edit { it[PURGESHOT_STRICT_MODE] = enabled } }
     suspend fun setPurgeShotCustomPresets(json: String?) {
         dataStore.edit { if (json == null) it.remove(PURGESHOT_CUSTOM_PRESETS) else it[PURGESHOT_CUSTOM_PRESETS] = json }
     }

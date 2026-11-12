@@ -11,6 +11,7 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.MediaStore
 import android.util.Log
+import androidx.work.BackoffPolicy
 import androidx.work.Data
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
@@ -39,7 +40,9 @@ class PurgeShotRepository @Inject constructor(
 ) {
     companion object {
         private const val TAG = "PurgeShotRepo"
-        private const val WORK_PREFIX = "purgeshot_delete_"
+        internal const val WORK_PREFIX = "purgeshot_delete_"
+        private const val MAX_DELETE_ATTEMPTS = 5
+        private const val TERMINAL_RETENTION_MS = 30L * 24 * 60 * 60 * 1000
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -74,6 +77,12 @@ class PurgeShotRepository @Inject constructor(
             }
             // Deduplicate any existing pending duplicates (e.g. legacy dupes before fix)
             deduplicatePending()
+            // Screenshots the user deleted from their gallery are still in our
+            // queue until the timer fires. Reconcile now so the queue reflects
+            // reality and no doomed work/alarms stay armed.
+            reconcilePending()
+            // Keep the database from growing forever with old terminal rows.
+            dao.purgeTerminalOlderThan(System.currentTimeMillis() - TERMINAL_RETENTION_MS)
             // Re-schedule all pending regardless (handles reboot / update)
             val allPending = dao.getPendingSync()
             for (e in allPending) {
@@ -113,6 +122,77 @@ class PurgeShotRepository @Inject constructor(
         if (removed > 0) {
             scope.launch { externalBackup.mirrorToExternal(dao.getPendingSync()) }
             Log.i(TAG, "deduplicatePending total removed=$removed")
+        }
+    }
+
+    /**
+     * Marks queued screenshots that no longer exist as [PurgeShotEntity.STATUS_EXPIRED].
+     *
+     * Users often delete a screenshot from their gallery before the timer fires.
+     * Without this sweep, the app keeps showing a countdown for a file that is
+     * already gone and keeps its WorkManager job + exact alarm armed.
+     *
+     * @return number of queue entries that were found missing.
+     */
+    suspend fun reconcilePending(): Int = withContext(Dispatchers.IO) {
+        val pending = dao.getPendingSync()
+        if (pending.isEmpty()) return@withContext 0
+        var removed = 0
+        for (entity in pending) {
+            if (!fileExistsNow(entity.fileUriString, entity.filePath)) {
+                dao.updateStatus(entity.id, PurgeShotEntity.STATUS_EXPIRED)
+                cancelWork(entity.id)
+                cancelAlarm(entity.id)
+                removed++
+                Log.i(TAG, "Reconciled missing screenshot id=${entity.id} ${entity.displayName}")
+            }
+        }
+        if (removed > 0) {
+            runCatching { externalBackup.mirrorToExternal(dao.getPendingSync()) }
+        }
+        removed
+    }
+
+    /** Public existence probe shared by workers and reconciliation. */
+    suspend fun isFilePresent(entity: PurgeShotEntity): Boolean = withContext(Dispatchers.IO) {
+        fileExistsNow(entity.fileUriString, entity.filePath)
+    }
+
+    /** Moves an entry to a terminal state and disarms its work/alarm. */
+    suspend fun markTerminal(id: Long, status: String, error: String? = null) = withContext(Dispatchers.IO) {
+        if (error != null) dao.incrementAttempts(id, error)
+        dao.updateStatus(id, status)
+        cancelWork(id)
+        cancelAlarm(id)
+        runCatching { externalBackup.mirrorToExternal(dao.getPendingSync()) }
+    }
+
+    /**
+     * A file is present if either its MediaStore row or its on-disk path still
+     * exists. A permission failure is treated as "present" so a transient
+     * SecurityException can never make the queue forget a file that is still
+     * there.
+     */
+    private fun fileExistsNow(uriString: String, filePath: String?): Boolean {
+        if (!filePath.isNullOrBlank()) {
+            if (runCatching { java.io.File(filePath).exists() }.getOrDefault(false)) return true
+        }
+        val uri = runCatching { Uri.parse(uriString) }.getOrNull() ?: return false
+        if (uri.scheme == "file") {
+            return runCatching { uri.path?.let { java.io.File(it).exists() } == true }.getOrDefault(false)
+        }
+        return try {
+            context.contentResolver.query(
+                uri,
+                arrayOf(MediaStore.MediaColumns._ID),
+                null,
+                null,
+                null,
+            )?.use { it.moveToFirst() } ?: false
+        } catch (_: SecurityException) {
+            true
+        } catch (_: Exception) {
+            true
         }
     }
 
@@ -185,6 +265,12 @@ class PurgeShotRepository @Inject constructor(
         label: String
     ): List<PurgeShotEntity> = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
+        // Load the current pending set once instead of running two Room queries
+        // per item. A burst of screenshots is common (long-press volume, scroll
+        // capture) and the old per-item queries made the popup feel sluggish.
+        val pendingNow = dao.getPendingSync()
+        val pendingUris = pendingNow.mapTo(HashSet()) { it.fileUriString }
+        val pendingPaths = pendingNow.mapNotNullTo(HashSet()) { it.filePath }
         // Deduplicate incoming batch by uri and by filePath to prevent same screenshot queued multiple times
         val distinctItems = items.distinctBy { (uri, _, path) -> (path ?: uri.toString()) }
         val filtered = mutableListOf<Triple<Uri, String, String?>>()
@@ -196,21 +282,11 @@ class PurgeShotRepository @Inject constructor(
             if (uriStr in seenUris) continue
             if (path != null && path in seenPaths) continue
             // DB dedup — skip if already pending by uri or path
-            val dupByUri = dao.findPendingByUri(uriStr)
-            if (dupByUri != null) {
-                Log.w(TAG, "skip duplicate batch uri=$uriStr pending id=${dupByUri.id}")
+            if (uriStr in pendingUris || (path != null && path in pendingPaths)) {
+                Log.w(TAG, "skip duplicate batch uri=$uriStr path=$path")
                 PurgeShotHandler.markUriHandled(uriStr)
                 if (path != null) PurgeShotHandler.markUriHandled(path)
                 continue
-            }
-            if (path != null) {
-                val dupByPath = dao.findPendingByPath(path)
-                if (dupByPath != null) {
-                    Log.w(TAG, "skip duplicate batch path=$path pending id=${dupByPath.id}")
-                    PurgeShotHandler.markUriHandled(uriStr)
-                    PurgeShotHandler.markUriHandled(path)
-                    continue
-                }
             }
             seenUris.add(uriStr)
             if (path != null) seenPaths.add(path)
@@ -281,19 +357,46 @@ class PurgeShotRepository @Inject constructor(
         items: List<Pair<Uri, String?>>
     ): Int = withContext(Dispatchers.IO) {
         var count = 0
+        val now = System.currentTimeMillis()
+        val resolvedKeys = mutableListOf<String>()
         for ((uri, path) in items) {
-            PurgeShotHandler.markUriHandled(uri.toString())
+            val uriStr = uri.toString()
+            PurgeShotHandler.markUriHandled(uriStr)
             val entity = PurgeShotEntity(
-                fileUriString = uri.toString(),
-                displayName = "Screenshot",
+                fileUriString = uriStr,
+                displayName = uri.lastPathSegment ?: "Screenshot",
                 filePath = path,
-                scheduledDeleteAtMs = System.currentTimeMillis(),
+                scheduledDeleteAtMs = now,
                 durationMillis = 0L,
                 durationLabel = "Now"
             )
             val ok = deleteFile(entity)
             if (ok) count++
+            // Record the outcome so the queue/history reflects the action. The
+            // popup used to delete files without leaving any trace, which made
+            // "Deleted" stats and the history wrong.
+            val status = if (ok) PurgeShotEntity.STATUS_DELETED else PurgeShotEntity.STATUS_FAILED
+            val existing = dao.findPendingByUri(uriStr)
+                ?: path?.let { dao.findPendingByPath(it) }
+            if (existing != null) {
+                dao.updateStatus(existing.id, status)
+                cancelWork(existing.id)
+                cancelAlarm(existing.id)
+            } else {
+                runCatching {
+                    dao.insert(
+                        entity.copy(
+                            status = status,
+                            lastError = if (ok) null else "manual delete failed",
+                        ),
+                    )
+                }
+            }
+            resolvedKeys.add(uriStr)
+            if (path != null) resolvedKeys.add(path)
         }
+        runCatching { settingsRepository.addPurgeShotResolvedUris(resolvedKeys) }
+        runCatching { externalBackup.mirrorToExternal(dao.getPendingSync()) }
         Log.i(TAG, "Deleted $count of ${items.size} files in batch")
         count
     }
@@ -343,6 +446,13 @@ class PurgeShotRepository @Inject constructor(
             var uri = Uri.parse(entity.fileUriString)
             val resolver = context.contentResolver
             val resolvedPath = entity.filePath ?: (if (uri.scheme == "file") uri.path else queryPathFromUri(uri))
+
+            // Fast path: the user (or another app) already deleted it. Avoid
+            // spinning up Shizuku / MediaStore delete attempts for a missing file.
+            if (!fileExistsNow(entity.fileUriString, resolvedPath)) {
+                Log.i(TAG, "File already gone: ${entity.fileUriString}")
+                return@withContext true
+            }
 
             // If uri is file://, resolve to content:// URI via MediaStore if indexed
             if (uri.scheme == "file" && resolvedPath != null) {
@@ -523,6 +633,7 @@ class PurgeShotRepository @Inject constructor(
             val request = OneTimeWorkRequestBuilder<PurgeShotDeletionWorker>()
                 .setInputData(data)
                 .setInitialDelay(delay, TimeUnit.MILLISECONDS)
+                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
                 .addTag("purgeshot")
                 .addTag("purgeshot_${entity.id}")
                 .build()
@@ -542,11 +653,46 @@ class PurgeShotRepository @Inject constructor(
             val data = Data.Builder().putLong("purge_id", id).build()
             val request = OneTimeWorkRequestBuilder<PurgeShotDeletionWorker>()
                 .setInputData(data)
+                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
                 .addTag("purgeshot")
+                .addTag("purgeshot_$id")
                 .build()
-            WorkManager.getInstance(context).enqueue(request)
+            // Unique work: an alarm-triggered immediate run and a scheduled run
+            // must never race each other into duplicate deletion jobs.
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                WORK_PREFIX + id,
+                ExistingWorkPolicy.REPLACE,
+                request,
+            )
         } catch (e: Exception) {
             Log.w(TAG, "enqueueImmediateWork failed", e)
+        }
+    }
+
+    /**
+     * Schedules a retry for a failed deletion with exponential backoff while
+     * keeping one unique job per queue entry.
+     */
+    private fun scheduleRetryWork(id: Long, attempt: Int) {
+        try {
+            val backoffMs = (5L * 60_000L * (1L shl attempt.coerceIn(0, 4)))
+                .coerceAtMost(60L * 60_000L)
+            val data = Data.Builder().putLong("purge_id", id).build()
+            val request = OneTimeWorkRequestBuilder<PurgeShotDeletionWorker>()
+                .setInputData(data)
+                .setInitialDelay(backoffMs, TimeUnit.MILLISECONDS)
+                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
+                .addTag("purgeshot")
+                .addTag("purgeshot_$id")
+                .build()
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                WORK_PREFIX + id,
+                ExistingWorkPolicy.REPLACE,
+                request,
+            )
+            Log.d(TAG, "Retry scheduled for id=$id in ${backoffMs}ms (attempt $attempt)")
+        } catch (e: Exception) {
+            Log.w(TAG, "scheduleRetryWork failed", e)
         }
     }
 
@@ -611,7 +757,7 @@ class PurgeShotRepository @Inject constructor(
         } catch (_: Exception) {}
     }
 
-    suspend fun processDue() {
+    suspend fun processDue() = withContext(Dispatchers.IO) {
         val due = dao.getDue()
         for (e in due) {
             val ok = deleteFile(e)
@@ -620,36 +766,29 @@ class PurgeShotRepository @Inject constructor(
                 cancelWork(e.id)
                 cancelAlarm(e.id)
             } else {
-                // If file already gone, mark deleted; else increment attempts and reschedule short retry
-                val stillExists = checkExists(e)
+                // If file already gone, mark expired; else increment attempts
+                // and schedule one unique retry with exponential backoff.
+                val stillExists = fileExistsNow(e.fileUriString, e.filePath)
                 if (!stillExists) {
                     dao.updateStatus(e.id, PurgeShotEntity.STATUS_EXPIRED)
-                    cancelWork(e.id); cancelAlarm(e.id)
+                    cancelWork(e.id)
+                    cancelAlarm(e.id)
                 } else {
-                    dao.incrementAttempts(e.id, "delete failed, will retry")
-                    // retry in 5 minutes via WorkManager
-                    val data = Data.Builder().putLong("purge_id", e.id).build()
-                    val req = OneTimeWorkRequestBuilder<PurgeShotDeletionWorker>()
-                        .setInputData(data)
-                        .setInitialDelay(5, TimeUnit.MINUTES)
-                        .build()
-                    WorkManager.getInstance(context).enqueue(req)
+                    val attempt = e.attempts + 1
+                    if (attempt >= MAX_DELETE_ATTEMPTS) {
+                        dao.updateStatus(e.id, PurgeShotEntity.STATUS_FAILED)
+                        cancelWork(e.id)
+                        cancelAlarm(e.id)
+                        Log.w(TAG, "Giving up on id=${e.id} after $attempt attempts")
+                    } else {
+                        dao.incrementAttempts(e.id, "delete failed, will retry")
+                        scheduleRetryWork(e.id, attempt)
+                    }
                 }
             }
         }
         if (due.isNotEmpty()) {
-            externalBackup.mirrorToExternal(dao.getPendingSync())
-        }
-    }
-
-    private fun checkExists(entity: PurgeShotEntity): Boolean {
-        return try {
-            val uri = Uri.parse(entity.fileUriString)
-            context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns._ID), null, null, null)?.use { c ->
-                c.moveToFirst()
-            } ?: false
-        } catch (_: Exception) {
-            if (entity.filePath != null) java.io.File(entity.filePath).exists() else false
+            runCatching { externalBackup.mirrorToExternal(dao.getPendingSync()) }
         }
     }
 }

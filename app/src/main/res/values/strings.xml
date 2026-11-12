@@ -3626,6 +3626,12 @@
     <string name="st_PurgeShot_EnablePurgeShot_Desc">Catch screenshots &amp; offer timers</string>
     <string name="st_PurgeShot_SmartAuto">Smart Auto</string>
     <string name="st_PurgeShot_SmartAuto_Desc">Auto-delete after %1$s without popup</string>
+    <string name="st_PurgeShot_StrictMode_Toggle">Strict mode</string>
+    <string name="st_PurgeShot_StrictMode_Toggle_Desc">Lock the popup until you choose — back and outside taps won\'t dismiss it</string>
+    <string name="st_PurgeShot_StrictMode">Strict mode</string>
+    <string name="st_PurgeShot_StrictMode_Desc">choose an option to close</string>
+    <string name="st_PurgeShot_StrictMode_Blocked">Pick a timer, Keep, or Delete to continue</string>
+    <string name="st_PurgeShot_AlreadyGone">%1$d screenshot(s) were already deleted outside Toolz</string>
     <string name="st_PurgeShot_Notifications">Notifications</string>
     <string name="st_PurgeShot_Notifications_Enabled">Show notification when deletion is scheduled</string>
     <string name="st_PurgeShot_Notifications_Disabled">Silent (no notifications)</string>
@@ -3828,6 +3834,7 @@
     <string name="st_Whisper_Groups_ImgUploadFail">Couldn\'t upload that photo. Check your connection and retry.</string>
     <string name="st_Whisper_Groups_ImgPickTooLarge">That photo is too large to send — pick a smaller one.</string>
     <string name="st_Whisper_Groups_ImgPickFailed">Couldn\'t read that photo — pick a different one.</string>
+    <string name="st_Whisper_Groups_ErrGone">This group is no longer available.</string>
     <string name="st_Whisper_Groups_CreateTitle">New group</string>
     <string name="st_Whisper_Groups_NameHint">Group name</string>
     <string name="st_Whisper_Groups_AddMembers">Add members (friends only)</string>
