@@ -514,7 +514,11 @@ fun WhisperGroupInfoScreen(
             onRequestBytes = { viewModel.loadGalleryImage(it) },
             onRetryThumb = { viewModel.retryGalleryItem(it) },
             onRetryGallery = { viewModel.loadGallery() },
-            onDismiss = { showGallery = false },
+            onDismiss = {
+                showGallery = false
+                // Do not keep decrypted photos resident after the grid closes.
+                viewModel.clearGalleryCache()
+            },
             onMessage = notify,
         )
     }

@@ -1341,7 +1341,11 @@ every group screen without touching the server plane:
   a failed gallery *list* shows an honest retry state instead of looking like
   "no shared photos"; a failed viewer story shows an inline retry instead of
   an eternal spinner. Decoded bitmaps hold bounded windows (8 in chat, 6 in
-  the viewer) instead of growing unbounded across a session.
+  the viewer) instead of growing unbounded across a session, and the
+  shared-photos gallery keeps at most 12 decrypted thumbs (8 MB) in a true
+  access-order LRU — the grid lists up to 100 photos, so an unbounded map
+  could hold every one of them resident. Evicted thumbs re-open from the disk
+  cache, and closing the grid frees the whole window.
 - **Notification taps route through validated actions** — including a
   "removed-from-group" tap landing on an explicit dead-end card — and group
   cards/coalesced loads/realtime merges were re-verified against the

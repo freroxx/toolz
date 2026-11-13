@@ -124,6 +124,18 @@ class WhisperGroupInfoViewModel @Inject constructor(
 
     private var requestWatch: kotlinx.coroutines.Job? = null
 
+    /**
+     * Resident decrypted gallery thumbs, true (access-order) LRU bounded two ways.
+     *
+     * The gallery lists the newest 100 photos and each opened thumb used to stay
+     * in `galleryBytes` for the screen's lifetime — up to ~100 decrypted photos
+     * resident at once once the user scrolled the grid (a real OOM on low-RAM
+     * devices). The disk cache still holds them, so an evicted thumb re-opens
+     * from disk instead of the network when it scrolls back into view.
+     */
+    private val galleryLru = object : java.util.LinkedHashMap<String, ByteArray>(16, 0.75f, true) {}
+    private var galleryLruBytes = 0L
+
     init {
         if (groupsEnabled() && groupId.isNotBlank()) {
             load()
@@ -415,24 +427,75 @@ class WhisperGroupInfoViewModel @Inject constructor(
             val items = res.getOrNull().orEmpty()
                 .filter { it.image != null }
                 .map { GalleryItem(rowId = it.id, ref = it.image!!, caption = it.body) }
+            // A deleted message must not leave its decrypted bytes (or its
+            // failed-cell marker) resident: prune everything the fresh list
+            // no longer contains before publishing.
+            pruneGalleryTo(items.mapTo(HashSet()) { it.rowId })
             // List failure must be distinguishable from "no shared photos" — the
             // dialog renders an honest Retry empty state instead (7.18 pattern).
             _uiState.update { it.copy(gallery = items, galleryLoadFailed = res.isFailure) }
         }
     }
 
+    private fun pruneGalleryTo(keep: Set<String>) {
+        val stale = galleryLru.keys.filterNot { it in keep }
+        if (stale.isNotEmpty()) {
+            stale.forEach { galleryLru.remove(it)?.let { b -> galleryLruBytes -= b.size.toLong() } }
+            if (galleryLruBytes < 0L) galleryLruBytes = 0L
+            publishGalleryBytes()
+        }
+        _uiState.update { st ->
+            val failed = st.galleryFailedIds.filterTo(HashSet()) { it in keep }
+            if (failed.size == st.galleryFailedIds.size) st else st.copy(galleryFailedIds = failed)
+        }
+    }
+
     fun loadGalleryImage(item: GalleryItem) {
-        if (_uiState.value.galleryBytes[item.rowId] != null) return
+        // Access-order touch: keep what the user is actually looking at.
+        if (galleryLru[item.rowId] != null) return
         viewModelScope.launch {
             val bytes = repository.openGroupImage(item.ref, "gmsg:${item.rowId}").getOrNull()
             if (bytes != null) {
-                _uiState.update { it.copy(galleryBytes = it.galleryBytes + (item.rowId to bytes)) }
+                // The list may have been reloaded while this thumb downloaded
+                // (the message was deleted): never resurrect a row the fresh
+                // list no longer contains.
+                if (_uiState.value.gallery.any { it.rowId == item.rowId }) {
+                    rememberGalleryBytes(item.rowId, bytes)
+                }
             } else {
                 // Thumb failure must not spin forever (chat-bubble failed branch parity):
                 // mark the cell broken; tapping it retries.
                 _uiState.update { it.copy(galleryFailedIds = it.galleryFailedIds + item.rowId) }
             }
         }
+    }
+
+    private fun rememberGalleryBytes(rowId: String, bytes: ByteArray) {
+        galleryLru.remove(rowId)?.let { galleryLruBytes -= it.size.toLong() }
+        galleryLru[rowId] = bytes
+        galleryLruBytes += bytes.size.toLong()
+        val iterator = galleryLru.entries.iterator()
+        while ((galleryLru.size > MAX_GALLERY_THUMB_ENTRIES ||
+                galleryLruBytes > MAX_GALLERY_THUMB_BYTES) && iterator.hasNext()
+        ) {
+            val eldest = iterator.next()
+            iterator.remove()
+            galleryLruBytes -= eldest.value.size.toLong()
+        }
+        if (galleryLruBytes < 0L) galleryLruBytes = 0L
+        publishGalleryBytes()
+    }
+
+    private fun publishGalleryBytes() {
+        _uiState.update { it.copy(galleryBytes = java.util.LinkedHashMap(galleryLru)) }
+    }
+
+    /** Frees every resident thumb when the gallery dialog closes. */
+    fun clearGalleryCache() {
+        if (galleryLru.isEmpty()) return
+        galleryLru.clear()
+        galleryLruBytes = 0L
+        publishGalleryBytes()
     }
 
     fun retryGalleryItem(item: GalleryItem) {
@@ -453,3 +516,12 @@ class WhisperGroupInfoViewModel @Inject constructor(
         _uiState.update { it.copy(error = null) }
     }
 }
+
+/**
+ * Resident gallery thumbs are bounded both by entry count (the grid shows 9 at
+ * once on a phone) and by bytes, because a single decrypted photo can be
+ * hundreds of KB and the list holds up to 100 refs.
+ */
+private const val MAX_GALLERY_THUMB_ENTRIES = 12
+private const val MAX_GALLERY_THUMB_BYTES = 8L * 1024 * 1024
+
