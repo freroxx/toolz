@@ -1206,6 +1206,8 @@ does something smarter than "refetch on ping":
   photo/story opens a multi-megabyte PNG plus AES-GCM; both ran on the caller's
   dispatcher, i.e. the view-model's Main. They now run on
   `Dispatchers.Default`, matching the 1:1 decode and avatar-loader discipline.
+  The same applies to sends: one seal per member (up to 12, each opening and
+  persisting a ratchet session) runs on Default instead of janking the frame.
 - **Removal exits the surface.** RLS hides a group row from a removed member
   before membership is checked, so reads fail as "Group not found." instead of
   "not a member". Both map to `st_Whisper_Groups_ErrGone`; an open chat says

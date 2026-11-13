@@ -2104,20 +2104,28 @@ private suspend fun WhisperRepository.sealAndPublishContent(
     msgKind: String = "chat",
 ): Result<String> = runCatching {
     val targets = m.members.keys.sorted()
-    val frames = mutableMapOf<String, String>()
-    val failed = mutableListOf<String>()
-    for (memberId in targets) {
-        val frame = buildGroupFrameBody(groupId, m.epoch, System.currentTimeMillis(), frameBody)
-        // The self leg cannot ride the 1:1 ratchet path (the edge refuses
-        // self-bundles); it seals through the per-install self-leg anchor so
-        // solo-owner groups and same-device alt-account groups send at all.
-        val sealed = if (memberId == me) sealGroupSelfFrame(me, frame)
-        else sealWithRatchet(me, memberId, frame)
-        if (sealed == null) {
-            failed.add(memberId)
-        } else {
-            frames[memberId] = sealed.first
+    // Up to 12 seals per send: each one opens/persists a ratchet session and
+    // runs X25519 + AEAD (and may unwrap a Keystore-wrapped key). The send is
+    // launched from the chat ViewModel, i.e. Main, so doing this inline made a
+    // group send visibly janky on slower devices. Seal on Default like the
+    // decode paths.
+    val (frames, failed) = withContext(Dispatchers.Default) {
+        val frames = mutableMapOf<String, String>()
+        val failed = mutableListOf<String>()
+        for (memberId in targets) {
+            val frame = buildGroupFrameBody(groupId, m.epoch, System.currentTimeMillis(), frameBody)
+            // The self leg cannot ride the 1:1 ratchet path (the edge refuses
+            // self-bundles); it seals through the per-install self-leg anchor so
+            // solo-owner groups and same-device alt-account groups send at all.
+            val sealed = if (memberId == me) sealGroupSelfFrame(me, frame)
+            else sealWithRatchet(me, memberId, frame)
+            if (sealed == null) {
+                failed.add(memberId)
+            } else {
+                frames[memberId] = sealed.first
+            }
         }
+        frames to failed
     }
     if (failed.isNotEmpty()) {
         // Per-leg diagnostics (ids stay in logcat, never in UI strings):
@@ -2867,14 +2875,18 @@ private suspend fun WhisperRepository.publishPictureFrames(
     // Seal EVERY key frame BEFORE uploading. Uploading first meant an
     // unreachable member aborted the publish after the hosted blob existed —
     // an orphan with no signed event referencing it, leaked forever.
-    val frames = mutableMapOf<String, String>()
-    val failed = mutableListOf<String>()
-    for (memberId in m.members.keys.sorted()) {
-        val frame = buildGroupFrameBody(groupId, m.epoch, System.currentTimeMillis(), keyB64)
-        // Self leg for picture-key frames too — same reason as the chat lane.
-        val out = if (memberId == me) sealGroupSelfFrame(me, frame)
-        else sealWithRatchet(me, memberId, frame)
-        if (out == null) failed.add(memberId) else frames[memberId] = out.first
+    // Same off-Main rule as the chat fan-out: up to 12 session seals.
+    val (frames, failed) = withContext(Dispatchers.Default) {
+        val frames = mutableMapOf<String, String>()
+        val failed = mutableListOf<String>()
+        for (memberId in m.members.keys.sorted()) {
+            val frame = buildGroupFrameBody(groupId, m.epoch, System.currentTimeMillis(), keyB64)
+            // Self leg for picture-key frames too — same reason as the chat lane.
+            val out = if (memberId == me) sealGroupSelfFrame(me, frame)
+            else sealWithRatchet(me, memberId, frame)
+            if (out == null) failed.add(memberId) else frames[memberId] = out.first
+        }
+        frames to failed
     }
     require(failed.isEmpty()) {
         "Could not reach ${failed.size} member(s) — picture not changed. Retry when they're reachable."
