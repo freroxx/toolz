@@ -1355,7 +1355,13 @@ every group screen without touching the server plane:
   shared-photos gallery keeps at most 12 decrypted thumbs (8 MB) in a true
   access-order LRU — the grid lists up to 100 photos, so an unbounded map
   could hold every one of them resident. Evicted thumbs re-open from the disk
-  cache, and closing the grid frees the whole window.
+  cache, and closing the grid frees the whole window. The Daily Ups viewer
+  also frees its image window on close (a decode still in flight is dropped
+  unless that story is in the open snapshot), and its per-story receipt and
+  reaction maps are pruned to stories the hub still lists — so a day of
+  openings cannot accumulate them. A view receipt is idempotent on the server
+  and gets exactly one bounded retry, because a single transient failure
+  used to lose it for the rest of the open.
 - **Notification taps route through validated actions** — including a
   "removed-from-group" tap landing on an explicit dead-end card — and group
   cards/coalesced loads/realtime merges were re-verified against the

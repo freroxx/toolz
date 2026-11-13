@@ -342,6 +342,40 @@ class WhisperDailyUpsViewModel @Inject constructor(
         _viewer.value = null
         receiptedStories.clear()
         reactionLookups.clear()
+        releaseViewerCaches()
+    }
+
+    /** True while [storyId] belongs to the viewer snapshot currently open. */
+    private fun viewerContains(storyId: String): Boolean =
+        _viewer.value?.segments?.any { segment ->
+            segment.stories.any { it.storyId == storyId }
+        } == true
+
+    /**
+     * Frees viewer-only state when the overlay closes.
+     *
+     * The decoded-image window is consumed by the overlay alone, yet up to six
+     * ~2 MP ARGB frames (~8 MB each) stayed resident after the last frame
+     * disappeared — roughly 48 MB of pure heap pressure on a hub that never
+     * reads them. A decrypt still in flight when the overlay closes finishes
+     * into the void (see [viewerContains]) instead of repopulating the window.
+     * Receipt/reaction maps are pruned to stories the hub still lists so a day
+     * of opens cannot accumulate them.
+     */
+    private fun releaseViewerCaches() {
+        if (_images.value.isNotEmpty()) _images.value = emptyMap()
+        if (_failedImages.value.isNotEmpty()) _failedImages.value = emptySet()
+        val live = uiState.value.posterGroups
+            .flatMapTo(HashSet()) { poster -> poster.stories.map { it.storyId } }
+        _receipts.update {
+            val stats = pruneToLiveStories(it.ownStats, live)
+            val reactions = pruneToLiveStories(it.myReactions, live)
+            if (stats === it.ownStats && reactions === it.myReactions) {
+                it
+            } else {
+                it.copy(ownStats = stats, myReactions = reactions)
+            }
+        }
     }
 
     /** Advance one story; crossing a poster boundary is part of one open order. */
@@ -468,6 +502,10 @@ class WhisperDailyUpsViewModel @Inject constructor(
                 repository.downloadDailyUpImage(storyId)
                     .onSuccess { image ->
                         val bmp = withContext(Dispatchers.IO) { decodeDisplayBitmap(image.bytes) }
+                        // The overlay may have closed (or the story may have
+                        // been deleted) while this decrypt was in flight: never
+                        // put the freed frame back.
+                        if (!viewerContains(storyId)) return@launch
                         if (bmp != null) {
                             insertViewerImage(storyId, bmp)
                         } else {
@@ -476,6 +514,7 @@ class WhisperDailyUpsViewModel @Inject constructor(
                         }
                     }
                     .onFailure { e ->
+                        if (!viewerContains(storyId)) return@onFailure
                         _failedImages.update { it + storyId }
                         _viewerError.value = dailyUpErrorText(appContext, e)
                     }
@@ -525,8 +564,12 @@ class WhisperDailyUpsViewModel @Inject constructor(
     /** Receipts are advisory: a miss only means the poster never learns. */
     private fun markViewedOnce(storyId: String) {
         viewModelScope.launch {
-            repository.markDailyUpViewed(storyId).onFailure {
-                // Deliberately silent (see KDoc: receipts must never nag).
+            // One bounded retry: the RPC is an idempotent upsert, and a single
+            // transient failure used to lose the view for good because
+            // [receiptedStories] blocks a second attempt in this open.
+            repeat(2) { attempt ->
+                if (repository.markDailyUpViewed(storyId).isSuccess) return@launch
+                if (attempt == 0) delay(1_500)
             }
         }
     }
@@ -636,6 +679,7 @@ class WhisperDailyUpsViewModel @Inject constructor(
         val currentFlat = v.flatPosition
         if (flatDeleted == currentFlat) {
             _viewer.value = null
+            releaseViewerCaches()
             return
         }
         val segments = v.segments.mapNotNull { segment ->
@@ -644,14 +688,20 @@ class WhisperDailyUpsViewModel @Inject constructor(
         }
         if (segments.isEmpty()) {
             _viewer.value = null
+            releaseViewerCaches()
             return
         }
         val target = if (flatDeleted < currentFlat) currentFlat - 1 else currentFlat
         val position = viewerPositionAtFlat(segments.map { it.stories.size }, target)
-        _viewer.value = if (position == null) {
-            null
+        if (position == null) {
+            _viewer.value = null
+            releaseViewerCaches()
         } else {
-            v.copy(segments = segments, segmentIndex = position.first, storyIndex = position.second)
+            _viewer.value = v.copy(
+                segments = segments,
+                segmentIndex = position.first,
+                storyIndex = position.second,
+            )
         }
     }
 
@@ -660,3 +710,13 @@ class WhisperDailyUpsViewModel @Inject constructor(
         const val MAX_VIEWER_IMAGES = 6
     }
 }
+
+/**
+ * Keeps only receipt/reaction entries whose story the hub still lists.
+ *
+ * The maps are populated per viewer open; without this they grew for the whole
+ * ViewModel lifetime (~24 h of expiring stories). Returns the SAME instance
+ * when nothing is stale so a close with a live snapshot does not churn state.
+ */
+internal fun <V> pruneToLiveStories(map: Map<String, V>, live: Set<String>): Map<String, V> =
+    if (map.keys.all(live::contains)) map else map.filterKeys { it in live }
