@@ -1198,7 +1198,9 @@ does something smarter than "refetch on ping":
   watermark only advance while the screen is STARTED (the same V-1 boundary
   as the 1:1 chat) and catch up on resume. Own rows are never given a seen
   receipt — the UI excludes the sender from "seen by", so those rows were
-  only a DB write and a realtime broadcast per message.
+  only a DB write and a realtime broadcast per message. Each pass marks the
+  newest 100 other-sender rows (the timeline is oldest-first, so capping the
+  head marked ancient history and left the on-screen messages unmarked).
 - **Crypto and media decoding never run on Main.** A group timeline page opens
   up to 100 sealed rows (envelope decode, AEAD open, content parse) and a group
   photo/story opens a multi-megabyte PNG plus AES-GCM; both ran on the caller's

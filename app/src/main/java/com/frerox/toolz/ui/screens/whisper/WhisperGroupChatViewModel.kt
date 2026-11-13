@@ -195,13 +195,8 @@ class WhisperGroupChatViewModel @Inject constructor(
         if (!isChatVisible) return
         // Receipts for my OWN rows are meaningless (the UI excludes the sender
         // from "seen by"), yet each was a DB write plus a realtime event fanned
-        // out to every member. Only mark everyone else's rows.
-        val ids = list.asSequence()
-            .filter { !it.mine && it.clientId.isNotBlank() }
-            .map { it.clientId }
-            .distinct()
-            .take(100)
-            .toList()
+        // out to every member. Only mark everyone else's rows, newest first.
+        val ids = newestSeenReceiptIds(list)
         viewModelScope.launch {
             if (!isChatVisible) return@launch
             if (ids.isNotEmpty()) runCatching { repository.markGroupSeen(groupId, ids) }
@@ -987,4 +982,26 @@ class WhisperGroupChatViewModel @Inject constructor(
             }
         }
     }
+}
+
+/**
+ * Receipt targets for one visible timeline: the NEWEST [limit] client ids from
+ * other senders, newest first.
+ *
+ * [messages] is ascending (oldest first), so the old `take(limit)` marked the
+ * OLDEST rows — in a long or paged chat the newest messages the user was
+ * actually looking at never got a read receipt. Own rows are excluded (the UI
+ * never shows the sender in "seen by") and duplicate/blank ids are dropped.
+ */
+internal fun newestSeenReceiptIds(
+    messages: List<WhisperGroupChatMessage>,
+    limit: Int = 100,
+): List<String> {
+    if (limit <= 0) return emptyList()
+    return messages.asReversed().asSequence()
+        .filter { !it.mine && it.clientId.isNotBlank() }
+        .map { it.clientId }
+        .distinct()
+        .take(limit)
+        .toList()
 }
