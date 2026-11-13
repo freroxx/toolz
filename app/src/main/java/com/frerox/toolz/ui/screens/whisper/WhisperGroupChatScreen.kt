@@ -107,8 +107,12 @@ fun WhisperGroupChatScreen(
         if (state.removed) {
             // Let the sentence be read before the surface disappears; the hub
             // (whose row is already gone) is the honest destination.
-            snackbar.showGroupNotice(context.getString(R.string.st_Whisper_Groups_ErrGone))
-            delay(1_200)
+            // showGroupNotice suspends until the snackbar DISMISSES (4 s, or
+            // queued behind another one) — awaiting it kept the dead chat open
+            // for 4 s + the delay. Bound the whole notice to the intended 1.2 s.
+            kotlinx.coroutines.withTimeoutOrNull(1_200) {
+                snackbar.showGroupNotice(context.getString(R.string.st_Whisper_Groups_ErrGone))
+            }
             onNavigateBack()
         }
     }
