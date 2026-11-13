@@ -1074,6 +1074,12 @@ SQL baseline and the history serving lives in the deployed
 `whisper-bundle-fetch`; a stale edge deploy silently drops reinstall-proofing.
 The post-deploy smoke runbook verifies this pairing.
 
+A sync reads the log in explicit `seq`-ordered pages rather than one unbounded
+select: PostgREST caps a select at the project's `max-rows` (1 000 on
+Supabase), so a fresh device would otherwise verify only the first 1 000 events
+of a long-lived group. The walk reads one row past the 5 000-row verification
+cap, so an oversized log fails honestly instead of being treated as complete.
+
 **Account deletion (resolved for the v1.1.8 launch).** The signer archive
 deliberately has **no FK to `auth.users`**, is retained by
 `whisper_purge_account_data`, and `whisper-bundle-fetch` serves a **signers-only

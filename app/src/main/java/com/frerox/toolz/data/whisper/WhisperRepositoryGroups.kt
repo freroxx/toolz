@@ -106,6 +106,10 @@ object WhisperGroupsConfig {
     /** Max event-log rows a single sync will verify (runaway-log guard). */
     const val MAX_VERIFIED_EVENTS = 5_000
 
+    /** Event-log page size: PostgREST caps an unbounded select (1 000 rows on
+     *  Supabase), so a full pull must page explicitly to reach the cap above. */
+    const val EVENT_PAGE_SIZE = 500L
+
     /** Network ceiling per group op: loads always settle (error + retry), never hang. */
     const val OP_TIMEOUT_MS = 30_000L
 
@@ -1089,13 +1093,26 @@ private suspend fun WhisperRepository.fetchVerifiedMembershipInner(groupId: Stri
     val cached = groupDao.events(groupId)
     val watermark = cached.maxOfOrNull { it.seq } ?: 0L
     suspend fun fetchFresh(afterSeq: Long): List<WhisperGroupEvent> {
-        val rows = if (afterSeq > 0) {
-            db.from("whisper_group_events").select {
-                filter { eq("group_id", groupId); gt("seq", afterSeq) }
+        // PostgREST caps an unbounded select at the project's max-rows (1 000
+        // on Supabase), so a fresh device used to verify only the first 1 000
+        // events of a long-lived group while this file supports 5 000 — a
+        // removal/rename past the cap was invisible to verification. Page
+        // explicitly on seq and read one row past the cap so an oversized log
+        // fails honestly instead of being treated as complete.
+        val rows = mutableListOf<GroupEventRow>()
+        var offset = 0L
+        while (rows.size <= WhisperGroupsConfig.MAX_VERIFIED_EVENTS) {
+            val batch = db.from("whisper_group_events").select {
+                filter {
+                    eq("group_id", groupId)
+                    if (afterSeq > 0) gt("seq", afterSeq)
+                }
+                order("seq", Order.ASCENDING)
+                range(offset, offset + WhisperGroupsConfig.EVENT_PAGE_SIZE - 1)
             }.decodeList<GroupEventRow>()
-        } else {
-            db.from("whisper_group_events").select { filter { eq("group_id", groupId) } }
-                .decodeList<GroupEventRow>()
+            rows += batch
+            if (batch.size.toLong() < WhisperGroupsConfig.EVENT_PAGE_SIZE) break
+            offset += WhisperGroupsConfig.EVENT_PAGE_SIZE
         }
         return rows.sortedBy { it.seq }.map { it.toModel() }
     }
