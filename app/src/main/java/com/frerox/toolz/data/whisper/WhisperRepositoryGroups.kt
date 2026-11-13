@@ -965,6 +965,13 @@ internal data class GroupMessageInsert(
     @SerialName("msg_kind") val msgKind: String = "chat",
 )
 
+/** Slim projection for unread counting: never downloads ciphertext just to count rows. */
+@Serializable
+internal data class GroupUnreadRow(
+    @SerialName("sender_id") val senderId: String,
+    @SerialName("created_at") val createdAt: String? = null,
+)
+
 /** One decrypted group chat line for the UI. */
 data class WhisperGroupChatMessage(
     val id: String,
@@ -3280,14 +3287,19 @@ internal fun WhisperRepository.observeGroupMessagesLive(groupId: String): kotlin
 suspend fun WhisperRepository.countGroupUnread(groupId: String, mark: String, me: String): Int {
     if (groupId.isBlank() || me.isBlank()) return 0
     return runCatching {
-        db.from("whisper_group_messages").select {
+        // Project only the two columns the count needs: selecting `*` pulled
+        // up to 101 ciphertext payloads (tens of KB) per group on every hub
+        // load and every preview ping, purely to throw them away.
+        db.from("whisper_group_messages").select(
+            io.github.jan.supabase.postgrest.query.Columns.raw("sender_id,created_at"),
+        ) {
             filter {
                 eq("group_id", groupId)
                 if (mark.isNotBlank()) gt("created_at", mark)
             }
             order("created_at", Order.DESCENDING)
             limit(101)
-        }.decodeList<GroupMessageRow>().count { it.senderId != me && (mark.isBlank() || (it.createdAt ?: "") > mark) }
+        }.decodeList<GroupUnreadRow>().count { it.senderId != me && (mark.isBlank() || (it.createdAt ?: "") > mark) }
     }.getOrDefault(0)
 }
 
