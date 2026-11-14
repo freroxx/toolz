@@ -105,6 +105,11 @@ class WhisperNotificationManager @Inject constructor(
     // re-emit on reconnect/poll-seed. Dedupe by BOTH sender and friendship id
     // so either lane can suppress the other.
     private val recentlyNotifiedFriendRequests = ConcurrentHashMap<String, Long>()
+    // Daily Up cards share the message id band and group key but are not
+    // "new messages": the summary must not count them as message children, or
+    // it lingers as "Whisper / New message" after the last message is gone.
+    private val dailyUpNotifIds: MutableSet<Int> =
+        java.util.concurrent.ConcurrentHashMap.newKeySet()
     private val NOTIF_DEDUPE_TTL_MS = 30_000L
     private val MAX_RECENT_NOTIF_IDS = 1_024
     private val FRIEND_REQUEST_DEDUPE_TTL_MS = 3 * 60_000L
@@ -134,7 +139,12 @@ class WhisperNotificationManager @Inject constructor(
         }
         synchronized(senderNotifIds) {
             for ((key, value) in idPrefs.all) {
-                if (key.startsWith("id_") && value is Int) senderNotifIds[key.removePrefix("id_")] = value
+                if (key.startsWith("id_") && value is Int) {
+                    senderNotifIds[key.removePrefix("id_")] = value
+                    // Rebuild after a process restart so a persisted Daily Up
+                    // card is not mistaken for a message child.
+                    if (key.startsWith("id_dailyup:")) dailyUpNotifIds += value
+                }
             }
             nextMessageId = idPrefs.getInt("next", FIRST_MESSAGE_NOTIF_ID)
             if (nextMessageId >= LAST_MESSAGE_NOTIF_ID) {
@@ -147,6 +157,7 @@ class WhisperNotificationManager @Inject constructor(
                         .forEach { notifManager.cancel(it.id) }
                 }
                 senderNotifIds.clear()
+                dailyUpNotifIds.clear()
                 nextMessageId = FIRST_MESSAGE_NOTIF_ID
             }
         }
@@ -165,6 +176,7 @@ class WhisperNotificationManager @Inject constructor(
         // Lookup only: cancelling a ring that never had a push must not burn a
         // sender-id slot (senderNotifId allocates on miss).
         val id = synchronized(senderNotifIds) { senderNotifIds["dailyup:$posterId"] } ?: return
+        dailyUpNotifIds -= id
         runCatching { notifManager.cancel(id) }
         maybeCancelGroupSummary()
     }
@@ -361,6 +373,7 @@ class WhisperNotificationManager @Inject constructor(
         recentlyNotifiedMessageIds.clear()
         lastBlankNotifyAt.clear()
         recentlyNotifiedFriendRequests.clear()
+        dailyUpNotifIds.clear()
         synchronized(senderNotifIds) {
             senderNotifIds.clear()
             nextMessageId = FIRST_MESSAGE_NOTIF_ID
@@ -379,14 +392,16 @@ class WhisperNotificationManager @Inject constructor(
      * V2-FIX M-M?: the group summary used to outlive every child — a lone "Whisper / New
      * encrypted messages" notification stayed in the shade until tapped. After any
      * message-band child is cancelled, query the ACTIVE notification list and cancel the
-     * summary when no child remains (friend requests share the group key but post in their
-     * own band and do not count as message children).
+     * summary when no child remains (friend requests and group events post in
+     * their own bands, and Daily Up cards are tracked in [dailyUpNotifIds], so
+     * none of them count as message children).
      */
     private fun maybeCancelGroupSummary() {
         try {
             val hasActiveChild = notifManager.activeNotifications.any { sbn ->
                 sbn.id != SUMMARY_NOTIF_ID &&
                     sbn.id in FIRST_MESSAGE_NOTIF_ID until LAST_MESSAGE_NOTIF_ID &&
+                    sbn.id !in dailyUpNotifIds &&
                     sbn.notification.group == GROUP_KEY
             }
             if (!hasActiveChild) notifManager.cancel(SUMMARY_NOTIF_ID)
@@ -548,6 +563,7 @@ class WhisperNotificationManager @Inject constructor(
         if (!shouldNotifyForMessage(storyId)) return
         if (mutePrefs.isMuted(posterId)) return
         val notifId = senderNotifId("dailyup:$posterId")
+        dailyUpNotifIds += notifId
         val deepLinkIntent = whisperNotificationIntent(
             action = "com.frerox.toolz.OPEN_WHISPER_DAILY_UPS",
             identity = "dailyup:$posterId",
