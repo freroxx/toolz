@@ -264,18 +264,23 @@ class PurgeShotService : Service() {
 
     private fun buildForegroundNotification(): Notification {
         val launchIntent = Intent(this, com.frerox.toolz.MainActivity::class.java).apply {
-            putExtra("navigate_to", "purgeshot")
+            // Must be the real route, not a display label. A stale "purgeshot"
+            // extra used to crash Navigation with "destination not found".
+            putExtra(com.frerox.toolz.MainActivity.EXTRA_NAVIGATE_TO, com.frerox.toolz.ui.navigation.Screen.PurgeShot.route)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         }
-        val pi = android.app.PendingIntent.getActivity(this, 0, launchIntent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
+        val pi = android.app.PendingIntent.getActivity(
+            this, NOTIF_ID, launchIntent,
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE,
+        )
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("PurgeShot active")
-            .setContentText("Watching for screenshots")
+            .setContentTitle(getString(R.string.st_PurgeShot_Title))
+            .setContentText(getString(R.string.st_PurgeShot_Service_Watching))
+            .setContentIntent(pi)
             .setSmallIcon(R.drawable.ic_stat_toolz)
             // Ongoing status notification: no large icon so the text stays readable.
             .setOngoing(true)
             .setSilent(true)
-            .setContentIntent(pi)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .build()

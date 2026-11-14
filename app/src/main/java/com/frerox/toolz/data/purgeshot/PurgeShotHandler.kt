@@ -684,7 +684,7 @@ object PurgeShotHandler {
             ensureChannel(context)
 
             val openIntent = Intent(context, MainActivity::class.java).apply {
-                putExtra("navigate_to", "purgeshot")
+                putExtra(MainActivity.EXTRA_NAVIGATE_TO, com.frerox.toolz.ui.navigation.Screen.PurgeShot.route)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             }
             val pi = PendingIntent.getActivity(
