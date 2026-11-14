@@ -1289,6 +1289,22 @@ suspend fun WhisperRepository.syncGroups(): Result<List<WhisperGroupMembership>>
     ok
 }
 
+/**
+ * Drops all local cached state for a group that was authoritatively left,
+ * disbanded, or from which the user was removed: Room cache rows (group,
+ * members, signed events), the read watermark, notification preference
+ * override, and mute state.
+ */
+internal suspend fun WhisperRepository.purgeDepartedGroup(groupId: String) {
+    if (groupId.isBlank()) return
+    groupDao.deleteGroup(groupId)
+    groupDao.clearMembers(groupId)
+    groupDao.clearEvents(groupId)
+    groupReadStore.clearGroup(groupId)
+    groupNotifPrefs.clearOverride(groupId)
+    mutePrefs.unmuteUser("group:$groupId")
+}
+
 private suspend fun WhisperRepository.persistGroupCache(
     group: GroupRow,
     membership: WhisperGroupMembership,
