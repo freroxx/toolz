@@ -351,13 +351,32 @@ class WhisperPrekeyManager @Inject constructor(
         val existing = prefs.getString(KEY_IK_SEED, null)
         if (existing != null) {
             val unwrapped = crypto.unwrapWithKeystoreAes(existing)
-                ?: error("Identity seed unwrapping failed — protocol state corrupted")
-            return unwrapped.also { cachedIdentitySeed = it }
+            if (unwrapped != null) {
+                return unwrapped.also { cachedIdentitySeed = it }
+            }
+            // Keystore wrap key was invalidated, rotated, or wiped (e.g. after reinstall,
+            // backup restore, or Keystore clear). Heal immediately by regenerating a fresh
+            // identity seed rather than crashing with IllegalStateException.
+            Log.w("WhisperPrekey", "Identity seed unwrapping failed — Keystore wrap key invalidated or divergent. Healing identity seed.")
+            ProtocolDiagnostics.increment("identity.seedUnwrapFailedHeal")
+            ProtocolDiagnostics.log("prekeys: Keystore unwrap failed for identity seed; generating fresh seed to heal protocol state")
+            prefs.edit()
+                .remove(KEY_IK_SEED)
+                .remove(KEY_CURRENT_SPK)
+                .remove(KEY_SPK_PUBLISHED_AT)
+                .commit()
+            currentSpkKid = null
+            lastPublishedAtMs = 0L
+            cachedIdentityPublicB64 = null
         }
         val seed = SessionCrypto.generatePrivateKey()
         val wrapped = crypto.wrapWithKeystoreAes(seed)
-            ?: error("Could not protect identity seed")
-        prefs.edit().putString(KEY_IK_SEED, wrapped).commit()
+        if (wrapped != null) {
+            prefs.edit().putString(KEY_IK_SEED, wrapped).commit()
+        } else {
+            Log.e("WhisperPrekey", "Could not protect identity seed with Keystore AES — retaining in memory")
+            ProtocolDiagnostics.increment("identity.seedWrapFailed")
+        }
         return seed.also { cachedIdentitySeed = it }
     }
 

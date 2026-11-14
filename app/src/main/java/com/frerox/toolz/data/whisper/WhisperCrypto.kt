@@ -344,8 +344,9 @@ class WhisperCrypto @Inject constructor(
     /** Inverse of [wrapWithKeystoreAes]; null on tamper or missing key. */
     fun unwrapWithKeystoreAes(wrappedB64: String): ByteArray? = runCatching {
         val keyStore = java.security.KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
-        val secret = keyStore.getKey(WRAP_ALIAS, null) as javax.crypto.SecretKey
+        val secret = keyStore.getKey(WRAP_ALIAS, null) as? javax.crypto.SecretKey ?: return@runCatching null
         val packed = Base64.decode(wrappedB64, Base64.NO_WRAP)
+        if (packed.size < 13) return@runCatching null
         val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(javax.crypto.Cipher.DECRYPT_MODE, secret, javax.crypto.spec.GCMParameterSpec(128, packed.copyOfRange(0, 12)))
         cipher.doFinal(packed.copyOfRange(12, packed.size))

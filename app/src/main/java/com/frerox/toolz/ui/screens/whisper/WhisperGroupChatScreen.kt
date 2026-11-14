@@ -137,7 +137,7 @@ fun WhisperGroupChatScreen(
     // Authorization is the reconstructed POLICY state, not a role check: the
     // owner may delegate send (or poll rights) to members through a signed
     // POLICY event, and a member without send locks exactly as before.
-    val canSend = membership?.allows(myId, WhisperGroupCapability.SEND_MESSAGES) == true
+    val canSend = membership?.allows(myId, WhisperGroupCapability.SEND_MESSAGES) ?: true
     val canCreatePoll = membership?.allows(myId, WhisperGroupCapability.CREATE_POLLS) == true
     val canClosePoll = membership?.allows(myId, WhisperGroupCapability.CLOSE_POLLS) == true
     val locked = membership != null && !canSend
@@ -315,7 +315,7 @@ fun WhisperGroupChatScreen(
             )
         },
         bottomBar = {
-            if (membership != null || state.isLoading) {
+            if (!state.removed) {
                 GroupComposer(
                     draft = draft,
                     onDraftChange = {

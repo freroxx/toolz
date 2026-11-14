@@ -1118,7 +1118,30 @@ private suspend fun WhisperRepository.fetchVerifiedMembershipInner(groupId: Stri
     }
     var events = (cached.map { it.toModel() } + fetchFresh(watermark))
         .distinctBy { it.id }.sortedBy { it.seq }
-    if (events.isEmpty()) error("Group has no history.")
+    if (events.isEmpty()) {
+        val me = requireMe()
+        if (group.createdBy == me) {
+            val payload = groupJson.encodeToString(
+                kotlinx.serialization.json.JsonObject.serializer(),
+                kotlinx.serialization.json.buildJsonObject {
+                    put("name", group.name.ifBlank { "Group" })
+                    put("invite", "admins")
+                },
+            )
+            runCatching {
+                publishGroupEvent(
+                    groupId = groupId,
+                    seq = 1,
+                    epoch = 0,
+                    type = WhisperGroupEventType.CREATE,
+                    actor = me,
+                    payload = payload,
+                ).getOrThrow()
+            }
+            events = fetchFresh(0).distinctBy { it.id }.sortedBy { it.seq }
+        }
+        if (events.isEmpty()) error("Group has no history.")
+    }
     require(events.size <= WhisperGroupsConfig.MAX_VERIFIED_EVENTS) {
         "Group history is too large to verify safely."
     }
@@ -1382,14 +1405,16 @@ suspend fun WhisperRepository.createGroup(
     val cleanName = name.trim().take(WhisperGroupsConfig.MAX_GROUP_NAME_CHARS)
     require(cleanName.isNotBlank()) { "Group name is required." }
     val others = memberIds.filter { it.isNotBlank() && it != me }.distinct()
-    require(others.isNotEmpty()) { "Add at least one friend." }
+    // Solo groups (me only, for personal notes, drafts, or staged groups) are fully supported.
     require(1 + others.size <= WhisperGroupsConfig.MAX_MEMBERS) {
         "Groups hold ${WhisperGroupsConfig.MAX_MEMBERS} members max."
     }
     // Friends-only adds: every invitee must be an accepted friend.
-    val friendIds = getFriends().getOrThrow().map { it.id }.toSet()
-    val strangers = others.filter { it !in friendIds }
-    require(strangers.isEmpty()) { "Only friends can be added to a group." }
+    if (others.isNotEmpty()) {
+        val friendIds = getFriends().getOrThrow().map { it.id }.toSet()
+        val strangers = others.filter { it !in friendIds }
+        require(strangers.isEmpty()) { "Only friends can be added to a group." }
+    }
     val groupId = java.util.UUID.randomUUID().toString()
     db.from("whisper_groups").insert(GroupRowInsert(id = groupId, name = cleanName, epoch = 0, createdBy = me))
     try {
@@ -1443,9 +1468,9 @@ suspend fun WhisperRepository.createGroup(
             android.util.Log.w("WhisperGroups", "create round-trip re-read soft-failed: ${e.message}")
         }
     } catch (e: Throwable) {
-        // No history: tear the whole stub down (row + admin row).
-        runCatching { db.from("whisper_group_members").delete { filter { eq("group_id", groupId); eq("user_id", me) } } }
+        // No history: tear the whole stub down (group row + member row).
         runCatching { db.from("whisper_groups").delete { filter { eq("id", groupId) } } }
+        runCatching { db.from("whisper_group_members").delete { filter { eq("group_id", groupId); eq("user_id", me) } } }
         throw e
     }
     var seq = 2L

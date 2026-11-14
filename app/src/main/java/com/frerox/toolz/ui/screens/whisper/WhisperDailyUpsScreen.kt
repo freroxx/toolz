@@ -16,6 +16,8 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -51,10 +53,15 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AddCircle
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -86,6 +93,9 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
@@ -118,7 +128,9 @@ import com.frerox.toolz.ui.components.ExpressiveCard
 import com.frerox.toolz.ui.components.ExpressiveRefreshIndicator
 import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
+import com.frerox.toolz.ui.components.ToolzExpressiveTextButton
 import com.frerox.toolz.ui.components.ToolzTonalExpressiveButton
+import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.rememberToolzHapticFeedback
 import com.frerox.toolz.ui.theme.toolzBackground
 import kotlinx.coroutines.Job
@@ -187,12 +199,14 @@ fun WhisperDailyUpsScreen(
         val owner = ownerArg?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
         if (ownerOpenConsumed || state.loading) return@LaunchedEffect
         if (state.error != null && state.posterGroups.isEmpty()) return@LaunchedEffect
-        val poster = state.posterGroups.firstOrNull { it.ownerId == owner && !it.isMine }
+        val poster = state.posterGroups.firstOrNull { it.ownerId == owner }
         // A cold open can beat the Room combine by one frame: hold the hand-off
         // until the reconciled list can answer for this owner.
         if (poster == null && state.posterGroups.isEmpty()) return@LaunchedEffect
         ownerOpenConsumed = true
-        if (poster != null) viewModel.openViewerForOwner(owner)
+        if (poster != null) {
+            if (poster.isMine) viewModel.openMyViewer() else viewModel.openViewerForOwner(owner)
+        }
     }
 
     // The viewer shows a SNAPSHOT captured at open. If the story being read
@@ -221,9 +235,20 @@ fun WhisperDailyUpsScreen(
                     }
                 },
                 actions = {
-                    // The compose entry is the hub's primary affordance — top
-                    // bar action AND the "+" ring below, never one alone. The
-                    // VM gate survives recomposition and stops a double push.
+                    val quotaLeft = (WhisperDailyUpsConfig.DAILY_LIMIT - state.quotaUsed).coerceAtLeast(0)
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        modifier = Modifier.padding(end = 4.dp),
+                    ) {
+                        Text(
+                            text = "$quotaLeft/${WhisperDailyUpsConfig.DAILY_LIMIT}",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        )
+                    }
                     IconButton(
                         onClick = {
                             if (viewModel.acceptNavigation()) onNavigateToCompose()
@@ -232,12 +257,16 @@ fun WhisperDailyUpsScreen(
                         Icon(
                             Icons.Rounded.AddCircle,
                             contentDescription = stringResource(R.string.st_Whisper_DailyUp_AddCd),
+                            tint = MaterialTheme.colorScheme.primary,
                         )
                     }
                     if (state.loading) {
                         CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
+                            modifier = Modifier
+                                .padding(horizontal = 12.dp)
+                                .size(20.dp),
                             strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.primary,
                         )
                     } else {
                         IconButton(onClick = { viewModel.refresh() }) {
@@ -330,12 +359,15 @@ fun WhisperDailyUpsScreen(
                             if (viewModel.acceptNavigation()) onNavigateToCompose()
                         },
                     )
-                    Spacer(Modifier.height(18.dp))
+                    Spacer(Modifier.height(20.dp))
+                    SectionHeader(
+                        text = stringResource(R.string.st_Whisper_DailyUp_RecentUpdates) +
+                            if (friendPosters.isNotEmpty()) " (${friendPosters.size})" else "",
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                    )
+                    Spacer(Modifier.height(6.dp))
                     if (friendPosters.isEmpty()) {
-                        Text(
-                            text = stringResource(R.string.st_Whisper_DailyUp_NoFriendUps),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        DailyUpsEmptyState(
                             modifier = Modifier.padding(horizontal = 16.dp),
                         )
                     } else {
@@ -343,8 +375,22 @@ fun WhisperDailyUpsScreen(
                             posters = friendPosters,
                             onOpen = { ownerId -> viewModel.openViewerForOwner(ownerId) },
                         )
+                        Spacer(Modifier.height(16.dp))
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            friendPosters.forEach { poster ->
+                                FriendStoryCard(
+                                    poster = poster,
+                                    onClick = { viewModel.openViewerForOwner(poster.ownerId) },
+                                )
+                            }
+                        }
                     }
-                    Spacer(Modifier.height(24.dp))
+                    Spacer(Modifier.height(32.dp))
                 }
             }
         }
@@ -354,8 +400,16 @@ fun WhisperDailyUpsScreen(
     val mineFallback = stringResource(R.string.st_Whisper_DailyUp_Mine)
     AnimatedVisibility(
         visible = viewer != null,
-        enter = fadeIn(),
-        exit = fadeOut(),
+        enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) +
+            scaleIn(
+                initialScale = 0.94f,
+                animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow),
+            ),
+        exit = fadeOut(animationSpec = spring(stiffness = Spring.StiffnessMedium)) +
+            scaleOut(
+                targetScale = 0.94f,
+                animationSpec = spring(stiffness = Spring.StiffnessMedium),
+            ),
         modifier = Modifier.fillMaxSize(),
     ) {
         val v = viewer ?: return@AnimatedVisibility
@@ -407,68 +461,153 @@ private fun YourDayCard(
 ) {
     val youLabel = stringResource(R.string.st_Whisper_You)
     val name = myName.ifBlank { youLabel }
-    // The card itself is the shortcut: live ups open my viewer, an empty day
-    // opens the composer. The trailing buttons make both actions explicit.
+    val isLive = ownCount > 0
+
     ExpressiveCard(
-        onClick = { if (ownCount > 0) onView() else onAdd() },
+        onClick = { if (isLive) onView() else onAdd() },
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp),
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(28.dp),
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp),
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                GroupAvatar(
-                    name = name,
-                    groupId = myId.ifBlank { "daily_ups_me" },
-                    size = 56.dp,
-                )
-                Spacer(Modifier.width(12.dp))
+                Box(
+                    modifier = Modifier.size(68.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    val ringColor = if (isLive) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.outlineVariant
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(68.dp)
+                            .border(
+                                width = if (isLive) 3.dp else 2.dp,
+                                color = ringColor,
+                                shape = CircleShape,
+                            ),
+                    )
+                    GroupAvatar(
+                        name = name,
+                        groupId = myId.ifBlank { "daily_ups_me" },
+                        size = 58.dp,
+                    )
+                    if (isLive) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier
+                                .size(22.dp)
+                                .align(Alignment.TopEnd),
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = ownCount.toString(),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+                        }
+                    } else {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier
+                                .size(22.dp)
+                                .align(Alignment.BottomEnd),
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Rounded.Add,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onPrimary,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.width(16.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = stringResource(R.string.st_Whisper_DailyUp_YourDay),
-                        style = MaterialTheme.typography.titleMedium,
+                        style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                     )
+                    Spacer(Modifier.height(4.dp))
                     Text(
-                        text = if (ownCount > 0) {
+                        text = if (isLive) {
                             stringResource(R.string.st_Whisper_DailyUp_YourDayLive, ownCount)
                         } else {
                             stringResource(R.string.st_Whisper_DailyUp_YourDayEmpty)
                         },
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
-            Spacer(Modifier.height(12.dp))
-            // Quota + actions share the bottom row: the card stays comfortable
-            // at 320dp with both buttons present, and the quota appears once.
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = stringResource(
-                        R.string.st_Whisper_DailyUp_QuotaLeft,
-                        quotaLeft,
-                        WhisperDailyUpsConfig.DAILY_LIMIT,
-                    ),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                )
-                if (ownCount > 0) {
+            Spacer(Modifier.height(16.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                ) {
+                    Text(
+                        text = stringResource(
+                            R.string.st_Whisper_DailyUp_QuotaLeft,
+                            quotaLeft,
+                            WhisperDailyUpsConfig.DAILY_LIMIT,
+                        ),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                if (isLive) {
                     ToolzTonalExpressiveButton(
                         onClick = onView,
-                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
                     ) {
+                        Icon(
+                            Icons.Rounded.PlayArrow,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
                         Text(stringResource(R.string.st_Whisper_DailyUp_View))
                     }
                     Spacer(Modifier.width(8.dp))
                 }
                 ToolzExpressiveButton(
                     onClick = onAdd,
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
                 ) {
-                    Text(stringResource(R.string.st_Whisper_DailyUp_Add))
+                    Icon(
+                        Icons.Rounded.Add,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        if (isLive) {
+                            stringResource(R.string.st_Whisper_DailyUp_Add)
+                        } else {
+                            stringResource(R.string.st_Whisper_DailyUp_CreateAction)
+                        },
+                    )
                 }
             }
         }
@@ -484,6 +623,7 @@ private fun FriendsRail(
     val someone = stringResource(R.string.st_Whisper_DailyUp_Someone)
     val seenLabel = stringResource(R.string.st_Whisper_DailyUp_SeenState)
     val unseenLabel = stringResource(R.string.st_Whisper_DailyUp_UnseenState)
+    val haptic = rememberToolzHapticFeedback()
     LazyRow(
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
@@ -506,9 +646,18 @@ private fun FriendsRail(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
                     .width(72.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .semantics(mergeDescendants = true) {}
-                    .clickable(onClickLabel = openLabel) { onOpen(poster.ownerId) }
+                    .clip(RoundedCornerShape(16.dp))
+                    .semantics {
+                        onClick(label = openLabel) {
+                            haptic.click()
+                            onOpen(poster.ownerId)
+                            true
+                        }
+                    }
+                    .bouncyClick {
+                        haptic.click()
+                        onOpen(poster.ownerId)
+                    }
                     .padding(vertical = 4.dp),
             ) {
                 Box(
@@ -521,7 +670,7 @@ private fun FriendsRail(
                         modifier = Modifier
                             .size(64.dp)
                             .border(
-                                width = 3.dp,
+                                width = if (poster.unseenCount > 0) 3.dp else 2.dp,
                                 color = if (poster.unseenCount > 0) {
                                     MaterialTheme.colorScheme.primary
                                 } else {
@@ -533,7 +682,7 @@ private fun FriendsRail(
                     GroupAvatar(
                         name = name,
                         groupId = poster.ownerId,
-                        size = 56.dp,
+                        size = 54.dp,
                         picture = poster.picture,
                     )
                     if (poster.unseenCount >= 2) {
@@ -558,14 +707,165 @@ private fun FriendsRail(
                 Text(
                     text = name,
                     style = MaterialTheme.typography.labelMedium,
+                    fontWeight = if (poster.unseenCount > 0) FontWeight.Bold else FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.Center,
                     modifier = Modifier
                         .width(72.dp)
-                        .padding(top = 4.dp),
+                        .padding(top = 6.dp),
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun FriendStoryCard(
+    poster: StoryPoster,
+    onClick: () -> Unit,
+) {
+    val someone = stringResource(R.string.st_Whisper_DailyUp_Someone)
+    val name = poster.ownerName?.takeIf { it.isNotBlank() } ?: someone
+    val storyCount = poster.stories.size
+    val unseenCount = poster.unseenCount
+    val isUnseen = unseenCount > 0
+
+    val ringColor = if (isUnseen) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.outlineVariant
+    }
+
+    ExpressiveCard(
+        onClick = onClick,
+        shape = RoundedCornerShape(20.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier.size(54.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(54.dp)
+                        .border(
+                            width = if (isUnseen) 2.5.dp else 1.5.dp,
+                            color = ringColor,
+                            shape = CircleShape,
+                        ),
+                )
+                GroupAvatar(
+                    name = name,
+                    groupId = poster.ownerId,
+                    size = 46.dp,
+                    picture = poster.picture,
+                )
+                if (unseenCount >= 2) {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier
+                            .size(18.dp)
+                            .align(Alignment.TopEnd),
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = unseenCount.toString(),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = name,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = if (isUnseen) FontWeight.Bold else FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(2.dp))
+                val subtitleText = when {
+                    isUnseen -> stringResource(R.string.st_Whisper_DailyUp_UnseenPill, unseenCount)
+                    storyCount == 1 -> stringResource(R.string.st_Whisper_DailyUp_StoriesCountOne)
+                    else -> stringResource(R.string.st_Whisper_DailyUp_StoriesCount, storyCount)
+                }
+                Text(
+                    text = subtitleText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (isUnseen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = if (isUnseen) FontWeight.SemiBold else FontWeight.Normal,
+                )
+            }
+            Surface(
+                shape = CircleShape,
+                color = if (isUnseen) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
+                contentColor = if (isUnseen) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .padding(8.dp)
+                        .size(18.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DailyUpsEmptyState(modifier: Modifier = Modifier) {
+    Surface(
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Rounded.AutoAwesome,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(28.dp),
+                )
+            }
+            Spacer(Modifier.height(14.dp))
+            Text(
+                text = stringResource(R.string.st_Whisper_DailyUp_EmptyTitle),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = stringResource(R.string.st_Whisper_DailyUp_EmptyDesc),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
         }
     }
 }
@@ -659,6 +959,14 @@ private fun StoryViewerOverlay(
     ) != null
     val goNext: () -> Unit = {
         if (hasNext) onNext() else closeWithHaptic()
+    }
+    val goPrev: () -> Unit = {
+        val prev = viewerPrevPosition(viewer.segmentSizes, viewer.segmentIndex, viewer.storyIndex)
+        if (prev != null) {
+            onPrev()
+        } else {
+            navScope.launch { progress.snapTo(0f) }
+        }
     }
 
     // Decrypt + receipt/reaction reads begin as soon as the current story
@@ -805,7 +1113,7 @@ private fun StoryViewerOverlay(
                         true
                     },
                     CustomAccessibilityAction(previousLabel) {
-                        if (pendingDeleteId == null) onPrev()
+                        if (pendingDeleteId == null) goPrev()
                         true
                     },
                 )
@@ -831,7 +1139,7 @@ private fun StoryViewerOverlay(
                     displayName = if (story.isMine) ownName else story.ownerName.ifBlank { someone },
                     pressed = { p -> pressed = p },
                     onNext = goNext,
-                    onPrev = onPrev,
+                    onPrev = goPrev,
                 )
             }
 
@@ -1156,11 +1464,7 @@ private fun ReactionPalette(
     currentEmoji: String,
     onToggle: (String, Boolean) -> Unit,
 ) {
-    // Six 48dp targets do not fit a 320dp phone with fixed spacing. Weighting
-    // the cells keeps the full 48dp touch target on every supported width and
-    // lets the palette fill the row cleanly instead of clipping the last emoji.
-    // Emoji are graphics, not reading text: keep them at 26dp physical size so
-    // the six 48dp targets still fit when the user doubles the font scale.
+    val haptic = rememberToolzHapticFeedback()
     val emojiFontSize = with(LocalDensity.current) { 26.dp.toSp() }
     Row(
         modifier = Modifier
@@ -1179,11 +1483,14 @@ private fun ReactionPalette(
                     .minimumInteractiveComponentSize()
                     .clip(CircleShape)
                     .clickable {
+                        haptic.tick()
                         onToggle(emoji, !active)
                     }
                     .then(
                         if (active) {
-                            Modifier.background(Color.White.copy(alpha = 0.24f))
+                            Modifier
+                                .background(Color.White.copy(alpha = 0.28f))
+                                .border(1.5.dp, Color.White.copy(alpha = 0.8f), CircleShape)
                         } else {
                             Modifier
                         },
@@ -1193,6 +1500,7 @@ private fun ReactionPalette(
                         selected = active
                         role = Role.Button
                         onClick(label = reactCd) {
+                            haptic.tick()
                             onToggle(emoji, !active)
                             true
                         }
@@ -1210,10 +1518,21 @@ private fun ReactionPalette(
 private fun ConfirmDeleteDailyUpDialog(confirm: () -> Unit, dismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = dismiss,
-        title = { Text(stringResource(R.string.st_Whisper_DailyUp_DeleteLabel)) },
-        text = { Text(stringResource(R.string.st_Whisper_DailyUp_DeleteConfirm)) },
+        title = {
+            Text(
+                text = stringResource(R.string.st_Whisper_DailyUp_DeleteLabel),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+            )
+        },
+        text = {
+            Text(
+                text = stringResource(R.string.st_Whisper_DailyUp_DeleteConfirm),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        },
         confirmButton = {
-            Button(
+            ToolzExpressiveButton(
                 onClick = confirm,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.error,
@@ -1224,9 +1543,10 @@ private fun ConfirmDeleteDailyUpDialog(confirm: () -> Unit, dismiss: () -> Unit)
             }
         },
         dismissButton = {
-            TextButton(onClick = dismiss) {
+            ToolzExpressiveTextButton(onClick = dismiss) {
                 Text(stringResource(android.R.string.cancel))
             }
         },
+        shape = RoundedCornerShape(28.dp),
     )
 }

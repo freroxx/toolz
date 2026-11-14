@@ -524,6 +524,10 @@ class WhisperDailyUpsViewModel @Inject constructor(
 
     /** One story image failed to load; the viewer page offers an inline retry. */
     fun retryImage(storyId: String) {
+        // Also clear any stale in-flight lock: a previous decode may have crashed
+        // out of its finally block in an edge case, leaving [inFlightImages] stuck
+        // and blocking every subsequent retry attempt for this story id.
+        inFlightImages.update { it - storyId }
         _failedImages.update { it - storyId }
         ensureImage(storyId)
     }
@@ -708,9 +712,14 @@ class WhisperDailyUpsViewModel @Inject constructor(
 
     /**
      * Removes [storyId] from the open viewer snapshot, keeping the reader on
-     * the story they are actually looking at. The deleted page itself closes
-     * the overlay; an emptied poster segment is dropped and the flat position
-     * is re-mapped so no unrelated story jumps under the finger.
+     * the story they are actually looking at.
+     *
+     * When the CURRENT story is the deleted one:
+     *  - If the same poster segment still has a following story, advance to it.
+     *  - Otherwise close the viewer (the segment or the entire overlay is gone).
+     *
+     * When a non-current story is deleted, the flat-position arithmetic re-maps
+     * so no unrelated story jumps under the finger.
      */
     private fun dropViewerStory(storyId: String) {
         val v = _viewer.value ?: return
@@ -718,23 +727,43 @@ class WhisperDailyUpsViewModel @Inject constructor(
             .flatMap { it.stories }
             .indexOfFirst { it.storyId == storyId }
         if (flatDeleted < 0) return
-        val currentFlat = v.flatPosition
-        if (flatDeleted == currentFlat) {
-            _viewer.value = null
-            releaseViewerCaches()
-            return
-        }
+
         val segments = v.segments.mapNotNull { segment ->
             val stories = segment.stories.filterNot { it.storyId == storyId }
             if (stories.isEmpty()) null else segment.copy(stories = stories)
         }
+
         if (segments.isEmpty()) {
             _viewer.value = null
             releaseViewerCaches()
             return
         }
+
+        val currentFlat = v.flatPosition
+        val newSizes = segments.map { it.stories.size }
+
+        if (flatDeleted == currentFlat) {
+            // Deleted the current story: try to stay at the same flat position
+            // (which now points at the NEXT story after the gap), then fall back
+            // to the last story if we were at the end of the new list.
+            val target = currentFlat.coerceAtMost(segments.sumOf { it.stories.size } - 1)
+            val position = viewerPositionAtFlat(newSizes, target)
+            if (position == null) {
+                _viewer.value = null
+                releaseViewerCaches()
+            } else {
+                _viewer.value = v.copy(
+                    segments = segments,
+                    segmentIndex = position.first,
+                    storyIndex = position.second,
+                )
+            }
+            return
+        }
+
+        // Non-current story deleted: shift flat target if the gap is before us.
         val target = if (flatDeleted < currentFlat) currentFlat - 1 else currentFlat
-        val position = viewerPositionAtFlat(segments.map { it.stories.size }, target)
+        val position = viewerPositionAtFlat(newSizes, target)
         if (position == null) {
             _viewer.value = null
             releaseViewerCaches()

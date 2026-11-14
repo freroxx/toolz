@@ -4128,6 +4128,13 @@
     <string name="st_Whisper_DailyUp_RailLabelOne">%1$s, %2$d up, %3$s</string>
     <string name="st_Whisper_DailyUp_SeenState">seen</string>
     <string name="st_Whisper_DailyUp_UnseenState">unseen</string>
+    <string name="st_Whisper_DailyUp_RecentUpdates">Recent updates</string>
+    <string name="st_Whisper_DailyUp_EmptyTitle">No updates yet</string>
+    <string name="st_Whisper_DailyUp_EmptyDesc">When your friends post Daily Ups, they\'ll appear here for 24 hours.</string>
+    <string name="st_Whisper_DailyUp_CreateAction">Create Daily Up</string>
+    <string name="st_Whisper_DailyUp_StoriesCount">%1$d stories</string>
+    <string name="st_Whisper_DailyUp_StoriesCountOne">1 story</string>
+    <string name="st_Whisper_DailyUp_UnseenPill">%1$d new</string>
     <string name="st_Whisper_NotifBanner_Title">Enable notifications</string>
     <string name="st_Whisper_NotifBanner_Desc">Get notified when friends message you — even when Toolz is in background.</string>
     <string name="st_Whisper_NotifBanner_Enable">Enable</string>

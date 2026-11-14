@@ -106,7 +106,7 @@ suspend fun WhisperRepository.getMyProfile(forceRefresh: Boolean = false): Resul
                 // full decision inputs so any silent blocker is visible in logcat.
                 android.util.Log.w(
                     "WhisperRepo",
-                    "KeyHeal check: serverKey=${existing.publicKey?.take(12)}… localKey=${pubKey?.take(12)}… " +
+                    "KeyHeal check: serverKey=${existing.publicKey.take(12)}… localKey=${pubKey.take(12)}… " +
                         "equal=${existing.publicKey == pubKey} hasStaged=${crypto.hasStagedAliases()} " +
                         "-> divergence=$reinstallDivergence"
                 )
@@ -116,9 +116,9 @@ suspend fun WhisperRepository.getMyProfile(forceRefresh: Boolean = false): Resul
                 // Build the body without nulls: a null field would be serialized as
                 // "field": null and NULL the server column (e.g. username) on self-heal.
                 val body = buildJsonObject {
-                    if (needsKey || reinstallDivergence) put("public_key", pubKey!!)
+                    if (needsKey || reinstallDivergence) put("public_key", pubKey)
                     cleanUsername?.let { put("username", it) }
-                    if (needsDisplayName) put("display_name", metaDisplayName!!)
+                    if (needsDisplayName && metaDisplayName != null) put("display_name", metaDisplayName)
                     // V5.1: republishing a key MUST look fresh to contacts, or they
                     // classify CHANGED and the manual verify dance returns.
                     if (needsKey || reinstallDivergence) {
@@ -231,10 +231,13 @@ suspend fun WhisperRepository.getMyProfile(forceRefresh: Boolean = false): Resul
      * invalid_username P0001, network) propagates to the caller.
      */
     private fun isMissingUsernameRpc(throwable: Throwable): Boolean {
-        if ((throwable as? RestException)?.statusCode == 404) return true
+        val status = (throwable as? RestException)?.statusCode
+        if (status == 404 || status == 401 || status == 403) return true
         val msg = throwable.message.orEmpty()
         return msg.contains("PGRST202", ignoreCase = true) ||
-            msg.contains("Could not find the function", ignoreCase = true)
+            msg.contains("Could not find the function", ignoreCase = true) ||
+            msg.contains("permission denied", ignoreCase = true) ||
+            msg.contains("not_authenticated", ignoreCase = true)
     }
 
     suspend fun WhisperRepository.updateProfile(update: WhisperProfileUpdate): Result<Unit> = runCatching {
@@ -255,7 +258,7 @@ suspend fun WhisperRepository.getMyProfile(forceRefresh: Boolean = false): Resul
             update.isHiddenFromDiscover?.let { put("hide_from_discover", it) }
             update.lastSeenAt?.let { put("last_seen_at", it) }
             when {
-                update.publicKey != null -> put("public_key", update.publicKey!!)
+                update.publicKey != null -> put("public_key", update.publicKey)
                 pubKey != null -> {
                     // V2-FIX (reviewwhisper.md) L-13: CE-safe runCatching around suspend call.
                     val serverKeyResult = runCatchingCE {

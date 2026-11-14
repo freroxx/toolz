@@ -180,13 +180,12 @@ class WhisperGroupInfoViewModel @Inject constructor(
                             )
                         },
                         myId = me,
-                        amOwner = repository.cachedGroups().firstOrNull { it.id == groupId }?.createdBy == me,
+                        amOwner = m.policy.ownerId == me,
                         canDisband = m.members.size <= 1 && m.isMember(me),
                         mutedUntilMs = mutePrefs.mutedUntilMs(muteKey),
                         notifOn = notifPrefs.isEnabled(
                             groupId,
-                            (repository.cachedGroups().firstOrNull { it.id == groupId }?.createdBy == me) ||
-                                m.isAdmin(me),
+                            (m.policy.ownerId == me) || m.isAdmin(me),
                         ),
                         isLoading = false,
                         isWorking = false,

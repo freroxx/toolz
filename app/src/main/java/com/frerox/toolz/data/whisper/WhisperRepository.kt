@@ -3244,8 +3244,10 @@ class WhisperRepository @Inject constructor(
                     }
                     ownPreview ?: if (profile.publicKey != null) {
                         val createdAtEpochMs = WhisperMessageEntity.parseSortEpoch(row.lastCreatedAt)
-                        decryptUnified(row.lastContent, row.lastContentIv, row.partnerId, row.partnerId, myId, createdAtEpochMs)
-                            ?: decryptUnified(row.lastContent, row.lastContentIv, row.partnerId, myId, row.partnerId, createdAtEpochMs)
+                        runCatchingCE {
+                            decryptUnified(row.lastContent, row.lastContentIv, row.partnerId, row.partnerId, myId, createdAtEpochMs)
+                                ?: decryptUnified(row.lastContent, row.lastContentIv, row.partnerId, myId, row.partnerId, createdAtEpochMs)
+                        }.getOrNull()
                     } else {
                         null
                     } ?: WhisperTombstone.LOCKED_PLACEHOLDER
@@ -3321,8 +3323,10 @@ class WhisperRepository @Inject constructor(
                     }
                     ownPreview ?: if ((peerKeyFor(partnerId) ?: profile.publicKey) != null) {
                         val previewEpochMs = WhisperMessageEntity.parseSortEpoch(lastMsg.createdAt)
-                        decryptUnified(lastMsg.content, lastMsg.contentIv, partnerId, lastMsg.senderId, lastMsg.receiverId, previewEpochMs)
-                            ?: decryptUnified(lastMsg.content, lastMsg.contentIv, partnerId, lastMsg.receiverId, lastMsg.senderId, previewEpochMs)
+                        runCatchingCE {
+                            decryptUnified(lastMsg.content, lastMsg.contentIv, partnerId, lastMsg.senderId, lastMsg.receiverId, previewEpochMs)
+                                ?: decryptUnified(lastMsg.content, lastMsg.contentIv, partnerId, lastMsg.receiverId, lastMsg.senderId, previewEpochMs)
+                        }.getOrNull()
                     } else {
                         null
                     } ?: WhisperTombstone.LOCKED_PLACEHOLDER

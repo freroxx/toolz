@@ -33,15 +33,18 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.WhisperDailyUpsConfig
+import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.rememberToolzHapticFeedback
 
 /**
@@ -81,34 +84,57 @@ internal fun DailyUpsStoriesBar(
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalAlignment = Alignment.Top,
     ) {
-        val ownName = strip.me?.effectiveName?.takeIf { it.isNotBlank() } ?: youLabel
+        val me = strip.me
+        val ownName = me?.effectiveName?.takeIf { it.isNotBlank() } ?: youLabel
+        val myId = me?.id ?: "daily_ups_me"
+        val ownLabel = if (strip.mineLive) stringResource(R.string.st_Whisper_DailyUp_YourDay) else newUpLabel
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
-                .width(64.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .semantics(mergeDescendants = true) {}
-                .clickable(onClickLabel = newUpLabel) {
+                .width(68.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .semantics {
+                    onClick(label = ownLabel) {
+                        haptic.click()
+                        if (strip.mineLive && me?.id != null) {
+                            onOpenPoster(me.id)
+                        } else {
+                            onCompose()
+                        }
+                        true
+                    }
+                }
+                .bouncyClick {
                     haptic.click()
-                    onCompose()
+                    if (strip.mineLive && me?.id != null) {
+                        onOpenPoster(me.id)
+                    } else {
+                        onCompose()
+                    }
                 }
                 .padding(vertical = 4.dp),
         ) {
             StoryBubble(
-                ownerId = strip.me?.id ?: "daily_ups_me",
+                ownerId = myId,
                 name = ownName,
                 ringColor = if (strip.mineLive) {
                     MaterialTheme.colorScheme.primary
                 } else {
                     MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
                 },
+                ringWidth = if (strip.mineLive) 3.dp else 2.dp,
                 plusBadge = true,
                 badgeCount = 0,
+                onPlusClick = {
+                    haptic.click()
+                    onCompose()
+                },
             )
             Text(
-                text = newUpLabel,
+                text = ownLabel,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = if (strip.mineLive) FontWeight.SemiBold else FontWeight.Normal,
                 textAlign = TextAlign.Center,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -130,10 +156,16 @@ internal fun DailyUpsStoriesBar(
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
-                    .width(64.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .semantics(mergeDescendants = true) {}
-                    .clickable(onClickLabel = openLabel) {
+                    .width(68.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .semantics {
+                        onClick(label = openLabel) {
+                            haptic.click()
+                            onOpenPoster(poster.ownerId)
+                            true
+                        }
+                    }
+                    .bouncyClick {
                         haptic.click()
                         onOpenPoster(poster.ownerId)
                     }
@@ -174,11 +206,13 @@ private fun StoryBubble(
     ringColor: Color,
     plusBadge: Boolean,
     badgeCount: Int,
+    ringWidth: Dp = 2.dp,
+    onPlusClick: (() -> Unit)? = null,
 ) {
     Box(
         modifier = Modifier
             .size(56.dp)
-            .border(2.dp, ringColor, CircleShape)
+            .border(ringWidth, ringColor, CircleShape)
             .padding(3.dp)
             .clearAndSetSemantics {},
         contentAlignment = Alignment.Center,
@@ -195,12 +229,19 @@ private fun StoryBubble(
                 contentColor = MaterialTheme.colorScheme.onPrimary,
                 modifier = Modifier
                     .size(20.dp)
-                    .align(Alignment.BottomEnd),
+                    .align(Alignment.BottomEnd)
+                    .then(
+                        if (onPlusClick != null) {
+                            Modifier.clickable(onClick = onPlusClick)
+                        } else {
+                            Modifier
+                        },
+                    ),
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
                         Icons.Rounded.Add,
-                        contentDescription = null,
+                        contentDescription = stringResource(R.string.st_Whisper_DailyUp_AddCd),
                         tint = MaterialTheme.colorScheme.onPrimary,
                         modifier = Modifier.size(14.dp),
                     )

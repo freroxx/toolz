@@ -477,9 +477,7 @@ private fun GroupRowCard(
     val photoLabel = stringResource(R.string.st_Whisper_Groups_Photo)
     val pollLabel = stringResource(R.string.st_Whisper_Groups_Poll)
     val membersLabel = stringResource(R.string.st_Whisper_Groups_Members)
-    val hasPreview = preview != null &&
-        (preview.text.isNotBlank() || preview.hasImage || preview.hasPoll)
-    val line = if (hasPreview && preview != null) {
+    val line = if (preview != null && (preview.text.isNotBlank() || preview.hasImage || preview.hasPoll)) {
         val sender = preview.senderName.takeIf { it.isNotBlank() }?.let { "$it: " }.orEmpty()
         sender + preview.text.ifBlank {
             when {
@@ -491,7 +489,7 @@ private fun GroupRowCard(
     } else {
         "$memberCount $membersLabel"
     }
-    val mediaIcon = if (hasPreview && preview != null) {
+    val mediaIcon = if (preview != null && (preview.text.isNotBlank() || preview.hasImage || preview.hasPoll)) {
         when {
             preview.hasPoll -> Icons.Rounded.BarChart
             preview.hasImage -> Icons.Rounded.Image
@@ -629,7 +627,7 @@ private fun CreateGroupSheet(
     // A failed create hands the button back so the user can retry.
     LaunchedEffect(state.error) { if (state.error != null) submitting = false }
 
-    val canCreate = name.isNotBlank() && picked.isNotEmpty() && !submitting
+    val canCreate = name.isNotBlank() && !submitting
     val visibleFriends = remember(state.friends, query) {
         val q = query.trim().lowercase()
         if (q.isBlank()) state.friends

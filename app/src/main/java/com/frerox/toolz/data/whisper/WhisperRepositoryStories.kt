@@ -261,9 +261,8 @@ suspend fun WhisperRepository.publishDailyUp(
         }
 
         val (sealed, key) = newGroupPictureSeal(photo.bytes)
-        val png = WhisperImageCipherTransport.encode(sealed)
         val (hostUrl, attachmentId) = encryptedImageHost
-            .upload(png, "story-$me-${System.currentTimeMillis()}", WhisperDailyUpsConfig.UPLOAD_TTL_SECONDS)
+            .upload(sealed, "story-$me-${System.currentTimeMillis()}", WhisperDailyUpsConfig.UPLOAD_TTL_SECONDS)
             .getOrThrow()
         require(hostUrl.isNotBlank() && !attachmentId.isNullOrBlank()) { "Picture upload failed." }
 
@@ -527,8 +526,14 @@ suspend fun WhisperRepository.downloadDailyUpImage(storyId: String): Result<Whis
         // The viewer collects on Main: unwrap + AES-GCM (several megabytes)
         // belongs off the UI thread, like the avatar loader already does.
         withContext(Dispatchers.Default) {
-            val sealed = WhisperImageCipherTransport.decode(hosted)
+            var sealed = WhisperImageCipherTransport.decode(hosted)
                 ?: throw IllegalStateException("corrupt story image")
+            // Backwards compatibility for any story uploaded with double-transport encoding:
+            // if the unwrapped payload is another valid transport PNG, peel the second layer.
+            val inner = WhisperImageCipherTransport.decode(sealed)
+            if (inner != null) {
+                sealed = inner
+            }
             val plain = openGroupPictureBytes(sealed, key)
                 ?: throw IllegalStateException("corrupt story image")
             WhisperStoryImage(plain)

@@ -4512,3 +4512,310 @@ alter table public.whisper_group_events add column if not exists signer_cert tex
 
 -- ═══════════════ end 20261019_whisper_signer_history.sql ═══════════════
 
+-- ═══════════════ 20261114_whisper_group_permissions_and_rpc_hardening.sql ═
+-- 1. Helper functions for group authorization (SECURITY DEFINER, recursion-free)
+create or replace function public.is_group_member(p_group_id uuid, p_user_id uuid)
+returns boolean language sql security definer set search_path = public stable as $$
+  select exists (
+    select 1 from public.whisper_group_members
+    where group_id = p_group_id and user_id = p_user_id
+  );
+$$;
+
+create or replace function public.is_group_admin(p_group_id uuid, p_user_id uuid)
+returns boolean language sql security definer set search_path = public stable as $$
+  select exists (
+    select 1 from public.whisper_group_members
+    where group_id = p_group_id and user_id = p_user_id and role = 'admin'
+  );
+$$;
+
+revoke all on function public.is_group_member(uuid, uuid) from public;
+grant execute on function public.is_group_member(uuid, uuid) to authenticated;
+
+revoke all on function public.is_group_admin(uuid, uuid) from public;
+grant execute on function public.is_group_admin(uuid, uuid) to authenticated;
+
+-- 2. Upgrade whisper_group_mirror_settings to synchronize roles and policy
+create or replace function public.whisper_group_mirror_settings()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_send boolean;
+  v_target uuid;
+begin
+  if new.type = 'settings' then
+    begin
+      v_send := (new.payload::jsonb ->> 'adminSend')::boolean;
+    exception when others then
+      v_send := null;
+    end;
+    if v_send is not null then
+      update public.whisper_groups set admin_only_send = v_send where id = new.group_id;
+    end if;
+  elsif new.type = 'policy' then
+    begin
+      v_send := not ((new.payload::jsonb -> 'member') ? 'send');
+      update public.whisper_groups set admin_only_send = v_send where id = new.group_id;
+    exception when others then
+      null;
+    end;
+  elsif new.type = 'promote' then
+    begin
+      v_target := (new.payload::jsonb #>> '{}')::uuid;
+      update public.whisper_group_members set role = 'admin'
+       where group_id = new.group_id and user_id = v_target;
+    exception when others then
+      null;
+    end;
+  elsif new.type = 'demote' then
+    begin
+      v_target := (new.payload::jsonb #>> '{}')::uuid;
+      update public.whisper_group_members set role = 'member'
+       where group_id = new.group_id and user_id = v_target;
+    exception when others then
+      null;
+    end;
+  end if;
+  return new;
+end;
+$$;
+
+-- 3. Upgrade RLS on whisper_group_members
+drop policy if exists whisper_group_members_select_own on public.whisper_group_members;
+drop policy if exists whisper_group_members_select_member on public.whisper_group_members;
+create policy whisper_group_members_select_member
+on public.whisper_group_members
+for select
+to authenticated
+using (
+  user_id = (select auth.uid()) or public.is_group_member(group_id, (select auth.uid()))
+);
+
+drop policy if exists whisper_group_members_update_admin on public.whisper_group_members;
+create policy whisper_group_members_update_admin
+on public.whisper_group_members
+for update
+to authenticated
+using (
+  public.is_group_admin(group_id, (select auth.uid()))
+)
+with check (
+  public.is_group_admin(group_id, (select auth.uid()))
+);
+
+-- 4. Upgrade RLS on whisper_groups
+drop policy if exists whisper_groups_delete_last_member on public.whisper_groups;
+drop policy if exists whisper_groups_delete_creator_or_last_member on public.whisper_groups;
+create policy whisper_groups_delete_creator_or_last_member
+on public.whisper_groups
+for delete
+to authenticated
+using (
+  (created_by = (select auth.uid()) and not exists (
+    select 1 from public.whisper_group_members m where m.group_id = whisper_groups.id and m.user_id <> (select auth.uid())
+  ))
+  or (public.is_group_member(id, (select auth.uid())) and not exists (
+    select 1 from public.whisper_group_members m where m.group_id = whisper_groups.id and m.user_id <> (select auth.uid())
+  ))
+);
+
+-- 5. Upgrade RLS on whisper_group_events
+drop policy if exists whisper_group_events_select_member on public.whisper_group_events;
+create policy whisper_group_events_select_member
+on public.whisper_group_events
+for select
+to authenticated
+using (
+  public.is_group_member(group_id, (select auth.uid()))
+  or exists (
+    select 1 from public.whisper_group_invites i
+    where i.group_id = whisper_group_events.group_id and i.user_id = (select auth.uid())
+  )
+);
+
+drop policy if exists whisper_group_events_insert_member on public.whisper_group_events;
+create policy whisper_group_events_insert_member
+on public.whisper_group_events
+for insert
+to authenticated
+with check (
+  actor = (select auth.uid())
+  and (
+    public.is_group_member(group_id, (select auth.uid()))
+    or (
+      type in ('create', 'join', 'decline')
+      and (
+        exists (select 1 from public.whisper_groups g where g.id = whisper_group_events.group_id and g.created_by = (select auth.uid()))
+        or exists (select 1 from public.whisper_group_invites i where i.group_id = whisper_group_events.group_id and i.user_id = (select auth.uid()))
+      )
+    )
+  )
+);
+
+-- 6. Upgrade whisper_check_username_available for anon + authenticated
+create or replace function public.whisper_check_username_available(p_username text)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_caller uuid := auth.uid();
+  v_uname  text := lower(trim(both from coalesce(p_username, '')));
+  v_count  int;
+  v_window timestamptz;
+  v_limit  int := 30;
+  v_taken  boolean;
+begin
+  if v_uname !~ '^[a-z0-9_]{1,32}$' then
+    raise exception 'invalid_username' using errcode = 'P0001';
+  end if;
+
+  if v_caller is not null then
+    perform pg_advisory_xact_lock(hashtextextended('username-check:' || v_caller::text, 0));
+
+    insert into public.whisper_username_check_quota(user_id, check_count, window_start)
+    values (v_caller, 1, now())
+    on conflict (user_id) do update set
+      check_count  = case
+                       when extract(epoch from (now() - whisper_username_check_quota.window_start)) > 3600
+                       then 1
+                       else whisper_username_check_quota.check_count + 1
+                     end,
+      window_start = case
+                       when extract(epoch from (now() - whisper_username_check_quota.window_start)) > 3600
+                       then now()
+                       else whisper_username_check_quota.window_start
+                     end
+    returning check_count, window_start into v_count, v_window;
+
+    if v_count > v_limit then
+      raise exception 'rate_limited' using errcode = 'P0002';
+    end if;
+  end if;
+
+  select exists(
+    select 1 from public.profiles where lower(username) = v_uname
+  ) into v_taken;
+
+  return not v_taken;
+end;
+$$;
+
+revoke all on function public.whisper_check_username_available(text) from public;
+grant execute on function public.whisper_check_username_available(text) to authenticated, anon;
+
+-- 7. Fix search path on security definer functions
+alter function public.are_friends(uuid, uuid) set search_path = public;
+alter function public.get_conversations(uuid) set search_path = public;
+alter function public.handle_updated_at() set search_path = public;
+
+-- Revoke anon execute on internal trigger functions
+revoke execute on function public.whisper_group_mirror_settings() from anon, public;
+revoke execute on function public.whisper_group_validate_policy_event() from anon, public;
+revoke execute on function public.whisper_group_apply_policy_owner() from anon, public;
+revoke execute on function public.whisper_group_chain_event_epoch() from anon, public;
+revoke execute on function public.whisper_group_guard_message() from anon, public;
+revoke execute on function public.whisper_group_reject_direct_owner_change() from anon, public;
+revoke execute on function public.whisper_group_require_invite() from anon, public;
+revoke execute on function public.whisper_group_enforce_member_cap() from anon, public;
+revoke execute on function public.whisper_group_enforce_invite_cap() from anon, public;
+revoke execute on function public.whisper_group_consume_join_request() from anon, public;
+revoke execute on function public.whisper_group_consume_invite() from anon, public;
+revoke execute on function public.whisper_group_cleanup_receipts() from anon, public;
+revoke execute on function public.whisper_group_cleanup_reactions() from anon, public;
+revoke execute on function public.whisper_group_validate_message_ref() from anon, public;
+revoke execute on function public.whisper_story_enforce_server_expiry() from anon, public;
+-- ═══════════════ end 20261114_whisper_group_permissions_and_rpc_hardening.sql ═══════════════
+
+
+
+
+-- ═══════════════ 20261114_whisper_dailyups_security_hardening.sql ═══════════════
+-- Closes security advisor findings for story tables and internal functions.
+-- All story client RPCs (publish/view/react/delete) remain callable by authenticated.
+-- Internal trigger functions, admin helpers and service-role functions are revoked from public REST access.
+
+-- 1. Revoke anon from internal utility functions that must not be REST-callable
+revoke execute on function public.are_friends(uuid, uuid) from anon, public;
+grant execute on function public.are_friends(uuid, uuid) to authenticated;
+
+CREATE OR REPLACE FUNCTION public.get_conversations(p_user_id uuid)
+ RETURNS TABLE(partner_id uuid, last_content text, last_content_iv text, last_created_at timestamp with time zone, unread_count bigint)
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+  IF auth.uid() IS NULL OR auth.uid() <> p_user_id THEN
+    RAISE EXCEPTION 'access denied' USING ERRCODE = '42501';
+  END IF;
+
+  RETURN QUERY
+  WITH last_messages AS (
+    SELECT DISTINCT ON (
+      CASE WHEN sender_id = p_user_id THEN receiver_id ELSE sender_id END
+    )
+      CASE WHEN sender_id = p_user_id THEN receiver_id ELSE sender_id END AS partner_id,
+      content,
+      content_iv,
+      created_at
+    FROM public.messages
+    WHERE sender_id = p_user_id OR receiver_id = p_user_id
+    ORDER BY 
+      CASE WHEN sender_id = p_user_id THEN receiver_id ELSE sender_id END,
+      created_at DESC
+  ),
+  unread_counts AS (
+    SELECT 
+      sender_id AS partner_id,
+      COUNT(*) as count
+    FROM public.messages
+    WHERE receiver_id = p_user_id AND is_read = false
+    GROUP BY sender_id
+  )
+  SELECT 
+    lm.partner_id,
+    lm.content as last_content,
+    lm.content_iv as last_content_iv,
+    lm.created_at as last_created_at,
+    COALESCE(uc.count, 0) as unread_count
+  FROM last_messages lm
+  LEFT JOIN unread_counts uc ON lm.partner_id = uc.partner_id
+  ORDER BY lm.created_at DESC;
+END;
+$function$;
+
+revoke execute on function public.get_conversations(uuid) from anon, public;
+grant execute on function public.get_conversations(uuid) to authenticated;
+
+revoke execute on function public.handle_new_user() from anon, public, authenticated;
+revoke execute on function public.handle_updated_at() from anon, public, authenticated;
+
+-- 2. Trigger-only functions: revoke all REST access (they are called only by
+--    their respective triggers, never directly via RPC)
+revoke execute on function public.whisper_archive_group_signer() from anon, public, authenticated;
+revoke execute on function public.whisper_check_block_before_friend() from anon, public, authenticated;
+revoke execute on function public.whisper_check_block_before_message() from anon, public, authenticated;
+
+-- 3. Service-role-only story cleanup functions: revoke from client roles
+revoke all on function public.whisper_story_cleanup_claim(integer, integer) from anon, public, authenticated;
+revoke all on function public.whisper_story_cleanup_result(uuid, boolean, text) from anon, public, authenticated;
+
+-- 4. whisper_story_cleanup: RLS enabled with explicit service_role policy.
+--    anon and authenticated are blocked by RLS (no policy = deny). The table
+--    is managed exclusively by the whisper-story-sweep edge function which
+--    runs with the service_role key.
+drop policy if exists "whisper_story_cleanup_service_role_only" on public.whisper_story_cleanup;
+create policy "whisper_story_cleanup_service_role_only"
+  on public.whisper_story_cleanup
+  for all
+  to service_role
+  using (true)
+  with check (true);
+
+-- ═══════════════ end 20261114_whisper_dailyups_security_hardening.sql ═══════════════

@@ -829,4 +829,15 @@ class WhisperGroupsTest {
             assertTrue((e.message ?: "").contains("current owner"))
         }
     }
+
+    @Test
+    fun `solo group with creator only has valid membership and can send`() {
+        val solo = applyEvents(gid, listOf(create()), verify, keys)
+        assertEquals(1, solo.members.size)
+        assertTrue(solo.isAdmin(admin))
+        assertTrue(solo.isMember(admin))
+        assertTrue(solo.allows(admin, WhisperGroupCapability.SEND_MESSAGES))
+        assertEquals(admin, solo.policy.ownerId)
+        assertTrue(solo.isMemberAt(admin, 0))
+    }
 }

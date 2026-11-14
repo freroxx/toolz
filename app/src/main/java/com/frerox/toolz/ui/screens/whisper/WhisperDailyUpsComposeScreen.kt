@@ -13,6 +13,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +28,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -64,6 +66,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -76,6 +79,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.WhisperDailyUpsConfig
+import com.frerox.toolz.ui.components.ExpressiveCard
 import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.components.ToolzExpressiveTextButton
@@ -262,17 +266,34 @@ private fun PhotoSlot(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
             ) {
-                Icon(
-                    Icons.Rounded.AddPhotoAlternate,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(44.dp),
-                )
-                Spacer(Modifier.height(10.dp))
+                Box(
+                    modifier = Modifier
+                        .size(64.dp)
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Rounded.AddPhotoAlternate,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(32.dp),
+                    )
+                }
+                Spacer(Modifier.height(14.dp))
                 Text(
                     text = stringResource(R.string.st_Whisper_DailyUp_PickPhoto),
                     style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = stringResource(R.string.st_Whisper_DailyUp_YourDayEmpty),
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 24.dp),
                 )
             }
         }
@@ -324,23 +345,33 @@ private fun PhotoSlot(
 
 @Composable
 private fun ReceiptsRow(on: Boolean, onChange: (Boolean) -> Unit) {
-    Row(
+    ExpressiveCard(
+        onClick = { onChange(!on) },
+        shape = RoundedCornerShape(20.dp),
         modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = stringResource(R.string.st_Whisper_DailyUp_ReceiptsLabel),
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                text = stringResource(R.string.st_Whisper_DailyUp_ReceiptsDesc),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.st_Whisper_DailyUp_ReceiptsLabel),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = stringResource(R.string.st_Whisper_DailyUp_ReceiptsDesc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Switch(checked = on, onCheckedChange = onChange)
         }
-        Switch(checked = on, onCheckedChange = onChange)
     }
 }
 
@@ -350,62 +381,76 @@ private fun AudienceSummaryRow(
     onEdit: () -> Unit,
     onRetryFriends: () -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = stringResource(
-                    R.string.st_Whisper_DailyUp_AudienceSummary,
-                    state.audienceSize,
-                ),
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.weight(1f),
-            )
-            when {
-                state.friendsLoading -> CircularProgressIndicator(
-                    modifier = Modifier.size(18.dp),
-                    strokeWidth = 2.dp,
+    ExpressiveCard(
+        onClick = if (state.friends.isNotEmpty()) onEdit else onRetryFriends,
+        shape = RoundedCornerShape(20.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = stringResource(
+                        R.string.st_Whisper_DailyUp_AudienceSummary,
+                        state.audienceSize,
+                    ),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f),
                 )
-                state.friends.isNotEmpty() -> TextButton(onClick = onEdit) {
-                    Text(stringResource(R.string.st_Whisper_DailyUp_AudienceEdit))
+                when {
+                    state.friendsLoading -> CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                    )
+                    state.friends.isNotEmpty() -> TextButton(onClick = onEdit) {
+                        Text(
+                            text = stringResource(R.string.st_Whisper_DailyUp_AudienceEdit),
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
                 }
             }
-        }
-        Text(
-            text = stringResource(R.string.st_Whisper_DailyUp_AudienceHint),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        if (state.audienceCapped && !state.friendsLoading && !state.friendsFailed) {
             Text(
-                text = stringResource(
-                    R.string.st_Whisper_DailyUp_AudienceCapped,
-                    state.friends.size,
-                    WhisperDailyUpsConfig.MAX_RECIPIENTS,
-                ),
+                text = stringResource(R.string.st_Whisper_DailyUp_AudienceHint),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-        }
-        when {
-            // Loading wins over a stale failure while a retry is in flight.
-            state.friendsLoading -> Unit
-            state.friendsFailed -> Row(verticalAlignment = Alignment.CenterVertically) {
+            if (state.audienceCapped && !state.friendsLoading && !state.friendsFailed) {
                 Text(
-                    text = stringResource(R.string.st_Whisper_DailyUp_FriendsFailed),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.weight(1f),
+                    text = stringResource(
+                        R.string.st_Whisper_DailyUp_AudienceCapped,
+                        state.friends.size,
+                        WhisperDailyUpsConfig.MAX_RECIPIENTS,
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                TextButton(onClick = onRetryFriends) {
-                    Text(stringResource(R.string.st_Whisper_DailyUp_Retry))
-                }
             }
-            state.friends.isEmpty() -> Text(
-                text = stringResource(R.string.st_Whisper_DailyUp_NoFriends),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            when {
+                // Loading wins over a stale failure while a retry is in flight.
+                state.friendsLoading -> Unit
+                state.friendsFailed -> Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = stringResource(R.string.st_Whisper_DailyUp_FriendsFailed),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = onRetryFriends) {
+                        Text(stringResource(R.string.st_Whisper_DailyUp_Retry))
+                    }
+                }
+                state.friends.isEmpty() -> Text(
+                    text = stringResource(R.string.st_Whisper_DailyUp_NoFriends),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
@@ -587,14 +632,10 @@ private fun ComposeShareBar(
         ShareBlock.NoPhoto -> stringResource(R.string.st_Whisper_DailyUp_NeedPhoto)
         ShareBlock.NoQuota -> stringResource(R.string.st_Whisper_DailyUp_NoUpsLeft)
         ShareBlock.TooManyPeople -> stringResource(R.string.st_Whisper_DailyUp_ErrAudience)
-        ShareBlock.NoAudience -> if (
-            !state.friendsLoading &&
-            !state.friendsFailed &&
-            state.friends.isNotEmpty()
-        ) {
-            stringResource(R.string.st_Whisper_DailyUp_AudienceWarning)
-        } else {
-            null
+        ShareBlock.NoAudience -> when {
+            state.friendsLoading || state.friendsFailed -> null
+            state.friends.isEmpty() -> stringResource(R.string.st_Whisper_DailyUp_NoFriends)
+            else -> stringResource(R.string.st_Whisper_DailyUp_AudienceWarning)
         }
         else -> null
     }
@@ -618,10 +659,11 @@ private fun ComposeShareBar(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 if (reason != null) {
+                    val isWarning = block == ShareBlock.NoAudience && state.friends.isNotEmpty()
                     Text(
                         text = reason,
                         style = MaterialTheme.typography.bodySmall,
-                        color = if (block == ShareBlock.NoAudience) {
+                        color = if (isWarning) {
                             MaterialTheme.colorScheme.error
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
