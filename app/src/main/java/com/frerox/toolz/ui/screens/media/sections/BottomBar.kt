@@ -214,8 +214,7 @@ private fun PillTabRow(
                         ) {
                             Text(
                                 label,
-                                fontWeight = FontWeight.Black,
-                                letterSpacing = 0.4.sp,
+                                fontWeight = FontWeight.SemiBold,
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer,
                                 maxLines = 1,
@@ -608,21 +607,19 @@ fun MiniPlayer(
                             Column {
                                 Text(
                                     text = track.title,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Black,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
-                                    color = if (isDark) Color(0xFFEEEEEE) else Color(0xFF111111)
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
-                                val artistText = track.artist?.takeIf { it.isNotBlank() && it != "<unknown>" }?.uppercase() ?: "UNKNOWN ARTIST"
+                                val artistText = track.artist?.takeIf { it.isNotBlank() && it != "<unknown>" } ?: "Unknown artist"
                                 Text(
                                     text = artistText,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                                    fontWeight = FontWeight.ExtraBold,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    letterSpacing = 0.5.sp
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
@@ -676,21 +673,17 @@ fun MiniPlayer(
                                 modifier = Modifier.size(30.dp)
                             )
                         } else {
-                            Crossfade(targetState = isPlaying, animationSpec = tween(180), label = "ppMini") { playing ->
-                                // Same real morph as the full player (scale + fade), so play/pause
-                                // reads as one shape transforming rather than two icons dissolving.
-                                AnimatedContent(
-                                    targetState = playing,
-                                    transitionSpec = {
-                                        (scaleIn(initialScale = 0.5f, animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMediumLow)) + fadeIn(tween(140)))
-                                            .togetherWith(
-                                                scaleOut(targetScale = 0.5f, animationSpec = spring(Spring.DampingRatioNoBouncy, Spring.StiffnessHigh)) + fadeOut(tween(100))
-                                            )
-                                    },
-                                    label = "ppMiniMorph"
-                                ) { pl ->
-                                    Icon(if (pl) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, null, modifier = Modifier.size(30.dp))
-                                }
+                            AnimatedContent(
+                                targetState = isPlaying,
+                                transitionSpec = {
+                                    (scaleIn(initialScale = 0.5f, animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMediumLow)) + fadeIn(tween(140)))
+                                        .togetherWith(
+                                            scaleOut(targetScale = 0.5f, animationSpec = spring(Spring.DampingRatioNoBouncy, Spring.StiffnessHigh)) + fadeOut(tween(100))
+                                        )
+                                },
+                                label = "ppMiniMorph"
+                            ) { playing ->
+                                Icon(if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, null, modifier = Modifier.size(30.dp))
                             }
                         }
                     }
@@ -743,8 +736,8 @@ fun MiniPlayer(
                                 if (currentLyric != null) {
                                     Text(
                                         currentLyric,
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.Black,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.SemiBold,
                                         textAlign = TextAlign.Center,
                                         fontFamily = fontFamily,
                                         color = lyricColor,
@@ -769,8 +762,8 @@ fun MiniPlayer(
                                         Text(
                                             stringResource(R.string.st_MusicPlayerScreen_etm87),
                                             style = MaterialTheme.typography.bodyMedium,
-                                            color = lyricColor.copy(alpha = 0.35f),
-                                            fontWeight = FontWeight.Bold,
+                                            color = lyricColor.copy(alpha = 0.55f),
+                                            fontWeight = FontWeight.Normal,
                                             fontFamily = fontFamily,
                                             textAlign = TextAlign.Center
                                         )
@@ -790,8 +783,8 @@ fun MiniPlayer(
                                     if (lyric != null) {
                                         Text(
                                             lyric,
-                                            style = MaterialTheme.typography.titleMedium,
-                                            fontWeight = FontWeight.Black,
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.SemiBold,
                                             textAlign = TextAlign.Center,
                                             fontFamily = fontFamily,
                                             color = lyricColor,
@@ -816,8 +809,8 @@ fun MiniPlayer(
                                             Text(
                                                 "Enjoy the music",
                                                 style = MaterialTheme.typography.bodyMedium,
-                                                color = lyricColor.copy(alpha = 0.35f),
-                                                fontWeight = FontWeight.Bold,
+                                                color = lyricColor.copy(alpha = 0.55f),
+                                                fontWeight = FontWeight.Normal,
                                                 fontFamily = fontFamily,
                                                 textAlign = TextAlign.Center
                                             )
@@ -838,8 +831,8 @@ fun MiniPlayer(
                             Text(
                                 formatDuration(progress),
                                 style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Black,
-                                color = if (isDark) Color(0xFFE5E5E5).copy(alpha = 0.7f) else Color(0xFF222222).copy(alpha = 0.7f)
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             com.frerox.toolz.ui.components.ExpressiveLinearProgressIndicator(
                                 progress = { animatedProgress },
@@ -851,8 +844,8 @@ fun MiniPlayer(
                             Text(
                                 formatDuration(duration),
                                 style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Black,
-                                color = if (isDark) Color(0xFFE5E5E5).copy(alpha = 0.4f) else Color(0xFF222222).copy(alpha = 0.4f)
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                             )
                         }
                     }

@@ -1286,8 +1286,14 @@ fun ToolzNavHost(
         if (currentRoute == null || currentRoute == "onboarding") return@LaunchedEffect
 
         if (currentRoute != route) {
-            navController.navigate(route) {
-                launchSingleTop = true
+            // A malformed extra (or an old notification cached from a previous
+            // build) must never take the app down with an unmatched route.
+            runCatching {
+                navController.navigate(route) {
+                    launchSingleTop = true
+                }
+            }.onFailure {
+                android.util.Log.w("MainActivity", "Ignoring unknown navigation route: $route", it)
             }
         }
         // Mark as shortcut-launched if the intent was a shortcut and target is not dashboard
@@ -2226,7 +2232,13 @@ private fun resolveExternalNavigationRoute(intent: Intent): String? {
         }
     }
 
-    return route
+    // Accept legacy/human-friendly aliases (old PurgeShot notifications used
+    // "purgeshot"; the destination route is "purge_shot").
+    return when (route) {
+        "purgeshot", "purge-shot" -> Screen.PurgeShot.route
+        "musicplayer", "music-player" -> Screen.MusicPlayer.createRoute(0)
+        else -> route
+    }
 }
 
 private fun getUriFromIntent(intent: Intent): Uri? {

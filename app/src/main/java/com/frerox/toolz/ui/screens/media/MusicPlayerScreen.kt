@@ -727,9 +727,9 @@ private fun PermissionPlaceholder(onAllow: () -> Unit) {
 
             StaggeredEntrance(index = 1) {
                 Text(
-                    "Storage Access",
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Black,
+                    "Storage access",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.SemiBold,
                     textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.onSurface
                 )
@@ -752,17 +752,15 @@ private fun PermissionPlaceholder(onAllow: () -> Unit) {
             StaggeredEntrance(index = 3) {
                 ToolzExpressiveButton(
                     onClick = onAllow,
-                    shape = RoundedCornerShape(24.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(64.dp)
+                        .height(56.dp)
                 ) {
-                    Icon(Icons.Rounded.LockOpen, null, modifier = Modifier.size(22.dp))
-                    Spacer(Modifier.width(12.dp))
+                    Icon(Icons.Rounded.LockOpen, null, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(10.dp))
                     Text(
-                        "GRANT ACCESS",
-                        fontWeight = FontWeight.ExtraBold,
-                        letterSpacing = 1.sp,
+                        "Grant access",
+                        fontWeight = FontWeight.SemiBold,
                         style = MaterialTheme.typography.labelLarge
                     )
                 }
@@ -780,11 +778,10 @@ private fun LoadingPlaceholder() {
                 color = MaterialTheme.colorScheme.primary
             )
             Text(
-                "SCANNING LIBRARY",
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Black,
-                letterSpacing = 2.sp,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                "Scanning library",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
@@ -953,7 +950,7 @@ fun CatalogStreamQualitySheet(
                 .navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text("Stream quality", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+            Text("Stream quality", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
             Text(
                 "Only applies to online Catalog playback. Auto stays adaptive and is the default.",
                 style = MaterialTheme.typography.bodyMedium,
@@ -1011,7 +1008,7 @@ fun SleepTimerDialog(onDismiss: () -> Unit, onSet: (Int?) -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Rounded.Timer, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
                 Spacer(Modifier.width(10.dp))
-                Text("Sleep Timer", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
+                Text("Sleep timer", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
             }
         },
         text = {
@@ -1029,7 +1026,7 @@ fun SleepTimerDialog(onDismiss: () -> Unit, onSet: (Int?) -> Unit) {
                             Text(
                                 "$mins",
                                 style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Black,
+                                fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.width(40.dp)
                             )
@@ -1042,12 +1039,12 @@ fun SleepTimerDialog(onDismiss: () -> Unit, onSet: (Int?) -> Unit) {
                     onClick = { onSet(null); onDismiss() },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Cancel timer", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Black)
+                    Text("Cancel timer", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Medium)
                 }
             }
         },
         confirmButton = {},
-        shape = RoundedCornerShape(36.dp),
+        shape = RoundedCornerShape(28.dp),
         containerColor = MaterialTheme.colorScheme.surface
     )
 }
@@ -1057,7 +1054,7 @@ fun CreatePlaylistDialog(onDismiss: () -> Unit, onCreate: (String) -> Unit) {
     var name by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("NEW PLAYLIST", fontWeight = FontWeight.Black, letterSpacing = 1.sp) },
+        title = { Text("New playlist", fontWeight = FontWeight.SemiBold) },
         text = {
             OutlinedTextField(
                 value = name,
@@ -1079,15 +1076,15 @@ fun CreatePlaylistDialog(onDismiss: () -> Unit, onCreate: (String) -> Unit) {
                 modifier = Modifier.height(52.dp),
                 enabled = name.isNotBlank()
             ) {
-                Text("CREATE", fontWeight = FontWeight.Black)
+                Text("Create", fontWeight = FontWeight.SemiBold)
             }
         },
         dismissButton = {
             ToolzExpressiveButton(onClick = onDismiss, colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent, contentColor = MaterialTheme.colorScheme.onSurface), shape = RoundedCornerShape(14.dp)) {
-                Text("CANCEL", fontWeight = FontWeight.Bold)
+                Text("Cancel", fontWeight = FontWeight.Medium)
             }
         },
-        shape = RoundedCornerShape(36.dp),
+        shape = RoundedCornerShape(28.dp),
         containerColor = MaterialTheme.colorScheme.surface
     )
 }
@@ -1096,7 +1093,7 @@ fun CreatePlaylistDialog(onDismiss: () -> Unit, onCreate: (String) -> Unit) {
 fun MultiSelectPlaylistPicker(playlists: List<Playlist>, onDismiss: () -> Unit, onPlaylistSelected: (Playlist) -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("ADD TO PLAYLIST", fontWeight = FontWeight.Black, letterSpacing = 1.sp) },
+        title = { Text("Add to playlist", fontWeight = FontWeight.SemiBold) },
         text = {
             if (playlists.isEmpty()) {
                 Text("No playlists yet.", textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1108,8 +1105,8 @@ fun MultiSelectPlaylistPicker(playlists: List<Playlist>, onDismiss: () -> Unit, 
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("CANCEL", fontWeight = FontWeight.Black) } },
-        shape = RoundedCornerShape(36.dp),
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel", fontWeight = FontWeight.Medium) } },
+        shape = RoundedCornerShape(28.dp),
         containerColor = MaterialTheme.colorScheme.surface
     )
 }
@@ -1158,7 +1155,7 @@ fun PlaylistPickerDialog(
             }
         },
         containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-        shape = RoundedCornerShape(topStart = 36.dp, topEnd = 36.dp)
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
     ) {
         Column(
             modifier = Modifier
@@ -1173,11 +1170,10 @@ fun PlaylistPickerDialog(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "SAVE TO PLAYLIST",
+                    text = "Save to playlist",
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 2.sp,
-                    color = MaterialTheme.colorScheme.primary
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
                 // Persistent create shortcut, not just an empty-state
                 // fallback — someone saving a track often wants a new
@@ -1187,7 +1183,6 @@ fun PlaylistPickerDialog(
                         onClick = { isCreating = true },
                         shape = RoundedCornerShape(12.dp),
                         color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                        modifier = Modifier.bouncyClick(onClick = { isCreating = true })
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
@@ -1195,7 +1190,7 @@ fun PlaylistPickerDialog(
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Icon(Icons.Rounded.Add, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
-                            Text("NEW", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, letterSpacing = 0.6.sp, color = MaterialTheme.colorScheme.primary)
+                            Text("New", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
                         }
                     }
                 }
@@ -1395,7 +1390,7 @@ fun LyricCustomizationSheet(
                             )
                         }
                     }
-                    Text("Lyrics Style", fontWeight = FontWeight.Black, style = MaterialTheme.typography.headlineSmall)
+                    Text("Lyrics style", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleLarge)
                 }
 
                 TextButton(
@@ -1488,7 +1483,7 @@ fun LyricCustomizationSheet(
 
             // Alignment
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Alignment", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                Text("Alignment", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1529,7 +1524,7 @@ fun LyricCustomizationSheet(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("Typography", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                    Text("Typography", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
                     ToolzExpressiveIconButton(onClick = { /* TODO: Font Picker */ }, modifier = Modifier.size(32.dp), shape = CircleShape) {
                         Icon(Icons.Rounded.Add, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                     }
@@ -1584,7 +1579,7 @@ fun highlightSearch(text: String, query: String, highlightColor: Color): Annotat
 
     return buildAnnotatedString {
         append(text.substring(0, index))
-        withStyle(SpanStyle(color = highlightColor, fontWeight = FontWeight.Black)) {
+        withStyle(SpanStyle(color = highlightColor, fontWeight = FontWeight.SemiBold)) {
             append(text.substring(index, index + query.length))
         }
         append(text.substring(index + query.length))

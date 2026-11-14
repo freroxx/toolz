@@ -51,7 +51,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.frerox.toolz.data.music.MusicTrack
 import com.frerox.toolz.ui.components.AlbumArtImage
@@ -203,9 +202,8 @@ fun QueueSheet(
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             Text(
                                 "Up next",
-                                style = MaterialTheme.typography.headlineSmall,
-                                fontWeight = FontWeight.ExtraBold,
-                                letterSpacing = (-0.4).sp
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.SemiBold
                             )
                             AnimatedContent(
                                 targetState = queue.size,
@@ -217,13 +215,13 @@ fun QueueSheet(
                             ) { count ->
                                 if (count > 0) {
                                     Surface(
-                                        shape = RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp, bottomStart = 8.dp, bottomEnd = 12.dp),
+                                        shape = RoundedCornerShape(10.dp),
                                         color = dynamicColors.primary.copy(alpha = 0.16f)
                                     ) {
                                         Text(
                                             "$count",
                                             style = MaterialTheme.typography.labelLarge,
-                                            fontWeight = FontWeight.Black,
+                                            fontWeight = FontWeight.SemiBold,
                                             color = dynamicColors.primary,
                                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
                                         )
@@ -278,17 +276,16 @@ fun QueueSheet(
                                 .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
                         )
                         Text(
-                            "COMING UP",
+                            "Coming up",
                             style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
-                            letterSpacing = 1.2.sp
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                         )
                         AnimatedVisibility(visible = dragDropState.isDragging) {
                             Text(
                                 "· drag to reorder",
                                 style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
+                                fontWeight = FontWeight.Medium,
                                 color = dynamicColors.primary.copy(alpha = 0.8f)
                             )
                         }
@@ -564,9 +561,9 @@ fun QueueItem(
                     )
                 }
                 Text(
-                    "UNDO",
+                    "Undo",
                     style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.ExtraBold,
+                    fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.error
                 )
             }

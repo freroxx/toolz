@@ -78,7 +78,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.draw.drawBehind
@@ -215,7 +214,7 @@ fun FolderCard(
     ExpressiveCard(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth().height(148.dp).bouncyClick(onClick = onClick),
-        shape = RoundedCornerShape(topStart = 18.dp, topEnd = 10.dp, bottomStart = 10.dp, bottomEnd = 18.dp),
+        shape = RoundedCornerShape(16.dp),
         containerColor = if (isCurrentFolder)
             MaterialTheme.colorScheme.surfaceContainerHigh
         else
@@ -224,7 +223,7 @@ fun FolderCard(
         elevation = 0.dp
     ) {
         Column(
-            modifier = Modifier.fillMaxSize().padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 16.dp),
+            modifier = Modifier.fillMaxSize().padding(14.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             Row(
@@ -233,7 +232,7 @@ fun FolderCard(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Surface(
-                    shape = RoundedCornerShape(topStart = 6.dp, topEnd = 12.dp, bottomStart = 12.dp, bottomEnd = 12.dp),
+                    shape = RoundedCornerShape(12.dp),
                     color = accentColor.copy(alpha = if (isCurrentFolder) 0.18f else 0.1f)
                 ) {
                     Box(modifier = Modifier.padding(9.dp), contentAlignment = Alignment.Center) {
@@ -270,7 +269,7 @@ fun FolderCard(
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(
                     text = folderName,
-                    fontWeight = FontWeight.Bold,
+                    fontWeight = FontWeight.SemiBold,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.titleSmall,
@@ -282,14 +281,13 @@ fun FolderCard(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = if (trackCount == 1) "1 TRACK" else "$trackCount TRACKS",
+                    text = if (trackCount == 1) "1 track" else "$trackCount tracks",
                     style = MaterialTheme.typography.labelSmall,
                     color = if (isCurrentFolder)
                         MaterialTheme.colorScheme.primary
                     else
-                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 0.4.sp
+                        MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.Medium
                 )
             }
         }
@@ -350,7 +348,7 @@ fun FolderTracksDialog(
             ) {
                 Surface(
                     modifier = Modifier.size(56.dp),
-                    shape = RoundedCornerShape(topStart = 10.dp, topEnd = 20.dp, bottomStart = 20.dp, bottomEnd = 20.dp),
+                    shape = RoundedCornerShape(16.dp),
                     color = MaterialTheme.colorScheme.primaryContainer,
                     shadowElevation = 0.dp
                 ) {
@@ -367,18 +365,17 @@ fun FolderTracksDialog(
                     Text(
                         folderName,
                         style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Black,
+                        fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
-                            if (tracks.size == 1) "1 TRACK" else "${tracks.size} TRACKS",
-                            style = MaterialTheme.typography.labelSmall,
+                            if (tracks.size == 1) "1 track" else "${tracks.size} tracks",
+                            style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Black,
-                            letterSpacing = 1.sp
+                            fontWeight = FontWeight.Medium
                         )
                         if (currentlyPlayingInFolder) {
                             Surface(
@@ -389,9 +386,8 @@ fun FolderTracksDialog(
                                     stringResource(R.string.st_MusicPlayerScreen_p30),
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                                     style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Black,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    letterSpacing = 0.5.sp
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.primary
                                 )
                             }
                         }
@@ -614,9 +610,8 @@ fun LibrarySection(
                         Icon(Icons.Rounded.Add, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                         Text(
                             stringResource(R.string.st_MusicPlayerScreen_n9),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Black,
-                            letterSpacing = 0.6.sp,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.primary
                         )
                     }
@@ -678,9 +673,8 @@ fun LibrarySection(
                         Icon(Icons.Rounded.CreateNewFolder, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                         Text(
                             stringResource(R.string.st_MusicPlayerScreen_a43),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Black,
-                            letterSpacing = 0.6.sp,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.primary
                         )
                     }
@@ -789,7 +783,7 @@ fun LibrarySection(
         var newName by remember(playlist.id) { mutableStateOf(playlist.name) }
         AlertDialog(
             onDismissRequest = { playlistToRename = null },
-            title = { Text(stringResource(R.string.st_MusicPlayerScreen_rp46), fontWeight = FontWeight.Black) },
+            title = { Text(stringResource(R.string.st_MusicPlayerScreen_rp46), fontWeight = FontWeight.SemiBold) },
             text = {
                 OutlinedTextField(
                     value = newName,
@@ -814,7 +808,7 @@ fun LibrarySection(
                     },
                     shape = RoundedCornerShape(12.dp),
                     enabled = newName.isNotBlank()
-                ) { Text(stringResource(R.string.st_MusicPlayerScreen_rn48), fontWeight = FontWeight.Black) }
+                ) { Text(stringResource(R.string.st_MusicPlayerScreen_rn48), fontWeight = FontWeight.SemiBold) }
             },
             dismissButton = {
                 TextButton(onClick = { playlistToRename = null }) { Text(stringResource(R.string.st_MusicPlayerScreen_c49)) }
@@ -829,10 +823,9 @@ fun LibrarySection(
 fun SectionLabel(text: String) {
     Text(
         text = text,
-        style = MaterialTheme.typography.labelLarge,
-        fontWeight = FontWeight.Black,
-        letterSpacing = 2.sp,
-        color = MaterialTheme.colorScheme.primary
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.onSurface
     )
 }
 
@@ -845,7 +838,7 @@ fun RowSectionHeader(title: String, onViewAll: () -> Unit) {
     ) {
         SectionLabel(title)
         TextButton(onClick = onViewAll) {
-            Text("SEE ALL", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+            Text("See all", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.primary)
         }
     }
 }
@@ -860,26 +853,21 @@ fun QuickAccessCard(
     contentColor: Color,
     onClick: () -> Unit
 ) {
-    // Asymmetric M3 Expressive corner, trimmed down from the previous
-    // 24dp max — at this tile width a corner that large curved directly
-    // under the label baseline and clipped the descenders of "Recent" /
-    // "Top Played". 16dp still reads as a distinct expressive shape while
-    // leaving the label column flat, unrounded ground to sit on. The
-    // bottom padding is also given its own (larger) inset so the text
-    // block clears the curve with margin instead of hugging it.
+    // Uniform 20dp corner: large enough to feel expressive, small enough that
+    // the label never sits on the curve or clips its descenders.
     val nalwfMsg = stringResource(R.string.st_MusicPlayerScreen_nalwf14)
     val context = LocalContext.current
     
     ExpressiveCard(
         onClick = onClick,
         modifier = modifier.bouncyClick(onClick = onClick),
-        shape = RoundedCornerShape(topStart = 12.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 12.dp),
+        shape = RoundedCornerShape(20.dp),
         containerColor = containerColor,
         contentColor = contentColor,
         elevation = 0.dp
     ) {
         Column(
-            modifier = Modifier.fillMaxSize().padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 18.dp),
+            modifier = Modifier.fillMaxSize().padding(16.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             Row(
@@ -891,18 +879,17 @@ fun QuickAccessCard(
                 Text(
                     text = "$count",
                     style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Black,
+                    fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     color = contentColor
                 )
             }
             Text(
-                text = label.uppercase(),
+                text = label,
                 style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.ExtraBold,
-                color = contentColor.copy(alpha = 0.75f),
-                letterSpacing = 0.8.sp,
+                fontWeight = FontWeight.Medium,
+                color = contentColor.copy(alpha = 0.8f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 softWrap = false
@@ -936,11 +923,11 @@ fun PlaylistCard(
     ExpressiveCard(
         onClick = onClick,
         onLongClick = { showContextMenu = true },
-        modifier = Modifier.fillMaxWidth().height(220.dp),
-        shape = RoundedCornerShape(36.dp),
+        modifier = Modifier.fillMaxWidth().height(184.dp),
+        shape = RoundedCornerShape(20.dp),
         containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(4.dp),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
-        elevation = 4.dp
+        elevation = 2.dp
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             // ── Background: custom thumb > mosaic > solid gradient ────────────
@@ -1025,7 +1012,7 @@ fun PlaylistCard(
                     Text(
                         text = playlist.name,
                         style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Black,
+                        fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         color = MaterialTheme.colorScheme.onSurface
@@ -1039,8 +1026,7 @@ fun PlaylistCard(
                             text = if (playlist.trackUris.size == 1) "1 track" else "${playlist.trackUris.size} tracks",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Black,
-                            letterSpacing = 0.3.sp,
+                            fontWeight = FontWeight.Medium,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                         )
                     }
@@ -1048,10 +1034,10 @@ fun PlaylistCard(
                 
                 Surface(
                     onClick = onPlay,
-                    modifier = Modifier.size(46.dp).bouncyClick {},
+                    modifier = Modifier.size(44.dp),
                     shape = CircleShape,
                     color = MaterialTheme.colorScheme.primary.copy(alpha = 0.92f),
-                    shadowElevation = 6.dp
+                    shadowElevation = 4.dp
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(Icons.Rounded.PlayArrow, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(24.dp))
@@ -1082,7 +1068,7 @@ fun PlaylistCard(
                 )
                 HorizontalDivider(modifier = Modifier.alpha(0.1f).padding(vertical = 4.dp))
                 DropdownMenuItem(
-                    text = { Text("Delete", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.error) },
+                    text = { Text("Delete", fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.error) },
                     onClick = { showContextMenu = false; onDelete() },
                     leadingIcon = { Icon(Icons.Rounded.Delete, null, tint = MaterialTheme.colorScheme.error) }
                 )
@@ -1132,7 +1118,7 @@ fun PlaylistDetailView(
         onDismissRequest = onDismiss,
         modifier = Modifier.fillMaxHeight(),
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        shape = RoundedCornerShape(topStart = 40.dp, topEnd = 40.dp),
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
         containerColor = MaterialTheme.colorScheme.surface,
         dragHandle = null
     ) {
@@ -1142,7 +1128,7 @@ fun PlaylistDetailView(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(280.dp)
+                    .height(240.dp)
             ) {
                 // Background blurred artwork
                 if (!performanceMode && playlistTracks.isNotEmpty()) {
@@ -1180,11 +1166,11 @@ fun PlaylistDetailView(
                 ) {
                     // Artwork with elevation and better shape
                     Surface(
-                        modifier = Modifier.size(160.dp),
-                        shape = RoundedCornerShape(28.dp),
+                        modifier = Modifier.size(132.dp),
+                        shape = RoundedCornerShape(20.dp),
                         color = MaterialTheme.colorScheme.surfaceVariant,
-                        shadowElevation = 16.dp,
-                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
+                        shadowElevation = 8.dp,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                     ) {
                         if (playlist.thumbnailUri != null) {
                             AsyncImage(
@@ -1226,8 +1212,8 @@ fun PlaylistDetailView(
 
                     Text(
                         text = playlist.name,
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Black,
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         color = MaterialTheme.colorScheme.onSurface,
@@ -1294,7 +1280,7 @@ fun PlaylistDetailView(
                 ) {
                     Icon(Icons.Rounded.PlayArrow, null, modifier = Modifier.size(24.dp))
                     Spacer(Modifier.width(10.dp))
-                    Text("PLAY ALL", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                    Text("Play all", fontWeight = FontWeight.SemiBold)
                 }
 
                 ToolzExpressiveButton(
@@ -1308,7 +1294,7 @@ fun PlaylistDetailView(
                 ) {
                     Icon(Icons.Rounded.Shuffle, null, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("MIX", fontWeight = FontWeight.Bold)
+                    Text("Shuffle", fontWeight = FontWeight.SemiBold)
                 }
             }
 
@@ -1338,7 +1324,7 @@ fun PlaylistDetailView(
                         text = "${playlistTracks.size}",
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
                         style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Black,
+                        fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.primary
                     )
                 }
@@ -1358,14 +1344,14 @@ fun PlaylistDetailView(
                         Icon(
                             Icons.Rounded.LibraryMusic,
                             null,
-                            modifier = Modifier.size(64.dp).alpha(0.1f)
+                            modifier = Modifier.size(64.dp).alpha(0.35f)
                         )
                         Spacer(Modifier.height(16.dp))
                         Text(
-                            text = if (searchQuery.isEmpty()) "Empty Playlist" else "No matches found",
+                            text = if (searchQuery.isEmpty()) "Empty playlist" else "No matches found",
                             style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                            fontWeight = FontWeight.Bold
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = FontWeight.Medium
                         )
                         if (isEditable && searchQuery.isEmpty()) {
                             Spacer(Modifier.height(24.dp))
@@ -1392,7 +1378,7 @@ fun PlaylistDetailView(
                             headlineContent = {
                                 Text(
                                     track.title,
-                                    fontWeight = if (isCurrent) FontWeight.Black else FontWeight.Bold,
+                                    fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Medium,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                     color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
@@ -1400,11 +1386,10 @@ fun PlaylistDetailView(
                             },
                             supportingContent = {
                                 Text(
-                                    track.artist?.uppercase() ?: "UNKNOWN ARTIST",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                                    fontWeight = FontWeight.ExtraBold,
-                                    letterSpacing = 0.5.sp
+                                    track.artist?.takeIf { it.isNotBlank() && it != "<unknown>" } ?: "Unknown artist",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontWeight = FontWeight.Normal
                                 )
                             },
                             leadingContent = {
@@ -1416,9 +1401,9 @@ fun PlaylistDetailView(
                                     Text(
                                         text = "${index + 1}",
                                         style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.Black,
-                                        color = if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
-                                                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
+                                        fontWeight = FontWeight.Medium,
+                                        color = if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                                         modifier = Modifier.width(28.dp),
                                         textAlign = TextAlign.Center
                                     )
@@ -1539,7 +1524,7 @@ fun PlaylistDetailView(
                 ) {
                     Icon(Icons.Rounded.Add, null)
                     Spacer(Modifier.width(8.dp))
-                    Text("ADD SONGS", fontWeight = FontWeight.Black)
+                    Text("Add songs", fontWeight = FontWeight.SemiBold)
                 }
             }
         }
@@ -1563,16 +1548,16 @@ fun PlaylistEmptyCard(onCreatePlaylist: () -> Unit) {
     Surface(
         onClick = onCreatePlaylist,
         modifier = Modifier.fillMaxWidth().bouncyClick(onClick = onCreatePlaylist),
-        shape = RoundedCornerShape(topStart = 10.dp, topEnd = 20.dp, bottomStart = 20.dp, bottomEnd = 10.dp),
+        shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
-        border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f))
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 18.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Surface(
-                shape = RoundedCornerShape(topStart = 14.dp, topEnd = 8.dp, bottomStart = 14.dp, bottomEnd = 14.dp),
+                shape = RoundedCornerShape(12.dp),
                 color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
             ) {
                 Box(modifier = Modifier.padding(12.dp), contentAlignment = Alignment.Center) {
@@ -1627,16 +1612,16 @@ fun FolderEmptyCard(onAddFolder: () -> Unit) {
     Surface(
         onClick = onAddFolder,
         modifier = Modifier.fillMaxWidth().bouncyClick(onClick = onAddFolder),
-        shape = RoundedCornerShape(topStart = 20.dp, topEnd = 10.dp, bottomStart = 10.dp, bottomEnd = 20.dp),
+        shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
-        border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f))
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 18.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Surface(
-                shape = RoundedCornerShape(topStart = 8.dp, topEnd = 14.dp, bottomStart = 14.dp, bottomEnd = 14.dp),
+                shape = RoundedCornerShape(12.dp),
                 color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
             ) {
                 Box(modifier = Modifier.padding(12.dp), contentAlignment = Alignment.Center) {
@@ -1699,8 +1684,8 @@ fun PlaylistPickerRow(playlist: Playlist, onClick: () -> Unit) {
             }
             Spacer(Modifier.width(14.dp))
             Column {
-                Text(playlist.name, fontWeight = FontWeight.Black, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
-                Text("${playlist.trackUris.size} tracks", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
+                Text(playlist.name, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+                Text("${playlist.trackUris.size} tracks", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Normal)
             }
         }
     }

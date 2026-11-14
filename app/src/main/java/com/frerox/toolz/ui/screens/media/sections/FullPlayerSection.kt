@@ -662,16 +662,11 @@ fun FullPlayerView(
                             }
 
                             // ── 2. Album art ──
-                            val squareCorner by animateDpAsState(
-                                targetValue = if (state.isPlaying) 28.dp else 52.dp,
-                                animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessLow),
-                                label = "artCornerMorph"
-                            )
                             val artMaxSize = (configuration.screenWidthDp * 0.80f).dp.coerceAtMost(310.dp)
                             val artShape = when (state.artShape) {
                                 "CIRCLE" -> CircleShape
-                                "SQUIRCLE", "SQUARE_ROUNDED" -> RoundedCornerShape(36.dp)
-                                else -> RoundedCornerShape(squareCorner)
+                                "SQUIRCLE", "SQUARE_ROUNDED" -> RoundedCornerShape(32.dp)
+                                else -> RoundedCornerShape(28.dp)
                             }
 
                             // ── Queue-derived next/prev preview ──
@@ -959,7 +954,7 @@ fun FullPlayerView(
                                                 Text(
                                                     text = title,
                                                     style = MaterialTheme.typography.headlineSmall,
-                                                    fontWeight = FontWeight.Bold,
+                                                    fontWeight = FontWeight.SemiBold,
                                                     maxLines = 1,
                                                     overflow = TextOverflow.Ellipsis,
                                                     color = MaterialTheme.colorScheme.onSurface,
@@ -973,7 +968,7 @@ fun FullPlayerView(
                                             Text(
                                                 text = title,
                                                 style = MaterialTheme.typography.headlineSmall,
-                                                fontWeight = FontWeight.Bold,
+                                                fontWeight = FontWeight.SemiBold,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis,
                                                 color = MaterialTheme.colorScheme.onSurface
@@ -998,7 +993,7 @@ fun FullPlayerView(
                                         Text(
                                             text = artist,
                                             style = MaterialTheme.typography.bodyLarge,
-                                            fontWeight = FontWeight.Medium,
+                                            fontWeight = FontWeight.Normal,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
@@ -1006,89 +1001,42 @@ fun FullPlayerView(
                                     }
                                 }
 
-                                // ── Favorite button — expressive burst ──
-                                // Three coordinated motions instead of a single scale
-                                // pop: (1) an overshoot scale with a quick anticipatory
-                                // dip below 1x before the bounce, (2) a small ±rotation
-                                // wobble so the heart feels flicked rather than just
-                                // resized, (3) a soft radiating ring that expands and
-                                // fades behind the icon on "add" only, echoing the fill
-                                // color so it reads as a little burst of warmth. Skips
-                                // all of this on first composition of a track so it
-                                // only ever plays on a genuine toggle.
+                                // ── Favorite button — one quiet scale on toggle ──
                                 val favScale = remember(track.uri) { Animatable(1f) }
-                                val favRotation = remember(track.uri) { Animatable(0f) }
-                                val ringProgress = remember(track.uri) { Animatable(1f) }
                                 var isFavInitialized by remember(track.uri) { mutableStateOf(false) }
                                 LaunchedEffect(track.uri, track.isFavorite) {
                                     if (!isFavInitialized) {
                                         isFavInitialized = true
                                     } else {
-                                        launch {
-                                            favScale.snapTo(0.85f)
-                                            favScale.animateTo(
-                                                targetValue = 1f,
-                                                animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMedium)
-                                            )
-                                        }
-                                        launch {
-                                            val kick = if (track.isFavorite) 14f else -10f
-                                            favRotation.snapTo(0f)
-                                            favRotation.animateTo(kick, tween(90, easing = FastOutSlowInEasing))
-                                            favRotation.animateTo(0f, spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessLow))
-                                        }
-                                        if (track.isFavorite) {
-                                            launch {
-                                                ringProgress.snapTo(0f)
-                                                ringProgress.animateTo(1f, tween(480, easing = FastOutSlowInEasing))
-                                            }
-                                        }
+                                        favScale.snapTo(0.82f)
+                                        favScale.animateTo(
+                                            targetValue = 1f,
+                                            animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMedium)
+                                        )
                                     }
                                 }
-                                val favColor = MaterialTheme.colorScheme.error
-                                Box(contentAlignment = Alignment.Center) {
-                                    // Radiating ring, drawn behind the button, only visible
-                                    // mid-animation (alpha fades to 0 as it expands to 0).
-                                    Canvas(
+                                ToolzExpressiveIconButton(
+                                    onClick = {
+                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        onToggleFavorite(track)
+                                    },
+                                    modifier = Modifier.size(44.dp),
+                                    shape = CircleShape,
+                                    colors = IconButtonDefaults.filledIconButtonColors(
+                                        containerColor = if (track.isFavorite) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                                        contentColor = if (track.isFavorite) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                ) {
+                                    Icon(
+                                        if (track.isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                                        contentDescription = if (track.isFavorite) stringResource(R.string.st_MusicPlayerScreen_rff20) else stringResource(R.string.st_MusicPlayerScreen_atf21),
                                         modifier = Modifier
-                                            .size(44.dp)
-                                            .graphicsLayer { alpha = (1f - ringProgress.value).coerceIn(0f, 1f) }
-                                    ) {
-                                        if (ringProgress.value < 1f) {
-                                            val strokeWidth = 2.dp.toPx()
-                                            val r = (size.minDimension / 2f) * (0.6f + ringProgress.value * 0.7f)
-                                            drawCircle(
-                                                color = favColor,
-                                                radius = r,
-                                                center = center,
-                                                style = Stroke(width = strokeWidth)
-                                            )
-                                        }
-                                    }
-                                    ToolzExpressiveIconButton(
-                                        onClick = {
-                                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                            onToggleFavorite(track)
-                                        },
-                                        modifier = Modifier.size(44.dp),
-                                        shape = CircleShape,
-                                        colors = IconButtonDefaults.filledIconButtonColors(
-                                            containerColor = if (track.isFavorite) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
-                                            contentColor = if (track.isFavorite) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    ) {
-                                        Icon(
-                                            if (track.isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                                            contentDescription = if (track.isFavorite) stringResource(R.string.st_MusicPlayerScreen_rff20) else stringResource(R.string.st_MusicPlayerScreen_atf21),
-                                            modifier = Modifier
-                                                .size(20.dp)
-                                                .graphicsLayer {
-                                                    scaleX = favScale.value
-                                                    scaleY = favScale.value
-                                                    rotationZ = favRotation.value
-                                                }
-                                        )
-                                    }
+                                            .size(20.dp)
+                                            .graphicsLayer {
+                                                scaleX = favScale.value
+                                                scaleY = favScale.value
+                                            }
+                                    )
                                 }
                             }
 
@@ -1155,11 +1103,6 @@ fun FullPlayerView(
                                     label = "playScale"
                                 )
                                 val playOnColor = if (dynamicColors.primary.luminance() > 0.5f) Color(0xFF1A1A1A) else Color.White
-                                val playShape by animateFloatAsState(
-                                    targetValue = if (state.isPlaying) 30f else 46f,
-                                    animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMediumLow),
-                                    label = "playShapeMorph"
-                                )
                                 ToolzExpressiveButton(
                                     onClick = {
                                         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -1170,7 +1113,7 @@ fun FullPlayerView(
                                         .height(64.dp)
                                         .scale(if (state.performanceMode) 1f else playScale)
                                         .semantics { contentDescription = if (state.isPlaying) pauseCd else playCd },
-                                    shape = RoundedCornerShape(playShape.dp),
+                                    shape = RoundedCornerShape(28.dp),
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = dynamicColors.primary,
                                         contentColor = playOnColor
@@ -1216,11 +1159,11 @@ fun FullPlayerView(
                                 }
                             }
 
-                            // ── 6. Secondary controls — real segmented toggle group ──
+                            // ── 6. Secondary controls — segmented toggle group ──
                             Spacer(Modifier.height(16.dp))
                             Surface(
-                                modifier = Modifier.fillMaxWidth().height(64.dp),
-                                shape = RoundedCornerShape(32.dp),
+                                modifier = Modifier.fillMaxWidth().height(56.dp),
+                                shape = RoundedCornerShape(28.dp),
                                 color = MaterialTheme.colorScheme.surfaceContainerHigh
                             ) {
                                 Row(
@@ -1262,8 +1205,8 @@ fun FullPlayerView(
                                             KaraokeMicIcon(
                                                 isActive = state.isKaraokeActive,
                                                 onClick = onToggleKaraoke,
-                                                size = 50.dp,
-                                                iconSize = 22.dp,
+                                                size = 46.dp,
+                                                iconSize = 20.dp,
                                                 thumbnailUri = track.thumbnailUri,
                                                 isLoading = aiState.isResolvingInstrumental
                                             )
@@ -1336,13 +1279,13 @@ private fun SegmentToggle(
     )
     Surface(
         onClick = onClick,
-        modifier = Modifier.size(50.dp),
+        modifier = Modifier.size(46.dp),
         shape = CircleShape,
         color = containerColor,
         contentColor = contentColor
     ) {
         Box(contentAlignment = Alignment.Center) {
-            Icon(if (checked) checkedIcon else uncheckedIcon, contentDescription = contentDescription, modifier = Modifier.size(24.dp))
+            Icon(if (checked) checkedIcon else uncheckedIcon, contentDescription = contentDescription, modifier = Modifier.size(22.dp))
         }
     }
 }
@@ -1364,7 +1307,7 @@ private fun SegmentToggle(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
         containerColor = MaterialTheme.colorScheme.surface,
         dragHandle = {
             Box(
@@ -1385,8 +1328,8 @@ private fun SegmentToggle(
         ) {
             Text(
                 stringResource(R.string.st_MusicPlayerScreen_ms_title74),
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Black,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.padding(vertical = 16.dp)
             )
 
@@ -1404,7 +1347,7 @@ private fun SegmentToggle(
                 Text(
                     "${"%.2f".format(state.playbackSpeed)}x",
                     style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Black,
+                    fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.primary
                 )
             }
@@ -1559,7 +1502,7 @@ private fun SegmentToggle(
                             Text(
                                 preset,
                                 style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.Black,
+                                fontWeight = FontWeight.SemiBold,
                                 color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
                             )
                         }
@@ -2154,7 +2097,7 @@ fun AudioVisualizerHalo(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false),
-        shape = RoundedCornerShape(topStart = 44.dp, topEnd = 44.dp),
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
         containerColor = MaterialTheme.colorScheme.surface,
         dragHandle = {
             Box(
@@ -2181,19 +2124,19 @@ fun AudioVisualizerHalo(
                         }
                     }
                     Column {
-                        Text("Sleep Timer", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                        Text("Sleep timer", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                         Text(
                             if (currentTimerActive && remainingMs != null) "Stops in ${formatDuration(remainingMs)}"
                             else "Music stops after selected time",
                             style = MaterialTheme.typography.labelSmall,
                             color = if (currentTimerActive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Medium
                         )
                     }
                 }
                 if (currentTimerActive) {
                     ToolzExpressiveButton(onClick = onCancel, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error, contentColor = MaterialTheme.colorScheme.onError)) {
-                        Text("Cancel", fontWeight = FontWeight.Black)
+                        Text("Cancel", fontWeight = FontWeight.SemiBold)
                     }
                 }
             }
@@ -2221,8 +2164,8 @@ fun AudioVisualizerHalo(
                             shape = RoundedCornerShape(20.dp)
                         ) {
                             Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("$mins", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
-                                Text("min", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f), fontWeight = FontWeight.SemiBold)
+                                Text("$mins", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                                Text("min", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f), fontWeight = FontWeight.Medium)
                             }
                         }
                     }

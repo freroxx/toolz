@@ -43,8 +43,10 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -177,7 +179,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.round
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
 import com.frerox.toolz.R
 import com.frerox.toolz.data.catalog.CatalogTrack
@@ -262,14 +263,31 @@ fun CatalogContent(
     var focusedTrackSize by remember { mutableStateOf(Size.Zero) }
     var focusedTrackRadius by remember { mutableStateOf(24.dp) }
     var shockwaveOffset by remember { mutableStateOf(Offset.Zero) }
+    var shockwaveKey by remember { mutableStateOf(0) }
     var showShockwave by remember { mutableStateOf(false) }
     val isReturning = remember { mutableStateOf(false) }
     var rootCoordinates by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
 
+    // One animated value drives the whole focus pull-back: the catalog behind
+    // the focused card blurs and dims in sync, then releases on dismissal.
+    // Read it inside graphicsLayer/draw blocks only, so the animation stays on
+    // the render thread and never recomposes the grid.
+    val focusBackdrop = animateFloatAsState(
+        targetValue = if (focusedTrack != null && !isReturning.value && !performanceMode) 1f else 0f,
+        animationSpec = tween(
+            durationMillis = if (isReturning.value) 280 else 380,
+            easing = FastOutSlowInEasing,
+        ),
+        label = "catalogFocusBackdrop",
+    )
+
     fun resetFocus() {
+        if (focusedTrack == null || isReturning.value) return
         isReturning.value = true
         scope.launch {
-            delay(450) 
+            // Matches the longer of the exit fade/scale runs, then clears the
+            // overlay so it stops intercepting taps behind it.
+            delay(360)
             focusedTrack = null
             isReturning.value = false
         }
@@ -285,15 +303,6 @@ fun CatalogContent(
         }
     }
 
-    val blurAlpha by animateFloatAsState(
-        targetValue = if (focusedTrack != null && !isReturning.value) 1f else 0f,
-        animationSpec = tween(if (isReturning.value) 500 else 800, easing = FastOutSlowInEasing),
-        label = "blurAlpha"
-    )
-
-    // Using a lambda for blur to avoid recompositions
-    val getBlurAlpha = remember { { blurAlpha } }
-
     var focusedTrackLayoutMode by remember { mutableStateOf<LayoutMode>(LayoutMode.LIST) }
 
     val onResolveAndPlay: (CatalogTrack, androidx.compose.ui.layout.LayoutCoordinates, androidx.compose.ui.unit.Dp, LayoutMode) -> Unit = { track, coords, radius, mode ->
@@ -304,7 +313,8 @@ fun CatalogContent(
             focusedTrackSize = Size(coords.size.width.toFloat(), coords.size.height.toFloat())
             focusedTrackRadius = radius
             shockwaveOffset = positionInRoot
-            showShockwave = true
+            shockwaveKey++
+            showShockwave = !performanceMode
             isReturning.value = false
             vibrationManager?.vibrateClick()
                 ?: view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
@@ -372,7 +382,7 @@ fun CatalogContent(
     if (showPlaylistPicker && playlistTargetTrack != null) {
         AlertDialog(
             onDismissRequest = { showPlaylistPicker = false },
-            title = { Text(stringResource(R.string.st_CatalogScreen_atp1), fontWeight = FontWeight.Black) },
+            title = { Text(stringResource(R.string.st_CatalogScreen_atp1), fontWeight = FontWeight.SemiBold) },
             text = {
                 if (playlists.isEmpty()) {
                     Text(
@@ -446,8 +456,6 @@ fun CatalogContent(
         }
     }
 
-    val localDensity = LocalDensity.current
-
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -457,12 +465,24 @@ fun CatalogContent(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
-                    val currentBlur = getBlurAlpha()
-                    if (currentBlur > 0f && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        val blurPx = (currentBlur * 18 * localDensity.density).coerceAtLeast(0.1f)
-                        renderEffect = android.graphics.RenderEffect
-                            .createBlurEffect(blurPx, blurPx, android.graphics.Shader.TileMode.DECAL)
-                            .asComposeRenderEffect()
+                    val progress = focusBackdrop.value
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        // Blur only the content that sits behind the focused
+                        // card. CLAMP keeps the edge pixels from turning
+                        // transparent the way DECAL did, which looked like a
+                        // vignette leak on bright artwork.
+                        if (progress > 0.001f) {
+                            val radiusPx = progress * 15.dp.toPx()
+                            renderEffect = android.graphics.RenderEffect
+                                .createBlurEffect(radiusPx, radiusPx, Shader.TileMode.CLAMP)
+                                .asComposeRenderEffect()
+                        } else {
+                            renderEffect = null
+                        }
+                    } else {
+                        // Pre-31 fallback: a restrained dim, since there is no
+                        // cheap render-effect blur available.
+                        alpha = 1f - progress * 0.18f
                     }
                 }
         ) {
@@ -691,36 +711,32 @@ fun CatalogContent(
             }
         }
 
-        if (showShockwave && !performanceMode) {
-            val dynamicColorsForShockwave = rememberDynamicColors(
-                artworkUri = focusedTrack?.thumbnailUrl,
-                isDark = isDark
-            )
-            
-            ShockwaveOverlay(
-                offset = shockwaveOffset,
-                size = focusedTrackSize,
-                radius = focusedTrackRadius,
-                color = dynamicColorsForShockwave.primary,
-                onFinished = { showShockwave = false }
-            )
-        }
-
-        focusedTrack?.let { track ->
-            if (!performanceMode) {
-                val dynamicColorsForFocus = rememberDynamicColors(
+        if (!performanceMode) {
+            focusedTrack?.let { track ->
+                val focusColors = rememberDynamicColors(
                     artworkUri = track.thumbnailUrl,
-                    isDark = isDark
+                    isDark = isDark,
                 )
+                if (showShockwave) {
+                    FocusShockwave(
+                        offset = shockwaveOffset,
+                        size = focusedTrackSize,
+                        radius = focusedTrackRadius,
+                        color = focusColors.primary,
+                        animationKey = shockwaveKey,
+                        onFinished = { showShockwave = false },
+                    )
+                }
                 FocusedTrackOverlay(
                     track = track,
                     offset = shockwaveOffset,
                     size = focusedTrackSize,
                     radius = focusedTrackRadius,
-                    color = dynamicColorsForFocus.primary,
+                    color = focusColors.primary,
                     layoutMode = focusedTrackLayoutMode,
                     isDiscover = focusedTrackLayoutMode == LayoutMode.FEATURED,
-                    isReturning = isReturning.value
+                    isReturning = isReturning.value,
+                    onDismiss = ::resetFocus,
                 )
             }
         }
@@ -805,7 +821,7 @@ private fun CatalogTopActions(
                 Text(
                     stringResource(R.string.st_CatalogScreen_cat4),
                     style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Black,
+                    fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
@@ -852,26 +868,26 @@ private fun SectionHeader(title: String, subtitle: String, icon: androidx.compos
         verticalAlignment = Alignment.CenterVertically
     ) {
         Surface(
-            modifier = Modifier.size(40.dp),
-            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier.size(36.dp),
+            shape = RoundedCornerShape(12.dp),
             color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(21.dp))
+                Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
             }
         }
-        Spacer(Modifier.width(16.dp))
+        Spacer(Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 title,
                 style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Black,
+                fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(
                 subtitle,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -887,47 +903,62 @@ private fun FocusedTrackOverlay(
     color: Color,
     layoutMode: LayoutMode,
     isDiscover: Boolean,
-    isReturning: Boolean
+    isReturning: Boolean,
+    onDismiss: () -> Unit,
 ) {
-    val overlayScaleTarget = if (layoutMode == LayoutMode.LIST) 1.04f else 1.08f
-    val scale by animateFloatAsState(
-        targetValue = if (isReturning) 1f else overlayScaleTarget,
-        animationSpec = tween(
-            durationMillis = if (isReturning) 500 else 700,
-            easing = FastOutSlowInEasing
-        ),
-        label = "overlayScale"
-    )
-    val alpha by animateFloatAsState(
-        targetValue = if (isReturning) 0f else 1f,
-        animationSpec = tween(if (isReturning) 450 else 500),
-        label = "overlayAlpha"
-    )
-    
-    val getScale = remember { { scale } }
-    val getAlpha = remember { { alpha } }
+    val overlayScaleTarget = if (layoutMode == LayoutMode.LIST) 1.018f else 1.03f
+
+    // Entry starts a touch smaller and a little transparent so the card visibly
+    // settles into focus instead of popping on at its final size.
+    val scale = remember { Animatable(0.972f) }
+    val alpha = remember { Animatable(0f) }
+    val settle = remember { Animatable(0f) }
+
+    LaunchedEffect(isReturning) {
+        if (isReturning) {
+            alpha.animateTo(0f, tween(280, easing = FastOutSlowInEasing))
+            scale.animateTo(1f, tween(320, easing = FastOutSlowInEasing))
+        } else {
+            // All three settle together: the card fades and scales in while the
+            // last of the motion smear resolves. Running them sequentially made
+            // the card invisible for the length of the scale spring.
+            settle.snapTo(1f)
+            launch {
+                scale.animateTo(
+                    targetValue = overlayScaleTarget,
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioNoBouncy,
+                        stiffness = Spring.StiffnessMediumLow,
+                    ),
+                )
+            }
+            launch { alpha.animateTo(1f, tween(240, easing = FastOutSlowInEasing)) }
+            launch { settle.animateTo(0f, tween(300, easing = FastOutSlowInEasing)) }
+        }
+    }
 
     val density = LocalDensity.current
-    
-    val motionBlur = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        val blur = if (!isReturning) ( (1f - alpha) * 12f) else 0f
-        if (blur > 0.1f) android.graphics.RenderEffect.createBlurEffect(blur, blur, Shader.TileMode.DECAL) else null
-    } else null
+    val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
 
-    Box(modifier = Modifier.fillMaxSize().graphicsLayer { 
-        this.alpha = getAlpha()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            renderEffect = motionBlur?.asComposeRenderEffect()
-        }
-    }) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.24f))
+            .graphicsLayer { this.alpha = alpha.value }
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                onClick = onDismiss,
+            )
+    ) {
         Box(
             modifier = Modifier
                 .offset { IntOffset(offset.x.toInt(), offset.y.toInt()) }
                 .size(with(density) { size.width.toDp() }, with(density) { size.height.toDp() })
                 .graphicsLayer {
-                    scaleX = getScale()
-                    scaleY = getScale()
-                    shadowElevation = if (isReturning) 0f else 40.dp.toPx()
+                    scaleX = scale.value
+                    scaleY = scale.value
+                    shadowElevation = if (isReturning) 0f else 24.dp.toPx()
                     spotShadowColor = color.copy(alpha = 0.6f)
                     ambientShadowColor = color.copy(alpha = 0.6f)
                     clip = true
@@ -935,31 +966,126 @@ private fun FocusedTrackOverlay(
                 }
                 .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(radius))
         ) {
-            if (isDiscover) {
-                FeaturedCarouselItem(track = track, isFocused = true, color = color, staticScale = true)
-            } else if (layoutMode == LayoutMode.GRID) {
-                CatalogGridCard(
-                    track = track,
-                    isDownloaded = false,
-                    progress = null,
-                    isFocused = true,
-                    onClick = {},
-                    onDownload = {},
-                    onLongPress = {},
-                    onMore = {}
-                )
-            } else {
-                CatalogListCard(
-                    track = track,
-                    isDownloaded = false,
-                    progress = null,
-                    isFocused = true,
-                    onClick = {},
-                    onDownload = {},
-                    onLongPress = {},
-                    onMore = {}
-                )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        // Focus motion blur: strongest on the first frames,
+                        // resolved before the card finishes scaling up.
+                        val smear = settle.value
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            if (smear > 0.02f) {
+                                val radiusPx = smear * 7.dp.toPx()
+                                renderEffect = android.graphics.RenderEffect
+                                    .createBlurEffect(radiusPx, radiusPx, Shader.TileMode.CLAMP)
+                                    .asComposeRenderEffect()
+                            } else {
+                                renderEffect = null
+                            }
+                        }
+                    }
+            ) {
+                if (isDiscover) {
+                    FeaturedCarouselItem(
+                        track = track,
+                        isFocused = true,
+                        color = color,
+                        staticScale = true,
+                        onClick = onDismiss,
+                    )
+                } else if (layoutMode == LayoutMode.GRID) {
+                    CatalogGridCard(
+                        track = track,
+                        isDownloaded = false,
+                        progress = null,
+                        isFocused = true,
+                        onClick = onDismiss,
+                        onDownload = {},
+                        onLongPress = {},
+                        onMore = {}
+                    )
+                } else {
+                    CatalogListCard(
+                        track = track,
+                        isDownloaded = false,
+                        progress = null,
+                        isFocused = true,
+                        onClick = onDismiss,
+                        onDownload = {},
+                        onLongPress = {},
+                        onMore = {}
+                    )
+                }
             }
+        }
+    }
+}
+
+/**
+ * A single, quick ripple from the tapped card's bounds.
+ *
+ * The old shockwave expanded for two seconds across the entire screen with an
+ * 80dp stroke, which read as decoration. This one is deliberately short: one
+ * crisp outline, one soft halo, and a quieter echo, all gone in ~420ms. It
+ * explains why the card in front of you lifted, then gets out of the way.
+ */
+@Composable
+private fun FocusShockwave(
+    offset: Offset,
+    size: Size,
+    radius: androidx.compose.ui.unit.Dp,
+    color: Color,
+    animationKey: Int,
+    onFinished: () -> Unit,
+) {
+    val progress = remember { Animatable(0f) }
+
+    LaunchedEffect(animationKey) {
+        progress.snapTo(0f)
+        progress.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(420, easing = CubicBezierEasing(0.2f, 0f, 0f, 1f)),
+        )
+        onFinished()
+    }
+
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        val p = progress.value
+        if (p >= 1f) return@Canvas
+
+        val radiusPx = radius.toPx()
+        val fade = (1f - p) * (1f - p)
+
+        // Soft halo: depth without a hard edge.
+        val grow = 2.dp.toPx() + (42.dp.toPx() * p)
+        drawRoundRect(
+            color = color.copy(alpha = 0.10f * fade),
+            topLeft = Offset(offset.x - grow, offset.y - grow),
+            size = Size(size.width + grow * 2, size.height + grow * 2),
+            cornerRadius = CornerRadius(radiusPx + grow),
+        )
+
+        // Leading edge.
+        drawRoundRect(
+            color = color.copy(alpha = 0.42f * fade),
+            topLeft = Offset(offset.x - grow, offset.y - grow),
+            size = Size(size.width + grow * 2, size.height + grow * 2),
+            cornerRadius = CornerRadius(radiusPx + grow),
+            style = Stroke(width = 2.5.dp.toPx() - 1.5.dp.toPx() * p),
+        )
+
+        // Quiet echo trailing behind.
+        val p2 = ((p - 0.20f) / 0.80f).coerceIn(0f, 1f)
+        if (p2 > 0f) {
+            val grow2 = 2.dp.toPx() + (62.dp.toPx() * p2)
+            val fade2 = (1f - p2) * (1f - p2) * 0.55f
+            drawRoundRect(
+                color = color.copy(alpha = 0.30f * fade2),
+                topLeft = Offset(offset.x - grow2, offset.y - grow2),
+                size = Size(size.width + grow2 * 2, size.height + grow2 * 2),
+                cornerRadius = CornerRadius(radiusPx + grow2),
+                style = Stroke(width = 1.dp.toPx()),
+            )
         }
     }
 }
@@ -1001,12 +1127,13 @@ private fun FeaturedCarouselItem(
     isFocused: Boolean,
     color: Color = MaterialTheme.colorScheme.primary,
     staticScale: Boolean = false,
-    parallaxOffset: Float = 0f
+    parallaxOffset: Float = 0f,
+    onClick: () -> Unit = {},
 ) {
     val scale by animateFloatAsState(if (isFocused && !staticScale) 1.05f else 1f, label = "featuredScale")
     
     ExpressiveCard(
-        onClick = { },
+        onClick = onClick,
         modifier = modifier
             .width(240.dp)
             .graphicsLayer {
@@ -1052,10 +1179,9 @@ private fun FeaturedCarouselItem(
                             blurRadius = 4f
                         )
                     ),
-                    fontWeight = FontWeight.Black,
+                    fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    letterSpacing = 0.5.sp
+                    overflow = TextOverflow.Ellipsis
                 )
                 Text(
                     text = track.artist,
@@ -1067,7 +1193,7 @@ private fun FeaturedCarouselItem(
                             blurRadius = 2f
                         )
                     ),
-                    fontWeight = FontWeight.Bold,
+                    fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -1204,23 +1330,22 @@ private fun CatalogGridCard(
                         )
                     }
                 }
-                if (isFocused) {
-                    Box(modifier = Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.2f)))
-                }
-                Row(modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp)) {
-                    DownloadButton(
-                        isDownloaded = isDownloaded,
-                        progress = progress,
-                        onDownload = onDownload,
-                        compact = true
-                    )
+                if (!isFocused) {
+                    Row(modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp)) {
+                        DownloadButton(
+                            isDownloaded = isDownloaded,
+                            progress = progress,
+                            onDownload = onDownload,
+                            compact = true
+                        )
+                    }
                 }
             }
             Spacer(Modifier.height(10.dp))
             Text(
                 text = track.title,
                 style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Black,
+                fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -1229,8 +1354,8 @@ private fun CatalogGridCard(
             Text(
                 text = track.artist,
                 style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.alpha(alpha).padding(horizontal = 4.dp)
@@ -1296,16 +1421,13 @@ private fun CatalogListCard(
                         )
                     }
                 }
-                if (isFocused) {
-                    Box(modifier = Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.2f), RoundedCornerShape(14.dp)))
-                }
             }
             Spacer(Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f).alpha(alpha)) {
                 Text(
                     track.title,
                     style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Black,
+                    fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     color = MaterialTheme.colorScheme.onSurface
@@ -1314,25 +1436,27 @@ private fun CatalogListCard(
                 Text(
                     track.artist,
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            Spacer(Modifier.width(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                DownloadButton(
-                    isDownloaded = isDownloaded,
-                    progress = progress,
-                    onDownload = onDownload,
-                    compact = true
-                )
-                IconButton(
-                    onClick = onMore,
-                    modifier = Modifier.size(44.dp)
-                ) {
-                    Icon(Icons.Rounded.MoreVert, null, modifier = Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (!isFocused) {
+                Spacer(Modifier.width(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    DownloadButton(
+                        isDownloaded = isDownloaded,
+                        progress = progress,
+                        onDownload = onDownload,
+                        compact = true
+                    )
+                    IconButton(
+                        onClick = onMore,
+                        modifier = Modifier.size(44.dp)
+                    ) {
+                        Icon(Icons.Rounded.MoreVert, null, modifier = Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
             }
         }
@@ -1722,7 +1846,7 @@ private fun CatalogTrackActionsSheet(
                 )
                 Spacer(Modifier.width(14.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(track.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(track.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Spacer(Modifier.height(4.dp))
                     Text(track.artist, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(8.dp))
@@ -1810,8 +1934,8 @@ fun CatalogOnboardingDialog(onDismiss: () -> Unit) {
                 Spacer(Modifier.height(16.dp))
                 Text(
                     stringResource(R.string.st_CatalogScreen_wtc18),
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Black,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
                     textAlign = TextAlign.Center
                 )
             }
@@ -1864,7 +1988,7 @@ fun DownloadOptionsBottomSheet(
                 .padding(bottom = 32.dp)
                 .navigationBarsPadding()
         ) {
-            Text(stringResource(R.string.st_CatalogScreen_dwn16), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+            Text(stringResource(R.string.st_CatalogScreen_dwn16), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(8.dp))
             Text(
                 stringResource(R.string.st_CatalogScreen_cht1tbs21),
@@ -1987,11 +2111,11 @@ fun SpinningDownloadPopup(
                     )
                 }
                 Spacer(Modifier.height(20.dp))
-                Text(track.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+                Text(track.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
                 Spacer(Modifier.height(6.dp))
                 Text(track.artist, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(10.dp))
-                Text("${(progress * 100).toInt()}%", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+                Text("${(progress * 100).toInt()}%", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(22.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                     OutlinedButton(
@@ -2027,59 +2151,6 @@ private fun formatDuration(millis: Long): String {
         String.format(Locale.getDefault(), "%d:%02d", minutes, seconds)
     }
 }
-@Composable
-private fun ShockwaveOverlay(
-    offset: Offset,
-    size: Size,
-    radius: androidx.compose.ui.unit.Dp,
-    color: Color,
-    onFinished: () -> Unit
-) {
-    val progress = remember { Animatable(0f) }
-    val density = LocalDensity.current
-    
-    LaunchedEffect(Unit) {
-        progress.animateTo(
-            targetValue = 1f,
-            animationSpec = tween(2000, easing = CubicBezierEasing(0.2f, 0.8f, 0.2f, 1f))
-        )
-        onFinished()
-    }
-
-    androidx.compose.foundation.Canvas(
-        modifier = Modifier
-            .fillMaxSize()
-            .graphicsLayer {
-                // Animate alpha via graphicsLayer to keep it on the render thread
-                alpha = (1f - progress.value)
-            }
-    ) {
-        val expansion = progress.value * max(this.size.width, this.size.height) * 0.75f
-        val strokeWidth = (80 * (1f - progress.value)).dp.toPx()
-        val rectRadius = with(density) { radius.toPx() }
-        
-        drawRoundRect(
-            color = color,
-            topLeft = Offset(offset.x - expansion, offset.y - expansion),
-            size = Size(size.width + expansion * 2, size.height + expansion * 2),
-            cornerRadius = CornerRadius(rectRadius + expansion),
-            style = Stroke(width = strokeWidth),
-            alpha = 0.35f
-        )
-        
-        // Subtler second layer
-        val expansion2 = progress.value * max(this.size.width, this.size.height) * 0.45f
-        drawRoundRect(
-            color = color,
-            topLeft = Offset(offset.x - expansion2, offset.y - expansion2),
-            size = Size(size.width + expansion2 * 2, size.height + expansion2 * 2),
-            cornerRadius = CornerRadius(rectRadius + expansion2),
-            style = Stroke(width = strokeWidth * 0.4f),
-            alpha = 0.15f
-        )
-    }
-}
-
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun ExpressiveOfflineNotice(
@@ -2112,9 +2183,9 @@ private fun ExpressiveOfflineNotice(
                 )
                 Spacer(Modifier.height(16.dp))
                 Text(
-                    text = "We noticed...",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Black,
+                    text = "We noticed…",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(Modifier.height(12.dp))

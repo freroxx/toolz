@@ -960,10 +960,9 @@ private fun KaraokeSplash(trackTitle: String, trackUri: String?, onSkip: () -> U
 
             Text(
                 stringResource(R.string.st_KaraokeScreen_k31),
-                style       = MaterialTheme.typography.displaySmall,
-                fontWeight  = FontWeight.Black,
-                color       = MaterialTheme.colorScheme.primary,
-                letterSpacing = 8.sp
+                style       = MaterialTheme.typography.headlineLarge,
+                fontWeight  = FontWeight.SemiBold,
+                color       = MaterialTheme.colorScheme.primary
             )
             Text(
                 trackTitle,
@@ -980,7 +979,7 @@ private fun KaraokeSplash(trackTitle: String, trackUri: String?, onSkip: () -> U
                 onClick = onSkip,
                 colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
             ) {
-                Text(stringResource(R.string.st_KaraokeScreen_rtts32), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Text(stringResource(R.string.st_KaraokeScreen_rtts32), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Medium)
             }
         }
     }
@@ -1014,17 +1013,16 @@ private fun KaraokeCountdown(tick: Int) {
                 Text(
                     text       = "$t",
                     style      = MaterialTheme.typography.displayLarge,
-                    fontWeight = FontWeight.Black,
-                    fontSize   = 148.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize   = 120.sp,
                     color      = MaterialTheme.colorScheme.primary
                 )
             }
             Text(
                 stringResource(R.string.st_KaraokeScreen_gr33),
-                style       = MaterialTheme.typography.labelLarge,
-                fontWeight  = FontWeight.Black,
-                letterSpacing = 6.sp,
-                color       = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
+                style       = MaterialTheme.typography.labelMedium,
+                fontWeight  = FontWeight.Medium,
+                color       = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
             )
         }
     }
@@ -1055,25 +1053,23 @@ private fun KaraokeHeader(
                 if (reconnecting) {
                     Text(
                         stringResource(R.string.st_KaraokeScreen_rm34),
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Black,
-                        letterSpacing = 2.sp,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.primary
                     )
                 } else {
                     Text(
                         stringResource(R.string.st_KaraokeScreen_km35),
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Black,
-                        letterSpacing = 2.sp,
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
                     )
                 }
             }
             Text(
                 title,
                 style   = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Bold,
+                fontWeight = FontWeight.SemiBold,
                 color   = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -1253,7 +1249,7 @@ private fun KaraokeLine(
                 text       = line.content,
                 style      = if (isCurrent) MaterialTheme.typography.headlineMedium
                 else           MaterialTheme.typography.bodyLarge,
-                fontWeight = if (isCurrent || isLineCorrect) FontWeight.ExtraBold else FontWeight.SemiBold,
+                fontWeight = if (isCurrent || isLineCorrect) FontWeight.Bold else FontWeight.Medium,
                 textAlign  = TextAlign.Center,
                 color      = textColor
             )
@@ -1316,42 +1312,14 @@ private fun KaraokeWord(
 
     val wordScale = (1f + (0.05f * animFrac)) * pingScale
 
-    val glowAlpha by animateFloatAsState(
-        targetValue = if ((isActive || isCorrect) && !performanceMode) 0.4f else 0f,
-        animationSpec = tween(400),
-        label = "glowAlpha"
-    )
-
     Box(contentAlignment = Alignment.Center) {
-        if (glowAlpha > 0f) {
-            Text(
-                text       = word.word,
-                style      = if (isCurrent) MaterialTheme.typography.headlineMedium
-                else           MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.Black,
-                color      = color.copy(alpha = glowAlpha),
-                modifier   = Modifier
-                    .graphicsLayer {
-                        scaleX = wordScale * 1.15f
-                        scaleY = wordScale * 1.15f
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                            renderEffect = android.graphics.RenderEffect
-                                .createBlurEffect(15f, 15f, android.graphics.Shader.TileMode.CLAMP)
-                                .asComposeRenderEffect()
-                        }
-                    }
-                    .padding(horizontal = 3.dp, vertical = 2.dp),
-                textAlign  = TextAlign.Center
-            )
-        }
-
         Text(
             text       = word.word,
             style      = if (isCurrent) MaterialTheme.typography.headlineMedium
             else           MaterialTheme.typography.bodyLarge,
-            fontWeight = if (isActive || isCorrect) FontWeight.Black
-            else if (isCurrent) FontWeight.ExtraBold
-            else FontWeight.Medium,
+            fontWeight = if (isActive || isCorrect) FontWeight.Bold
+            else if (isCurrent) FontWeight.SemiBold
+            else FontWeight.Normal,
             color      = color,
             modifier   = Modifier
                 .graphicsLayer {
@@ -1386,7 +1354,7 @@ private fun KaraokeLoadingLyrics() {
             Text(
                 stringResource(R.string.st_KaraokeScreen_ll36),
                 style   = MaterialTheme.typography.bodyMedium,
-                color   = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+                color   = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 fontWeight = FontWeight.Medium
             )
         }
@@ -1514,7 +1482,7 @@ private fun RecordingStatusPill(
             Text(
                 text = text,
                 style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Black,
+                fontWeight = FontWeight.SemiBold,
                 color = pillColor
             )
         }
@@ -1570,7 +1538,7 @@ private fun LiveScoreChip(
                 Text(
                     liveTier,
                     style      = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Black,
+                    fontWeight = FontWeight.SemiBold,
                     color      = tint,
                     modifier   = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                 )
@@ -1582,7 +1550,7 @@ private fun LiveScoreChip(
             Text(
                 "$animatedScore%",
                 style      = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Black,
+                fontWeight = FontWeight.SemiBold,
                 color      = tint
             )
 
@@ -1607,7 +1575,7 @@ private fun LiveScoreChip(
                     Text(
                         "🔥$streak",
                         style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Black,
+                        fontWeight = FontWeight.SemiBold,
                         color = Color(0xFFFF7043)
                     )
                     // Show max streak if meaningfully larger
@@ -1786,13 +1754,13 @@ private fun PlayPauseMasterButton(
         shape = CircleShape,
         color = MaterialTheme.colorScheme.primary,
         modifier = Modifier.size(72.dp),
-        shadowElevation = 8.dp
+        shadowElevation = 4.dp
     ) {
         Box(contentAlignment = Alignment.Center) {
             Icon(
                 imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                 contentDescription = null,
-                tint = Color.White,
+                tint = MaterialTheme.colorScheme.onPrimary,
                 modifier = Modifier.size(32.dp)
             )
         }
@@ -1935,10 +1903,9 @@ private fun KaraokeEvaluation(
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
                         stringResource(R.string.st_KaraokeScreen_pr41),
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Black,
-                        letterSpacing = 4.sp,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                     )
                     Text(
                         track.title,
@@ -1977,8 +1944,8 @@ private fun KaraokeEvaluation(
                         Text(
                             grade,
                             style = MaterialTheme.typography.displayLarge,
-                            fontWeight = FontWeight.Black,
-                            fontSize = 110.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 100.sp,
                             color = gradeColor,
                             modifier = Modifier.graphicsLayer {
                                 val s = 0.9f + (animatedScore / 100f) * 0.15f
@@ -1988,7 +1955,7 @@ private fun KaraokeEvaluation(
                         Text(
                             "$animatedScore%",
                             style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.ExtraBold,
+                            fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                         )
                     }
@@ -1998,8 +1965,8 @@ private fun KaraokeEvaluation(
 
                 Text(
                     message,
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Black,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
                     color = gradeColor,
                     textAlign = TextAlign.Center
                 )
@@ -2008,7 +1975,7 @@ private fun KaraokeEvaluation(
 
                 ElevatedCard(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(32.dp),
+                    shape = RoundedCornerShape(24.dp),
                     colors = CardDefaults.elevatedCardColors(
                         containerColor = MaterialTheme.colorScheme.surfaceContainerLow
                     )
@@ -2061,15 +2028,14 @@ private fun KaraokeEvaluation(
                             ) {
                                 Text(
                                     stringResource(R.string.st_KaraokeScreen_acc52),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Black,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
-                                    letterSpacing = 1.sp
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                                 )
                                 Text(
                                     "${(accuracyRate * 100).toInt()}%",
                                     style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Bold,
+                                    fontWeight = FontWeight.SemiBold,
                                     color = gradeColor
                                 )
                             }
@@ -2088,10 +2054,9 @@ private fun KaraokeEvaluation(
                                     Icon(Icons.Rounded.AutoAwesome, null, tint = gradeColor, modifier = Modifier.size(16.dp))
                                     Text(
                                         stringResource(R.string.st_KaraokeScreen_pl53),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.Black,
-                                        color = gradeColor.copy(alpha = 0.7f),
-                                        letterSpacing = 1.2.sp
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Medium,
+                                        color = gradeColor.copy(alpha = 0.8f)
                                     )
                                 }
                                 Text(
@@ -2115,8 +2080,8 @@ private fun KaraokeEvaluation(
                     if (recordingFile != null) {
                         Button(
                             onClick  = onAudioSaved,
-                            modifier = Modifier.weight(1f).height(64.dp),
-                            shape    = RoundedCornerShape(24.dp),
+                            modifier = Modifier.weight(1f).height(56.dp),
+                            shape    = RoundedCornerShape(20.dp),
                             colors   = ButtonDefaults.buttonColors(
                                 containerColor = MaterialTheme.colorScheme.primaryContainer,
                                 contentColor   = MaterialTheme.colorScheme.onPrimaryContainer
@@ -2127,25 +2092,22 @@ private fun KaraokeEvaluation(
                             Text(
                                 stringResource(R.string.st_KaraokeScreen_s54),
                                 style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.Black,
-                                letterSpacing = 1.sp
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
                     }
 
                     Button(
                         onClick  = onDone,
-                        modifier = Modifier.weight(if (recordingFile != null) 1.2f else 1f).height(64.dp),
-                        shape    = RoundedCornerShape(24.dp),
+                        modifier = Modifier.weight(if (recordingFile != null) 1.2f else 1f).height(56.dp),
+                        shape    = RoundedCornerShape(20.dp),
                         colors   = ButtonDefaults.buttonColors(containerColor = gradeColor),
-                        elevation = ButtonDefaults.buttonElevation(defaultElevation = 8.dp)
+                        elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
                     ) {
                         Text(
                             stringResource(R.string.st_KaraokeScreen_cont55),
                             style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Black,
-                            fontSize      = 18.sp,
-                            letterSpacing = 2.sp,
+                            fontWeight = FontWeight.SemiBold,
                             color         = Color.White
                         )
                     }
@@ -2170,13 +2132,12 @@ private fun EvalStat(label: String, value: String, icon: ImageVector, valueColor
         Icon(icon, null, modifier = Modifier.size(14.dp), tint = valueColor.copy(alpha = 0.6f))
         Text(value,
             style      = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Black,
+            fontWeight = FontWeight.SemiBold,
             color      = valueColor)
         Text(label,
-            style       = MaterialTheme.typography.labelSmall,
-            fontWeight  = FontWeight.Bold,
-            color       = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
-            letterSpacing = 0.5.sp)
+            style       = MaterialTheme.typography.labelMedium,
+            fontWeight  = FontWeight.Medium,
+            color       = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
     }
 }
 
@@ -2285,8 +2246,8 @@ fun SingConfidentlyBottomSheet(
 
             Text(
                 stringResource(R.string.st_KaraokeScreen_sc56),
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Black,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
                 textAlign = TextAlign.Center,
                 color = MaterialTheme.colorScheme.onSurface
             )
@@ -2347,7 +2308,7 @@ fun SingConfidentlyBottomSheet(
                                 Text(
                                     String.format(java.util.Locale.US, "%d:%02d", match.duration / 60000, (match.duration % 60000) / 1000),
                                     style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Black,
+                                    fontWeight = FontWeight.SemiBold,
                                     color = MaterialTheme.colorScheme.onPrimaryContainer
                                 )
                             }
@@ -2470,7 +2431,7 @@ fun ManualPickSheet(
                                     Text(
                                         stringResource(R.string.st_KaraokeScreen_u10),
                                         style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.Black,
+                                        fontWeight = FontWeight.SemiBold,
                                         color = MaterialTheme.colorScheme.onPrimaryContainer
                                     )
                 }
@@ -2513,7 +2474,7 @@ fun KaraokeSettingsModal(
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        shape            = RoundedCornerShape(topStart = 44.dp, topEnd = 44.dp),
+        shape            = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
         containerColor   = MaterialTheme.colorScheme.surface,
         dragHandle       = {
             Box(
@@ -2550,11 +2511,11 @@ fun KaraokeSettingsModal(
                 }
                 Column {
                     Text(stringResource(R.string.st_KaraokeScreen_ks12),
-                        style      = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Black)
+                        style      = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold)
                     Text(stringResource(R.string.st_KaraokeScreen_cye13),
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f))
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
                 }
             }
 

@@ -18,7 +18,6 @@
 package com.frerox.toolz.ui.screens.media
 
 import com.frerox.toolz.ui.components.fadingEdges
-import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.*
 import android.content.ContentUris
 import android.net.Uri
@@ -211,7 +210,7 @@ fun KaraokeTab(
             Text(
                 "Recordings",
                 style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Black,
+                fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface
             )
             FilledTonalIconButton(
@@ -228,7 +227,7 @@ fun KaraokeTab(
 
         Box(modifier = Modifier.fillMaxSize()) {
             if (recordings.isEmpty()) {
-                KaraokeEmptyState()
+                KaraokeEmptyState(onStartSession = { showSongPicker = true })
             } else {
                 val refreshState = rememberPullToRefreshState()
                 PullToRefreshBox(
@@ -301,7 +300,6 @@ fun KaraokeTab(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 32.dp)
-                    .bouncyClick { showSongPicker = true }
             )
 
             if (showSongPicker) {
@@ -319,19 +317,19 @@ fun KaraokeTab(
 }
 
 @Composable
-private fun KaraokeEmptyState() {
+private fun KaraokeEmptyState(onStartSession: () -> Unit) {
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.padding(32.dp)
         ) {
             Surface(
-                modifier = Modifier.size(100.dp),
-                shape = ExtraLargeExpressiveShape,
+                modifier = Modifier.size(88.dp),
+                shape = RoundedCornerShape(28.dp),
                 color = MaterialTheme.colorScheme.secondaryContainer,
                 contentColor = MaterialTheme.colorScheme.onSecondaryContainer
             ) {
@@ -339,22 +337,29 @@ private fun KaraokeEmptyState() {
                     Icon(
                         Icons.Rounded.MicExternalOn,
                         contentDescription = null,
-                        modifier = Modifier.size(48.dp)
+                        modifier = Modifier.size(40.dp)
                     )
                 }
             }
+            Spacer(Modifier.height(4.dp))
             Text(
                 "No recordings yet",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Medium,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(
                 "Start a karaoke session to record your first performance",
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center
             )
+            Spacer(Modifier.height(8.dp))
+            ToolzExpressiveButton(onClick = onStartSession) {
+                Icon(Icons.Rounded.Mic, null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Choose a song", fontWeight = FontWeight.SemiBold)
+            }
         }
     }
 }
@@ -380,19 +385,19 @@ private fun RecordingCard(
             onClick = onPlay,
             onLongClick = { showMenu = true },
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(18.dp),
+            shape = RoundedCornerShape(16.dp),
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         ) {
             Row(
-                modifier = Modifier.padding(10.dp),
+                modifier = Modifier.padding(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 AlbumArtImage(
                     url = metadata?.thumbnailUrl,
                     seed = metadata?.title ?: item.name.substringBeforeLast("."),
                     modifier = Modifier
-                        .size(60.dp)
-                        .clip(RoundedCornerShape(14.dp)),
+                        .size(56.dp)
+                        .clip(RoundedCornerShape(12.dp)),
                     contentScale = ContentScale.Crop,
                     iconSize = 24.dp
                 )
@@ -402,12 +407,11 @@ private fun RecordingCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = metadata?.title ?: item.name.substringBeforeLast("."),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        fontSize = 15.sp
+                        overflow = TextOverflow.Ellipsis
                     )
                     Spacer(Modifier.height(2.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -437,7 +441,7 @@ private fun RecordingCard(
                         Text(
                             text = "${grade ?: ""} $score%",
                             style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Black,
+                            fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onPrimaryContainer,
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                             fontSize = 10.sp
@@ -454,7 +458,7 @@ private fun RecordingCard(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         ) {
             DropdownMenuItem(
-                text = { Text("Play Again", fontWeight = FontWeight.Bold) },
+                text = { Text("Play again", fontWeight = FontWeight.SemiBold) },
                 onClick = {
                     showMenu = false
                     onPlay()
@@ -521,7 +525,7 @@ fun SongPickerDialog(
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(
             modifier = Modifier.fillMaxWidth(0.92f).fillMaxHeight(0.85f),
-            shape = RoundedCornerShape(32.dp),
+            shape = RoundedCornerShape(24.dp),
             color = MaterialTheme.colorScheme.surfaceContainerHigh
         ) {
             Column {
@@ -529,9 +533,9 @@ fun SongPickerDialog(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 20.dp)
                 ) {
                     Text(
-                        "Choose a Song",
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Black,
+                        "Choose a song",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.align(Alignment.CenterStart)
                     )
                     ToolzExpressiveIconButton(
@@ -621,8 +625,8 @@ private fun SongPickerItem(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     track.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis

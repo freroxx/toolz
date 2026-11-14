@@ -3703,6 +3703,7 @@
     <string name="st_PurgeShot_Notif_Scheduled_Single">Screenshot scheduled</string>
     <string name="st_PurgeShot_Notif_Scheduled_Multiple">%1$d screenshots scheduled</string>
     <string name="st_PurgeShot_Notif_Scheduled_Desc">Will be deleted in %1$s</string>
+    <string name="st_PurgeShot_Service_Watching">Watching for screenshots</string>
     <string name="st_PurgeShot_Channel_Service_Name">PurgeShot service</string>
     <string name="st_PurgeShot_Channel_Service_Desc">Monitors screenshots while PurgeShot is active</string>
     <string name="st_PurgeShot_Channel_Alerts_Name">PurgeShot prompts</string>

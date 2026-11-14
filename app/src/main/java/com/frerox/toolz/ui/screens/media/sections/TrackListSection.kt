@@ -78,7 +78,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.draw.drawBehind
@@ -311,37 +310,35 @@ fun TrackSectionHeader(
 ) {
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 20.dp, bottomEnd = 8.dp),
-        color = color.copy(alpha = 0.12f),
-        border = BorderStroke(1.dp, color.copy(alpha = 0.22f))
+        shape = RoundedCornerShape(14.dp),
+        color = color.copy(alpha = 0.10f)
     ) {
         Row(
             modifier = Modifier.padding(start = 14.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(icon, null, tint = color, modifier = Modifier.size(15.dp))
-            Spacer(Modifier.width(7.dp))
+            Icon(icon, null, tint = color, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(8.dp))
             Text(
-                text = label.uppercase(),
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Black,
-                letterSpacing = 0.6.sp,
+                text = label,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
                 color = color
             )
             Spacer(Modifier.width(6.dp))
             Text(
-                text = "· $count",
+                text = "$count",
                 style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = color.copy(alpha = 0.65f)
+                fontWeight = FontWeight.Medium,
+                color = color.copy(alpha = 0.7f)
             )
             if (showTweenArrow) {
-                Spacer(Modifier.width(6.dp))
+                Spacer(Modifier.width(8.dp))
                 Surface(
                     onClick = onTween,
-                    modifier = Modifier.size(28.dp).bouncyClick(onClick = onTween),
+                    modifier = Modifier.size(28.dp),
                     shape = CircleShape,
-                    color = color.copy(alpha = 0.16f)
+                    color = color.copy(alpha = 0.14f)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
@@ -448,17 +445,18 @@ fun EmptyMusicPlaceholder(onScan: () -> Unit) {
             Icon(
                 Icons.Rounded.MusicOff,
                 null,
-                modifier = Modifier.size(80.dp).alpha(0.1f),
-                tint = MaterialTheme.colorScheme.onSurface
+                modifier = Modifier.size(64.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
             )
             Spacer(Modifier.height(20.dp))
-            Text(stringResource(R.string.st_MusicPlayerScreen_ntf15), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
-            Text(stringResource(R.string.st_MusicPlayerScreen_sdtm16), color = MaterialTheme.colorScheme.outline, textAlign = TextAlign.Center)
+            Text(stringResource(R.string.st_MusicPlayerScreen_ntf15), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+            Spacer(Modifier.height(4.dp))
+            Text(stringResource(R.string.st_MusicPlayerScreen_sdtm16), color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
             Spacer(Modifier.height(28.dp))
-            ToolzExpressiveButton(onClick = onScan, shape = RoundedCornerShape(20.dp)) {
+            ToolzExpressiveButton(onClick = onScan) {
                 Icon(Icons.Rounded.Search, null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
-                Text(stringResource(R.string.st_MusicPlayerScreen_sn17), fontWeight = FontWeight.Black)
+                Text(stringResource(R.string.st_MusicPlayerScreen_sn17), fontWeight = FontWeight.SemiBold)
             }
         }
     }
@@ -514,17 +512,9 @@ fun TrackItem(
         isCurrent  -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.14f)
         else       -> Color.Transparent
     }
-    // M3 Expressive favors asymmetric corner treatments over a uniform
-    // radius — leading corners stay tight so the row reads as a rail item,
-    // trailing corners open up toward the art. One shape value drives the
-    // card, the art clip, and every overlay drawn on the art, so they can't
-    // drift out of sync the way three separately-declared radii could.
-    val artCorner = if (isCurrent) 18.dp else 14.dp
-    val artShape = RoundedCornerShape(
-        topStart = artCorner * 0.4f, bottomStart = artCorner * 0.4f,
-        topEnd = artCorner, bottomEnd = artCorner
-    )
-    val cardShape = RoundedCornerShape(topStart = 8.dp, bottomStart = 8.dp, topEnd = 22.dp, bottomEnd = 22.dp)
+    val artCorner = 12.dp
+    val artShape = RoundedCornerShape(artCorner)
+    val cardShape = RoundedCornerShape(16.dp)
 
     val nalwfMsg = stringResource(R.string.st_MusicPlayerScreen_nalwf14)
     val context = LocalContext.current
@@ -610,7 +600,7 @@ fun TrackItem(
                             .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Rounded.Check, contentDescription = stringResource(R.string.st_MusicPlayerScreen_sel18), tint = Color.White, modifier = Modifier.size(24.dp))
+                        Icon(Icons.Rounded.Check, contentDescription = stringResource(R.string.st_MusicPlayerScreen_sel18), tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(24.dp))
                     }
                 }
             }
@@ -622,21 +612,20 @@ fun TrackItem(
                 val highlightColor = MaterialTheme.colorScheme.secondary
                 Text(
                     text = if (searchQuery.isNotBlank()) highlightSearch(track.title, searchQuery, highlightColor) else AnnotatedString(track.title),
-                    fontWeight = if (isCurrent) FontWeight.Black else FontWeight.Bold,
+                    fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     color = titleColor,
                     style = MaterialTheme.typography.bodyLarge
                 )
-                val artistText = track.artist?.takeIf { it.isNotBlank() && it != "<unknown>" }?.uppercase() ?: "UNKNOWN ARTIST"
+                val artistText = track.artist?.takeIf { it.isNotBlank() && it != "<unknown>" } ?: "Unknown artist"
                 Text(
                     text = artistText,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                    fontWeight = FontWeight.ExtraBold,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.Normal,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    letterSpacing = 0.5.sp
+                    overflow = TextOverflow.Ellipsis
                 )
             }
 
@@ -792,7 +781,7 @@ fun TrackCard(track: MusicTrack, onClick: () -> Unit, cardWidth: Dp = 152.dp) {
             seed = track.uri,
             modifier = Modifier
                 .size(artSize)
-                .clip(RoundedCornerShape(topStart = 6.dp, topEnd = 10.dp, bottomStart = 10.dp, bottomEnd = 6.dp)),
+                .clip(RoundedCornerShape(12.dp)),
             iconSize = 32.dp
         )
         Spacer(Modifier.height(12.dp))
@@ -816,21 +805,19 @@ fun TrackCard(track: MusicTrack, onClick: () -> Unit, cardWidth: Dp = 152.dp) {
             Text(
                 text = track.title,
                 style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Bold,
+                fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.fillMaxWidth()
             )
-            val artistText = track.artist?.takeIf { it.isNotBlank() && it != "<unknown>" }?.uppercase() ?: stringResource(R.string.st_MusicPlayerScreen_ua25)
+            val artistText = track.artist?.takeIf { it.isNotBlank() && it != "<unknown>" } ?: stringResource(R.string.st_MusicPlayerScreen_ua25)
             Text(
                 text = artistText,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
-                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                letterSpacing = 0.3.sp,
                 modifier = Modifier.fillMaxWidth()
             )
         }
@@ -872,7 +859,7 @@ fun TrackCarouselRow(
     contentPadding: PaddingValues = PaddingValues(horizontal = 2.dp)
 ) {
     val carouselState = rememberCarouselState { tracks.size }
-    val artShape = RoundedCornerShape(topStart = 6.dp, topEnd = 10.dp, bottomStart = 10.dp, bottomEnd = 6.dp)
+    val artShape = RoundedCornerShape(12.dp)
 
     HorizontalMultiBrowseCarousel(
         state = carouselState,
@@ -905,21 +892,19 @@ fun TrackCarouselRow(
                 Text(
                     text = track.title,
                     style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
+                    fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.fillMaxWidth()
                 )
-                val artistText = track.artist?.takeIf { it.isNotBlank() && it != "<unknown>" }?.uppercase() ?: "UNKNOWN ARTIST"
+                val artistText = track.artist?.takeIf { it.isNotBlank() && it != "<unknown>" } ?: "Unknown artist"
                 Text(
                     text = artistText,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
-                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    letterSpacing = 0.3.sp,
                     modifier = Modifier.fillMaxWidth()
                 )
             }
@@ -934,7 +919,7 @@ fun highlightSearch(text: String, query: String, highlightColor: Color): Annotat
 
     return buildAnnotatedString {
         append(text.substring(0, index))
-        withStyle(SpanStyle(color = highlightColor, fontWeight = FontWeight.Black)) {
+        withStyle(SpanStyle(color = highlightColor, fontWeight = FontWeight.SemiBold)) {
             append(text.substring(index, index + query.length))
         }
         append(text.substring(index + query.length))

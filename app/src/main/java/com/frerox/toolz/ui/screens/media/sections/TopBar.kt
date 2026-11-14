@@ -34,16 +34,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.focusGroup
-import androidx.compose.ui.focus.onFocusEvent
 import androidx.compose.ui.text.font.FontWeight
 import com.frerox.toolz.ui.screens.media.MusicUiState
 import com.frerox.toolz.ui.screens.media.SortOrder
@@ -174,38 +167,10 @@ fun ScreenTopBar(
             exit = shrinkVertically() + fadeOut()
         ) {
             Column {
-                // Track focus locally so the wrapper can grow/glow on focus
-                // without needing ExpressiveSearchField to expose its own
-                // interaction source — it only takes query/placeholder/icons.
-                var isSearchFocused by remember { mutableStateOf(false) }
-                val fieldScale by animateFloatAsState(
-                    targetValue = if (isSearchFocused) 1f else 0.99f,
-                    animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMedium),
-                    label = "searchFieldScale"
-                )
-                val glowAlpha by animateFloatAsState(
-                    targetValue = if (isSearchFocused) 1f else 0f,
-                    animationSpec = tween(220),
-                    label = "searchFieldGlow"
-                )
-                val glowColor = MaterialTheme.colorScheme.primary
-
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 18.dp, vertical = 6.dp)
-                        .graphicsLayer { scaleX = fieldScale; scaleY = fieldScale }
-                        .drawBehind {
-                            if (glowAlpha > 0f) {
-                                drawRoundRect(
-                                    color = glowColor.copy(alpha = 0.35f * glowAlpha),
-                                    cornerRadius = CornerRadius(size.height / 2f, size.height / 2f),
-                                    style = Stroke(width = 1.6.dp.toPx())
-                                )
-                            }
-                        }
-                        .onFocusEvent { isSearchFocused = it.hasFocus || it.isFocused }
-                        .focusGroup()
                 ) {
                     ExpressiveSearchField(
                         query = searchQuery,
@@ -213,34 +178,27 @@ fun ScreenTopBar(
                         placeholder = {
                             Text(
                                 stringResource(R.string.st_MusicPlayerScreen_st_hint4),
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 style = MaterialTheme.typography.bodyMedium
                             )
                         },
                         leadingIcon = {
-                            val iconScale by animateFloatAsState(
-                                targetValue = if (isSearchFocused) 1.08f else 1f,
-                                animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMedium),
-                                label = "searchIconScale"
-                            )
                             Icon(
                                 Icons.Rounded.Search,
                                 null,
-                                tint = if (isSearchFocused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
-                                modifier = Modifier
-                                    .size(20.dp)
-                                    .graphicsLayer { scaleX = iconScale; scaleY = iconScale }
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
                             )
                         },
                         trailingIcon = {
                             androidx.compose.animation.AnimatedVisibility(
                                 visible = searchQuery.isNotEmpty(),
-                                enter = fadeIn(tween(160)) + scaleIn(initialScale = 0.6f, animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMedium)),
-                                exit = fadeOut(tween(120)) + scaleOut(targetScale = 0.6f, animationSpec = tween(120))
+                                enter = fadeIn(tween(160)),
+                                exit = fadeOut(tween(120))
                             ) {
                                 Surface(
                                     onClick = { onSearchChange("") },
-                                    modifier = Modifier.size(28.dp).bouncyClick { onSearchChange("") },
+                                    modifier = Modifier.size(28.dp),
                                     shape = CircleShape,
                                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
                                 ) {
@@ -267,7 +225,7 @@ fun ScreenTopBar(
 @Composable
 private fun SortDropdownItem(label: String, icon: ImageVector, onClick: () -> Unit) {
     DropdownMenuItem(
-        text = { Text(label, fontWeight = FontWeight.Bold) },
+        text = { Text(label, fontWeight = FontWeight.Medium) },
         onClick = onClick,
         leadingIcon = { Icon(icon, null, tint = MaterialTheme.colorScheme.primary) }
     )
