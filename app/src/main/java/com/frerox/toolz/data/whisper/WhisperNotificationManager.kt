@@ -96,6 +96,8 @@ class WhisperNotificationManager @Inject constructor(
     private var nextMessageId = FIRST_MESSAGE_NOTIF_ID
     @Volatile private var isInForeground = false
     @Volatile var currentChatId: String? = null
+    /** Poster whose Daily Up ring is on screen right now (viewer open). */
+    @Volatile var currentDailyUpOwnerId: String? = null
     @Volatile var isViewingFriendRequests: Boolean = false
     // Dedupe: same messageId from FCM + realtime must not double-notify within TTL.
     private val recentlyNotifiedMessageIds = ConcurrentHashMap<String, Long>()
@@ -562,6 +564,10 @@ class WhisperNotificationManager @Inject constructor(
         if (storyId.isBlank() || posterId.isBlank()) return
         if (!shouldNotifyForMessage(storyId)) return
         if (mutePrefs.isMuted(posterId)) return
+        // Same-poster open-ring suppression, mirroring currentChatId for chats:
+        // a push landing while the user is literally looking at that poster's
+        // ring must not post a card they will immediately cancel.
+        if (isInForeground && currentDailyUpOwnerId == posterId) return
         val notifId = senderNotifId("dailyup:$posterId")
         dailyUpNotifIds += notifId
         val deepLinkIntent = whisperNotificationIntent(

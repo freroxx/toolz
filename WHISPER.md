@@ -1608,9 +1608,12 @@ get IDs and resolve the name locally) — content-free either way.
 The shade card for a Daily Up is per poster, not per story (a newer up
 replaces it), and it is dismissed as soon as that poster's ring is on screen
 in-app — opening from the hub or the stories bar used to leave a card behind
-that only the next post from that person could replace. The tap target carries
-the poster ID for a validated route that falls back to the hub when the story
-has expired or been deleted underneath it.
+that only the next post from that person could replace. A push that lands
+while that same ring is open is suppressed outright (the `currentChatId`
+pattern, applied per poster), because the card would be cancelled a frame
+later and only flash. The tap target carries the poster ID for a validated
+route that falls back to the hub when the story has expired or been deleted
+underneath it.
 
 ---
 

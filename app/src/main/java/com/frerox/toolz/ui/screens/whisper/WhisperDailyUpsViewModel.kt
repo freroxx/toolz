@@ -212,6 +212,14 @@ class WhisperDailyUpsViewModel @Inject constructor(
     val failedImages: StateFlow<Set<String>> = _failedImages.asStateFlow()
     val receipts: StateFlow<ReceiptsUi> = _receipts.asStateFlow()
 
+    /**
+     * Poster whose ring this VM has reported as on screen. Declared BEFORE the
+     * init block: property initializers run in declaration order, so a
+     * `null` initializer placed after an inline-starting collector would wipe
+     * the id the collector just set.
+     */
+    @Volatile private var viewingOwnerId: String? = null
+
     init {
         refresh()
         viewModelScope.launch { collectProfileNames() }
@@ -223,8 +231,29 @@ class WhisperDailyUpsViewModel @Inject constructor(
             viewer
                 .map { it?.currentSegment?.ownerId }
                 .distinctUntilChanged()
-                .collect { owner -> if (owner != null) notificationManager.cancelDailyUpNotification(owner) }
+                .collect { owner ->
+                    // Suppress a push for the ring already on screen (the same
+                    // open-surface gate chats get from currentChatId), and
+                    // dismiss the shade card that announced it.
+                    notificationManager.currentDailyUpOwnerId = owner
+                    if (owner != null) {
+                        viewingOwnerId = owner
+                        notificationManager.cancelDailyUpNotification(owner)
+                    }
+                }
         }
+    }
+
+    override fun onCleared() {
+        // viewModelScope is already cancelled here, so the collector cannot
+        // emit its closing null: without this a stale id would suppress that
+        // poster's Daily Up pushes for the rest of the process.
+        val mine = viewingOwnerId
+        if (mine != null && notificationManager.currentDailyUpOwnerId == mine) {
+            notificationManager.currentDailyUpOwnerId = null
+        }
+        viewingOwnerId = null
+        super.onCleared()
     }
 
     /** Hub open/refresh: sync server truth + read back the day's quota.
