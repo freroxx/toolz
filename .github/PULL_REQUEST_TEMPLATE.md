@@ -21,7 +21,7 @@ Closes #
 
 - [ ] Verified build succeeds without errors (`./gradlew assembleDebug`)
 - [ ] Unit tests pass cleanly (`./gradlew testDebugUnitTest`)
-- [ ] Tested on a physical device or emulator running Android 12+ (minSdk 31)
+- [ ] Tested on a physical device or emulator running Android 8.0+ (minSdk 26)
 - [ ] Verified no regressions introduced in adjacent instruments
 - [ ] TalkBack / accessibility semantics verified if modifying UI
 

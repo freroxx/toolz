@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="https://github.com/freroxx/toolz/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/freroxx/toolz?display_name=tag&style=flat-square&color=6750A4" /></a>
-  <img alt="Android 12+" src="https://img.shields.io/badge/Android-12%2B-3DDC84?logo=android&logoColor=white&style=flat-square" />
+  <img alt="Android 8.0+" src="https://img.shields.io/badge/Android-8.0%2B-3DDC84?logo=android&logoColor=white&style=flat-square" />
   <img alt="Kotlin 2.4.20" src="https://img.shields.io/badge/Kotlin-2.4.20-7F52FF?logo=kotlin&logoColor=white&style=flat-square" />
   <img alt="Jetpack Compose" src="https://img.shields.io/badge/Jetpack%20Compose-UI-4285F4?logo=jetpackcompose&logoColor=white&style=flat-square" />
   <img alt="Material 3 Expressive" src="https://img.shields.io/badge/Material%203-Expressive-E8DEF8?style=flat-square" />
@@ -218,7 +218,7 @@ Toolz includes a built-in updater — it checks GitHub releases automatically so
 - **Android Studio** (latest stable)
 - **Android SDK** — compileSdk 37, targetSdk 36
 - **JDK 17**
-- **Device or Emulator** — Android 12+ (minSdk 31)
+- **Device or Emulator** — Android 8.0+ (minSdk 26)
 
 ### Build
 
@@ -236,7 +236,7 @@ Import the project into Android Studio, let Gradle sync, then build or run direc
 
 ## 🛠️ Tech Stack
 
-> Verified from `gradle/libs.versions.toml` + `app/build.gradle.kts` (AGP 9.4.1, compileSdk 37, targetSdk 36, minSdk 31, JDK 17)
+> Verified from `gradle/libs.versions.toml` + `app/build.gradle.kts` (AGP 9.4.1, compileSdk 37, targetSdk 37, minSdk 26, JDK 17)
 
 | Layer | Libraries |
 |---|---|

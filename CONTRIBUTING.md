@@ -21,7 +21,7 @@ By opening a pull request, you confirm that:
 
 - **IDE**: Android Studio (Ladybug or newer recommended)
 - **JDK**: JDK 17
-- **SDK**: compileSdk 37, targetSdk 36, minSdk 31 (Android 12+)
+- **SDK**: compileSdk 37, targetSdk 37, minSdk 26 (Android 8.0+)
 - **UI**: Jetpack Compose only (Material 3 Expressive). No XML layouts.
 - **DI / Architecture**: Hilt for injection, MVI/MVVM pattern with `StateFlow`.
 

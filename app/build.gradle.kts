@@ -47,7 +47,7 @@ android {
 
     defaultConfig {
         applicationId = "com.frerox.toolz"
-        minSdk = 31
+        minSdk = 26
         targetSdk = 37
         versionCode = 19
         versionName = "1.1.8"
