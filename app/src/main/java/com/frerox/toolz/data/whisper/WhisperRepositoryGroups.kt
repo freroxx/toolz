@@ -1259,11 +1259,7 @@ suspend fun WhisperRepository.syncGroups(): Result<List<WhisperGroupMembership>>
                             firstFailure.compareAndSet(null, it)
                             val msg = it.message.orEmpty()
                             if ("no longer a member" in msg || "Group not found" in msg) {
-                                runCatching {
-                                    groupDao.deleteGroup(row.groupId)
-                                    groupDao.clearMembers(row.groupId)
-                                    groupDao.clearEvents(row.groupId)
-                                }
+                                runCatching { purgeDepartedGroup(row.groupId) }
                             }
                             android.util.Log.w("WhisperGroups", "syncGroups: skipping one group: ${it.message}")
                         }
@@ -1287,9 +1283,7 @@ suspend fun WhisperRepository.syncGroups(): Result<List<WhisperGroupMembership>>
     val myIds = myRows.map { it.groupId }.toSet()
     runCatching {
         groupDao.allGroups().filter { it.id !in myIds }.forEach { stale ->
-            groupDao.deleteGroup(stale.id)
-            groupDao.clearMembers(stale.id)
-            groupDao.clearEvents(stale.id)
+            purgeDepartedGroup(stale.id)
         }
     }
     ok
@@ -1951,18 +1945,14 @@ suspend fun WhisperRepository.leaveGroup(groupId: String): Result<Unit> = runCat
     val m = fetchVerifiedMembership(groupId).getOrThrow()
     if (!m.isMember(me)) {
         db.from("whisper_group_members").delete { filter { eq("group_id", groupId); eq("user_id", me) } }
-        groupDao.deleteGroup(groupId)
-        groupDao.clearMembers(groupId)
-        groupDao.clearEvents(groupId)
+        purgeDepartedGroup(groupId)
         return@runCatching
     }
     require(!(m.isAdmin(me) && m.admins.size <= 1)) { "The last admin cannot leave — promote someone first." }
     val (seq, epoch) = nextGroupSeqEpoch(groupId)
     publishGroupEvent(groupId, seq, epoch + 1, WhisperGroupEventType.LEAVE, me, "\"\"").getOrThrow()
     db.from("whisper_group_members").delete { filter { eq("group_id", groupId); eq("user_id", me) } }
-    groupDao.deleteGroup(groupId)
-    groupDao.clearMembers(groupId)
-    groupDao.clearEvents(groupId)
+    purgeDepartedGroup(groupId)
 }
 
 /**
@@ -1978,9 +1968,7 @@ suspend fun WhisperRepository.disbandGroup(groupId: String): Result<Unit> = runC
     require(m.isMember(me)) { "You are not a member." }
     require(m.members.size <= 1) { "Only the last remaining member can disband the group." }
     db.from("whisper_groups").delete { filter { eq("id", groupId) } }
-    groupDao.deleteGroup(groupId)
-    groupDao.clearMembers(groupId)
-    groupDao.clearEvents(groupId)
+    purgeDepartedGroup(groupId)
 }
 
 /** Sends one message to every current member (fail-closed: all legs or nothing). */

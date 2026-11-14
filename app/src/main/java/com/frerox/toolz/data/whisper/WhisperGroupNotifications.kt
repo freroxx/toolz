@@ -53,6 +53,18 @@ class WhisperGroupNotifPrefs @Inject constructor(
         _overrides.update { it + (groupId to enabled) }
     }
 
+    /**
+     * Drops one group's explicit override. Called when the group is
+     * authoritatively gone (left/disbanded/removed): an override for a group
+     * that no longer exists would otherwise live in this permanently-loaded
+     * preferences file forever.
+     */
+    fun clearOverride(groupId: String) {
+        if (groupId.isBlank()) return
+        prefs.edit().remove(KEY_PREFIX + groupId).apply()
+        _overrides.update { it - groupId }
+    }
+
     /** Wipe on account deletion (same hygiene as mute prefs). */
     suspend fun clearAll() {
         val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {

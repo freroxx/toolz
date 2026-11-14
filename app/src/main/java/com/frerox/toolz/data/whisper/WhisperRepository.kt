@@ -108,13 +108,16 @@ class WhisperRepository @Inject constructor(
     internal val storyLocalDao: WhisperStoryLocalDao,
     private val keyTrustStore: WhisperKeyTrustStore,
     private val hiddenChatsStore: WhisperHiddenChatsStore,
-    private val mutePrefs: WhisperMutePreferences,
+    // internal so WhisperRepositoryGroups can drop a departed group's mute /
+    // read watermark / notification override together with its cached rows.
+    internal val mutePrefs: WhisperMutePreferences,
     // Daily Ups local seen set: cleared with the rest of the account's local data.
     private val storySeenStore: WhisperStorySeenStore,
     // Phase-2 groups local UI state (ships in v1.1.8, but must still be
     // wiped on account deletion so a following account never inherits it).
-    private val groupReadStore: WhisperGroupReadStore,
-    private val groupNotifPrefs: WhisperGroupNotifPrefs,
+    // internal: the groups lane purges these per group on authoritative removal.
+    internal val groupReadStore: WhisperGroupReadStore,
+    internal val groupNotifPrefs: WhisperGroupNotifPrefs,
     // Rotate-bookkeeping + undo buffer: both survive sign-out by design, but
     // account deletion is a permanent identity change and must drop them.
     private val keyRotationStore: WhisperKeyRotationStore,
