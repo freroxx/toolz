@@ -789,9 +789,15 @@ the extraction rules. Upgrading installs are
 handled once by `WhisperLegacyImporter`: it copies every row into the new
 database in one committed transaction, then deletes the legacy rows with
 `PRAGMA secure_delete = ON`, drops the now-unmanaged legacy tables and
-best-effort checkpoints/VACUUMs `toolz_db` so freed pages cannot carry old
+checkpoints `toolz_db` so freed pages (and old `-wal` frames) cannot carry
 metadata into a backup. The importer is idempotent and retries on the next
-launch if anything fails, so no history is lost.
+launch if anything fails, so no history is lost. The copy/delete/drop and
+checkpoint are synchronous because they gate correctness; only the
+space-reclaiming `VACUUM` (a full-file rewrite that can take seconds) is
+handed to an IO coroutine a few seconds after startup, since the split runs
+during Hilt injection on the main thread. A debug build logs the row count and
+elapsed milliseconds of the one-time split, which is the device-verifiable
+cost signal.
 
 A scoping note on that table, because the row titles hide it. Whisper state is
 split by *what it is*, not uniformly by account. Room message rows are filtered

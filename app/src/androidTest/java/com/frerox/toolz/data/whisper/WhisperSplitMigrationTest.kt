@@ -14,6 +14,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -149,6 +150,37 @@ class WhisperSplitMigrationTest {
             assertEquals("ciphertext", cursor.getString(0))
             assertEquals(0L, cursor.getLong(1))
         }
+    }
+
+    @Test
+    fun migrateIfNeeded_defersVacuumAndKeepsTheMoveCompleteBeforeItRuns() {
+        createLegacyTables(includeSortEpoch = true)
+        legacy.execSQL(
+            "INSERT INTO whisper_messages (id, senderId, receiverId, content, isRead, createdAt, " +
+                "isDeletedForEveryone, sortEpoch) " +
+                "VALUES ('m1', 'alice', 'bob', 'ciphertext', 0, '2026-11-07T00:00:00Z', 0, 1)",
+        )
+
+        var scheduled: (() -> Unit)? = null
+        val targetDb = target.openHelper.writableDatabase
+        val copied = WhisperLegacyImporter.migrateIfNeeded(
+            legacy = legacy,
+            target = targetDb,
+            scheduleMaintenance = { scheduled = it },
+        )
+
+        // The correctness half (copy + delete + drop) is already committed when
+        // the provider returns; only the space-reclamation VACUUM is deferred.
+        assertEquals(1, copied)
+        assertNotNull("maintenance was not scheduled", scheduled)
+        targetDb.query("SELECT COUNT(*) FROM whisper_messages").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals(1, cursor.getInt(0))
+        }
+        legacy.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'whisper_%'")
+            .use { cursor -> assertFalse("legacy whisper tables survived", cursor.moveToFirst()) }
+
+        scheduled!!.invoke()
     }
 
     private fun createLegacyTables(includeSortEpoch: Boolean) {

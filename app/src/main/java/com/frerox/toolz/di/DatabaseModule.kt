@@ -18,9 +18,12 @@
 package com.frerox.toolz.di
 
 import android.content.Context
+import android.os.SystemClock
+import android.util.Log
 import androidx.room.Room
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.frerox.toolz.BuildConfig
 import com.frerox.toolz.data.AppDatabase
 import com.frerox.toolz.data.notepad.NoteDao
 import com.frerox.toolz.data.notepad.NoteAttachmentDao
@@ -48,6 +51,10 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 import net.zetetic.database.sqlcipher.SQLiteNotADatabaseException
 import javax.inject.Singleton
@@ -639,6 +646,7 @@ object DatabaseModule {
     fun provideWhisperDatabase(
         @ApplicationContext context: Context,
         appDatabase: AppDatabase,
+        @ApplicationScope appScope: CoroutineScope,
     ): WhisperDatabase {
         System.loadLibrary("sqlcipher")
         val dbName = WhisperDatabase.DB_NAME
@@ -700,10 +708,29 @@ object DatabaseModule {
         // the legacy rows remain and the next launch retries, so a transient
         // error can never strand the app or lose history.
         runCatching {
-            com.frerox.toolz.data.whisper.WhisperLegacyImporter.migrateIfNeeded(
+            val startedAt = SystemClock.elapsedRealtime()
+            val copied = com.frerox.toolz.data.whisper.WhisperLegacyImporter.migrateIfNeeded(
                 legacy = appDatabase.openHelper.writableDatabase,
                 target = db.openHelper.writableDatabase,
+                // This provider runs during Hilt injection (main thread). The
+                // copy/delete/drop must finish before Whisper reads anything,
+                // but a VACUUM rewrites the whole legacy database — defer that
+                // space reclamation to IO after startup settles.
+                scheduleMaintenance = { block ->
+                    appScope.launch(Dispatchers.IO) {
+                        delay(5_000)
+                        block()
+                    }
+                },
             )
+            if (BuildConfig.DEBUG) {
+                // Device-verifiable cost of the one-time split (no row content).
+                Log.d(
+                    "DatabaseModule",
+                    "Whisper legacy split: $copied rows in " +
+                        "${SystemClock.elapsedRealtime() - startedAt} ms",
+                )
+            }
         }.onFailure {
             if (com.frerox.toolz.BuildConfig.DEBUG) {
                 android.util.Log.e(

@@ -74,10 +74,19 @@ internal object WhisperLegacyImporter {
      * no-op (plus one `DROP TABLE IF EXISTS` pass on the first run after an
      * upgrade). Callers should still guard it so a transient failure can never
      * prevent the app from starting; the next launch retries.
+     *
+     * [scheduleMaintenance] receives the `VACUUM` that reclaims the freed
+     * pages. The provider runs during Hilt injection, i.e. on the main thread,
+     * and a VACUUM rewrites the whole legacy database — seconds on a large
+     * one. Copy/delete/drop and the WAL checkpoint stay synchronous because
+     * they gate correctness (backup exclusion, no history loss, no old page
+     * images left in `-wal`); only the space reclamation is deferred. When
+     * null (tests) the VACUUM runs inline.
      */
     fun migrateIfNeeded(
         legacy: SupportSQLiteDatabase,
         target: SupportSQLiteDatabase,
+        scheduleMaintenance: ((() -> Unit) -> Unit)? = null,
     ): Int {
         val present = TABLES.filter { tableExists(legacy, it) }
         if (present.isEmpty()) return 0
@@ -140,11 +149,19 @@ internal object WhisperLegacyImporter {
             }
         }
 
+        // Fold the WAL now: the drop deleted pages whose OLD images can still sit
+        // in `toolz_db-wal`, and that file is inside the (currently disabled)
+        // backup boundary. TRUNCATE removes them once the checkpoint succeeds.
+        runCatching { legacy.query("PRAGMA wal_checkpoint(TRUNCATE)").close() }
+
         // Best-effort: some Room connection pools reject VACUUM while another
         // connection is active. secure_delete already scrubbed the rows, so a
         // failure here costs space, never confidentiality.
-        runCatching { legacy.query("PRAGMA wal_checkpoint(TRUNCATE)").close() }
-        runCatching { legacy.execSQL("VACUUM") }
+        val maintenance: () -> Unit = {
+            runCatching { legacy.execSQL("VACUUM") }
+            Unit
+        }
+        if (scheduleMaintenance != null) scheduleMaintenance(maintenance) else maintenance()
         return copied
     }
 
