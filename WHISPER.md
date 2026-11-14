@@ -1605,6 +1605,13 @@ Story push pings carry poster ID and story ID; the poster's name rides only insi
 encrypted Web Push payloads on the FCM-fallback path (external distributors
 get IDs and resolve the name locally) — content-free either way.
 
+The shade card for a Daily Up is per poster, not per story (a newer up
+replaces it), and it is dismissed as soon as that poster's ring is on screen
+in-app — opening from the hub or the stories bar used to leave a card behind
+that only the next post from that person could replace. The tap target carries
+the poster ID for a validated route that falls back to the hub when the story
+has expired or been deleted underneath it.
+
 ---
 
 ## 13. How it is verified

@@ -152,6 +152,23 @@ class WhisperNotificationManager @Inject constructor(
         }
     }
 
+    /**
+     * Dismisses the shade card for one poster's Daily Up.
+     *
+     * AutoCancel only fires when the card itself is tapped. Opening the ring
+     * from the hub or the stories bar leaves the card behind forever (it used
+     * to sit there until the next post from that person replaced it), so the
+     * viewer cancels it as soon as that poster's ring is on screen.
+     */
+    fun cancelDailyUpNotification(posterId: String) {
+        if (posterId.isBlank()) return
+        // Lookup only: cancelling a ring that never had a push must not burn a
+        // sender-id slot (senderNotifId allocates on miss).
+        val id = synchronized(senderNotifIds) { senderNotifIds["dailyup:$posterId"] } ?: return
+        runCatching { notifManager.cancel(id) }
+        maybeCancelGroupSummary()
+    }
+
     private fun createChannel() {
         val channel = NotificationChannel(
             CHANNEL_ID,

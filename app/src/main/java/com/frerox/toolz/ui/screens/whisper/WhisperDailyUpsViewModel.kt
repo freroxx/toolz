@@ -37,7 +37,9 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -65,6 +67,7 @@ import javax.inject.Inject
 class WhisperDailyUpsViewModel @Inject constructor(
     private val repository: WhisperRepository,
     private val seenStore: WhisperStorySeenStore,
+    private val notificationManager: com.frerox.toolz.data.whisper.WhisperNotificationManager,
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) : ViewModel() {
 
@@ -212,6 +215,16 @@ class WhisperDailyUpsViewModel @Inject constructor(
     init {
         refresh()
         viewModelScope.launch { collectProfileNames() }
+        // The ring is on screen: the shade card for that poster is stale now,
+        // whether the viewer was opened from the hub, the stories bar or the
+        // notification itself. AutoCancel can only fire on a card tap, so
+        // without this the card lived until that person's next post.
+        viewModelScope.launch {
+            viewer
+                .map { it?.currentSegment?.ownerId }
+                .distinctUntilChanged()
+                .collect { owner -> if (owner != null) notificationManager.cancelDailyUpNotification(owner) }
+        }
     }
 
     /** Hub open/refresh: sync server truth + read back the day's quota.
