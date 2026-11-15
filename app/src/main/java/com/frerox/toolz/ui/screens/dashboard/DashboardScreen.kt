@@ -125,6 +125,11 @@ import java.time.format.DateTimeFormatter
 import java.util.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled
+import com.frerox.toolz.ui.liquidglass.LocalLiquidGlassBackdrop
+import com.frerox.toolz.ui.liquidglass.GlassCard
+import com.frerox.toolz.ui.liquidglass.liquidGlassEffect
+import com.frerox.toolz.ui.liquidglass.LiquidGlassIconButton
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DATA MODELS
@@ -706,13 +711,23 @@ fun PinnedCarouselItem(
             modifier = Modifier.fillMaxSize().padding(16.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            Surface(
-                modifier = Modifier.size(44.dp),
-                shape = SmallExpressiveShape,
-                color = tool.color.copy(alpha = 0.2f)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
+            val glassEnabledInPinned = LocalLiquidGlassEnabled.current
+            if (glassEnabledInPinned) {
+                Box(
+                    modifier = Modifier.size(44.dp),
+                    contentAlignment = Alignment.Center
+                ) {
                     Icon(tool.icon, null, tint = tool.color, modifier = Modifier.size(24.dp))
+                }
+            } else {
+                Surface(
+                    modifier = Modifier.size(44.dp),
+                    shape = SmallExpressiveShape,
+                    color = tool.color.copy(alpha = 0.2f)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(tool.icon, null, tint = tool.color, modifier = Modifier.size(24.dp))
+                    }
                 }
             }
             Text(
@@ -754,13 +769,23 @@ fun SpotlightSection(tool: ToolItem, onNavigate: (String) -> Unit) {
                     .padding(20.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Surface(
-                    modifier = Modifier.size(56.dp),
-                    shape = MediumExpressiveShape,
-                    color = tool.color.copy(alpha = 0.2f)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
+                val glassInSpotlight = LocalLiquidGlassEnabled.current
+                if (glassInSpotlight) {
+                    Box(
+                        modifier = Modifier.size(56.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Icon(tool.icon, null, tint = tool.color, modifier = Modifier.size(28.dp))
+                    }
+                } else {
+                    Surface(
+                        modifier = Modifier.size(56.dp),
+                        shape = MediumExpressiveShape,
+                        color = tool.color.copy(alpha = 0.2f)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(tool.icon, null, tint = tool.color, modifier = Modifier.size(28.dp))
+                        }
                     }
                 }
                 Spacer(Modifier.width(16.dp))
@@ -837,14 +862,24 @@ fun DashboardTopBar(
 
             Spacer(Modifier.width(12.dp))
 
-            IconButton(
-                onClick = onSettingsClick,
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f))
-            ) {
-                Icon(Icons.Rounded.Settings, "Settings", modifier = Modifier.size(20.dp))
+            val glassEnabled = LocalLiquidGlassEnabled.current
+            if (glassEnabled) {
+                LiquidGlassIconButton(
+                    onClick = onSettingsClick,
+                    modifier = Modifier.size(48.dp),
+                ) {
+                    Icon(Icons.Rounded.Settings, "Settings", modifier = Modifier.size(20.dp))
+                }
+            } else {
+                IconButton(
+                    onClick = onSettingsClick,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f))
+                ) {
+                    Icon(Icons.Rounded.Settings, "Settings", modifier = Modifier.size(20.dp))
+                }
             }
         }
     }
@@ -1034,12 +1069,14 @@ fun SmartSearchBar(
 private fun UrlSuggestionRow(query: String, onNavigate: (String) -> Unit) {
     val vibrationManager = LocalVibrationManager.current
     val url = if (query.startsWith("http")) query else "https://$query"
+    val glassEnabled = LocalLiquidGlassEnabled.current
+    val urlGlassModifier = Modifier.fillMaxWidth().padding(top = 6.dp).liquidGlassEffect(shape = SquircleShape)
     
     Surface(
-        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+        modifier = if (glassEnabled) urlGlassModifier else Modifier.fillMaxWidth().padding(top = 6.dp),
         shape = SquircleShape,
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
+        color = if (glassEnabled) Color.Transparent else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = if (glassEnabled) 0.35f else 0.2f)),
         onClick = {
             vibrationManager?.vibrateClick()
             onNavigate(Screen.Browser.createRoute(url))
@@ -1053,7 +1090,7 @@ private fun UrlSuggestionRow(query: String, onNavigate: (String) -> Unit) {
             Surface(
                 modifier = Modifier.size(36.dp),
                 shape = CircleShape,
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                color = if (glassEnabled) Color.White.copy(alpha = 0.12f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(Icons.Rounded.Language, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
@@ -1076,6 +1113,8 @@ fun AiSearchResponseDropdown(
     onNavigate: (String) -> Unit
 ) {
     val vibrationManager = LocalVibrationManager.current
+    val glassEnabled = LocalLiquidGlassEnabled.current
+    val glassModifier = Modifier.fillMaxWidth().padding(top = 6.dp).liquidGlassEffect(shape = SquircleShape)
     
     // Typewriter effect (simplified for markdown)
     var displayedText by remember { mutableStateOf("") }
@@ -1093,11 +1132,11 @@ fun AiSearchResponseDropdown(
     }
 
     Surface(
-        modifier       = Modifier.fillMaxWidth().padding(top = 6.dp),
+        modifier       = if (glassEnabled) glassModifier else Modifier.fillMaxWidth().padding(top = 6.dp),
         shape          = SquircleShape,
-        color          = MaterialTheme.colorScheme.surfaceContainerHigh,
-        tonalElevation = 4.dp,
-        border         = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
+        color          = if (glassEnabled) Color.Transparent else MaterialTheme.colorScheme.surfaceContainerHigh,
+        tonalElevation = if (glassEnabled) 0.dp else 4.dp,
+        border         = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = if (glassEnabled) 0.35f else 0.2f)),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
@@ -1179,14 +1218,18 @@ private fun SearchDropdown(
     onNavigate: (String) -> Unit,
     isAi: Boolean = false,
 ) {
+    val glassEnabled = LocalLiquidGlassEnabled.current
+    val glassModifier = Modifier.fillMaxWidth().padding(top = 6.dp).liquidGlassEffect(shape = SquircleShape)
+
     Surface(
-        modifier       = Modifier.fillMaxWidth().padding(top = 6.dp),
+        modifier       = if (glassEnabled) glassModifier else Modifier.fillMaxWidth().padding(top = 6.dp),
         shape          = SquircleShape,
-        color          = MaterialTheme.colorScheme.surfaceContainerHigh,
-        tonalElevation = 4.dp,
+        color          = if (glassEnabled) Color.Transparent else MaterialTheme.colorScheme.surfaceContainerHigh,
+        tonalElevation = if (glassEnabled) 0.dp else 4.dp,
         border         = BorderStroke(
             1.dp,
-            if (isAi) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+            if (glassEnabled) MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
+            else if (isAi) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
             else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f),
         ),
     ) {
@@ -3502,7 +3545,7 @@ fun ToolDetailSheet(
                             else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    Switch(
+                    com.frerox.toolz.ui.components.ExpressiveSwitch(
                         checked         = isPinned,
                         onCheckedChange = { vibrationManager?.vibrateTick(); onTogglePin() },
                     )
