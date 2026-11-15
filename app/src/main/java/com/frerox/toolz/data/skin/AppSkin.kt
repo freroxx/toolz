@@ -68,6 +68,7 @@ data class IconSpec(
 
 object IconCatalog {
     const val DEFAULT_ID = "grape-haze"
+    const val LIQUID_GLASS_ID = "liquid-glass"
 
     /**
      * Synthetic id for a user photo picked from the device (App Skin → Use photo).
@@ -78,6 +79,7 @@ object IconCatalog {
     const val CUSTOM_ID = "custom-photo"
 
     val BUILT_IN: List<IconSpec> = listOf(
+        IconSpec("liquid-glass", "Liquid Glass", tag = "Vivid", rim = 0xFFDFBCFF, bodyStart = 0xFF8534CE, bodyEnd = 0xFF120A22, disc = 0xFFFFFFFF, adaptToTheme = false, themePrimaryLight = 0xFF7B2FBE, themeSecondaryLight = 0xFF0C7E78, themePrimaryDark = 0xFFD5B9EE, themeSecondaryDark = 0xFF9AD9D2),
         // --- Reference icons: colours sampled from the original renders ---
         // Every preset carries a bodyEnd so the in-app gradient toggle works on all of them.
         IconSpec("grape-haze", "Grape Haze", tag = "Vivid", rim = 0xFFDFBCFF, bodyStart = 0xFF8534CE, bodyEnd = 0xFFD5B9EE, disc = 0xFFFFFFFF, adaptToTheme = true, themePrimaryLight = 0xFF7B2FBE, themeSecondaryLight = 0xFF0C7E78, themePrimaryDark = 0xFFD5B9EE, themeSecondaryDark = 0xFF9AD9D2),

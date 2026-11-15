@@ -1679,6 +1679,36 @@ class SettingsRepository @Inject constructor(
     suspend fun setPerformanceMode(enabled: Boolean) { dataStore.edit { it[PERFORMANCE_MODE] = enabled } }
     suspend fun setShowTopAppBarDescriptions(enabled: Boolean) { dataStore.edit { it[SHOW_TOP_APP_BAR_DESCRIPTIONS] = enabled } }
 
+    // ── Liquid Glass mode ───────────────────────────────────────────────────
+    private val LIQUID_GLASS_MODE = booleanPreferencesKey("liquid_glass_mode_enabled")
+    val liquidGlassModeEnabled: Flow<Boolean> = dataStore.data.map { it[LIQUID_GLASS_MODE] ?: false }
+    suspend fun setLiquidGlassModeEnabled(enabled: Boolean) { dataStore.edit { it[LIQUID_GLASS_MODE] = enabled } }
+
+    private val LIQUID_GLASS_BLUR_RADIUS = floatPreferencesKey("liquid_glass_blur_radius")
+    val liquidGlassBlurRadius: Flow<Float> = dataStore.data.map { it[LIQUID_GLASS_BLUR_RADIUS] ?: 8f }
+    suspend fun setLiquidGlassBlurRadius(radius: Float) { dataStore.edit { it[LIQUID_GLASS_BLUR_RADIUS] = radius } }
+
+    private val LIQUID_GLASS_TINT_ALPHA = floatPreferencesKey("liquid_glass_tint_alpha")
+    val liquidGlassTintAlpha: Flow<Float> = dataStore.data.map { it[LIQUID_GLASS_TINT_ALPHA] ?: 0.25f }
+    suspend fun setLiquidGlassTintAlpha(alpha: Float) { dataStore.edit { it[LIQUID_GLASS_TINT_ALPHA] = alpha } }
+
+    private val LIQUID_GLASS_REFRACTION = floatPreferencesKey("liquid_glass_refraction")
+    val liquidGlassRefraction: Flow<Float> = dataStore.data.map { it[LIQUID_GLASS_REFRACTION] ?: 24f }
+    suspend fun setLiquidGlassRefraction(refraction: Float) { dataStore.edit { it[LIQUID_GLASS_REFRACTION] = refraction } }
+
+    private val LIQUID_GLASS_DISABLED_ICON_IDS = stringSetPreferencesKey("liquid_glass_disabled_icon_ids")
+    val liquidGlassDisabledIconIds: Flow<Set<String>> = dataStore.data.map { it[LIQUID_GLASS_DISABLED_ICON_IDS] ?: emptySet() }
+    suspend fun toggleLiquidGlassIcon(iconId: String) {
+        dataStore.edit {
+            val current = it[LIQUID_GLASS_DISABLED_ICON_IDS] ?: emptySet()
+            if (iconId in current) {
+                it[LIQUID_GLASS_DISABLED_ICON_IDS] = current - iconId
+            } else {
+                it[LIQUID_GLASS_DISABLED_ICON_IDS] = current + iconId
+            }
+        }
+    }
+
     suspend fun setStepCounterEnabled(enabled: Boolean) { dataStore.edit { it[STEP_COUNTER_ENABLED] = enabled } }
     suspend fun setStepHistoryRetention(retention: String) { dataStore.edit { it[STEP_HISTORY_RETENTION] = retention } }
     suspend fun setAiFitnessAgentEnabled(enabled: Boolean) { dataStore.edit { it[AI_FITNESS_AGENT_ENABLED] = enabled } }

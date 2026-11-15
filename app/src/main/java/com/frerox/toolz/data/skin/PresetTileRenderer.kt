@@ -38,15 +38,31 @@ object PresetTileRenderer {
     suspend fun render(context: Context, presetId: String, shape: String?): Bitmap? =
         withContext(Dispatchers.Default) {
             try {
+                if (presetId == IconCatalog.LIQUID_GLASS_ID) {
+                    val refBitmap = android.graphics.BitmapFactory.decodeResource(
+                        context.resources,
+                        com.frerox.toolz.R.drawable.ic_liquid_glass_reference
+                    )
+                    if (refBitmap != null) {
+                        return@withContext Bitmap.createScaledBitmap(refBitmap, SIZE_PX, SIZE_PX, true)
+                    }
+                }
                 val res = context.resources
                 val pkg = context.packageName
                 val fgId = res.getIdentifier(fgName(presetId, shape), "drawable", pkg)
-                val bgId = res.getIdentifier(bgName(presetId), "color", pkg)
+                val bgId = res.getIdentifier(bgName(presetId), "color", pkg).takeIf { it != 0 }
+                    ?: res.getIdentifier(bgName(presetId), "drawable", pkg)
                 if (fgId == 0 || bgId == 0) return@withContext null
                 val fg = context.getDrawable(fgId) ?: return@withContext null
                 val out = Bitmap.createBitmap(SIZE_PX, SIZE_PX, Bitmap.Config.ARGB_8888)
                 val canvas = Canvas(out)
-                canvas.drawColor(context.getColor(bgId))
+                val bgDrawable = try { context.getDrawable(bgId) } catch (_: Exception) { null }
+                if (bgDrawable != null) {
+                    bgDrawable.setBounds(0, 0, SIZE_PX, SIZE_PX)
+                    bgDrawable.draw(canvas)
+                } else {
+                    canvas.drawColor(context.getColor(bgId))
+                }
                 fg.setBounds(0, 0, SIZE_PX, SIZE_PX)
                 fg.draw(canvas)
                 out
