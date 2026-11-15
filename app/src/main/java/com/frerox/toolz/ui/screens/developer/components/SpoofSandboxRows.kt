@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -104,7 +103,7 @@ fun SpoofToolTile(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            Switch(
+            com.frerox.toolz.ui.components.ExpressiveSwitch(
                 checked = active,
                 onCheckedChange = onToggle,
                 modifier = Modifier.semantics {

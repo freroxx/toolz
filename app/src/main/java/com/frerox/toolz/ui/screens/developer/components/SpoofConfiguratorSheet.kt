@@ -32,7 +32,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.SheetValue
@@ -323,7 +322,7 @@ private fun FixtureSwitchRow(
                 )
             }
         }
-        Switch(
+        com.frerox.toolz.ui.components.ExpressiveSwitch(
             checked = spec.get(params),
             onCheckedChange = onCheckedChange,
             modifier = Modifier.semantics { contentDescription = spec.label },

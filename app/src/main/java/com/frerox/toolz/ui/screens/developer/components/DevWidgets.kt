@@ -30,10 +30,8 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
 import androidx.compose.material3.rememberSliderState
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -96,17 +94,35 @@ fun DevCard(
     contentPadding: PaddingValues = PaddingValues(DevSpacing.card),
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        color = containerColor,
-        contentColor = MaterialTheme.colorScheme.onSurface,
-    ) {
-        Column(
-            modifier = Modifier.padding(contentPadding),
-            verticalArrangement = Arrangement.spacedBy(DevSpacing.gap),
-            content = content,
-        )
+    val liquidGlassEnabled = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled.current
+    val backdrop = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassBackdrop.current
+
+    if (liquidGlassEnabled) {
+        com.frerox.toolz.ui.liquidglass.GlassCard(
+            backdrop = backdrop,
+            modifier = modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            tint = containerColor.copy(alpha = 0.20f),
+        ) {
+            Column(
+                modifier = Modifier.padding(contentPadding),
+                verticalArrangement = Arrangement.spacedBy(DevSpacing.gap),
+                content = content,
+            )
+        }
+    } else {
+        Surface(
+            modifier = modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            color = containerColor,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+        ) {
+            Column(
+                modifier = Modifier.padding(contentPadding),
+                verticalArrangement = Arrangement.spacedBy(DevSpacing.gap),
+                content = content,
+            )
+        }
     }
 }
 
@@ -115,18 +131,36 @@ fun DevDangerCard(
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.28f),
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f)),
-    ) {
-        Column(
-            modifier = Modifier.padding(DevSpacing.card),
-            verticalArrangement = Arrangement.spacedBy(DevSpacing.gap),
-            content = content,
-        )
+    val liquidGlassEnabled = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled.current
+    val backdrop = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassBackdrop.current
+
+    if (liquidGlassEnabled) {
+        com.frerox.toolz.ui.liquidglass.GlassCard(
+            backdrop = backdrop,
+            modifier = modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            tint = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f),
+        ) {
+            Column(
+                modifier = Modifier.padding(DevSpacing.card),
+                verticalArrangement = Arrangement.spacedBy(DevSpacing.gap),
+                content = content,
+            )
+        }
+    } else {
+        Surface(
+            modifier = modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.28f),
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f)),
+        ) {
+            Column(
+                modifier = Modifier.padding(DevSpacing.card),
+                verticalArrangement = Arrangement.spacedBy(DevSpacing.gap),
+                content = content,
+            )
+        }
     }
 }
 
@@ -272,9 +306,9 @@ fun DevToggleRow(
                 else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
             )
         }
-        Switch(
+        com.frerox.toolz.ui.components.ExpressiveSwitch(
             checked = checked,
-            onCheckedChange = null,
+            onCheckedChange = { if (enabled) onCheckedChange(!checked) },
             enabled = enabled,
         )
     }
@@ -479,10 +513,11 @@ fun DevSlider(
                 color = MaterialTheme.colorScheme.primary,
             )
         }
-        Slider(
-            state = sliderState,
+        com.frerox.toolz.ui.components.ExpressiveSlider(
+            value = { sliderState.value },
             onValueChange = { sliderState.value = it },
             onValueChangeFinished = { onValueChange(sliderState.value) },
+            valueRange = range,
             enabled = enabled,
             modifier = Modifier
                 .fillMaxWidth()
