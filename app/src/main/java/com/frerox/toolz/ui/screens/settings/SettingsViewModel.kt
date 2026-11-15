@@ -276,6 +276,36 @@ class SettingsViewModel @Inject constructor(
     fun setPerformanceMode(enabled: Boolean) = viewModelScope.launch { repository.setPerformanceMode(enabled) }
     fun setShowTopAppBarDescriptions(enabled: Boolean) = viewModelScope.launch { repository.setShowTopAppBarDescriptions(enabled) }
 
+    // ── Liquid Glass ────────────────────────────────────────────────────────
+    val liquidGlassModeEnabled = repository.liquidGlassModeEnabled
+    fun setLiquidGlassModeEnabled(enabled: Boolean) = viewModelScope.launch {
+        repository.setLiquidGlassModeEnabled(enabled)
+        try {
+            val shape = try { repository.appIconShape.first() } catch (_: Exception) { null }
+            if (enabled) {
+                launcherIconManager.apply(com.frerox.toolz.data.skin.IconCatalog.LIQUID_GLASS_ID, shape)
+            } else {
+                val preset = try { repository.appIconPresetId.first() } catch (_: Exception) { null }
+                launcherIconManager.apply(preset ?: com.frerox.toolz.data.skin.IconCatalog.DEFAULT_ID, shape)
+            }
+        } catch (_: Exception) { }
+    }
+    val liquidGlassDisabledIconIds = repository.liquidGlassDisabledIconIds
+    fun toggleLiquidGlassIcon(iconId: String) =
+        viewModelScope.launch { repository.toggleLiquidGlassIcon(iconId) }
+
+    val liquidGlassBlurRadius = repository.liquidGlassBlurRadius
+    fun setLiquidGlassBlurRadius(radius: Float) =
+        viewModelScope.launch { repository.setLiquidGlassBlurRadius(radius) }
+
+    val liquidGlassTintAlpha = repository.liquidGlassTintAlpha
+    fun setLiquidGlassTintAlpha(alpha: Float) =
+        viewModelScope.launch { repository.setLiquidGlassTintAlpha(alpha) }
+
+    val liquidGlassRefraction = repository.liquidGlassRefraction
+    fun setLiquidGlassRefraction(refraction: Float) =
+        viewModelScope.launch { repository.setLiquidGlassRefraction(refraction) }
+
     fun setCustomRingtoneEnabled(enabled: Boolean) = viewModelScope.launch { repository.setCustomRingtoneEnabled(enabled) }
     fun setCustomRingtoneUri(uri: String?) = viewModelScope.launch { repository.setCustomRingtoneUri(uri) }
 

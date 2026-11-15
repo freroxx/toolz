@@ -21,6 +21,7 @@ import androidx.compose.material.icons.rounded.Subtitles
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -58,21 +59,45 @@ fun AppSkinThemeSection(viewModel: SettingsViewModel) {
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            val liquidGlassEnabled = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled.current
+            val backdrop = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassBackdrop.current
+
             listOf("SYSTEM", "LIGHT", "DARK").forEach { mode ->
                 val isSelected = themeMode == mode
-                Surface(
-                    onClick = {
-                        vibrationManager?.vibrateClick()
-                        viewModel.setThemeMode(mode)
-                    },
-                    modifier = Modifier.weight(1f).height(48.dp).bouncyClick {},
-                    shape = RoundedCornerShape(16.dp),
-                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                    border = if (!isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        @Suppress("DEPRECATION")
-                        Text(mode, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
+                if (liquidGlassEnabled && backdrop != null) {
+                    com.kyant.backdrop.catalog.components.LiquidButton(
+                        onClick = {
+                            vibrationManager?.vibrateClick()
+                            viewModel.setThemeMode(mode)
+                        },
+                        backdrop = backdrop,
+                        tint = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                        modifier = Modifier.weight(1f).height(48.dp),
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                mode,
+                                fontWeight = FontWeight.Black,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                } else {
+                    Surface(
+                        onClick = {
+                            vibrationManager?.vibrateClick()
+                            viewModel.setThemeMode(mode)
+                        },
+                        modifier = Modifier.weight(1f).height(48.dp).bouncyClick {},
+                        shape = RoundedCornerShape(16.dp),
+                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                        border = if (!isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            @Suppress("DEPRECATION")
+                            Text(mode, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
                 }
             }

@@ -53,9 +53,14 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import com.frerox.toolz.ui.liquidglass.LiquidGlassActivationOverlay
+import com.frerox.toolz.ui.liquidglass.ToolzMarkGlass
+import com.frerox.toolz.ui.liquidglass.LocalLiquidGlassBackdrop
+import com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled
+import com.frerox.toolz.ui.liquidglass.GlassCard
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
@@ -130,11 +135,19 @@ fun AppSkinScreen(
     val userName by viewModel.userName.collectAsState(initial = "")
     val mySubmissions by viewModel.mySubmissions.collectAsState(initial = emptyList())
     val submissionStatuses by viewModel.submissionStatuses.collectAsState(initial = emptyMap())
+    val liquidGlassModeEnabled by viewModel.liquidGlassModeEnabled.collectAsState(initial = false)
+    val liquidGlassDisabledIconIds by viewModel.liquidGlassDisabledIconIds.collectAsState(initial = emptySet())
+    val liquidGlassBlurRadius by viewModel.liquidGlassBlurRadius.collectAsState(initial = 8f)
+    val liquidGlassTintAlpha by viewModel.liquidGlassTintAlpha.collectAsState(initial = 0.25f)
+    val liquidGlassRefraction by viewModel.liquidGlassRefraction.collectAsState(initial = 24f)
+    val performanceMode by viewModel.performanceMode.collectAsState(initial = false)
 
     var showShare by remember { mutableStateOf(false) }
     var shareResult by remember { mutableStateOf<Result<String>?>(null) }
     var showAdvancedThemeDialog by remember { mutableStateOf(false) }
     var showGraySuggestion by remember { mutableStateOf(false) }
+    var showActivationOverlay by remember { mutableStateOf(false) }
+    var overlayEnabling by remember { mutableStateOf(true) }
 
     val isDark = when (themeMode) {
         "DARK" -> true
@@ -256,58 +269,106 @@ fun AppSkinScreen(
                 Spacer(Modifier.height(4.dp))
 
                 // Hero preview
-                Surface(
-                    shape = RoundedCornerShape(36.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.18f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.12f)),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Row(
-                        modifier = Modifier.padding(20.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(18.dp),
+                val heroGlassActive = liquidGlassModeEnabled && (presetId !in liquidGlassDisabledIconIds) && presetId != IconCatalog.CUSTOM_ID
+                val heroBackdrop = LocalLiquidGlassBackdrop.current
+
+                if (heroGlassActive && heroBackdrop != null) {
+                    com.frerox.toolz.ui.liquidglass.GlassCard(
+                        backdrop = heroBackdrop,
+                        shape = RoundedCornerShape(36.dp),
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
-                        ToolzMarkThemed(
-                            presetId = presetId,
-                            isDark = isDark,
-                            dynamicColor = dynamicColor,
-                            scheme = scheme,
-                            shape = shape,
-                            adaptToTheme = adaptTheme,
-                            followDynamic = followDynamic,
-                            bgOverride = bgOv,
-                            fgOverride = fgOv,
-                            strokeOverride = strokeOv,
-                            iconGradient = iconGradient,
-                            modifier = Modifier.size(112.dp).bouncyClick(
-                                onLongClick = {
-                                    // "custom-photo" has no catalog art; pin the file instead.
-                                    if (presetId == IconCatalog.CUSTOM_ID) {
-                                        viewModel.pinCustomPhotoToHome(showPinResult)
-                                    } else {
+                        Row(
+                            modifier = Modifier.padding(20.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(18.dp),
+                        ) {
+                            com.frerox.toolz.ui.liquidglass.ToolzIconTileGlass(
+                                spec = current,
+                                frame = com.frerox.toolz.data.skin.IconShape.parse(shape) ?: com.frerox.toolz.data.skin.IconShape.OCTAGON,
+                                isDark = isDark,
+                                modifier = Modifier.size(112.dp).bouncyClick(
+                                    onLongClick = {
                                         viewModel.pinPresetToHome(presetId, showPinResult)
-                                    }
-                                },
-                            ),
-                        )
-                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(current.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
-                            Text(
-                                "${iconShapeLabel(shape).lowercase()} · ${iconTagLabel(current.tag).lowercase()} · ${activeSkinId ?: stringResource(R.string.st_AppSkin_custom_look)}",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    },
+                                ),
                             )
-                            Spacer(Modifier.height(6.dp))
-                            ToolzExpressiveButton(
-                                onClick = {
-                                    vibrationManager?.vibrateClick()
-                                    onOpenCatalog()
-                                },
-                                modifier = Modifier.fillMaxWidth().height(50.dp),
-                            ) {
-                                Icon(Icons.Rounded.GridView, null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(8.dp))
-                                Text(stringResource(R.string.st_AppSkin_catalog_title), fontWeight = FontWeight.Black)
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(current.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+                                Text(
+                                    "${iconShapeLabel(shape).lowercase()} · Liquid Glass · 3D Gemstone",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Spacer(Modifier.height(6.dp))
+                                ToolzExpressiveButton(
+                                    onClick = {
+                                        vibrationManager?.vibrateClick()
+                                        onOpenCatalog()
+                                    },
+                                    modifier = Modifier.fillMaxWidth().height(50.dp),
+                                ) {
+                                    Icon(Icons.Rounded.GridView, null, modifier = Modifier.size(18.dp))
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(stringResource(R.string.st_AppSkin_catalog_title), fontWeight = FontWeight.Black)
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    Surface(
+                        shape = RoundedCornerShape(36.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.18f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.12f)),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(20.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(18.dp),
+                        ) {
+                            ToolzMarkThemed(
+                                presetId = presetId,
+                                isDark = isDark,
+                                dynamicColor = dynamicColor,
+                                scheme = scheme,
+                                shape = shape,
+                                adaptToTheme = adaptTheme,
+                                followDynamic = followDynamic,
+                                bgOverride = bgOv,
+                                fgOverride = fgOv,
+                                strokeOverride = strokeOv,
+                                iconGradient = iconGradient,
+                                modifier = Modifier.size(112.dp).bouncyClick(
+                                    onLongClick = {
+                                        // "custom-photo" has no catalog art; pin the file instead.
+                                        if (presetId == IconCatalog.CUSTOM_ID) {
+                                            viewModel.pinCustomPhotoToHome(showPinResult)
+                                        } else {
+                                            viewModel.pinPresetToHome(presetId, showPinResult)
+                                        }
+                                    },
+                                ),
+                            )
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(current.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+                                Text(
+                                    "${iconShapeLabel(shape).lowercase()} · ${iconTagLabel(current.tag).lowercase()} · ${activeSkinId ?: stringResource(R.string.st_AppSkin_custom_look)}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Spacer(Modifier.height(6.dp))
+                                ToolzExpressiveButton(
+                                    onClick = {
+                                        vibrationManager?.vibrateClick()
+                                        onOpenCatalog()
+                                    },
+                                    modifier = Modifier.fillMaxWidth().height(50.dp),
+                                ) {
+                                    Icon(Icons.Rounded.GridView, null, modifier = Modifier.size(18.dp))
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(stringResource(R.string.st_AppSkin_catalog_title), fontWeight = FontWeight.Black)
+                                }
                             }
                         }
                     }
@@ -330,7 +391,10 @@ fun AppSkinScreen(
                     ) {
                         items(IconCatalog.BUILT_IN, key = { it.id }) { spec ->
                             val selected = spec.id == presetId
-                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(72.dp)) {
+                            val isGlassActive = liquidGlassModeEnabled && (spec.id !in liquidGlassDisabledIconIds)
+                            val catalogBackdrop = LocalLiquidGlassBackdrop.current
+
+                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(76.dp)) {
                                 Surface(
                                     shape = RoundedCornerShape(20.dp),
                                     color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
@@ -344,17 +408,27 @@ fun AppSkinScreen(
                                     ),
                                 ) {
                                     Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(9.dp)) {
-                                        ToolzMarkThemed(
-                                            presetId = spec.id,
-                                            isDark = isDark,
-                                            dynamicColor = dynamicColor,
-                                            scheme = scheme,
-                                            shape = shape,
-                                            adaptToTheme = adaptTheme,
-                                            followDynamic = followDynamic,
-                                            iconGradient = iconGradient,
-                                            modifier = Modifier.size(50.dp),
-                                        )
+                                        if (isGlassActive) {
+                                            ToolzMarkGlass(
+                                                spec = spec,
+                                                backdrop = catalogBackdrop,
+                                                frame = com.frerox.toolz.data.skin.IconShape.parse(shape) ?: com.frerox.toolz.data.skin.IconShape.OCTAGON,
+                                                isDark = isDark,
+                                                modifier = Modifier.size(50.dp),
+                                            )
+                                        } else {
+                                            ToolzMarkThemed(
+                                                presetId = spec.id,
+                                                isDark = isDark,
+                                                dynamicColor = dynamicColor,
+                                                scheme = scheme,
+                                                shape = shape,
+                                                adaptToTheme = adaptTheme,
+                                                followDynamic = followDynamic,
+                                                iconGradient = iconGradient,
+                                                modifier = Modifier.size(50.dp),
+                                            )
+                                        }
                                     }
                                 }
                                 Text(
@@ -430,17 +504,34 @@ fun AppSkinScreen(
                             "CIRCLE" to stringResource(R.string.st_AppSkin_shape_circle),
                         ).forEach { (s, label) ->
                             val sel = com.frerox.toolz.data.skin.IconShape.parse(shape) == com.frerox.toolz.data.skin.IconShape.parse(s)
-                            Surface(
-                                onClick = {
-                                    vibrationManager?.vibrateClick()
-                                    viewModel.setAppIconShape(s)
-                                },
-                                modifier = Modifier.weight(1f).height(46.dp).bouncyClick {},
-                                shape = RoundedCornerShape(14.dp),
-                                color = if (sel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Text(label, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, color = if (sel) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (liquidGlassModeEnabled) {
+                                Surface(
+                                    onClick = {
+                                        vibrationManager?.vibrateClick()
+                                        viewModel.setAppIconShape(s)
+                                    },
+                                    modifier = Modifier.weight(1f).height(46.dp).bouncyClick {},
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = if (sel) MaterialTheme.colorScheme.primary.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.08f),
+                                    border = BorderStroke(if (sel) 1.5.dp else 1.dp, if (sel) MaterialTheme.colorScheme.primary.copy(alpha = 0.8f) else Color.White.copy(alpha = 0.18f)),
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text(label, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, color = if (sel) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.85f))
+                                    }
+                                }
+                            } else {
+                                Surface(
+                                    onClick = {
+                                        vibrationManager?.vibrateClick()
+                                        viewModel.setAppIconShape(s)
+                                    },
+                                    modifier = Modifier.weight(1f).height(46.dp).bouncyClick {},
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = if (sel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text(label, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, color = if (sel) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
                                 }
                             }
                         }
@@ -601,6 +692,30 @@ fun AppSkinScreen(
 
                 AppSkinSectionHeader(stringResource(R.string.st_AppSkin_header_theme))
 
+                LiquidGlassCard(
+                    enabled = liquidGlassModeEnabled,
+                    onToggle = { enabled ->
+                        viewModel.setLiquidGlassModeEnabled(enabled)
+                    },
+                    onToggleAnimation = { enabling ->
+                        overlayEnabling = enabling
+                        showActivationOverlay = true
+                    },
+                    performanceMode = performanceMode,
+                    onPerformanceModeChange = { viewModel.setPerformanceMode(it) },
+                    blurRadius = liquidGlassBlurRadius,
+                    onBlurRadiusChange = { viewModel.setLiquidGlassBlurRadius(it) },
+                    tintAlpha = liquidGlassTintAlpha,
+                    onTintAlphaChange = { viewModel.setLiquidGlassTintAlpha(it) },
+                    refraction = liquidGlassRefraction,
+                    onRefractionChange = { viewModel.setLiquidGlassRefraction(it) },
+                    onResetCustomization = {
+                        viewModel.setLiquidGlassBlurRadius(8f)
+                        viewModel.setLiquidGlassTintAlpha(0.25f)
+                        viewModel.setLiquidGlassRefraction(24f)
+                    }
+                )
+
                 // Theme & colors (migrated from Settings Visuals & theme)
                 AppSkinThemeSection(viewModel = viewModel)
 
@@ -623,8 +738,8 @@ fun AppSkinScreen(
                                 val st = submissionStatuses[sub.id]
                                 Surface(
                                     shape = RoundedCornerShape(20.dp),
-                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)),
+                                    color = if (liquidGlassModeEnabled) Color.White.copy(alpha = 0.08f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                                    border = BorderStroke(1.dp, if (liquidGlassModeEnabled) Color.White.copy(alpha = 0.12f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)),
                                     modifier = Modifier.fillMaxWidth(),
                                 ) {
                                     Row(
@@ -843,6 +958,12 @@ fun AppSkinScreen(
             }
         }
     }
+
+    LiquidGlassActivationOverlay(
+        visible = showActivationOverlay,
+        enabling = overlayEnabling,
+        onFinished = { showActivationOverlay = false }
+    )
 }
 
 /** Small-caps section label used to group the App Skin screen. */
@@ -877,7 +998,7 @@ private fun SkinMiniSwitch(
             Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
             Text(desc, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f), fontWeight = FontWeight.Medium)
         }
-        Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
+        com.frerox.toolz.ui.components.ExpressiveSwitch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
     }
 }
 
@@ -893,10 +1014,12 @@ private fun SkinMiniNote(title: String, desc: String) {
 /** Compact action row for inside the merged Icon colors card. */
 @Composable
 private fun SkinMiniAction(title: String, desc: String, onClick: () -> Unit) {
+    val glassInMiniAction = LocalLiquidGlassEnabled.current
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+        color = if (glassInMiniAction) Color.White.copy(alpha = 0.08f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+        border = if (glassInMiniAction) BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)) else null,
         modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
     ) {
         Row(
@@ -924,34 +1047,67 @@ private fun Color.appSkinLuminance(): Float {
  */
 @Composable
 private fun IconPackInfoCard() {
-    Surface(
-        shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.22f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f)),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.Top,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+    val glassEnabled = LocalLiquidGlassEnabled.current
+    if (glassEnabled) {
+        GlassCard(
+            shape = RoundedCornerShape(18.dp),
+            modifier = Modifier.fillMaxWidth(),
         ) {
-            Icon(
-                Icons.Rounded.Info,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(18.dp),
-            )
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    stringResource(R.string.st_AppSkin_iconpack_title),
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Black,
+            Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Icon(
+                    Icons.Rounded.Info,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp),
                 )
-                Text(
-                    stringResource(R.string.st_AppSkin_iconpack_body),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        stringResource(R.string.st_AppSkin_iconpack_title),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Black,
+                    )
+                    Text(
+                        stringResource(R.string.st_AppSkin_iconpack_body),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                    )
+                }
+            }
+        }
+    } else {
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.22f),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f)),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Icon(
+                    Icons.Rounded.Info,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp),
                 )
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        stringResource(R.string.st_AppSkin_iconpack_title),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Black,
+                    )
+                    Text(
+                        stringResource(R.string.st_AppSkin_iconpack_body),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                    )
+                }
             }
         }
     }

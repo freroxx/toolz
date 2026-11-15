@@ -28,9 +28,11 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -63,12 +65,19 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.frerox.toolz.R
 import com.frerox.toolz.data.skin.IconCatalog
+import com.frerox.toolz.data.skin.IconShape
 import com.frerox.toolz.data.skin.PinResult
 import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.components.ToolzMarkThemed
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.components.horizontalFadingEdges
+import com.frerox.toolz.ui.liquidglass.LocalLiquidGlassBackdrop
+import com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled
+import com.frerox.toolz.ui.liquidglass.LiquidGlassChip
+import com.frerox.toolz.ui.liquidglass.ToolzMarkGlass
+import com.frerox.toolz.ui.liquidglass.GlassCard
+import com.frerox.toolz.ui.liquidglass.liquidGlassEffect
 import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.ui.theme.toolzBackground
 
@@ -90,6 +99,9 @@ fun IconCatalogScreen(
     val adaptTheme by viewModel.appIconAdaptTheme.collectAsState(initial = true)
     val followDynamic by viewModel.appIconFollowDynamic.collectAsState(initial = true)
     val iconGradient by viewModel.appIconGradientEnabled.collectAsState(initial = true)
+    val liquidGlassModeEnabled by viewModel.liquidGlassModeEnabled.collectAsState(initial = false)
+    val liquidGlassDisabledIconIds by viewModel.liquidGlassDisabledIconIds.collectAsState(initial = emptySet())
+    val catalogBackdrop = LocalLiquidGlassBackdrop.current
 
     var query by remember { mutableStateOf("") }
     var tag by remember { mutableStateOf("All") }
@@ -164,38 +176,68 @@ fun IconCatalogScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             )
             // Live preview of current selection — fixed height so long names never shift the screen.
-            Surface(
-                shape = RoundedCornerShape(28.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.18f),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.12f)),
-                modifier = Modifier.fillMaxWidth().height(116.dp),
-            ) {
-                Row(modifier = Modifier.padding(16.dp).fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
-                    ToolzMarkThemed(
-                        presetId = presetId,
-                        isDark = isDark,
-                        dynamicColor = dynamicColor,
-                        scheme = scheme,
-                        shape = shape,
-                        adaptToTheme = adaptTheme,
-                        followDynamic = followDynamic,
-                        iconGradient = iconGradient,
-                        modifier = Modifier.size(76.dp),
-                    )
-                    Spacer(Modifier.width(14.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(current.name, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(
-                            "${iconShapeLabel(shape).lowercase()} · ${iconTagLabel(current.tag).lowercase()}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+            if (liquidGlassModeEnabled) {
+                GlassCard(
+                    backdrop = catalogBackdrop,
+                    shape = RoundedCornerShape(28.dp),
+                    modifier = Modifier.fillMaxWidth().height(116.dp),
+                ) {
+                    Row(modifier = Modifier.padding(16.dp).fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+                        ToolzMarkGlass(
+                            spec = current,
+                            backdrop = catalogBackdrop,
+                            frame = IconShape.parse(shape) ?: IconShape.OCTAGON,
+                            isDark = isDark,
+                            modifier = Modifier.size(76.dp),
                         )
+                        Spacer(Modifier.width(14.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(current.name, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(
+                                "${iconShapeLabel(shape).lowercase()} · ${iconTagLabel(current.tag).lowercase()}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+            } else {
+                Surface(
+                    shape = RoundedCornerShape(28.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.18f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.12f)),
+                    modifier = Modifier.fillMaxWidth().height(116.dp),
+                ) {
+                    Row(modifier = Modifier.padding(16.dp).fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+                        ToolzMarkThemed(
+                            presetId = presetId,
+                            isDark = isDark,
+                            dynamicColor = dynamicColor,
+                            scheme = scheme,
+                            shape = shape,
+                            adaptToTheme = adaptTheme,
+                            followDynamic = followDynamic,
+                            iconGradient = iconGradient,
+                            modifier = Modifier.size(76.dp),
+                        )
+                        Spacer(Modifier.width(14.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(current.name, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(
+                                "${iconShapeLabel(shape).lowercase()} · ${iconTagLabel(current.tag).lowercase()}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
                 }
             }
 
+            val searchFieldGlassModifier = Modifier.fillMaxWidth().liquidGlassEffect(shape = RoundedCornerShape(16.dp))
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
@@ -210,11 +252,11 @@ fun IconCatalogScreen(
                         }
                     }
                 },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = searchFieldGlassModifier,
                 colors = OutlinedTextFieldDefaults.colors(
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                    unfocusedBorderColor = Color.Transparent,
+                    unfocusedContainerColor = if (liquidGlassModeEnabled) Color.Transparent else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                    focusedContainerColor = if (liquidGlassModeEnabled) Color.Transparent else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    unfocusedBorderColor = if (liquidGlassModeEnabled) Color.White.copy(alpha = 0.12f) else Color.Transparent,
                     focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
                 ),
             )
@@ -226,22 +268,41 @@ fun IconCatalogScreen(
             ) {
                 items(IconCatalog.tags) { t ->
                     val sel = t == tag
-                    Surface(
-                        onClick = {
-                            vibrationManager?.vibrateClick()
-                            tag = t
-                        },
-                        shape = RoundedCornerShape(12.dp),
-                        color = if (sel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                        modifier = Modifier.bouncyClick {},
-                    ) {
-                        Text(
-                            iconTagLabel(t),
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Black,
-                            color = if (sel) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                    if (liquidGlassModeEnabled) {
+                        LiquidGlassChip(
+                            selected = sel,
+                            onClick = {
+                                vibrationManager?.vibrateClick()
+                                tag = t
+                            },
+                            backdrop = catalogBackdrop,
+                            modifier = Modifier,
+                        ) {
+                            Text(
+                                iconTagLabel(t),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Black,
+                                color = if (sel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    } else {
+                        Surface(
+                            onClick = {
+                                vibrationManager?.vibrateClick()
+                                tag = t
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (sel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                            modifier = Modifier.bouncyClick {},
+                        ) {
+                            Text(
+                                iconTagLabel(t),
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Black,
+                                color = if (sel) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
             }
@@ -255,32 +316,56 @@ fun IconCatalogScreen(
             ) {
                 items(filtered, key = { it.id }) { spec ->
                     val selected = spec.id == presetId
+                    val isGlassActive = liquidGlassModeEnabled && (spec.id !in liquidGlassDisabledIconIds)
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Surface(
-                            shape = RoundedCornerShape(24.dp),
-                            color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-                            border = BorderStroke(
-                                if (selected) 2.dp else 1.dp,
-                                if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
-                            ),
-                            modifier = Modifier.size(104.dp).bouncyClick(
-                                onClick = { viewModel.setAppIconPresetId(spec.id) },
-                                onLongClick = { viewModel.pinPresetToHome(spec.id, showPinResult) },
-                            ),
-                            shadowElevation = if (selected) 8.dp else 0.dp,
-                        ) {
-                            Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(13.dp)) {
-                                ToolzMarkThemed(
-                                    presetId = spec.id,
-                                    isDark = isDark,
-                                    dynamicColor = dynamicColor,
-                                    scheme = scheme,
-                                    shape = shape,
-                                    adaptToTheme = adaptTheme,
-                                    followDynamic = followDynamic,
-                                    iconGradient = iconGradient,
-                                    modifier = Modifier.size(78.dp),
-                                )
+                        if (isGlassActive) {
+                            // Glass tile: use GlassCard + ToolzMarkGlass
+                            GlassCard(
+                                backdrop = catalogBackdrop,
+                                shape = RoundedCornerShape(24.dp),
+                                tint = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.06f),
+                                modifier = Modifier.size(104.dp).bouncyClick(
+                                    onClick = { viewModel.setAppIconPresetId(spec.id) },
+                                    onLongClick = { viewModel.pinPresetToHome(spec.id, showPinResult) },
+                                ),
+                            ) {
+                                Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(13.dp).fillMaxSize()) {
+                                    ToolzMarkGlass(
+                                        spec = spec,
+                                        backdrop = catalogBackdrop,
+                                        frame = IconShape.parse(shape) ?: IconShape.OCTAGON,
+                                        isDark = isDark,
+                                        modifier = Modifier.size(78.dp),
+                                    )
+                                }
+                            }
+                        } else {
+                            Surface(
+                                shape = RoundedCornerShape(24.dp),
+                                color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                                border = BorderStroke(
+                                    if (selected) 2.dp else 1.dp,
+                                    if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                                ),
+                                modifier = Modifier.size(104.dp).bouncyClick(
+                                    onClick = { viewModel.setAppIconPresetId(spec.id) },
+                                    onLongClick = { viewModel.pinPresetToHome(spec.id, showPinResult) },
+                                ),
+                                shadowElevation = if (selected) 8.dp else 0.dp,
+                            ) {
+                                Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(13.dp)) {
+                                    ToolzMarkThemed(
+                                        presetId = spec.id,
+                                        isDark = isDark,
+                                        dynamicColor = dynamicColor,
+                                        scheme = scheme,
+                                        shape = shape,
+                                        adaptToTheme = adaptTheme,
+                                        followDynamic = followDynamic,
+                                        iconGradient = iconGradient,
+                                        modifier = Modifier.size(78.dp),
+                                    )
+                                }
                             }
                         }
                         Spacer(Modifier.height(4.dp))
@@ -291,7 +376,6 @@ fun IconCatalogScreen(
                             color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                         )
-                        Text(iconTagLabel(spec.tag), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), fontSize = 10.sp)
                     }
                 }
             }

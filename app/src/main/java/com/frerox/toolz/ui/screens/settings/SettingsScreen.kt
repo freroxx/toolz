@@ -70,6 +70,10 @@ import com.frerox.toolz.R
 import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.ui.theme.toolzBackground
+import com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled
+import com.frerox.toolz.ui.liquidglass.LocalLiquidGlassBackdrop
+import com.frerox.toolz.ui.liquidglass.GlassCard
+import com.frerox.toolz.ui.liquidglass.liquidGlassEffect
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -800,7 +804,7 @@ fun SettingsScreen(
                                         subtitle = "Intensity: ${(musicShakeSensitivity * 100).toInt()}%",
                                         icon = Icons.Rounded.GraphicEq
                                     ) {
-                                        Slider(
+                                        ExpressiveSlider(
                                             value = musicShakeSensitivity,
                                             onValueChange = { viewModel.setMusicShakeSensitivity(it) },
                                             valueRange = 0.1f..1f,
@@ -946,11 +950,10 @@ fun SettingsScreen(
                                         subtitle = "Target: $stepGoal steps",
                                         icon = Icons.Rounded.EmojiEvents
                                     ) {
-                                        Slider(
+                                        ExpressiveSlider(
                                             value = stepGoal.divideToFloat(),
                                             onValueChange = { viewModel.setStepGoal(it.toInt()) },
                                             valueRange = 1000f..30000f,
-                                            steps = 29,
                                             modifier = Modifier.padding(top = 8.dp),
                                             colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.primary, activeTrackColor = MaterialTheme.colorScheme.primary)
                                         )
@@ -1841,61 +1844,123 @@ fun SettingsExpandableSection(
 ) {
     val vibrationManager = LocalVibrationManager.current
     val rotation by animateFloatAsState(if (isExpanded) 180f else 0f, label = "arrowRotation")
+    val liquidGlassEnabled = LocalLiquidGlassEnabled.current
+    val backdrop = LocalLiquidGlassBackdrop.current
 
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(32.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
-    ) {
-        Column {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable {
-                        vibrationManager?.vibrateTick()
-                        onExpandToggle()
-                    }
-                    .padding(20.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Surface(
-                    modifier = Modifier.size(44.dp),
-                    shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+    if (liquidGlassEnabled && backdrop != null) {
+        GlassCard(
+            backdrop = backdrop,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(32.dp),
+        ) {
+            Column {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            vibrationManager?.vibrateTick()
+                            onExpandToggle()
+                        }
+                        .padding(20.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(icon, null, modifier = Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary)
+                    Surface(
+                        modifier = Modifier.size(44.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        color = Color.White.copy(alpha = 0.12f)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(icon, null, modifier = Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                    Spacer(Modifier.width(16.dp))
+                    @Suppress("DEPRECATION")
+                    Text(
+                        text = title,
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 1.sp
+                    )
+                    Icon(
+                        Icons.Rounded.KeyboardArrowDown,
+                        null,
+                        modifier = Modifier.rotate(rotation).size(24.dp),
+                        tint = MaterialTheme.colorScheme.outline
+                    )
+                }
+
+                AnimatedVisibility(
+                    visible = isExpanded,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 20.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        content()
                     }
                 }
-                Spacer(Modifier.width(16.dp))
-                @Suppress("DEPRECATION")
-                Text(
-                    text = title,
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 1.sp
-                )
-                Icon(
-                    Icons.Rounded.KeyboardArrowDown,
-                    null,
-                    modifier = Modifier.rotate(rotation).size(24.dp),
-                    tint = MaterialTheme.colorScheme.outline
-                )
             }
-
-            AnimatedVisibility(
-                visible = isExpanded,
-                enter = expandVertically() + fadeIn(),
-                exit = shrinkVertically() + fadeOut()
-            ) {
-                Column(
-                    modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 20.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+        }
+    } else {
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(32.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
+        ) {
+            Column {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            vibrationManager?.vibrateTick()
+                            onExpandToggle()
+                        }
+                        .padding(20.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    content()
+                    Surface(
+                        modifier = Modifier.size(44.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(icon, null, modifier = Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                    Spacer(Modifier.width(16.dp))
+                    @Suppress("DEPRECATION")
+                    Text(
+                        text = title,
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 1.sp
+                    )
+                    Icon(
+                        Icons.Rounded.KeyboardArrowDown,
+                        null,
+                        modifier = Modifier.rotate(rotation).size(24.dp),
+                        tint = MaterialTheme.colorScheme.outline
+                    )
+                }
+
+                AnimatedVisibility(
+                    visible = isExpanded,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 20.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        content()
+                    }
                 }
             }
         }
@@ -1904,6 +1969,7 @@ fun SettingsExpandableSection(
 
 @Composable
 fun SearchField(query: String, onQueryChange: (String) -> Unit) {
+    val isGlass = LocalLiquidGlassEnabled.current
     ExpressiveSearchField(
         query = query,
         onQueryChange = onQueryChange,
@@ -1917,10 +1983,12 @@ fun SearchField(query: String, onQueryChange: (String) -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp, vertical = 12.dp)
-            .shadow(
-                elevation = 20.dp,
-                shape = RoundedCornerShape(28.dp),
-                spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+            .then(
+                if (isGlass) Modifier else Modifier.shadow(
+                    elevation = 20.dp,
+                    shape = RoundedCornerShape(28.dp),
+                    spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                )
             ),
         leadingIcon = {
             Icon(
@@ -1948,96 +2016,193 @@ fun AboutSection(
 ) {
     val context = LocalContext.current
     val vibrationManager = LocalVibrationManager.current
+    val liquidGlassEnabled = LocalLiquidGlassEnabled.current
+    val backdrop = LocalLiquidGlassBackdrop.current
 
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 16.dp),
-        shape = RoundedCornerShape(40.dp),
-        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.05f),
-        border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
-    ) {
-        Column(
-            modifier = Modifier.padding(28.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+    if (liquidGlassEnabled && backdrop != null) {
+        GlassCard(
+            backdrop = backdrop,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 16.dp),
+            shape = RoundedCornerShape(40.dp),
+            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
         ) {
-            Surface(
-                modifier = Modifier.size(72.dp),
-                shape = RoundedCornerShape(20.dp),
-                color = MaterialTheme.colorScheme.primary,
-                shadowElevation = 12.dp
+            Column(
+                modifier = Modifier.padding(28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    com.frerox.toolz.ui.components.CurrentToolzMark(
-                        modifier = Modifier.size(72.dp).clip(RoundedCornerShape(20.dp)),
-                    )
+                Surface(
+                    modifier = Modifier.size(72.dp),
+                    shape = RoundedCornerShape(20.dp),
+                    color = Color.Transparent,
+                    shadowElevation = 0.dp
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        com.frerox.toolz.ui.components.CurrentToolzMark(
+                            modifier = Modifier.size(72.dp).clip(RoundedCornerShape(20.dp)),
+                        )
+                    }
                 }
-            }
-            Spacer(modifier = Modifier.height(20.dp))
-            Text(stringResource(R.string.st_About_Toolz), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
-            @Suppress("DEPRECATION")
-            Text(
-                "V${BuildConfig.VERSION_NAME}$statusSuffix",
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Black,
-                color = MaterialTheme.colorScheme.primary,
-                letterSpacing = 1.sp,
-            )
+                Spacer(modifier = Modifier.height(20.dp))
+                Text(stringResource(R.string.st_About_Toolz), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                @Suppress("DEPRECATION")
+                Text(
+                    "V${BuildConfig.VERSION_NAME}$statusSuffix",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.primary,
+                    letterSpacing = 1.sp,
+                )
 
-            Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(20.dp))
 
-            Text(
-                stringResource(R.string.st_About_Credits),
-                style = MaterialTheme.typography.bodyMedium,
-                textAlign = TextAlign.Center,
-                lineHeight = 22.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-            )
+                Text(
+                    stringResource(R.string.st_About_Credits),
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center,
+                    lineHeight = 22.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                )
 
-            Spacer(modifier = Modifier.height(28.dp))
+                Spacer(modifier = Modifier.height(28.dp))
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    ToolzExpressiveButton(
+                        onClick = onCheckUpdate,
+                        modifier = Modifier.weight(1f).height(52.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f), contentColor = MaterialTheme.colorScheme.primary)
+                    ) {
+                        Icon(Icons.Rounded.SystemUpdate, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(10.dp))
+                        @Suppress("DEPRECATION")
+                        Text(stringResource(R.string.st_About_Updates), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
+                    }
+
+                    ToolzExpressiveButton(
+                        onClick = {
+                            vibrationManager?.vibrateClick()
+                            val intent = Intent(Intent.ACTION_VIEW, "https://discord.gg/aAswRUerwh".toUri())
+                            context.startActivity(intent)
+                        },
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.weight(1f).height(52.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF5865F2).copy(alpha = 0.15f), contentColor = Color(0xFF5865F2))
+                    ) {
+                        Icon(Icons.Rounded.Forum, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(10.dp))
+                        @Suppress("DEPRECATION")
+                        Text(stringResource(R.string.st_About_Discord), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
                 ToolzExpressiveButton(
-                    onClick = onCheckUpdate,
-                    modifier = Modifier.weight(1f).height(52.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f), contentColor = MaterialTheme.colorScheme.primary)
+                    onClick = onNewsClick,
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f), contentColor = MaterialTheme.colorScheme.onSecondaryContainer)
                 ) {
-                    Icon(Icons.Rounded.SystemUpdate, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Rounded.Newspaper, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(10.dp))
-                    @Suppress("DEPRECATION")
-                    Text(stringResource(R.string.st_About_Updates), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
-                }
-
-                Button(
-                    onClick = {
-                        vibrationManager?.vibrateClick()
-                        val intent = Intent(Intent.ACTION_VIEW, "https://discord.gg/aAswRUerwh".toUri())
-                        context.startActivity(intent)
-                    },
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier.weight(1f).height(52.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF5865F2).copy(alpha = 0.1f), contentColor = Color(0xFF5865F2))
-                ) {
-                    Icon(Icons.Rounded.Forum, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(10.dp))
-                    @Suppress("DEPRECATION")
-                    Text(stringResource(R.string.st_About_Discord), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
+                    Text(stringResource(R.string.st_News_settings_history), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
                 }
             }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            ToolzExpressiveButton(
-                onClick = onNewsClick,
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f), contentColor = MaterialTheme.colorScheme.onSecondaryContainer)
+        }
+    } else {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 16.dp),
+            shape = RoundedCornerShape(40.dp),
+            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.05f),
+            border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+        ) {
+            Column(
+                modifier = Modifier.padding(28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Icon(Icons.Rounded.Newspaper, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(10.dp))
-                Text(stringResource(R.string.st_News_settings_history), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
+                Surface(
+                    modifier = Modifier.size(72.dp),
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    shadowElevation = 12.dp
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        com.frerox.toolz.ui.components.CurrentToolzMark(
+                            modifier = Modifier.size(72.dp).clip(RoundedCornerShape(20.dp)),
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(20.dp))
+                Text(stringResource(R.string.st_About_Toolz), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                @Suppress("DEPRECATION")
+                Text(
+                    "V${BuildConfig.VERSION_NAME}$statusSuffix",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.primary,
+                    letterSpacing = 1.sp,
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Text(
+                    stringResource(R.string.st_About_Credits),
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center,
+                    lineHeight = 22.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                )
+
+                Spacer(modifier = Modifier.height(28.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    ToolzExpressiveButton(
+                        onClick = onCheckUpdate,
+                        modifier = Modifier.weight(1f).height(52.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f), contentColor = MaterialTheme.colorScheme.primary)
+                    ) {
+                        Icon(Icons.Rounded.SystemUpdate, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(10.dp))
+                        @Suppress("DEPRECATION")
+                        Text(stringResource(R.string.st_About_Updates), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
+                    }
+
+                    ToolzExpressiveButton(
+                        onClick = {
+                            vibrationManager?.vibrateClick()
+                            val intent = Intent(Intent.ACTION_VIEW, "https://discord.gg/aAswRUerwh".toUri())
+                            context.startActivity(intent)
+                        },
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.weight(1f).height(52.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF5865F2).copy(alpha = 0.1f), contentColor = Color(0xFF5865F2))
+                    ) {
+                        Icon(Icons.Rounded.Forum, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(10.dp))
+                        @Suppress("DEPRECATION")
+                        Text(stringResource(R.string.st_About_Discord), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                ToolzExpressiveButton(
+                    onClick = onNewsClick,
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f), contentColor = MaterialTheme.colorScheme.onSecondaryContainer)
+                ) {
+                    Icon(Icons.Rounded.Newspaper, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(10.dp))
+                    Text(stringResource(R.string.st_News_settings_history), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
+                }
             }
         }
     }
@@ -2217,41 +2382,84 @@ fun SettingsItem(
     onClick: (() -> Unit)? = null,
     extraContent: @Composable (ColumnScope.() -> Unit)? = null
 ) {
-    Surface(
-        onClick = { onClick?.invoke() },
-        modifier = Modifier.fillMaxWidth(),
-        enabled = onClick != null,
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Surface(
-                    modifier = Modifier.size(40.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+    val liquidGlassEnabled = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled.current
+    val backdrop = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassBackdrop.current
+
+    if (liquidGlassEnabled && backdrop != null) {
+        com.frerox.toolz.ui.liquidglass.GlassCard(
+            backdrop = backdrop,
+            shape = RoundedCornerShape(20.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                    Surface(
+                        modifier = Modifier.size(40.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color.White.copy(alpha = 0.12f)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                        }
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        @Suppress("DEPRECATION")
+                        Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                        @Suppress("DEPRECATION")
+                        Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f), fontWeight = FontWeight.Medium)
+                    }
+                    if (onClick != null) {
+                        Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f), modifier = Modifier.size(18.dp))
                     }
                 }
-                Column(modifier = Modifier.weight(1f)) {
-                    @Suppress("DEPRECATION")
-                    Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                    @Suppress("DEPRECATION")
-                    Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), fontWeight = FontWeight.Medium)
-                }
-                if (onClick != null) {
-                    Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f), modifier = Modifier.size(18.dp))
+                extraContent?.let {
+                    Spacer(Modifier.height(4.dp))
+                    it()
                 }
             }
-            extraContent?.let {
-                Spacer(Modifier.height(4.dp))
-                it()
+        }
+    } else {
+        Surface(
+            onClick = { onClick?.invoke() },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = onClick != null,
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Surface(
+                        modifier = Modifier.size(40.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                        }
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        @Suppress("DEPRECATION")
+                        Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                        @Suppress("DEPRECATION")
+                        Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), fontWeight = FontWeight.Medium)
+                    }
+                    if (onClick != null) {
+                        Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f), modifier = Modifier.size(18.dp))
+                    }
+                }
+                extraContent?.let {
+                    Spacer(Modifier.height(4.dp))
+                    it()
+                }
             }
         }
     }
@@ -2268,40 +2476,82 @@ fun SettingsToggleItem(
     enabled: Boolean = true,
     modifier: Modifier = Modifier
 ) {
-    Surface(
-        onClick = { if (enabled) onCheckedChange(!checked) },
-        modifier = modifier.fillMaxWidth().alpha(if (enabled) 1f else 0.6f),
-        enabled = enabled,
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
-    ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+    val liquidGlassEnabled = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled.current
+    val backdrop = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassBackdrop.current
+
+    if (liquidGlassEnabled && backdrop != null) {
+        com.frerox.toolz.ui.liquidglass.GlassCard(
+            backdrop = backdrop,
+            shape = RoundedCornerShape(20.dp),
+            modifier = modifier
+                .fillMaxWidth()
+                .alpha(if (enabled) 1f else 0.6f)
+                .then(if (enabled) Modifier.clickable { onCheckedChange(!checked) } else Modifier),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                Surface(
-                    modifier = Modifier.size(40.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+            Row(
+                modifier = Modifier.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                    Surface(
+                        modifier = Modifier.size(40.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color.White.copy(alpha = 0.12f)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                        }
+                    }
+                    Spacer(Modifier.width(16.dp))
+                    Column {
+                        Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                        Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f), fontWeight = FontWeight.Medium)
                     }
                 }
-                Spacer(Modifier.width(16.dp))
-                Column {
-                    Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                    Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), fontWeight = FontWeight.Medium)
-                }
+                ExpressiveSwitch(
+                    checked = checked,
+                    onCheckedChange = onCheckedChange,
+                    enabled = enabled
+                )
             }
-            ExpressiveSwitch(
-                checked = checked,
-                onCheckedChange = onCheckedChange,
-                enabled = enabled
-            )
+        }
+    } else {
+        Surface(
+            onClick = { if (enabled) onCheckedChange(!checked) },
+            modifier = modifier.fillMaxWidth().alpha(if (enabled) 1f else 0.6f),
+            enabled = enabled,
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
+        ) {
+            Row(
+                modifier = Modifier.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                    Surface(
+                        modifier = Modifier.size(40.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                        }
+                    }
+                    Spacer(Modifier.width(16.dp))
+                    Column {
+                        Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                        Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), fontWeight = FontWeight.Medium)
+                    }
+                }
+                ExpressiveSwitch(
+                    checked = checked,
+                    onCheckedChange = onCheckedChange,
+                    enabled = enabled
+                )
+            }
         }
     }
 }

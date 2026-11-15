@@ -74,7 +74,7 @@ import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
+import com.frerox.toolz.ui.components.ExpressiveCard
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -86,7 +86,6 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
@@ -1028,7 +1027,7 @@ private fun UpdateSettingsCard(
     onSetAutoUpdate: (Boolean) -> Unit,
     onOpenAbiPicker: () -> Unit,
 ) {
-    Card(
+    ExpressiveCard(
         modifier = Modifier.fillMaxWidth(),
         shape = CardShape,
     ) {
@@ -1054,7 +1053,7 @@ private fun UpdateSettingsCard(
                     )
                 }
                 Spacer(Modifier.width(12.dp))
-                Switch(checked = autoUpdateEnabled, onCheckedChange = onSetAutoUpdate)
+                com.frerox.toolz.ui.components.ExpressiveSwitch(checked = autoUpdateEnabled, onCheckedChange = onSetAutoUpdate)
             }
             CardDivider()
             Row(
@@ -1483,7 +1482,7 @@ private fun Modifier.scrollEdgeFade(
 
 @Composable
 private fun StateCard(content: @Composable ColumnScope.() -> Unit) {
-    Card(
+    ExpressiveCard(
         modifier = Modifier.fillMaxWidth(),
         shape = CardShape,
     ) {
