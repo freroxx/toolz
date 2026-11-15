@@ -499,12 +499,9 @@ internal fun OverviewTab(
                 trailing = {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         NetPill(qualityLabel, emphasized = qualityLabel == "Excellent" || qualityLabel == "Good")
-                        Switch(
+                        com.frerox.toolz.ui.components.ExpressiveSwitch(
                             checked = state.audioFeedbackEnabled,
                             onCheckedChange = onToggleAudio,
-                            thumbContent = {
-                                Icon(if (state.audioFeedbackEnabled) Icons.AutoMirrored.Rounded.VolumeUp else Icons.AutoMirrored.Rounded.VolumeOff, null, Modifier.size(12.dp))
-                            }
                         )
                     }
                 }

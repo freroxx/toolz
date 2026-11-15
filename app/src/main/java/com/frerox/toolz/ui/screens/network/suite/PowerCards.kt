@@ -43,7 +43,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -352,15 +351,10 @@ internal fun MobileDataCard(
         },
         icon = Icons.Rounded.CellTower,
         trailing = {
-            Switch(
+            com.frerox.toolz.ui.components.ExpressiveSwitch(
                 checked = isEnabled,
                 onCheckedChange = onToggle,
                 enabled = privilegedReady,
-                thumbContent = {
-                    if (!privilegedReady) {
-                        Icon(Icons.Rounded.Lock, contentDescription = null, modifier = Modifier.size(12.dp))
-                    }
-                }
             )
         }
     ) {

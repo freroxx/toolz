@@ -89,7 +89,7 @@ fun NetworkConsoleView(
                 Text("This console runs privileged shell commands via Shizuku. Enable only if you know what you are doing.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text("Enable developer mode", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-                    Switch(checked = false, onCheckedChange = { onToggleConsole(true) })
+                    com.frerox.toolz.ui.components.ExpressiveSwitch(checked = false, onCheckedChange = { onToggleConsole(true) })
                 }
             }
             return@Column

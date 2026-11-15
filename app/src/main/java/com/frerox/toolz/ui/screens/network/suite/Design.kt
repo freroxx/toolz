@@ -31,8 +31,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -50,6 +48,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.frerox.toolz.ui.components.ExpressiveCard
 
 /**
  * THE design system for the Network suite. Simple M3 Expressive:
@@ -90,11 +89,11 @@ fun NetCard(
     contentPadding: androidx.compose.ui.unit.Dp = NetTokens.SpacingL,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    Card(
+    ExpressiveCard(
         modifier = modifier.fillMaxWidth(),
         shape = NetTokens.CardShape,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        elevation = 0.dp
     ) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(contentPadding),
