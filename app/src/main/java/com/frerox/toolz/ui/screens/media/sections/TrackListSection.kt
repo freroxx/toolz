@@ -148,7 +148,7 @@ fun TrackList(
     onOpenFullPlayer: () -> Unit,
     onDownload: (MusicTrack) -> Unit
 ) {
-    if (tracks.isEmpty() && !state.isLoading) {
+    if (tracks.isEmpty() && !state.isLoading && !state.hasKnownLibrary) {
         EmptyMusicPlaceholder(onScan = { viewModel.scanMusic() })
         return
     }

@@ -130,6 +130,7 @@ import java.util.*
 import com.frerox.toolz.ui.screens.media.MusicPlayerViewModel
 import com.frerox.toolz.ui.screens.media.MusicUiState
 import com.frerox.toolz.ui.screens.media.SongPickerDialog
+import com.frerox.toolz.ui.screens.media.formatDuration
 import com.frerox.toolz.ui.screens.media.ai.*
 import com.frerox.toolz.data.catalog.CatalogTrack
 
@@ -174,6 +175,7 @@ fun FolderList(state: MusicUiState, onFolderClick: (String, List<MusicTrack>) ->
 fun FolderCard(
     folderName: String,
     trackCount: Int,
+    modifier: Modifier = Modifier,
     isCurrentFolder: Boolean = false,
     onClick: () -> Unit
 ) {
@@ -213,7 +215,7 @@ fun FolderCard(
     
     ExpressiveCard(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth().height(148.dp).bouncyClick(onClick = onClick),
+        modifier = modifier.fillMaxWidth().height(148.dp).bouncyClick(onClick = onClick),
         shape = RoundedCornerShape(16.dp),
         containerColor = if (isCurrentFolder)
             MaterialTheme.colorScheme.surfaceContainerHigh
@@ -294,189 +296,6 @@ fun FolderCard(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@AnnotationOptIn(UnstableApi::class)
-@Composable
-fun FolderTracksDialog(
-    folderName: String,
-    tracks: List<MusicTrack>,
-    onDismiss: () -> Unit,
-    onPlayTrack: (MusicTrack) -> Unit,
-    state: MusicUiState,
-    viewModel: MusicPlayerViewModel
-) {
-    var searchQuery by remember { mutableStateOf("") }
-    val filtered = remember(tracks, searchQuery) {
-        if (searchQuery.isBlank()) tracks
-        else tracks.filter {
-            it.title.contains(searchQuery, ignoreCase = true) ||
-                    it.artist?.contains(searchQuery, ignoreCase = true) == true
-        }
-    }
-    val currentlyPlayingInFolder = state.currentTrack?.let { current -> tracks.any { it.uri == current.uri } } == true
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false),
-        shape = RoundedCornerShape(topStart = 44.dp, topEnd = 44.dp),
-        containerColor = MaterialTheme.colorScheme.surface,
-        dragHandle = {
-            Box(
-                modifier = Modifier
-                    .padding(top = 12.dp, bottom = 8.dp)
-                    .size(36.dp, 4.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
-            )
-        },
-        modifier = Modifier.fillMaxHeight(0.9f)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 20.dp)
-        ) {
-            Spacer(Modifier.height(16.dp))
-
-        // Header
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Surface(
-                    modifier = Modifier.size(56.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    shadowElevation = 0.dp
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            if (currentlyPlayingInFolder) Icons.Rounded.FolderOpen else Icons.Rounded.Folder,
-                            null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(28.dp)
-                        )
-                    }
-                }
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        folderName,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            if (tracks.size == 1) "1 track" else "${tracks.size} tracks",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Medium
-                        )
-                        if (currentlyPlayingInFolder) {
-                            Surface(
-                                shape = CircleShape,
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
-                            ) {
-                                Text(
-                                    stringResource(R.string.st_MusicPlayerScreen_p30),
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        }
-                    }
-                }
-                // Play-all button — hidden rather than crashing when a
-                // (freshly emptied) folder has nothing left to play.
-                if (tracks.isNotEmpty()) {
-                    ToolzExpressiveIconButton(onClick = { onPlayTrack(tracks.first()) }, shape = RoundedCornerShape(16.dp)) {
-                        Icon(Icons.Rounded.PlayArrow, null, modifier = Modifier.size(26.dp))
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(20.dp))
-
-            // Search
-            ExpressiveSearchField(
-                query = searchQuery,
-                onQueryChange = { searchQuery = it },
-                placeholder = { Text(stringResource(R.string.st_MusicPlayerScreen_st_hint31), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)) },
-                leadingIcon = { Icon(Icons.Rounded.Search, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary) },
-                trailingIcon = {
-                    androidx.compose.animation.AnimatedVisibility(
-                        visible = searchQuery.isNotEmpty(),
-                        enter = fadeIn(tween(160)) + scaleIn(initialScale = 0.6f, animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMedium)),
-                        exit = fadeOut(tween(120)) + scaleOut(targetScale = 0.6f, animationSpec = tween(120))
-                    ) {
-                        Surface(
-                            onClick = { searchQuery = "" },
-                            modifier = Modifier.size(28.dp).bouncyClick { searchQuery = "" },
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    Icons.Rounded.Close,
-                                    contentDescription = stringResource(R.string.st_MusicPlayerScreen_cs5),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                            }
-                        }
-                    }
-                },
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Spacer(Modifier.height(10.dp))
-            HorizontalDivider(modifier = Modifier.alpha(0.07f))
-            Spacer(Modifier.height(6.dp))
-
-            if (filtered.isEmpty()) {
-                Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Rounded.SearchOff, null, modifier = Modifier.size(48.dp).alpha(0.12f), tint = MaterialTheme.colorScheme.onSurface)
-                        Spacer(Modifier.height(8.dp))
-                        Text(stringResource(R.string.st_MusicPlayerScreen_nm32), color = MaterialTheme.colorScheme.outline, fontWeight = FontWeight.Bold)
-                    }
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = PaddingValues(bottom = 24.dp)
-                ) {
-                    items(filtered, key = { it.uri }) { track ->
-                        TrackItem(
-                            track = track,
-                            isCurrent = track.uri == state.currentTrack?.uri,
-                            isSelected = state.selectedTracks.contains(track.uri),
-                            isSelectionMode = state.isSelectionMode,
-                            onClick = {
-                                if (state.isSelectionMode) viewModel.toggleTrackSelection(track.uri)
-                                else onPlayTrack(track)
-                            },
-                            onLongClick = { viewModel.toggleTrackSelection(track.uri) },
-                            onDelete = { viewModel.deleteTrack(track) },
-                            onAddToPlaylist = { viewModel.addTrackToPlaylist(it, track) },
-                            onCreatePlaylist = { viewModel.createPlaylist(it) },
-                            onToggleFavorite = { viewModel.toggleFavorite(track) },
-                            playlists = state.playlists
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
 // ─────────────────────────────────────────────────────────────────────────────
 // Library Section
 // ─────────────────────────────────────────────────────────────────────────────
@@ -500,34 +319,25 @@ fun LibrarySection(
     var showMostPlayedDetail by remember { mutableStateOf(false) }
     var playlistToRename by remember { mutableStateOf<Playlist?>(null) }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp).fadingEdges(top = 16.dp, bottom = 24.dp),
-        contentPadding = PaddingValues(bottom = 130.dp, top = 0.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp)
-    ) {
-        // ── Header ─────────────────────────────────────────────────────────────
-        // The top app bar already reads "STUDIO PLAYER / Library", so this
-        // doesn't repeat that title in a decorative gradient card — it just
-        // states the one fact that matters (the count) plainly.
-        item {
-            Text(
-                text = "${state.tracks.size} tracks · ${state.playlists.size} playlists",
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 16.dp, bottom = 2.dp)
-            )
-        }
+    val totalListenMs = remember(state.mostPlayed) {
+        state.mostPlayed.sumOf { it.totalListenMs }
+    }
 
-        // ── Stats header row ──────────────────────────────────────────────────
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp).fadingEdges(top = 12.dp, bottom = 24.dp),
+        contentPadding = PaddingValues(bottom = 130.dp, top = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(26.dp)
+    ) {
+        // ── Quick access ───────────────────────────────────────────────────────
+        // One balanced three-up row: favourites, history and listening time stay
+        // together as a single glanceable summary above the content rails.
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Favorites
                 QuickAccessCard(
-                    modifier = Modifier.weight(1f).height(138.dp),
+                    modifier = Modifier.weight(1f).height(112.dp),
                     icon = Icons.Rounded.Favorite,
                     label = stringResource(R.string.st_MusicPlayerScreen_f33),
                     count = state.favoriteTracks.size,
@@ -535,9 +345,8 @@ fun LibrarySection(
                     contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                     onClick = { showFavoritesDetail = true }
                 )
-                // Recently Played
                 QuickAccessCard(
-                    modifier = Modifier.weight(1f).height(138.dp),
+                    modifier = Modifier.weight(1f).height(112.dp),
                     icon = Icons.Rounded.History,
                     label = stringResource(R.string.st_MusicPlayerScreen_r34),
                     count = state.recentlyPlayed.size,
@@ -545,12 +354,12 @@ fun LibrarySection(
                     contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                     onClick = { showRecentDetail = true }
                 )
-                // Most Played
                 QuickAccessCard(
-                    modifier = Modifier.weight(1f).height(138.dp),
+                    modifier = Modifier.weight(1f).height(112.dp),
                     icon = Icons.Rounded.TrendingUp,
                     label = stringResource(R.string.st_MusicPlayerScreen_tp35),
                     count = state.mostPlayed.size,
+                    value = formatListeningTime(totalListenMs),
                     containerColor = MaterialTheme.colorScheme.tertiaryContainer,
                     contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
                     onClick = { showMostPlayedDetail = true }
@@ -561,8 +370,13 @@ fun LibrarySection(
         // ── Recently Played carousel ──────────────────────────────────────────
         if (state.recentlyPlayed.isNotEmpty()) {
             item {
-                RowSectionHeader(stringResource(R.string.st_MusicPlayerScreen_rp36)) { showRecentDetail = true }
-                Spacer(Modifier.height(12.dp))
+                LibrarySectionHeader(
+                    title = "Jump back in",
+                    subtitle = stringResource(R.string.st_MusicPlayerScreen_rp36),
+                    actionLabel = "See all",
+                    onAction = { showRecentDetail = true }
+                )
+                Spacer(Modifier.height(10.dp))
                 TrackCarouselRow(
                     tracks = state.recentlyPlayed.take(12),
                     onTrackClick = { viewModel.playTrack(it, state.recentlyPlayed) }
@@ -573,8 +387,15 @@ fun LibrarySection(
         // ── Most Played carousel ──────────────────────────────────────────────
         if (state.mostPlayed.isNotEmpty()) {
             item {
-                RowSectionHeader(stringResource(R.string.st_MusicPlayerScreen_mop37)) { showMostPlayedDetail = true }
-                Spacer(Modifier.height(12.dp))
+                LibrarySectionHeader(
+                    title = stringResource(R.string.st_MusicPlayerScreen_mop37),
+                    subtitle = if (totalListenMs > 0L)
+                        "${formatListeningTime(totalListenMs)} listened"
+                    else "Your top tracks by listening time",
+                    actionLabel = "See all",
+                    onAction = { showMostPlayedDetail = true }
+                )
+                Spacer(Modifier.height(10.dp))
                 TrackCarouselRow(
                     tracks = state.mostPlayed.take(12),
                     onTrackClick = { viewModel.playTrack(it, state.mostPlayed) }
@@ -583,140 +404,96 @@ fun LibrarySection(
         }
 
         // ── Playlists ─────────────────────────────────────────────────────────
-        // Header is always shown now — previously the whole section
-        // (header, create button, everything) vanished when there were no
-        // playlists yet, which meant a first-time user had no way to find
-        // the create action inside the Library tab itself. The count in
-        // the label doubles as a quiet confirmation that "0" really is
-        // the current state, not a loading gap.
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                SectionLabel(if (state.playlists.isEmpty()) stringResource(R.string.st_MusicPlayerScreen_pl39) else stringResource(R.string.st_MusicPlayerScreen_pl39) + " · ${state.playlists.size}")
-                Surface(
-                    onClick = onCreatePlaylist,
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                    modifier = Modifier.bouncyClick(onClick = onCreatePlaylist)
+            LibrarySectionHeader(
+                title = stringResource(R.string.st_MusicPlayerScreen_pl39),
+                subtitle = if (state.playlists.isEmpty())
+                    "Build a set for any mood"
+                else "${state.playlists.size} " + if (state.playlists.size == 1) "playlist" else "playlists",
+                actionIcon = Icons.Rounded.Add,
+                actionLabel = stringResource(R.string.st_MusicPlayerScreen_n9),
+                onAction = onCreatePlaylist
+            )
+            Spacer(Modifier.height(12.dp))
+
+            if (state.playlists.isEmpty()) {
+                PlaylistEmptyCard(onCreatePlaylist = onCreatePlaylist)
+            } else {
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = PaddingValues(horizontal = 1.dp, vertical = 2.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(Icons.Rounded.Add, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
-                        Text(
-                            stringResource(R.string.st_MusicPlayerScreen_n9),
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.primary
+                    items(state.playlists, key = { it.id }) { playlist ->
+                        val thumbs = remember(playlist, state.tracks) {
+                            playlist.trackUris
+                                .take(4)
+                                .mapNotNull { uri -> state.tracks.find { it.uri == uri }?.thumbnailUri }
+                        }
+                        PlaylistCard(
+                            playlist = playlist,
+                            modifier = Modifier.width(180.dp).height(184.dp),
+                            firstTrackThumbnails = thumbs,
+                            onClick = { onPlaylistClick(playlist) },
+                            onPlay = { viewModel.playPlaylist(playlist) },
+                            onDelete = { onDeletePlaylist(playlist) },
+                            onRename = { playlistToRename = playlist },
+                            onUpdateThumb = { onUpdateThumb(playlist) }
                         )
                     }
-                }
-            }
-            Spacer(Modifier.height(12.dp))
-        }
-
-        if (state.playlists.isEmpty()) {
-            item { PlaylistEmptyCard(onCreatePlaylist = onCreatePlaylist) }
-        } else {
-            items(state.playlists.chunked(2)) { chunk ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    chunk.forEach { playlist ->
-                        Box(modifier = Modifier.weight(1f)) {
-                            val thumbs = remember(playlist, state.tracks) {
-                                playlist.trackUris
-                                    .take(4)
-                                    .mapNotNull { uri -> state.tracks.find { it.uri == uri }?.thumbnailUri }
-                            }
-                            PlaylistCard(
-                                playlist = playlist,
-                                firstTrackThumbnails = thumbs,
-                                onClick = { onPlaylistClick(playlist) },
-                                onPlay = { viewModel.playPlaylist(playlist) },
-                                onDelete = { onDeletePlaylist(playlist) },
-                                onRename = { playlistToRename = playlist },
-                                onUpdateThumb = { onUpdateThumb(playlist) }
-                            )
-                        }
+                    item {
+                        RailActionTile(
+                            modifier = Modifier.width(180.dp).height(184.dp),
+                            icon = Icons.AutoMirrored.Rounded.PlaylistAdd,
+                            label = "New playlist",
+                            onClick = onCreatePlaylist
+                        )
                     }
-                    if (chunk.size == 1) Spacer(Modifier.weight(1f))
                 }
             }
         }
 
         // ── Folders ───────────────────────────────────────────────────────────
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                SectionLabel(if (state.folders.isEmpty()) stringResource(R.string.st_MusicPlayerScreen_fl42) else stringResource(R.string.st_MusicPlayerScreen_fl42) + " · ${state.folders.size}")
-                Surface(
-                    onClick = onAddFolder,
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                    modifier = Modifier.bouncyClick(onClick = onAddFolder)
+            LibrarySectionHeader(
+                title = stringResource(R.string.st_MusicPlayerScreen_fl42),
+                subtitle = if (state.folders.isEmpty())
+                    "Bring in music from any folder"
+                else "${state.folders.size} " + if (state.folders.size == 1) "folder" else "folders",
+                actionIcon = Icons.Rounded.CreateNewFolder,
+                actionLabel = stringResource(R.string.st_MusicPlayerScreen_a43),
+                onAction = onAddFolder
+            )
+            Spacer(Modifier.height(12.dp))
+
+            if (state.folders.isEmpty()) {
+                FolderEmptyCard(onAddFolder = onAddFolder)
+            } else {
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = PaddingValues(horizontal = 1.dp, vertical = 2.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(Icons.Rounded.CreateNewFolder, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
-                        Text(
-                            stringResource(R.string.st_MusicPlayerScreen_a43),
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.primary
+                    items(state.folders.keys.toList(), key = { it }) { folderName ->
+                        val tracks = state.folders[folderName] ?: emptyList()
+                        val hasCurrentTrack = state.currentTrack?.let { current ->
+                            tracks.any { it.uri == current.uri }
+                        } == true
+                        FolderCard(
+                            folderName = folderName,
+                            trackCount = tracks.size,
+                            modifier = Modifier.width(166.dp),
+                            isCurrentFolder = hasCurrentTrack,
+                            onClick = { onFolderClick(folderName, tracks) }
                         )
                     }
-                }
-            }
-            Spacer(Modifier.height(12.dp))
-        }
-
-        if (state.folders.isEmpty()) {
-            item {
-                FolderEmptyCard(onAddFolder = onAddFolder)
-            }
-        } else {
-            // All folder rows now live inside ONE LazyColumn item, wrapped
-            // in their own Column with a 12dp spacedBy. Previously each row
-            // was a separate item, so the LazyColumn's own top-level
-            // spacedBy(20dp) ran *between* every row in addition to the
-            // 12dp spacer this composable added itself — rows ended up
-            // ~32dp apart instead of the intended tight 12dp rhythm, which
-            // read as a much bigger gap than every other section.
-            item {
-                val folderRows = state.folders.keys.toList().chunked(2)
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    folderRows.forEach { chunk ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            chunk.forEach { folderName ->
-                                val tracks = state.folders[folderName] ?: emptyList()
-                                val hasCurrentTrack = state.currentTrack?.let { current -> tracks.any { it.uri == current.uri } } == true
-                                Box(modifier = Modifier.weight(1f)) {
-                                    FolderCard(
-                                        folderName = folderName,
-                                        trackCount = tracks.size,
-                                        isCurrentFolder = hasCurrentTrack,
-                                        onClick = { onFolderClick(folderName, tracks) }
-                                    )
-                                }
-                            }
-                            if (chunk.size == 1) Spacer(Modifier.weight(1f))
-                        }
+                    item {
+                        RailActionTile(
+                            modifier = Modifier.width(166.dp).height(148.dp),
+                            icon = Icons.Rounded.CreateNewFolder,
+                            label = "Add folder",
+                            onClick = onAddFolder
+                        )
                     }
                 }
             }
@@ -773,6 +550,7 @@ fun LibrarySection(
             onPlayTrack = { track, tracks -> viewModel.playTrack(track, tracks) },
             isEditable = false,
             currentTrackUri = state.currentTrack?.uri,
+            subtitle = if (totalListenMs > 0L) "${formatListeningTime(totalListenMs)} listened" else null,
             onToggleFavorite = { viewModel.toggleFavorite(it) },
             onDownload = onDownload
         )
@@ -829,6 +607,130 @@ fun SectionLabel(text: String) {
     )
 }
 
+/** Section header used across Library: bold title, quiet count, one clear action. */
+@Composable
+private fun LibrarySectionHeader(
+    title: String,
+    subtitle: String,
+    actionLabel: String? = null,
+    actionIcon: ImageVector? = null,
+    onAction: (() -> Unit)? = null,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        if (actionLabel != null && onAction != null) {
+            Surface(
+                onClick = onAction,
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.10f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.16f))
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    if (actionIcon != null) {
+                        Icon(
+                            actionIcon,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                    Text(
+                        actionLabel,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Dashed-feeling create tile that closes a horizontal rail. */
+@Composable
+private fun RailActionTile(
+    modifier: Modifier = Modifier,
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier,
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.5f),
+        border = BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+        )
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Surface(
+                modifier = Modifier.size(52.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        icon,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            Text(
+                label,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+    }
+}
+
+/** Compact human-readable listening time, e.g. "3h 12m" or "42m". */
+private fun formatListeningTime(ms: Long): String {
+    if (ms <= 0L) return "0m"
+    val totalMinutes = ms / 60_000L
+    val hours = totalMinutes / 60L
+    val minutes = totalMinutes % 60L
+    val days = hours / 24L
+    return when {
+        days > 0L -> "${days}d ${hours % 24L}h"
+        hours > 0L && minutes > 0L -> "${hours}h ${minutes}m"
+        hours > 0L -> "${hours}h"
+        else -> "${minutes.coerceAtLeast(1L)}m"
+    }
+}
+
 @Composable
 fun RowSectionHeader(title: String, onViewAll: () -> Unit) {
     Row(
@@ -851,17 +753,15 @@ fun QuickAccessCard(
     count: Int,
     containerColor: Color,
     contentColor: Color,
+    value: String? = null,
     onClick: () -> Unit
 ) {
     // Uniform 20dp corner: large enough to feel expressive, small enough that
     // the label never sits on the curve or clips its descenders.
-    val nalwfMsg = stringResource(R.string.st_MusicPlayerScreen_nalwf14)
-    val context = LocalContext.current
-    
     ExpressiveCard(
         onClick = onClick,
         modifier = modifier.bouncyClick(onClick = onClick),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(22.dp),
         containerColor = containerColor,
         contentColor = contentColor,
         elevation = 0.dp
@@ -877,8 +777,8 @@ fun QuickAccessCard(
             ) {
                 Icon(icon, contentDescription = null, tint = contentColor.copy(alpha = 0.9f), modifier = Modifier.size(22.dp))
                 Text(
-                    text = "$count",
-                    style = MaterialTheme.typography.titleLarge,
+                    text = value ?: "$count",
+                    style = if (value != null) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -906,6 +806,7 @@ fun QuickAccessCard(
 @Composable
 fun PlaylistCard(
     playlist: Playlist,
+    modifier: Modifier = Modifier,
     firstTrackThumbnails: List<String?> = emptyList(),
     onClick: () -> Unit,
     onPlay: () -> Unit,
@@ -917,13 +818,10 @@ fun PlaylistCard(
 
     val performanceMode = LocalPerformanceMode.current
 
-    val nalwfMsg = stringResource(R.string.st_MusicPlayerScreen_nalwf14)
-    val context = LocalContext.current
-    
     ExpressiveCard(
         onClick = onClick,
         onLongClick = { showContextMenu = true },
-        modifier = Modifier.fillMaxWidth().height(184.dp),
+        modifier = modifier.fillMaxWidth().height(184.dp),
         shape = RoundedCornerShape(20.dp),
         containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(4.dp),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
@@ -1077,6 +975,537 @@ fun PlaylistCard(
     }
 }
 // ─────────────────────────────────────────────────────────────────────────────
+// Shared collection row + folder detail
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * One row inside a playlist/folder detail sheet. Kept in one place so the two
+ * collections cannot drift apart visually: same art treatment, same online
+ * badge, same favourite/download/remove affordances.
+ */
+@Composable
+fun CollectionTrackRow(
+    track: MusicTrack,
+    index: Int,
+    isCurrent: Boolean,
+    onClick: () -> Unit,
+    onToggleFavorite: (MusicTrack) -> Unit,
+    modifier: Modifier = Modifier,
+    onDownload: ((MusicTrack) -> Unit)? = null,
+    onRemove: (() -> Unit)? = null,
+    removeDescription: String = "Remove",
+) {
+    val haptic = LocalHapticFeedback.current
+    val isOnline = track.path == null && track.sourceUrl != null
+    val artist = track.artist?.takeIf { it.isNotBlank() && it != "<unknown>" } ?: "Unknown artist"
+
+    ListItem(
+        headlineContent = {
+            Text(
+                track.title,
+                fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+            )
+        },
+        supportingContent = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    artist,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                if (track.duration > 0L) {
+                    Text(
+                        " · ${formatDuration(track.duration)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                    )
+                }
+            }
+        },
+        leadingContent = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.padding(start = 2.dp)
+            ) {
+                Text(
+                    text = "${index + 1}",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                    modifier = Modifier.width(24.dp),
+                    textAlign = TextAlign.Center
+                )
+
+                Box(modifier = Modifier.size(46.dp), contentAlignment = Alignment.Center) {
+                    if (isCurrent) {
+                        PlayingBarsIndicator()
+                    } else {
+                        AlbumArtImage(
+                            url = track.thumbnailUri,
+                            seed = track.uri,
+                            modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp))
+                        )
+                    }
+
+                    if (isOnline) {
+                        Surface(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .offset(x = 4.dp, y = (-4).dp)
+                                .size(16.dp),
+                            color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.9f),
+                            shape = CircleShape
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Cloud,
+                                    contentDescription = "Online",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(10.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        trailingContent = {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                ToolzExpressiveIconButton(
+                    onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onToggleFavorite(track)
+                    },
+                    modifier = Modifier.size(36.dp),
+                    shape = CircleShape,
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = if (track.isFavorite)
+                            MaterialTheme.colorScheme.errorContainer
+                        else MaterialTheme.colorScheme.surfaceContainerHigh,
+                        contentColor = if (track.isFavorite)
+                            MaterialTheme.colorScheme.onErrorContainer
+                        else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                ) {
+                    Icon(
+                        if (track.isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                        contentDescription = if (track.isFavorite)
+                            stringResource(R.string.st_MusicPlayerScreen_rff20)
+                        else stringResource(R.string.st_MusicPlayerScreen_atf21),
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+
+                if (isOnline && onDownload != null) {
+                    ToolzExpressiveIconButton(
+                        onClick = { onDownload(track) },
+                        modifier = Modifier.size(36.dp),
+                        shape = CircleShape,
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = Color.Transparent,
+                            contentColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                        )
+                    ) {
+                        Icon(
+                            Icons.Rounded.Download,
+                            contentDescription = stringResource(R.string.st_MusicPlayerScreen_d19),
+                            modifier = Modifier.size(19.dp)
+                        )
+                    }
+                }
+
+                if (onRemove != null) {
+                    ToolzExpressiveIconButton(
+                        onClick = onRemove,
+                        modifier = Modifier.size(36.dp),
+                        shape = CircleShape,
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = Color.Transparent,
+                            contentColor = MaterialTheme.colorScheme.error.copy(alpha = 0.75f)
+                        )
+                    ) {
+                        Icon(
+                            Icons.Rounded.RemoveCircleOutline,
+                            contentDescription = removeDescription,
+                            modifier = Modifier.size(19.dp)
+                        )
+                    }
+                }
+            }
+        },
+        colors = ListItemDefaults.colors(
+            containerColor = if (isCurrent)
+                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+            else Color.Transparent
+        ),
+        modifier = modifier
+            .padding(horizontal = 8.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick)
+    )
+}
+
+/**
+ * Full-height folder sheet, designed as the folder counterpart to
+ * [PlaylistDetailView]: same header weight, same play/shuffle pair, same row
+ * language — but no editing affordances, because folders are a view over the
+ * filesystem rather than a user-owned list.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun FolderDetailView(
+    folderName: String,
+    tracks: List<MusicTrack>,
+    currentTrackUri: String?,
+    onDismiss: () -> Unit,
+    onPlayTrack: (MusicTrack, List<MusicTrack>) -> Unit,
+    onToggleFavorite: (MusicTrack) -> Unit,
+    onDownload: (MusicTrack) -> Unit,
+) {
+    var searchQuery by remember { mutableStateOf("") }
+    val filtered = remember(tracks, searchQuery) {
+        if (searchQuery.isBlank()) tracks
+        else tracks.filter {
+            it.title.contains(searchQuery, ignoreCase = true) ||
+                    it.artist?.contains(searchQuery, ignoreCase = true) == true
+        }
+    }
+    val playingInFolder = currentTrackUri != null && tracks.any { it.uri == currentTrackUri }
+    val performanceMode = LocalPerformanceMode.current
+    val coverUri = remember(tracks) { tracks.firstOrNull { !it.thumbnailUri.isNullOrBlank() }?.thumbnailUri }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.fillMaxHeight(),
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        containerColor = MaterialTheme.colorScheme.surface,
+        dragHandle = null
+    ) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            // ── Header ────────────────────────────────────────────────────────
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(236.dp)
+            ) {
+                if (!performanceMode && coverUri != null) {
+                    AsyncImage(
+                        model = coverUri,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .alpha(0.22f)
+                            .blur(32.dp)
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    MaterialTheme.colorScheme.surface.copy(alpha = 0.15f),
+                                    MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+                                    MaterialTheme.colorScheme.surface
+                                )
+                            )
+                        )
+                )
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .statusBarsPadding()
+                        .padding(horizontal = 24.dp, vertical = 16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Surface(
+                        modifier = Modifier.size(104.dp),
+                        shape = RoundedCornerShape(24.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        shadowElevation = 10.dp,
+                        border = BorderStroke(
+                            1.dp,
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                        )
+                    ) {
+                        FolderArtwork(tracks = tracks, performanceMode = performanceMode)
+                    }
+
+                    Spacer(Modifier.height(14.dp))
+
+                    Text(
+                        text = folderName,
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        textAlign = TextAlign.Center
+                    )
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            text = if (tracks.size == 1) "1 track" else "${tracks.size} tracks",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        if (playingInFolder) {
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    PlayingBarsIndicator()
+                                    Text(
+                                        "Playing",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    ToolzExpressiveIconButton(
+                        onClick = onDismiss,
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
+                        ),
+                        shape = CircleShape
+                    ) {
+                        Icon(Icons.Rounded.Close, contentDescription = "Close")
+                    }
+                }
+            }
+
+            // ── Actions ──────────────────────────────────────────────────────
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                ToolzExpressiveButton(
+                    onClick = {
+                        if (tracks.isNotEmpty()) onPlayTrack(tracks.first(), tracks)
+                    },
+                    enabled = tracks.isNotEmpty(),
+                    modifier = Modifier.weight(1f).height(60.dp),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Icon(Icons.Rounded.PlayArrow, null, modifier = Modifier.size(24.dp))
+                    Spacer(Modifier.width(10.dp))
+                    Text("Play all", fontWeight = FontWeight.SemiBold)
+                }
+
+                ToolzExpressiveButton(
+                    onClick = {
+                        if (tracks.isNotEmpty()) {
+                            val shuffled = tracks.shuffled()
+                            onPlayTrack(shuffled.first(), shuffled)
+                        }
+                    },
+                    enabled = tracks.isNotEmpty(),
+                    modifier = Modifier.weight(0.72f).height(60.dp),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                ) {
+                    Icon(Icons.Rounded.Shuffle, null, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Shuffle", fontWeight = FontWeight.SemiBold)
+                }
+            }
+
+            Spacer(Modifier.height(22.dp))
+
+            // ── Search ───────────────────────────────────────────────────────
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                ExpressiveSearchField(
+                    query = searchQuery,
+                    onQueryChange = { searchQuery = it },
+                    modifier = Modifier.weight(1f),
+                    placeholder = { Text("Search this folder…") }
+                )
+
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+                ) {
+                    Text(
+                        text = "${filtered.size}",
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            // ── Tracks ───────────────────────────────────────────────────────
+            if (filtered.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            if (searchQuery.isEmpty()) Icons.Rounded.FolderOff else Icons.Rounded.SearchOff,
+                            null,
+                            modifier = Modifier.size(64.dp).alpha(0.3f)
+                        )
+                        Spacer(Modifier.height(14.dp))
+                        Text(
+                            text = if (searchQuery.isEmpty()) "This folder is empty" else "No matches found",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fadingEdges(top = 16.dp, bottom = 32.dp),
+                    contentPadding = PaddingValues(bottom = 32.dp, top = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    itemsIndexed(filtered, key = { _, t -> t.uri }) { index, track ->
+                        CollectionTrackRow(
+                            track = track,
+                            index = index,
+                            isCurrent = track.uri == currentTrackUri,
+                            onClick = { onPlayTrack(track, filtered) },
+                            onToggleFavorite = onToggleFavorite,
+                            onDownload = onDownload
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FolderArtwork(
+    tracks: List<MusicTrack>,
+    performanceMode: Boolean,
+) {
+    val thumbs = remember(tracks) {
+        tracks.mapNotNull { it.thumbnailUri?.takeIf(String::isNotBlank) }.distinct().take(4)
+    }
+    when {
+        thumbs.isNotEmpty() && !performanceMode -> {
+            Column(modifier = Modifier.fillMaxSize()) {
+                Row(modifier = Modifier.weight(1f)) {
+                    FolderArtCell(thumbs.getOrNull(0), Modifier.weight(1f).fillMaxHeight())
+                    FolderArtCell(thumbs.getOrNull(1), Modifier.weight(1f).fillMaxHeight())
+                }
+                Row(modifier = Modifier.weight(1f)) {
+                    FolderArtCell(thumbs.getOrNull(2), Modifier.weight(1f).fillMaxHeight())
+                    FolderArtCell(thumbs.getOrNull(3), Modifier.weight(1f).fillMaxHeight())
+                }
+            }
+        }
+        else -> {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.linearGradient(
+                            listOf(
+                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
+                                MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.45f)
+                            )
+                        )
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Rounded.Folder,
+                    null,
+                    modifier = Modifier.size(52.dp),
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FolderArtCell(uri: String?, modifier: Modifier) {
+    if (uri != null) {
+        AsyncImage(
+            model = uri,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = modifier
+        )
+    } else {
+        Box(
+            modifier = modifier.background(
+                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Rounded.MusicNote,
+                null,
+                modifier = Modifier.size(22.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+            )
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Playlist Detail View
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1093,6 +1522,7 @@ fun PlaylistDetailView(
     onPlayTrack: (MusicTrack, List<MusicTrack>) -> Unit,
     isEditable: Boolean = true,
     currentTrackUri: String? = null,
+    subtitle: String? = null,
     onToggleFavorite: (MusicTrack) -> Unit = {},
     onDownload: (MusicTrack) -> Unit
 ) {
@@ -1166,7 +1596,7 @@ fun PlaylistDetailView(
                 ) {
                     // Artwork with elevation and better shape
                     Surface(
-                        modifier = Modifier.size(132.dp),
+                        modifier = Modifier.size(112.dp),
                         shape = RoundedCornerShape(20.dp),
                         color = MaterialTheme.colorScheme.surfaceVariant,
                         shadowElevation = 8.dp,
@@ -1208,7 +1638,7 @@ fun PlaylistDetailView(
                         }
                     }
 
-                    Spacer(Modifier.height(20.dp))
+                    Spacer(Modifier.height(14.dp))
 
                     Text(
                         text = playlist.name,
@@ -1220,9 +1650,20 @@ fun PlaylistDetailView(
                         textAlign = TextAlign.Center
                     )
 
-                    if (playingInThisPlaylist) {
-                        Spacer(Modifier.height(8.dp))
-                        PlayingBarsIndicator()
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            text = subtitle ?: if (playlistTracks.size == 1) "1 track" else "${playlistTracks.size} tracks",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (playingInThisPlaylist) {
+                            PlayingBarsIndicator()
+                        }
                     }
                 }
 
@@ -1372,138 +1813,17 @@ fun PlaylistDetailView(
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     itemsIndexed(filteredPlaylistTracks, key = { _, t -> t.uri }) { index, track ->
-                        val isCurrent = track.uri == currentTrackUri
-
-                        ListItem(
-                            headlineContent = {
-                                Text(
-                                    track.title,
-                                    fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Medium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                                )
-                            },
-                            supportingContent = {
-                                Text(
-                                    track.artist?.takeIf { it.isNotBlank() && it != "<unknown>" } ?: "Unknown artist",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    fontWeight = FontWeight.Normal
-                                )
-                            },
-                            leadingContent = {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    modifier = Modifier.padding(start = 4.dp)
-                                ) {
-                                    Text(
-                                        text = "${index + 1}",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.Medium,
-                                        color = if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
-                                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                                        modifier = Modifier.width(28.dp),
-                                        textAlign = TextAlign.Center
-                                    )
-
-                                    Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-                                        if (isCurrent) {
-                                            PlayingBarsIndicator()
-                                        } else {
-                                            AlbumArtImage(
-                                                url = track.thumbnailUri,
-                                                seed = track.uri,
-                                                modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp))
-                                            )
-                                        }
-
-                                        // Cloud icon for online tracks
-                                        if (track.path == null && track.sourceUrl != null) {
-                                            Surface(
-                                                modifier = Modifier
-                                                    .align(Alignment.TopEnd)
-                                                    .offset(x = 4.dp, y = (-4).dp)
-                                                    .size(16.dp),
-                                                color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.8f),
-                                                shape = CircleShape
-                                            ) {
-                                                Box(contentAlignment = Alignment.Center) {
-                                                    Icon(
-                                                        imageVector = Icons.Rounded.Cloud,
-                                                        contentDescription = "Online",
-                                                        tint = Color.White,
-                                                        modifier = Modifier.size(10.dp)
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            },
-                            trailingContent = {
-                                Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    // Filled tonal container instead of a bare glyph — matches the
-                                    // favorite toggle used in the full player, so the "loved" state
-                                    // is legible against any card background, not just a red tint
-                                    // floating on transparency.
-                                    val haptic = LocalHapticFeedback.current
-                                    ToolzExpressiveIconButton(
-                onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onToggleFavorite(track)
-                },
-                modifier = Modifier.size(36.dp),
-                shape = CircleShape,
-                colors = IconButtonDefaults.filledIconButtonColors(
-                    containerColor = if (track.isFavorite) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
-                    contentColor = if (track.isFavorite) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            ) {
-                Icon(
-                    if (track.isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                    contentDescription = if (track.isFavorite) stringResource(R.string.st_MusicPlayerScreen_rff20) else stringResource(R.string.st_MusicPlayerScreen_atf21),
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-
-                                    if (track.path == null && track.sourceUrl != null) {
-                                        ToolzExpressiveIconButton(
-                                            onClick = { onDownload(track) },
-                                            modifier = Modifier.size(36.dp),
-                                            shape = CircleShape,
-                                            colors = IconButtonDefaults.filledIconButtonColors(
-                                                containerColor = Color.Transparent,
-                                                contentColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.65f)
-                                            )
-                                        ) {
-                                            Icon(Icons.Rounded.Download, contentDescription = stringResource(R.string.st_MusicPlayerScreen_d19), modifier = Modifier.size(19.dp))
-                                        }
-                                    }
-
-                                    if (isEditable) {
-                                        ToolzExpressiveIconButton(
-                                            onClick = { onRemoveTrack(track.uri) },
-                                            modifier = Modifier.size(36.dp),
-                                            shape = CircleShape,
-                                            colors = IconButtonDefaults.filledIconButtonColors(
-                                                containerColor = Color.Transparent,
-                                                contentColor = MaterialTheme.colorScheme.error.copy(alpha = 0.75f)
-                                            )
-                                        ) {
-                                            Icon(Icons.Rounded.RemoveCircleOutline, contentDescription = "Remove from playlist", modifier = Modifier.size(19.dp))
-                                        }
-                                    }
-                                }
-                            },
-                            colors = ListItemDefaults.colors(
-                                containerColor = if (isCurrent) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f) else Color.Transparent
-                            ),
-                            modifier = Modifier
-                                .padding(horizontal = 8.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .clickable { onPlayTrack(track, filteredPlaylistTracks) }
+                        CollectionTrackRow(
+                            track = track,
+                            index = index,
+                            isCurrent = track.uri == currentTrackUri,
+                            onClick = { onPlayTrack(track, filteredPlaylistTracks) },
+                            onToggleFavorite = onToggleFavorite,
+                            onDownload = onDownload,
+                            onRemove = if (isEditable) {
+                                { onRemoveTrack(track.uri) }
+                            } else null,
+                            removeDescription = "Remove from playlist"
                         )
                     }
                 }

@@ -165,7 +165,11 @@ import com.frerox.toolz.data.purgeshot.PurgeShotEntity
     // MIGRATION_68_69 is intentionally a no-op because the legacy tables must
     // stay readable until WhisperLegacyImporter has copied their rows and
     // dropped them. No non-Whisper table changes.
-    version = 69,
+    // Music listening time (70): music_tracks gains totalListenMs so "Most
+    // played" ranks by time spent listening instead of completion count. The
+    // migration backfills it from playCount * duration, which preserves the old
+    // ordering for existing libraries until fresh time is recorded.
+    version = 70,
     // H-10 FIX (reviewwhisper.md): schemas are now exported to app/schemas (see
     // build.gradle.kts room.schemaLocation). Every future bump MUST ship a Migration —
     // the DatabaseModule comment documents this contract too.

@@ -31,7 +31,7 @@ interface MusicDao {
     @Query("SELECT * FROM music_tracks WHERE lastPlayed > 0 ORDER BY lastPlayed DESC LIMIT 100")
     fun getRecentlyPlayed(): Flow<List<MusicTrack>>
 
-    @Query("SELECT * FROM music_tracks WHERE playCount > 0 ORDER BY playCount DESC LIMIT 100")
+    @Query("SELECT * FROM music_tracks WHERE totalListenMs > 0 ORDER BY totalListenMs DESC LIMIT 100")
     fun getMostPlayed(): Flow<List<MusicTrack>>
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
@@ -79,6 +79,12 @@ interface MusicDao {
 
     @Query("UPDATE music_tracks SET playCount = playCount + 1, lastPlayed = :timestamp WHERE sourceUrl = :sourceUrl")
     suspend fun incrementPlayCountBySourceUrl(sourceUrl: String, timestamp: Long)
+
+    @Query("UPDATE music_tracks SET totalListenMs = totalListenMs + :deltaMs WHERE uri = :uri")
+    suspend fun addListenTime(uri: String, deltaMs: Long)
+
+    @Query("UPDATE music_tracks SET totalListenMs = totalListenMs + :deltaMs WHERE sourceUrl = :sourceUrl")
+    suspend fun addListenTimeBySourceUrl(sourceUrl: String, deltaMs: Long)
 
     @Query("DELETE FROM music_tracks WHERE uri = :uri")
     suspend fun deleteTrackByUri(uri: String)

@@ -17,36 +17,127 @@
 
 package com.frerox.toolz.ui.screens.media.sections
 
-import androidx.compose.ui.res.stringResource
-import com.frerox.toolz.R
-import androidx.compose.animation.*
-import androidx.compose.animation.core.*
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.automirrored.rounded.Sort
-import androidx.compose.material.icons.rounded.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.automirrored.rounded.ViewList
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.GridView
+import androidx.compose.material.icons.rounded.KeyboardArrowUp
+import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Schedule
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Title
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import com.frerox.toolz.R
+import com.frerox.toolz.ui.components.ExpressiveSearchField
+import com.frerox.toolz.ui.components.ToolzExpressiveIconButton
 import com.frerox.toolz.ui.screens.media.MusicUiState
 import com.frerox.toolz.ui.screens.media.SortOrder
-import com.frerox.toolz.ui.components.*
+import com.frerox.toolz.ui.screens.media.catalog.LayoutMode
+import com.frerox.toolz.ui.theme.LocalShowTopAppBarDescriptions
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Top Bar
+// Adaptive top bar
 // ─────────────────────────────────────────────────────────────────────────────
+//
+// The bar is the app's navigation instrument, so it morphs with the tab rather
+// than swapping whole trees: the title and subtitle slide vertically into one
+// another while the action cluster cross-fades and settles with a light scale.
+// Layout height is pinned so a longer label never nudges the content below it.
 
-@OptIn(ExperimentalMaterial3Api::class)
+private data class MusicHeader(
+    val title: String,
+    val subtitle: String,
+    val key: String,
+)
+
+@Composable
+private fun rememberMusicHeader(
+    state: MusicUiState,
+    currentTabLabel: String?,
+): MusicHeader {
+    return when {
+        state.isSelectionMode -> MusicHeader(
+            title = "${state.selectedTracks.size} selected",
+            subtitle = "Choose an action",
+            key = "selection",
+        )
+        currentTabLabel == "Library" -> MusicHeader(
+            title = "Library",
+            subtitle = "Playlists, folders and favourites",
+            key = "library",
+        )
+        currentTabLabel == "Karaoke" -> MusicHeader(
+            title = "Karaoke",
+            subtitle = "Sing along with live lyrics",
+            key = "karaoke",
+        )
+        currentTabLabel == "Catalog" -> MusicHeader(
+            title = "Catalog",
+            subtitle = "Browse and play",
+            key = "catalog",
+        )
+        else -> MusicHeader(
+            title = "Your music",
+            subtitle = "All songs on this device",
+            key = "tracks",
+        )
+    }
+}
+
 @Composable
 fun ScreenTopBar(
     state: MusicUiState,
@@ -63,171 +154,339 @@ fun ScreenTopBar(
     onClearSelection: () -> Unit,
     onMultiAddPlaylist: () -> Unit,
     onResetCatalogOnboarding: () -> Unit = {},
-    onGoToTop: () -> Unit = {}
+    catalogLayoutMode: LayoutMode = LayoutMode.GRID,
+    onToggleCatalogLayout: () -> Unit = {},
+    onCatalogScrollToTop: () -> Unit = {},
 ) {
-    Column(modifier = Modifier.background(Color.Transparent)) {
-    ExpressiveTopAppBar(
-        // "STUDIO PLAYER" was decorative product branding that duplicated
-        // nothing useful and a vague "Precision playback" tagline filled
-        // the subtitle slot when idle. The subtitle slot is more useful
-        // showing the one thing that actually changes as you navigate:
-        // which tab you're on. Selection mode still overrides both with
-        // the live count, since that's the more urgent piece of state.
-        title = if (state.isSelectionMode) "${state.selectedTracks.size} Selected" else stringResource(R.string.st_MusicPlayerScreen_mp3),
-        subtitle = if (state.isSelectionMode) null else currentTabLabel,
-        navigationIcon = {
+    val header = rememberMusicHeader(state, currentTabLabel)
+    val isCatalog = currentTabLabel == "Catalog"
+    val isTracks = !state.isSelectionMode && !isCatalog &&
+        currentTabLabel != "Library" && currentTabLabel != "Karaoke"
+
+    // A very quiet tab tint behind the bar. It gives the morph a second,
+    // continuous channel of change (color) without painting a loud header.
+    val accent by androidx.compose.animation.animateColorAsState(
+        targetValue = when (header.key) {
+            "library" -> MaterialTheme.colorScheme.tertiary
+            "catalog" -> MaterialTheme.colorScheme.secondary
+            "karaoke" -> MaterialTheme.colorScheme.primary
+            "selection" -> MaterialTheme.colorScheme.primaryContainer
+            else -> MaterialTheme.colorScheme.primary
+        },
+        animationSpec = tween(520),
+        label = "topBarAccent",
+    )
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        accent.copy(alpha = 0.075f),
+                        accent.copy(alpha = 0.02f),
+                        Color.Transparent,
+                    )
+                )
+            )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .heightIn(min = 72.dp)
+                .padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             ToolzExpressiveIconButton(
                 onClick = if (state.isSelectionMode) onClearSelection else onBack,
-                shape = RoundedCornerShape(12.dp),
-                colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                shape = RoundedCornerShape(14.dp),
+                colors = IconButtonDefaults.filledIconButtonColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                ),
             ) {
-                Icon(if (state.isSelectionMode) Icons.Rounded.Close else Icons.AutoMirrored.Rounded.ArrowBack, null)
+                Icon(
+                    if (state.isSelectionMode) Icons.Rounded.Close
+                    else Icons.AutoMirrored.Rounded.ArrowBack,
+                    contentDescription = if (state.isSelectionMode) "Clear selection" else "Back",
+                )
             }
-        },
-        actions = {
-            if (state.isSelectionMode) {
-                ToolzExpressiveIconButton(
-                    onClick = onMultiAddPlaylist,
-                    shape = RoundedCornerShape(14.dp)
-                ) {
-                    Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, null, tint = MaterialTheme.colorScheme.primary)
+
+            Spacer(Modifier.width(14.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                AnimatedContent(
+                    targetState = header.title,
+                    transitionSpec = {
+                        (fadeIn(tween(240, delayMillis = 60)) +
+                            slideInVertically(tween(340), initialOffsetY = { it / 2 }))
+                            .togetherWith(
+                                fadeOut(tween(130)) +
+                                    slideOutVertically(tween(180), targetOffsetY = { -it / 3 })
+                            )
+                    },
+                    contentAlignment = Alignment.CenterStart,
+                    label = "topBarTitle",
+                ) { title ->
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.heightIn(min = 30.dp),
+                    )
                 }
-                } else {
-                    if (currentTabLabel == "Catalog") {
-                        ToolzExpressiveIconButton(
-                            onClick = onGoToTop,
-                            modifier = Modifier.padding(end = 4.dp).size(36.dp),
-                            colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
-                            shape = CircleShape
-                        ) {
-                            Icon(Icons.Rounded.KeyboardArrowUp, null, tint = MaterialTheme.colorScheme.primary)
-                        }
+                Spacer(Modifier.height(2.dp))
+                AnimatedVisibility(
+                    visible = LocalShowTopAppBarDescriptions.current,
+                    enter = fadeIn(tween(240, delayMillis = 40)) +
+                        expandVertically(
+                            animationSpec = spring(
+                                stiffness = Spring.StiffnessMediumLow,
+                                dampingRatio = 0.9f
+                            ),
+                            expandFrom = Alignment.Top,
+                        ),
+                    exit = fadeOut(tween(140)) +
+                        shrinkVertically(
+                            animationSpec = tween(200),
+                            shrinkTowards = Alignment.Top,
+                        ),
+                ) {
+                    AnimatedContent(
+                        targetState = header.subtitle,
+                        transitionSpec = {
+                            (fadeIn(tween(220, delayMillis = 90)) +
+                                slideInVertically(tween(300), initialOffsetY = { it / 2 }))
+                                .togetherWith(fadeOut(tween(120)))
+                        },
+                        contentAlignment = Alignment.CenterStart,
+                        label = "topBarSubtitle",
+                    ) { subtitle ->
+                        Text(
+                            text = subtitle,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.heightIn(min = 17.dp),
+                        )
                     }
-                    when (currentTab) {
-                            0 -> { // Tracks
-                                ToolzExpressiveIconButton(onClick = onRefresh) {
-                                    Icon(Icons.Rounded.Refresh, null)
+                }
+            }
+
+            AnimatedContent(
+                targetState = header.key,
+                transitionSpec = {
+                    (fadeIn(tween(220, delayMillis = 80)) +
+                        scaleIn(tween(320, delayMillis = 80), initialScale = 0.88f))
+                        .togetherWith(fadeOut(tween(120)) + scaleOut(tween(140), targetScale = 0.94f))
+                },
+                contentAlignment = Alignment.CenterEnd,
+                label = "topBarActions",
+            ) { key ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    when (key) {
+                        "selection" -> ToolzExpressiveIconButton(
+                            onClick = onMultiAddPlaylist,
+                            colors = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                            ),
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Rounded.PlaylistAdd,
+                                contentDescription = "Add to playlist",
+                            )
+                        }
+
+                        "catalog" -> {
+                            ToolzExpressiveIconButton(
+                                onClick = onRefresh,
+                                colors = topBarActionColors(),
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Refresh,
+                                    contentDescription = "Refresh catalog",
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                            ToolzExpressiveIconButton(
+                                onClick = onToggleCatalogLayout,
+                                colors = topBarActionColors(),
+                            ) {
+                                AnimatedContent(
+                                    targetState = catalogLayoutMode,
+                                    transitionSpec = {
+                                        (fadeIn(tween(160)) + scaleIn(tween(220), initialScale = 0.7f))
+                                            .togetherWith(
+                                                fadeOut(tween(120)) +
+                                                    scaleOut(tween(160), targetScale = 0.7f)
+                                            )
+                                    },
+                                    label = "catalogLayoutIcon",
+                                ) { mode ->
+                                    Icon(
+                                        if (mode == LayoutMode.GRID) Icons.AutoMirrored.Rounded.ViewList
+                                        else Icons.Rounded.GridView,
+                                        contentDescription = if (mode == LayoutMode.GRID)
+                                            "Switch to list" else "Switch to grid",
+                                        modifier = Modifier.size(20.dp),
+                                    )
                                 }
-                                Box {
-                                    ToolzExpressiveIconButton(onClick = { onShowSortMenu(true) }) {
-                                        Icon(Icons.AutoMirrored.Rounded.Sort, null)
-                                    }
+                            }
+                            ToolzExpressiveIconButton(
+                                onClick = onCatalogScrollToTop,
+                                colors = topBarActionColors(),
+                            ) {
+                                Icon(
+                                    Icons.Rounded.KeyboardArrowUp,
+                                    contentDescription = "Scroll to top",
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                        }
+
+                        "library" -> ToolzExpressiveIconButton(
+                            onClick = onAddPlaylist,
+                            colors = topBarActionColors(),
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Rounded.PlaylistAdd,
+                                contentDescription = "New playlist",
+                            )
+                        }
+
+                        else -> {
+                            ToolzExpressiveIconButton(
+                                onClick = onRefresh,
+                                colors = topBarActionColors(),
+                            ) {
+                                Icon(Icons.Rounded.Refresh, contentDescription = "Rescan library")
+                            }
+                            Box {
+                                ToolzExpressiveIconButton(
+                                    onClick = { onShowSortMenu(true) },
+                                    colors = topBarActionColors(),
+                                ) {
+                                    Icon(
+                                        Icons.AutoMirrored.Rounded.Sort,
+                                        contentDescription = "Sort songs",
+                                    )
+                                }
                                 DropdownMenu(
                                     expanded = showSortMenu,
                                     onDismissRequest = { onShowSortMenu(false) },
                                     shape = RoundedCornerShape(24.dp),
-                                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                                 ) {
-                                    SortDropdownItem("By Title", Icons.Rounded.Title) {
+                                    SortDropdownItem("By title", Icons.Rounded.Title) {
                                         onSort(SortOrder.TITLE); onShowSortMenu(false)
                                     }
-                                    SortDropdownItem(stringResource(R.string.st_MusicPlayerScreen_ba7), Icons.Rounded.Person) {
+                                    SortDropdownItem(
+                                        stringResource(R.string.st_MusicPlayerScreen_ba7),
+                                        Icons.Rounded.Person,
+                                    ) {
                                         onSort(SortOrder.ARTIST); onShowSortMenu(false)
                                     }
-                                    SortDropdownItem(stringResource(R.string.st_MusicPlayerScreen_br8), Icons.Rounded.Schedule) {
+                                    SortDropdownItem(
+                                        stringResource(R.string.st_MusicPlayerScreen_br8),
+                                        Icons.Rounded.Schedule,
+                                    ) {
                                         onSort(SortOrder.RECENT); onShowSortMenu(false)
                                     }
                                 }
                             }
                         }
-                        1 -> { // Library
-                                // Was "add folder" — folders already have their
-                                // own add action inside the Folders section
-                                // itself, so the header action is more useful
-                                // as the higher-frequency "new playlist" shortcut.
-                                ToolzExpressiveIconButton(onClick = onAddPlaylist) {
-                                    Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, null)
-                                }
-                            }
-                            2 -> { // Catalog
-                                ToolzExpressiveIconButton(onClick = onRefresh) {
-                                    Icon(Icons.Rounded.Refresh, null)
-                                }
-                            }
                     }
                 }
-            },
-            colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                containerColor = Color.Transparent,
-                scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.9f)
-            ),
-            modifier = Modifier.statusBarsPadding()
-        )
+            }
+        }
+
+        AnimatedVisibility(
+            visible = isTracks,
+            enter = expandVertically(spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = 0.85f)) +
+                fadeIn(tween(180)),
+            exit = shrinkVertically(spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = 0.9f)) +
+                fadeOut(tween(120)),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp, vertical = 4.dp),
+            ) {
+                ExpressiveSearchField(
+                    query = searchQuery,
+                    onQueryChange = onSearchChange,
+                    placeholder = {
+                        Text(
+                            stringResource(R.string.st_MusicPlayerScreen_st_hint4),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Rounded.Search,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    },
+                    trailingIcon = {
+                        androidx.compose.animation.AnimatedVisibility(
+                            visible = searchQuery.isNotEmpty(),
+                            enter = fadeIn(tween(160)),
+                            exit = fadeOut(tween(120)),
+                        ) {
+                            Surface(
+                                onClick = { onSearchChange("") },
+                                modifier = Modifier.size(28.dp),
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Rounded.Close,
+                                        contentDescription = "Clear search",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(14.dp),
+                                    )
+                                }
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
 
         HorizontalDivider(
             thickness = 0.5.dp,
-            color = MaterialTheme.colorScheme.outlineVariant.copy(0.3f),
-            modifier = Modifier.padding(top = 4.dp)
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f),
+            modifier = Modifier.padding(top = 4.dp),
         )
-
-        // Search bar — using M3 ExpressiveSearchField
-        AnimatedVisibility(
-            visible = currentTab == 0,
-            enter = expandVertically() + fadeIn(),
-            exit = shrinkVertically() + fadeOut()
-        ) {
-            Column {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 18.dp, vertical = 6.dp)
-                ) {
-                    ExpressiveSearchField(
-                        query = searchQuery,
-                        onQueryChange = onSearchChange,
-                        placeholder = {
-                            Text(
-                                stringResource(R.string.st_MusicPlayerScreen_st_hint4),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                        },
-                        leadingIcon = {
-                            Icon(
-                                Icons.Rounded.Search,
-                                null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        },
-                        trailingIcon = {
-                            androidx.compose.animation.AnimatedVisibility(
-                                visible = searchQuery.isNotEmpty(),
-                                enter = fadeIn(tween(160)),
-                                exit = fadeOut(tween(120))
-                            ) {
-                                Surface(
-                                    onClick = { onSearchChange("") },
-                                    modifier = Modifier.size(28.dp),
-                                    shape = CircleShape,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            Icons.Rounded.Close,
-                                            contentDescription = "Clear search",
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.size(14.dp)
-                                        )
-                                    }
-                                }
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-                Spacer(Modifier.height(6.dp))
-            }
-        }
     }
 }
+
+@Composable
+private fun topBarActionColors() = IconButtonDefaults.filledIconButtonColors(
+    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+    contentColor = MaterialTheme.colorScheme.onSurface,
+)
 
 @Composable
 private fun SortDropdownItem(label: String, icon: ImageVector, onClick: () -> Unit) {
     DropdownMenuItem(
         text = { Text(label, fontWeight = FontWeight.Medium) },
         onClick = onClick,
-        leadingIcon = { Icon(icon, null, tint = MaterialTheme.colorScheme.primary) }
+        leadingIcon = { Icon(icon, null, tint = MaterialTheme.colorScheme.primary) },
     )
 }
 
@@ -248,7 +507,9 @@ fun MusicTopBar(
     onClearSelection: () -> Unit,
     onMultiAddPlaylist: () -> Unit,
     onResetCatalogOnboarding: () -> Unit = {},
-    onGoToTop: () -> Unit = {}
+    catalogLayoutMode: LayoutMode = LayoutMode.GRID,
+    onToggleCatalogLayout: () -> Unit = {},
+    onCatalogScrollToTop: () -> Unit = {},
 ) = ScreenTopBar(
     state = state,
     currentTab = currentTab,
@@ -264,5 +525,7 @@ fun MusicTopBar(
     onClearSelection = onClearSelection,
     onMultiAddPlaylist = onMultiAddPlaylist,
     onResetCatalogOnboarding = onResetCatalogOnboarding,
-    onGoToTop = onGoToTop
+    catalogLayoutMode = catalogLayoutMode,
+    onToggleCatalogLayout = onToggleCatalogLayout,
+    onCatalogScrollToTop = onCatalogScrollToTop,
 )

@@ -636,6 +636,22 @@ class MusicRepository @Inject constructor(
         }
     }
 
+    /**
+     * Adds real listening time to a track. Catalog tracks are keyed by their
+     * source URL because the resolved stream URI changes between sessions;
+     * local tracks fall back to the stable content:// URI.
+     */
+    suspend fun addListenTime(uri: String, sourceUrl: String?, deltaMs: Long) {
+        if (deltaMs <= 0L) return
+        withContext(Dispatchers.IO) {
+            if (!sourceUrl.isNullOrBlank()) {
+                musicDao.addListenTimeBySourceUrl(sourceUrl, deltaMs)
+            } else if (uri.isNotBlank()) {
+                musicDao.addListenTime(uri, deltaMs)
+            }
+        }
+    }
+
     suspend fun incrementKaraokeSingCount(uri: String) {
         val track = getTrackByUri(uri) ?: return
         updateTrack(track.copy(karaokeSingCount = track.karaokeSingCount + 1))
@@ -673,6 +689,7 @@ class MusicRepository @Inject constructor(
             val merged = incoming.copy(
                 isFavorite            = existing.isFavorite,
                 playCount             = existing.playCount,
+                totalListenMs         = existing.totalListenMs,
                 lastPlayed            = existing.lastPlayed,
                 aiLyrics              = existing.aiLyrics,
                 aiArtistVitals        = existing.aiArtistVitals,

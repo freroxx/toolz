@@ -159,7 +159,7 @@ import com.frerox.toolz.ui.screens.media.catalog.*
 import com.frerox.toolz.ui.screens.media.sections.MusicTopBar
 import com.frerox.toolz.ui.screens.media.sections.ScreenBottomBar
 import com.frerox.toolz.ui.screens.media.sections.ScreenTopBar
-import com.frerox.toolz.ui.screens.media.sections.FolderTracksDialog
+import com.frerox.toolz.ui.screens.media.sections.FolderDetailView
 import com.frerox.toolz.ui.screens.media.sections.LibrarySection
 import com.frerox.toolz.ui.screens.media.sections.PlaylistDetailView
 import com.frerox.toolz.ui.screens.media.sections.PlaylistPickerRow
@@ -237,6 +237,19 @@ fun MusicPlayerScreen(
     var selectedFolderTracks by remember { mutableStateOf<Pair<String, List<MusicTrack>>?>(null) }
     var showKaraokeSettings by remember { mutableStateOf(false) }
     var selectedTrackForDownload by remember { mutableStateOf<CatalogTrack?>(null) }
+
+    val onDownloadTrack: (MusicTrack) -> Unit = { track ->
+        val trackId = track.sourceUrl?.substringAfter("v=")?.substringBefore("&")
+            ?: track.uri.hashCode().toString()
+        selectedTrackForDownload = CatalogTrack(
+            id = trackId,
+            title = track.title,
+            artist = track.artist ?: "Unknown",
+            sourceUrl = track.sourceUrl ?: "",
+            thumbnailUrl = track.thumbnailUri ?: "",
+            duration = track.duration
+        )
+    }
 
     val catalogGridState = rememberLazyStaggeredGridState()
     val scope = rememberCoroutineScope()
@@ -363,14 +376,24 @@ fun MusicPlayerScreen(
                 onBack = onBack,
                 onAddPlaylist = { showPlaylistDialog = true },
                 onRefresh = {
-                    if (currentTabLabel == "Catalog") catalogViewModel.loadStorefront()
-                    else viewModel.scanMusic()
+                    if (currentTabLabel == "Catalog") {
+                        if (!catalogState.isRefreshing) {
+                            catalogViewModel.loadStorefront(state.currentTrack, isRefresh = true)
+                        }
+                    } else viewModel.scanMusic()
                 },
                 onSort = { viewModel.setSortOrder(it) },
                 onClearSelection = { viewModel.clearSelection() },
                 onMultiAddPlaylist = { showMultiSelectPlaylistPicker = true },
                 onResetCatalogOnboarding = { catalogViewModel.resetOnboarding() },
-                onGoToTop = {
+                catalogLayoutMode = catalogState.layoutMode,
+                onToggleCatalogLayout = {
+                    catalogViewModel.setLayoutMode(
+                        if (catalogState.layoutMode == LayoutMode.GRID) LayoutMode.LIST
+                        else LayoutMode.GRID
+                    )
+                },
+                onCatalogScrollToTop = {
                     scope.launch {
                         catalogGridState.animateScrollToItem(0)
                     }
@@ -445,10 +468,7 @@ fun MusicPlayerScreen(
                                 viewModel = viewModel,
                                 searchQuery = searchQuery,
                                 onOpenFullPlayer = { showFullPlayer = true },
-                                onDownload = {
-                                    val trackId = it.sourceUrl?.substringAfter("v=")?.substringBefore("&") ?: it.uri.hashCode().toString()
-                                    selectedTrackForDownload = CatalogTrack(id = trackId, title = it.title, artist = it.artist ?: "Unknown", sourceUrl = it.sourceUrl ?: "", thumbnailUrl = it.thumbnailUri ?: "", duration = it.duration)
-                                }
+                                onDownload = onDownloadTrack
                             )
                             "Library" -> LibrarySection(
                                 state = state,
@@ -459,10 +479,7 @@ fun MusicPlayerScreen(
                                 onDeletePlaylist = { viewModel.deletePlaylist(it) },
                                 onFolderClick = { name, tracks -> selectedFolderTracks = name to tracks },
                                 onAddFolder = { folderLauncher.launch(null) },
-                                onDownload = {
-                                    val trackId = it.sourceUrl?.substringAfter("v=")?.substringBefore("&") ?: it.uri.hashCode().toString()
-                                    selectedTrackForDownload = CatalogTrack(id = trackId, title = it.title, artist = it.artist ?: "Unknown", sourceUrl = it.sourceUrl ?: "", thumbnailUrl = it.thumbnailUri ?: "", duration = it.duration)
-                                }
+                                onDownload = onDownloadTrack
                             )
                             "Karaoke" -> KaraokeTab(
                                 viewModel = viewModel,
@@ -539,14 +556,17 @@ fun MusicPlayerScreen(
             )
         }
 
-        if (selectedFolderTracks != null) {
-            FolderTracksDialog(
-                folderName = selectedFolderTracks!!.first,
-                tracks = selectedFolderTracks!!.second,
+        selectedFolderTracks?.let { (folderName, folderTracks) ->
+            FolderDetailView(
+                folderName = folderName,
+                tracks = folderTracks,
+                currentTrackUri = state.currentTrack?.uri,
                 onDismiss = { selectedFolderTracks = null },
-                onPlayTrack = { track -> viewModel.playTrack(track, selectedFolderTracks!!.second); selectedFolderTracks = null },
-                state = state,
-                viewModel = viewModel
+                onPlayTrack = { track, list ->
+                    viewModel.playTrack(track, list)
+                },
+                onToggleFavorite = { viewModel.toggleFavorite(it) },
+                onDownload = onDownloadTrack
             )
         }
 

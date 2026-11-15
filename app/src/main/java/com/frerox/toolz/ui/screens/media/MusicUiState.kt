@@ -80,6 +80,10 @@ data class MusicUiState(
     val karaokeSessionsCount    : Int                       = 0,
     val karaokeAvgScore         : Int                       = -1,
     val downloadedOnlyFilter    : Boolean                   = false,
+    // True once the library has ever contained tracks (persisted across app
+    // launches). Prevents the empty state from flashing before the first DB
+    // emission on a cold open.
+    val hasKnownLibrary         : Boolean                   = false,
     // Last playback failure (set by onPlayerError, cleared on READY/playing).
     // Lets the UI explain "can't play" instead of silently looking blocked.
     val playbackError           : String?                   = null,

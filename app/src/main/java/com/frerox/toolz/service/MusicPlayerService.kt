@@ -185,6 +185,13 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         private const val FGS_NOTIFICATION_ID = 1101
         private const val FGS_CHANNEL_ID = "music_playback"
         private const val FGS_CHANNEL_NAME = "Music playback"
+
+        // Listening-time accounting: flush the time actually spent playing to
+        // the library every 15s so "Most played" reflects real listening, not
+        // just start counts. A 60s ceiling per tick keeps a suspended/slept
+        // process from crediting minutes it never played.
+        private const val LISTEN_TIME_TICK_MS = 15_000L
+        private const val LISTEN_TIME_MAX_TICK_GAP_MS = 60_000L
     }
 
     private var mediaSession: MediaSession? = null
@@ -193,6 +200,13 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
     private var statePersistenceJob: Job? = null
     private var placeholderDemoteJob: Job? = null
     private var isPlaceholderActive = false
+
+    // Listening-time bookkeeping. The service owns this (not the ViewModel) so
+    // playback keeps counting while the UI is closed or backgrounded.
+    private var listenSessionJob: Job? = null
+    private var listenTrackUri: String? = null
+    private var listenTrackSourceUrl: String? = null
+    private var listenTickElapsedMs: Long = 0L
 
     private var sensorManager: SensorManager? = null
     private var audioManager: AudioManager? = null
@@ -621,6 +635,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             updateWidget(forceBitmapRefresh = true)
             savePlaybackState()
+            onListenTrackChanged()
 
             // Check if we need to resolve the stream URL for catalog tracks
             mediaItem?.let { item ->
@@ -637,6 +652,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                 // the steal-back window so a stale LOSS redelivery can't latch
                 // the player paused forever. Transient losses still pause.
                 markManualResume()
+                startListenSessionLoop()
                 // Media3 now owns the foreground with the real media notification.
                 // Drop our transient placeholder so "Preparing music…" never sticks
                 // and never competes with (or suppresses) the real notification.
@@ -655,6 +671,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             } else {
                 stopWidgetCorrectionLoop()
                 stopStatePersistenceLoop()
+                stopListenSessionLoop()
                 unregisterShakeListener()
                 savePlaybackState()
                 // Playback stopped/paused: if our placeholder is still up (e.g. a
@@ -864,6 +881,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         if (player.isPlaying) {
             startWidgetCorrectionLoop()
             startStatePersistenceLoop()
+            startListenSessionLoop()
             observeShakeSetting()
         }
         updateWidget(forceBitmapRefresh = true)
@@ -1571,6 +1589,78 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         savePlaybackState()
     }
 
+    // ── Listening time ───────────────────────────────────────────────────────
+    // Wall-clock accounting is deliberate: a track that is mostly skipped still
+    // earns only the seconds it actually sounded. Ticks flush incrementally so
+    // a process death loses at most a few seconds.
+
+    private fun startListenSessionLoop() {
+        listenSessionJob?.cancel()
+        syncListenTrack()
+        listenTickElapsedMs = SystemClock.elapsedRealtime()
+        listenSessionJob = serviceScope.launch {
+            while (isActive) {
+                delay(LISTEN_TIME_TICK_MS)
+                flushListenTimeAsync()
+            }
+        }
+    }
+
+    private fun stopListenSessionLoop() {
+        listenSessionJob?.cancel()
+        listenSessionJob = null
+        flushListenTimeAsync()
+        listenTrackUri = null
+        listenTrackSourceUrl = null
+        listenTickElapsedMs = 0L
+    }
+
+    private fun onListenTrackChanged() {
+        if (listenSessionJob?.isActive != true) return
+        flushListenTimeAsync()
+        syncListenTrack()
+    }
+
+    private fun syncListenTrack() {
+        val item = try { player.currentMediaItem } catch (_: Exception) { null }
+        listenTrackUri = item?.mediaId?.takeIf { it.isNotBlank() }
+        listenTrackSourceUrl = item?.mediaMetadata?.extras?.getString("source_url")
+        listenTickElapsedMs = SystemClock.elapsedRealtime()
+    }
+
+    private fun consumeListenDelta(): Long {
+        val now = SystemClock.elapsedRealtime()
+        val last = listenTickElapsedMs
+        listenTickElapsedMs = now
+        if (last <= 0L || listenTrackUri == null) return 0L
+        return (now - last).coerceIn(0L, LISTEN_TIME_MAX_TICK_GAP_MS)
+    }
+
+    private fun flushListenTimeAsync() {
+        val uri = listenTrackUri ?: return
+        val sourceUrl = listenTrackSourceUrl
+        val delta = consumeListenDelta()
+        if (delta <= 0L) return
+        serviceScope.launch {
+            runCatching { musicRepository.addListenTime(uri, sourceUrl, delta) }
+        }
+    }
+
+    private fun flushListenTimeBlocking() {
+        val uri = listenTrackUri
+        val sourceUrl = listenTrackSourceUrl
+        val delta = consumeListenDelta()
+        listenTrackUri = null
+        listenTrackSourceUrl = null
+        listenTickElapsedMs = 0L
+        if (uri == null || delta <= 0L) return
+        kotlinx.coroutines.runBlocking {
+            kotlinx.coroutines.withTimeoutOrNull(1_000L) {
+                runCatching { musicRepository.addListenTime(uri, sourceUrl, delta) }
+            }
+        }
+    }
+
     private fun savePlaybackState() {
         val currentItem = try { player.currentMediaItem } catch (_: Exception) { return }
             ?: return
@@ -2004,6 +2094,10 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             nm.cancel(FGS_NOTIFICATION_ID)
         }
+        // Credit the final seconds before the scope dies.
+        listenSessionJob?.cancel()
+        listenSessionJob = null
+        runCatching { flushListenTimeBlocking() }
         serviceScope.cancel()
         mediaSession?.run {
             release()

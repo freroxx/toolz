@@ -261,7 +261,7 @@ fun CatalogContent(
 
     var focusedTrack by remember { mutableStateOf<CatalogTrack?>(null) }
     var focusedTrackSize by remember { mutableStateOf(Size.Zero) }
-    var focusedTrackRadius by remember { mutableStateOf(24.dp) }
+    var focusedTrackRadius by remember { mutableStateOf(20.dp) }
     var shockwaveOffset by remember { mutableStateOf(Offset.Zero) }
     var shockwaveKey by remember { mutableStateOf(0) }
     var showShockwave by remember { mutableStateOf(false) }
@@ -494,30 +494,15 @@ fun CatalogContent(
                 LazyVerticalStaggeredGrid(
                 columns = StaggeredGridCells.Fixed(columns),
                 state = gridState,
-                modifier = Modifier.fillMaxSize().fadingEdges(top = 16.dp, bottom = 64.dp),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 120.dp),
+                modifier = Modifier.fillMaxSize().fadingEdges(top = 2.dp, bottom = 64.dp),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 120.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalItemSpacing = 12.dp
             ) {
                 // Determine max spans where needed (not strictly maxLineSpan in staggered, just FullLine)
                 val fullSpan = StaggeredGridItemSpan.FullLine
-                // ... (items remain the same)
-                item(span = StaggeredGridItemSpan.FullLine) {
-                    CatalogTopActions(
-                        onToggleLayout = {
-                            catalogViewModel.setLayoutMode(
-                                if (state.layoutMode == LayoutMode.GRID) LayoutMode.LIST else LayoutMode.GRID
-                            )
-                        },
-                        onRefresh = { 
-                            if (!state.isRefreshing) {
-                                catalogViewModel.loadStorefront(currentTrack, isRefresh = true) 
-                            }
-                        },
-                        layoutMode = state.layoutMode
-                    )
-                }
-
+                // Actions live in the adaptive top app bar now: refresh, layout
+                // switch and scroll-to-top are global chrome, not catalog content.
                 item(span = StaggeredGridItemSpan.FullLine) {
                     CatalogSearchBar(
                         query = state.query,
@@ -557,28 +542,26 @@ fun CatalogContent(
                             item(span = StaggeredGridItemSpan.FullLine) {
                                 SectionHeader(
                                     title = stringResource(R.string.st_CatalogScreen_qp6),
-                                    subtitle = "${state.quickPicks.size} ready to play",
+                                    subtitle = "Picked for you",
                                     icon = Icons.Rounded.AutoAwesome
                                 )
                             }
-                            catalogTrackRows(
-                                tracks = state.quickPicks,
-                                layoutMode = state.layoutMode,
-                                downloadedSourceUrls = downloadedSourceUrls,
-                                downloadingTracks = state.downloadingTracks,
-                                focusedTrackUrl = focusedTrack?.sourceUrl,
-                                onTrackClick = { track, coords, radius, mode ->
-                                    onResolveAndPlay(track, coords, radius, mode)
-                                },
-                                onTrackDownload = { selectedTrackForDownload = it },
-                                onTrackLongPress = { track ->
-                                    if (hapticEnabled) {
-                                        vibrationManager?.vibrateLongClick()
-                                            ?: view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                            item(span = StaggeredGridItemSpan.FullLine) {
+                                FeaturedCarousel(
+                                    tracks = state.quickPicks,
+                                    focusedTrackUrl = focusedTrack?.sourceUrl,
+                                    onTrackClick = { track, coords ->
+                                        onResolveAndPlay(track, coords, 20.dp, LayoutMode.FEATURED)
+                                    },
+                                    onLongClick = { track ->
+                                        if (hapticEnabled) {
+                                            vibrationManager?.vibrateLongClick()
+                                                ?: view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                        }
+                                        trackForAction = track
                                     }
-                                    trackForAction = track
-                                }
-                            )
+                                )
+                            }
                         }
 
                         item(span = StaggeredGridItemSpan.FullLine) {
@@ -778,10 +761,7 @@ private fun LazyStaggeredGridScope.catalogTrackRows(
         this.itemsIndexed(
             items = tracks,
             key = { _, track -> track.sourceUrl },
-            span = { index, _ ->
-                val spanCount = if (index % 5 == 0) StaggeredGridItemSpan.FullLine else StaggeredGridItemSpan.SingleLane
-                spanCount
-            }
+            span = { _, _ -> StaggeredGridItemSpan.SingleLane }
         ) { _, track ->
             var itemCoords by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
 
@@ -802,86 +782,28 @@ private fun LazyStaggeredGridScope.catalogTrackRows(
     }
 }
 @Composable
-private fun CatalogTopActions(
-    layoutMode: LayoutMode,
-    onToggleLayout: () -> Unit,
-    onRefresh: () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 8.dp, bottom = 4.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    stringResource(R.string.st_CatalogScreen_cat4),
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    stringResource(R.string.st_CatalogScreen_ot5),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                ToolzTonalExpressiveIconButton(
-                    onClick = onRefresh,
-                    modifier = Modifier.size(44.dp),
-                    colors = IconButtonDefaults.filledTonalIconButtonColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        contentColor = MaterialTheme.colorScheme.onSurface
-                    )
-                ) {
-                    Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(20.dp))
-                }
-                ToolzTonalExpressiveIconButton(
-                    onClick = onToggleLayout,
-                    modifier = Modifier.size(44.dp),
-                    colors = IconButtonDefaults.filledTonalIconButtonColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        contentColor = MaterialTheme.colorScheme.onSurface
-                    )
-                ) {
-                    Icon(
-                        if (layoutMode == LayoutMode.GRID) Icons.AutoMirrored.Rounded.ViewList else Icons.Rounded.GridView,
-                        null,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
-        }
-    }
-}
-@Composable
 private fun SectionHeader(title: String, subtitle: String, icon: androidx.compose.ui.graphics.vector.ImageVector) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 16.dp, bottom = 8.dp),
+            .padding(top = 22.dp, bottom = 2.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Surface(
-            modifier = Modifier.size(36.dp),
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+            modifier = Modifier.size(34.dp),
+            shape = RoundedCornerShape(11.dp),
+            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(19.dp))
             }
         }
-        Spacer(Modifier.width(14.dp))
+        Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(
@@ -1024,10 +946,10 @@ private fun FocusedTrackOverlay(
 /**
  * A single, quick ripple from the tapped card's bounds.
  *
- * The old shockwave expanded for two seconds across the entire screen with an
- * 80dp stroke, which read as decoration. This one is deliberately short: one
- * crisp outline, one soft halo, and a quieter echo, all gone in ~420ms. It
- * explains why the card in front of you lifted, then gets out of the way.
+ * Three coordinated layers announce the lift without becoming decoration:
+ * a soft body glow, a bright leading ring, and a slower echo. Everything is
+ * eased with a long, decelerating curve so the wave visibly "arrives" rather
+ * than snapping out at a linear rate, and the whole gesture is over in ~650ms.
  */
 @Composable
 private fun FocusShockwave(
@@ -1044,7 +966,10 @@ private fun FocusShockwave(
         progress.snapTo(0f)
         progress.animateTo(
             targetValue = 1f,
-            animationSpec = tween(420, easing = CubicBezierEasing(0.2f, 0f, 0f, 1f)),
+            animationSpec = tween(
+                durationMillis = 680,
+                easing = CubicBezierEasing(0.16f, 0.72f, 0.22f, 1f),
+            ),
         )
         onFinished()
     }
@@ -1054,37 +979,73 @@ private fun FocusShockwave(
         if (p >= 1f) return@Canvas
 
         val radiusPx = radius.toPx()
+        // Fast at the start, long settle at the end.
+        val spread = 1f - (1f - p) * (1f - p) * (1f - p)
         val fade = (1f - p) * (1f - p)
 
-        // Soft halo: depth without a hard edge.
-        val grow = 2.dp.toPx() + (42.dp.toPx() * p)
+        // 1. Soft body glow: gives the ring depth without a hard edge.
+        val glowGrow = 3.dp.toPx() + 34.dp.toPx() * spread
         drawRoundRect(
-            color = color.copy(alpha = 0.10f * fade),
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    color.copy(alpha = 0.20f * fade),
+                    color.copy(alpha = 0.06f * fade),
+                    Color.Transparent,
+                ),
+                center = Offset(
+                    offset.x + size.width / 2f,
+                    offset.y + size.height / 2f,
+                ),
+                radius = (size.width.coerceAtLeast(size.height) / 2f) + glowGrow + radiusPx,
+            ),
+            topLeft = Offset(offset.x - glowGrow, offset.y - glowGrow),
+            size = Size(size.width + glowGrow * 2, size.height + glowGrow * 2),
+            cornerRadius = CornerRadius(radiusPx + glowGrow),
+        )
+
+        // 2. Leading ring: the crisp edge the eye follows.
+        val grow = 2.dp.toPx() + 46.dp.toPx() * spread
+        drawRoundRect(
+            brush = Brush.linearGradient(
+                colors = listOf(
+                    color.copy(alpha = 0.12f * fade),
+                    color.copy(alpha = 0.62f * fade),
+                    color.copy(alpha = 0.24f * fade),
+                    color.copy(alpha = 0.5f * fade),
+                ),
+                start = Offset(offset.x, offset.y),
+                end = Offset(offset.x + size.width, offset.y + size.height),
+            ),
             topLeft = Offset(offset.x - grow, offset.y - grow),
             size = Size(size.width + grow * 2, size.height + grow * 2),
             cornerRadius = CornerRadius(radiusPx + grow),
+            style = Stroke(width = (2.6f - 1.4f * p).dp.toPx()),
         )
 
-        // Leading edge.
-        drawRoundRect(
-            color = color.copy(alpha = 0.42f * fade),
-            topLeft = Offset(offset.x - grow, offset.y - grow),
-            size = Size(size.width + grow * 2, size.height + grow * 2),
-            cornerRadius = CornerRadius(radiusPx + grow),
-            style = Stroke(width = 2.5.dp.toPx() - 1.5.dp.toPx() * p),
-        )
-
-        // Quiet echo trailing behind.
-        val p2 = ((p - 0.20f) / 0.80f).coerceIn(0f, 1f)
+        // 3. Echo: starts late, travels further, stays quiet.
+        val p2 = ((p - 0.18f) / 0.82f).coerceIn(0f, 1f)
         if (p2 > 0f) {
-            val grow2 = 2.dp.toPx() + (62.dp.toPx() * p2)
-            val fade2 = (1f - p2) * (1f - p2) * 0.55f
+            val grow2 = 2.dp.toPx() + 68.dp.toPx() * (1f - (1f - p2) * (1f - p2))
+            val fade2 = (1f - p2) * (1f - p2)
             drawRoundRect(
-                color = color.copy(alpha = 0.30f * fade2),
+                color = color.copy(alpha = 0.26f * fade2),
                 topLeft = Offset(offset.x - grow2, offset.y - grow2),
                 size = Size(size.width + grow2 * 2, size.height + grow2 * 2),
                 cornerRadius = CornerRadius(radiusPx + grow2),
                 style = Stroke(width = 1.dp.toPx()),
+            )
+        }
+
+        // 4. Inner edge pulse: the card's own border flashes once, which ties
+        // the wave to the exact bounds that were touched.
+        if (p < 0.32f) {
+            val q = p / 0.32f
+            drawRoundRect(
+                color = color.copy(alpha = 0.42f * (1f - q)),
+                topLeft = offset,
+                size = size,
+                cornerRadius = CornerRadius(radiusPx),
+                style = Stroke(width = 1.4.dp.toPx()),
             )
         }
     }
@@ -1140,11 +1101,11 @@ private fun FeaturedCarouselItem(
                 scaleX = scale
                 scaleY = scale
             },
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(20.dp),
         containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.20f),
         border = if (isFocused) BorderStroke(3.dp, color) else null
     ) {
-        Box(modifier = Modifier.clip(RoundedCornerShape(24.dp))) {
+        Box(modifier = Modifier.clip(RoundedCornerShape(20.dp))) {
             AlbumArtImage(
                 url = track.thumbnailUrl,
                 seed = track.title,
@@ -1293,18 +1254,17 @@ private fun CatalogGridCard(
     onLongPress: () -> Unit,
     onMore: () -> Unit
 ) {
-    val alpha by animateFloatAsState(if (isFocused) 1f else 0.85f, label = "gridAlpha")
-
     ExpressiveCard(
         onClick = onClick,
         onLongClick = onLongPress,
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
-        border = if (isFocused) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null
+        shape = RoundedCornerShape(20.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.7f),
+        border = if (isFocused) BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
+        else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.22f))
     ) {
-        Column(modifier = Modifier.padding(10.dp)) {
-            Box(modifier = Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(18.dp))) {
+        Column(modifier = Modifier.padding(8.dp)) {
+            Box(modifier = Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(14.dp))) {
                 AlbumArtImage(
                     url = track.thumbnailUrl,
                     seed = track.title,
@@ -1318,20 +1278,33 @@ private fun CatalogGridCard(
                     modifier = Modifier.align(Alignment.TopStart).padding(6.dp)
                 ) {
                     Surface(
-                        shape = RoundedCornerShape(10.dp),
+                        shape = RoundedCornerShape(9.dp),
                         color = MaterialTheme.colorScheme.primaryContainer,
                         tonalElevation = 6.dp
                     ) {
                         Icon(
                             Icons.Rounded.CloudDone,
-                            null,
-                            modifier = Modifier.padding(4.dp).size(14.dp),
+                            contentDescription = "Downloaded",
+                            modifier = Modifier.padding(4.dp).size(13.dp),
                             tint = MaterialTheme.colorScheme.onPrimaryContainer
                         )
                     }
                 }
                 if (!isFocused) {
-                    Row(modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp)) {
+                    Surface(
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp),
+                        shape = RoundedCornerShape(9.dp),
+                        color = Color.Black.copy(alpha = 0.55f)
+                    ) {
+                        Text(
+                            text = formatDuration(track.duration),
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                    Row(modifier = Modifier.align(Alignment.BottomStart).padding(4.dp)) {
                         DownloadButton(
                             isDownloaded = isDownloaded,
                             progress = progress,
@@ -1341,16 +1314,17 @@ private fun CatalogGridCard(
                     }
                 }
             }
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(9.dp))
             Text(
                 text = track.title,
-                style = MaterialTheme.typography.titleSmall,
+                style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.alpha(alpha).padding(horizontal = 4.dp)
+                modifier = Modifier.padding(horizontal = 4.dp)
             )
+            Spacer(Modifier.height(1.dp))
             Text(
                 text = track.artist,
                 style = MaterialTheme.typography.labelSmall,
@@ -1358,9 +1332,9 @@ private fun CatalogGridCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.alpha(alpha).padding(horizontal = 4.dp)
+                modifier = Modifier.padding(horizontal = 4.dp)
             )
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(6.dp))
         }
     }
 }
@@ -1376,20 +1350,20 @@ private fun CatalogListCard(
     onLongPress: () -> Unit,
     onMore: () -> Unit
 ) {
-    val alpha by animateFloatAsState(if (isFocused) 1f else 0.85f, label = "listAlpha")
-
     ExpressiveCard(
         onClick = onClick,
         onLongClick = onLongPress,
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        containerColor = Color.Transparent,
-        border = if (isFocused) BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)) else null
+        shape = RoundedCornerShape(18.dp),
+        containerColor = if (isFocused) Color.Transparent
+        else MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.55f),
+        border = if (isFocused) BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
+        else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.16f))
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 8.dp),
+                .padding(horizontal = 10.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(contentAlignment = Alignment.BottomEnd) {
@@ -1397,8 +1371,8 @@ private fun CatalogListCard(
                     url = track.thumbnailUrl,
                     seed = track.title,
                     modifier = Modifier
-                        .size(60.dp)
-                        .clip(RoundedCornerShape(14.dp)),
+                        .size(56.dp)
+                        .clip(RoundedCornerShape(13.dp)),
                     contentScale = ContentScale.Crop
                 )
                 androidx.compose.animation.AnimatedVisibility(
@@ -1415,15 +1389,15 @@ private fun CatalogListCard(
                     ) {
                         Icon(
                             Icons.Rounded.CloudDone,
-                            null,
+                            contentDescription = "Downloaded",
                             modifier = Modifier.padding(3.dp).size(10.dp),
                             tint = MaterialTheme.colorScheme.onPrimaryContainer
                         )
                     }
                 }
             }
-            Spacer(Modifier.width(16.dp))
-            Column(modifier = Modifier.weight(1f).alpha(alpha)) {
+            Spacer(Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     track.title,
                     style = MaterialTheme.typography.bodyLarge,
@@ -1432,19 +1406,28 @@ private fun CatalogListCard(
                     overflow = TextOverflow.Ellipsis,
                     color = MaterialTheme.colorScheme.onSurface
                 )
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    track.artist,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Spacer(Modifier.height(3.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        track.artist,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    Text(
+                        " · ${formatDuration(track.duration)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                        maxLines = 1
+                    )
+                }
             }
             if (!isFocused) {
-                Spacer(Modifier.width(8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Spacer(Modifier.width(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                     DownloadButton(
                         isDownloaded = isDownloaded,
                         progress = progress,
@@ -1453,9 +1436,14 @@ private fun CatalogListCard(
                     )
                     IconButton(
                         onClick = onMore,
-                        modifier = Modifier.size(44.dp)
+                        modifier = Modifier.size(40.dp)
                     ) {
-                        Icon(Icons.Rounded.MoreVert, null, modifier = Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Icon(
+                            Icons.Rounded.MoreVert,
+                            contentDescription = "More actions",
+                            modifier = Modifier.size(22.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
             }

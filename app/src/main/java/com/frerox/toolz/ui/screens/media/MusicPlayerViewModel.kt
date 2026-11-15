@@ -465,6 +465,7 @@ class MusicPlayerViewModel @Inject constructor(
                 isResolvingCatalog = false,
                 isKaraokeActive = false,
                 performanceMode = it.performanceMode,
+                hasKnownLibrary = tracks.isNotEmpty(),
             )
         }
         _sandboxDuration.value = tracks[0].duration
@@ -550,6 +551,11 @@ class MusicPlayerViewModel @Inject constructor(
     }
 
     private fun observeSettings() {
+        viewModelScope.launch {
+            settingsRepository.musicLibraryHasTracks.collect { known ->
+                if (known) _uiState.update { it.copy(hasKnownLibrary = true) }
+            }
+        }
         viewModelScope.launch {
             settingsRepository.showMusicVisualizer.collect { show ->
                 _uiState.update { it.copy(showVisualizer = show) }
@@ -644,6 +650,7 @@ class MusicPlayerViewModel @Inject constructor(
 
     private fun observeLibrary() {
         viewModelScope.launch(Dispatchers.Default) {
+            var persistedKnownLibrary = settingsRepository.musicLibraryHasTracks.first()
             val combinedFlow = combine(
                 repository.allTracks,
                 repository.allPlaylists,
@@ -681,6 +688,11 @@ class MusicPlayerViewModel @Inject constructor(
                         .thenByDescending { it.artist != null && it.artist != "Unknown Artist" && it.artist != "<unknown>" }
                 )
 
+                if (data.tracks.isNotEmpty() && !persistedKnownLibrary) {
+                    persistedKnownLibrary = true
+                    runCatching { settingsRepository.setMusicLibraryHasTracks(true) }
+                }
+
                 val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(
                     android.os.Environment.DIRECTORY_DOWNLOADS
                 )
@@ -714,7 +726,8 @@ class MusicPlayerViewModel @Inject constructor(
                             playWhenReady = player.playWhenReady,
                             isShuffleOn = player.shuffleModeEnabled,
                             repeatMode = player.repeatMode,
-                            duration = player.duration.coerceAtLeast(0L)
+                            duration = player.duration.coerceAtLeast(0L),
+                            hasKnownLibrary = state.hasKnownLibrary || data.tracks.isNotEmpty()
                         )
                     }
                     playbackTransport.updateDuration(player.duration.coerceAtLeast(0L))

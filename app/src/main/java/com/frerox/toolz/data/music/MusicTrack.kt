@@ -18,6 +18,7 @@
 package com.frerox.toolz.data.music
 
 import androidx.room.Entity
+import androidx.room.ColumnInfo
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
@@ -26,6 +27,7 @@ import androidx.room.PrimaryKey
     indices = [
         Index(value = ["lastPlayed"]),
         Index(value = ["playCount"]),
+        Index(value = ["totalListenMs"]),
         Index(value = ["sourceUrl"]),
         Index(value = ["path"]),
         Index(value = ["stableId"])
@@ -42,6 +44,11 @@ data class MusicTrack(
     val isFavorite: Boolean = false,
     val lastPlayed: Long = 0L,
     val playCount: Int = 0,
+    // Actual time spent listening (foreground + background playback). "Most
+    // played" ranks by this instead of completion count, so a long favourite
+    // that is usually skipped halfway does not outrank a song played through.
+    @ColumnInfo(defaultValue = "0")
+    val totalListenMs: Long = 0L,
     val path: String? = null,
     val sourceUrl: String? = null,
     val dateAdded: Long = java.lang.System.currentTimeMillis(),

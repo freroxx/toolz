@@ -615,6 +615,9 @@ class SettingsRepository @Inject constructor(
     private val CATALOG_STREAM_QUALITY = stringPreferencesKey("catalog_stream_quality") // "AUTO", "HIGH", "MEDIUM", "LOW"
     private val MUSIC_CACHE_SIZE_MB = intPreferencesKey("music_cache_size_mb") // 0/50/150/500
     private val MUSIC_DOWNLOADED_ONLY_FILTER = booleanPreferencesKey("music_downloaded_only_filter")
+    // Remembers that the device library had tracks, so the very first frame on
+    // app open never flashes an empty-state before Room emits the real library.
+    private val MUSIC_LIBRARY_HAS_TRACKS = booleanPreferencesKey("music_library_has_tracks")
 
     // Timer Duration Persistence
     private val LAST_TIMER_HOURS = intPreferencesKey("last_timer_hours")
@@ -1113,6 +1116,7 @@ class SettingsRepository @Inject constructor(
     val catalogStreamQuality: Flow<String> = dataStore.data.map { it[CATALOG_STREAM_QUALITY] ?: "AUTO" }
     val musicCacheSizeMb: Flow<Int> = dataStore.data.map { it[MUSIC_CACHE_SIZE_MB] ?: 150 }
     val musicDownloadedOnlyFilter: Flow<Boolean> = dataStore.data.map { it[MUSIC_DOWNLOADED_ONLY_FILTER] ?: false }
+    val musicLibraryHasTracks: Flow<Boolean> = dataStore.data.map { it[MUSIC_LIBRARY_HAS_TRACKS] ?: false }
 
     val lastTimerHours: Flow<Int> = dataStore.data.map {
         try {
@@ -1734,6 +1738,7 @@ class SettingsRepository @Inject constructor(
     suspend fun setCatalogStreamQuality(quality: String) { dataStore.edit { it[CATALOG_STREAM_QUALITY] = quality } }
     suspend fun setMusicCacheSizeMb(mb: Int) { dataStore.edit { it[MUSIC_CACHE_SIZE_MB] = mb.coerceIn(0, 500) } }
     suspend fun setMusicDownloadedOnlyFilter(enabled: Boolean) { dataStore.edit { it[MUSIC_DOWNLOADED_ONLY_FILTER] = enabled } }
+    suspend fun setMusicLibraryHasTracks(hasTracks: Boolean) { dataStore.edit { it[MUSIC_LIBRARY_HAS_TRACKS] = hasTracks } }
 
     suspend fun setLastTimerDuration(hours: Int, minutes: Int, seconds: Int) {
         dataStore.edit {
