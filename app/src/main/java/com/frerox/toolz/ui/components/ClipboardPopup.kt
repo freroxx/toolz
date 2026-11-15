@@ -43,6 +43,7 @@ import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.PushPin
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -284,7 +285,7 @@ fun ClipboardPopup(
                     }
                 }
 
-                Button(
+                ToolzExpressiveButton(
                     onClick = {
                         haptic.click()
                         awaitingPaste = true
@@ -310,7 +311,7 @@ fun ClipboardPopup(
                     Text(stringResource(R.string.st_ClipboardPopup_paste_current))
                 }
 
-                OutlinedButton(
+                ToolzOutlinedExpressiveButton(
                     onClick = {
                         haptic.click()
                         openHistory(context)
@@ -344,14 +345,19 @@ private fun PopupClipRow(
     val masked = (entry.isSensitive || entry.isLocked) && !revealed
     val isImage = entry.type == ClipboardType.IMAGE
     val isFile = entry.type == ClipboardType.FILE
+    val liquidGlassEnabled = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled.current
     Surface(
         onClick = onCopy,
         shape = RoundedCornerShape(18.dp),
-        color = if (entry.isSensitive || entry.isLocked) {
+        color = if (liquidGlassEnabled) {
+            if (entry.isSensitive || entry.isLocked) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f)
+            else Color.White.copy(alpha = 0.08f)
+        } else if (entry.isSensitive || entry.isLocked) {
             MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
         } else {
             MaterialTheme.colorScheme.surfaceContainerHighest
         },
+        border = if (liquidGlassEnabled) androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)) else null,
         modifier = Modifier.fillMaxWidth(),
     ) {
         Row(

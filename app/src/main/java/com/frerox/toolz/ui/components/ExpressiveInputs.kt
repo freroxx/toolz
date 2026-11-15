@@ -29,6 +29,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
@@ -40,6 +41,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import com.frerox.toolz.ui.liquidglass.liquidGlassEffect
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.ToolzTheme
 
@@ -53,8 +55,28 @@ fun ExpressiveSwitch(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
-    val haptic = rememberToolzHapticFeedback()
+    val liquidGlassEnabled = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled.current
     val performanceMode = LocalPerformanceMode.current
+    val backdrop = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassBackdrop.current
+    val isDark = isSystemInDarkTheme()
+    val switchSurfaceArgb = if (isDark) 0xFF1C1B1F.toInt() else 0xFFFFFBFE.toInt()
+    val effectiveBackdrop = if (liquidGlassEnabled && !performanceMode) {
+        backdrop ?: com.kyant.backdrop.backdrops.rememberCanvasBackdrop {
+            drawRect(Color(switchSurfaceArgb))
+        }
+    } else null
+
+    if (liquidGlassEnabled && !performanceMode && effectiveBackdrop != null) {
+        com.kyant.backdrop.catalog.components.LiquidToggle(
+            selected = { checked },
+            onSelect = onCheckedChange,
+            backdrop = effectiveBackdrop,
+            modifier = modifier
+        )
+        return
+    }
+
+    val haptic = rememberToolzHapticFeedback()
     val interactionSource = remember { MutableInteractionSource() }
     
     val isPressed by interactionSource.collectIsPressedAsState()
@@ -177,9 +199,46 @@ fun ExpressiveSlider(
     ),
     isPlaying: Boolean = false,
 ) {
-    val haptic = rememberToolzHapticFeedback()
+    val liquidGlassEnabled = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled.current
+    val performanceMode = LocalPerformanceMode.current
+    val backdrop = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassBackdrop.current
+
+    // Use theme-aware surface color for the canvas backdrop fallback
+    val isDark = isSystemInDarkTheme()
+    val surfaceArgb = if (isDark) 0xFF1C1B1F.toInt() else 0xFFFFFBFE.toInt()
+    val effectiveBackdrop = if (liquidGlassEnabled && !performanceMode) {
+        backdrop ?: com.kyant.backdrop.backdrops.rememberCanvasBackdrop {
+            drawRect(Color(surfaceArgb))
+        }
+    } else null
+
     val currentOnValueChange by rememberUpdatedState(onValueChange)
     val currentOnValueChangeFinished by rememberUpdatedState(onValueChangeFinished)
+
+    if (liquidGlassEnabled && !performanceMode && effectiveBackdrop != null) {
+        // LiquidSlider needs 20dp horizontal padding so the 40dp-wide thumb doesn't clip at edges.
+        // We also ensure a minimum height of 44dp so touch targets are always reachable.
+        Box(
+            modifier = modifier
+                .fillMaxWidth()
+                .heightIn(min = 44.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            com.kyant.backdrop.catalog.components.LiquidSlider(
+                value = value,
+                onValueChange = currentOnValueChange,
+                onValueChangeFinished = currentOnValueChangeFinished,
+                valueRange = valueRange,
+                visibilityThreshold = (valueRange.endInclusive - valueRange.start) / 1000f,
+                backdrop = effectiveBackdrop,
+                // Horizontal padding prevents the glass thumb from being clipped at the edges
+                modifier = Modifier.padding(horizontal = 20.dp)
+            )
+        }
+        return
+    }
+
+    val haptic = rememberToolzHapticFeedback()
     val interactionSource = remember { MutableInteractionSource() }
     val isDragged by interactionSource.collectIsDraggedAsState()
 
@@ -246,6 +305,22 @@ fun ExpressiveSearchField(
     var expanded by remember { mutableStateOf(false) }
     val currentOnSearch by rememberUpdatedState(onSearch)
     val haptic = rememberToolzHapticFeedback()
+    val liquidGlassEnabled = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled.current
+
+    val effectiveColors = if (liquidGlassEnabled) {
+        TextFieldDefaults.colors(
+            focusedContainerColor = Color.Transparent,
+            unfocusedContainerColor = Color.Transparent,
+            disabledContainerColor = Color.Transparent,
+            errorContainerColor = Color.Transparent,
+        )
+    } else colors
+
+    val fieldModifier = if (liquidGlassEnabled) {
+        modifier.liquidGlassEffect(
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(28.dp),
+        )
+    } else modifier
 
     SearchBarDefaults.InputField(
         query = query,
@@ -257,12 +332,12 @@ fun ExpressiveSearchField(
         },
         expanded = expanded,
         onExpandedChange = { expanded = it },
-        modifier = modifier,
+        modifier = fieldModifier,
         enabled = enabled,
         placeholder = placeholder,
         leadingIcon = leadingIcon,
         trailingIcon = trailingIcon,
-        colors = colors,
+        colors = effectiveColors,
     )
 }
 

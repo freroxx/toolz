@@ -1,78 +1,29 @@
-/*
- * Copyright (C) 2026 Toolz Contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
-
 package com.frerox.toolz.ui.components
 
 import android.content.res.Configuration
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.interaction.DragInteraction
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.clipRect
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.semantics.ProgressBarRangeInfo
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.progressBarRangeInfo
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.ToolzTheme
 import kotlin.math.PI
 import kotlin.math.sin
 
-/**
- * A seek slider with a restrained, continuous wave on the played portion.
- *
- * The inactive and active tracks share one path — the active colour is revealed
- * with a clip — so the wave never pinches, kinks or jumps at the thumb. Gestures
- * are handled directly instead of stacking an invisible Material Slider on top:
- * that older approach used two different thumb geometries, which made the drawn
- * thumb and the real touch target drift apart.
- */
 @Composable
 fun SquigglySlider(
     value: Float,
@@ -82,8 +33,7 @@ fun SquigglySlider(
     valueRange: ClosedFloatingPointRange<Float>,
     isPlaying: Boolean = true,
     activeColor: Color = MaterialTheme.colorScheme.primary,
-    inactiveColor: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
-    contentDescription: String? = null,
+    inactiveColor: Color = MaterialTheme.colorScheme.surfaceContainerHigh
 ) {
     SquigglySlider(
         value = { value },
@@ -94,7 +44,6 @@ fun SquigglySlider(
         isPlaying = isPlaying,
         activeColor = activeColor,
         inactiveColor = inactiveColor,
-        contentDescription = contentDescription,
     )
 }
 
@@ -108,180 +57,236 @@ fun SquigglySlider(
     valueRange: ClosedFloatingPointRange<Float>,
     isPlaying: Boolean = true,
     activeColor: Color = MaterialTheme.colorScheme.primary,
-    inactiveColor: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
-    contentDescription: String? = null,
+    inactiveColor: Color = MaterialTheme.colorScheme.surfaceContainerHigh
 ) {
-    val density = LocalDensity.current
-    val performanceMode = LocalPerformanceMode.current
     val interactionSource = remember { MutableInteractionSource() }
     val isDragged by interactionSource.collectIsDraggedAsState()
     val haptic = rememberToolzHapticFeedback()
-    val currentValue by rememberUpdatedState(value)
     val currentOnValueChange by rememberUpdatedState(onValueChange)
     val currentOnValueChangeFinished by rememberUpdatedState(onValueChangeFinished)
+    val liquidGlassEnabled = LocalLiquidGlassEnabled.current
 
-    val range = valueRange.endInclusive - valueRange.start
-    val progress = if (range > 0f) {
-        ((currentValue() - valueRange.start) / range).coerceIn(0f, 1f)
-    } else {
-        0f
+    LaunchedEffect(isDragged) {
+        if (isDragged) haptic.tick()
     }
 
-    // A single slow phase keeps the wave alive without looking busy.
-    val infiniteTransition = rememberInfiniteTransition(label = "squiggly_phase")
-    val phase by if (isPlaying && !performanceMode) {
+    // Performance optimization: skip animations in performance mode or when paused
+    val performanceMode = LocalPerformanceMode.current
+    val infiniteTransition = rememberInfiniteTransition(label = "wave_motion")
+
+    // The phase advances only when playing and not in performance mode.
+    // When paused, animating is paused completely to save 120fps GPU cycles.
+    val phase by if (!performanceMode && isPlaying) {
         infiniteTransition.animateFloat(
             initialValue = 0f,
             targetValue = (2 * PI).toFloat(),
             animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 2400, easing = LinearEasing),
-                repeatMode = RepeatMode.Restart,
+                animation = tween(1200, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
             ),
-            label = "squiggly_phase_state",
+            label = "phase_state"
         )
     } else {
         remember { mutableFloatStateOf(0f) }
     }
 
-    // Small, calm amplitude. The old 6-8dp wave read as a vibration rather
-    // than a progress indicator.
-    val amplitudeDp by animateFloatAsState(
+    // Fast, snappy amplitude/thumb so tap/drag feels immediate, not sluggish.
+    val currentAmplitude by animateFloatAsState(
         targetValue = when {
-            performanceMode || !isPlaying -> 0f
-            isDragged -> 2.6f
-            else -> 1.8f
+            isDragged -> 8f
+            isPlaying && !performanceMode -> 6f
+            else -> 0f
         },
-        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
-        label = "squiggly_amplitude",
-    )
-    val thumbRadiusDp by animateFloatAsState(
-        targetValue = if (isDragged) 8f else 6.5f,
-        animationSpec = tween(durationMillis = 140, easing = FastOutSlowInEasing),
-        label = "squiggly_thumb",
+        animationSpec = tween(
+            durationMillis = if (isDragged) 140 else if (isPlaying) 350 else 250,
+            easing = FastOutSlowInEasing
+        ),
+        label = "amplitude_state"
     )
 
-    val horizontalPadding = 12.dp
-    val trackHeight = 4.dp
-    val thumbCenterColor = MaterialTheme.colorScheme.surface
-
-    fun valueForX(x: Float, width: Float): Float {
-        val paddingPx = with(density) { horizontalPadding.toPx() }
-        val usable = (width - paddingPx * 2f).coerceAtLeast(1f)
-        val fraction = ((x - paddingPx) / usable).coerceIn(0f, 1f)
-        return valueRange.start + fraction * range
-    }
+    val thumbScale by animateFloatAsState(
+        targetValue = if (isDragged) 1.25f else 1f,
+        animationSpec = spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMedium),
+        label = "thumb_scale"
+    )
 
     Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(44.dp)
-            .padding(horizontal = 2.dp)
-            .semantics {
-                if (contentDescription != null) this.contentDescription = contentDescription
-                progressBarRangeInfo = ProgressBarRangeInfo(progress, valueRange)
-                if (enabled) {
-                    setProgress { target ->
-                        val clamped = target.coerceIn(valueRange.start, valueRange.endInclusive)
-                        currentOnValueChange(clamped)
-                        currentOnValueChangeFinished()
-                        true
-                    }
-                }
-            },
+        modifier = modifier.height(56.dp).padding(horizontal = 8.dp),
+        contentAlignment = Alignment.Center
     ) {
-        Canvas(
+        // Track layer
+        Spacer(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(44.dp)
-                .pointerInput(enabled, valueRange, density) {
-                    if (!enabled) return@pointerInput
-                    awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        down.consume()
-                        haptic.tick()
-                        val dragStart = DragInteraction.Start()
-                        interactionSource.tryEmit(dragStart)
-                        currentOnValueChange(valueForX(down.position.x, size.width.toFloat()))
+                .height(56.dp)
+                .drawWithCache {
+                    val path = Path()
+                    onDrawBehind {
+                        val horizontalPadding = 16.dp.toPx()
+                        val canvasWidth = size.width - (horizontalPadding * 2)
+                        val centerY = size.height / 2
 
-                        var pressed = true
-                        while (pressed) {
-                            val event = awaitPointerEvent()
-                            val change = event.changes.firstOrNull { it.id == down.id }
-                            if (change == null) break
-                            currentOnValueChange(valueForX(change.position.x, size.width.toFloat()))
-                            change.consume()
-                            pressed = change.pressed
+                        val range = valueRange.endInclusive - valueRange.start
+                        val sliderValue = value()
+                        val progress = if (range > 0) {
+                            ((sliderValue - valueRange.start) / range).coerceIn(0f, 1f)
+                        } else {
+                            0f
+                        }
+                        val thumbX = horizontalPadding + (canvasWidth * progress)
+
+                        // 1. Inactive Track (Clean simple line)
+                        drawLine(
+                            color = if (liquidGlassEnabled) inactiveColor.copy(alpha = 0.35f) else inactiveColor.copy(alpha = 0.24f),
+                            start = Offset(thumbX, centerY),
+                            end = Offset(size.width - horizontalPadding, centerY),
+                            strokeWidth = 4.dp.toPx(),
+                            cap = StrokeCap.Round
+                        )
+
+                        if (!isPlaying && currentAmplitude == 0f) {
+                            // Simple linear track for performance mode / paused
+                            if (liquidGlassEnabled && !performanceMode) {
+                                // Subtle refractive aura along line
+                                drawLine(
+                                    color = activeColor.copy(alpha = 0.25f),
+                                    start = Offset(horizontalPadding, centerY),
+                                    end = Offset(thumbX, centerY),
+                                    strokeWidth = 8.dp.toPx(),
+                                    cap = StrokeCap.Round
+                                )
+                            }
+                            drawLine(
+                                color = activeColor,
+                                start = Offset(horizontalPadding, centerY),
+                                end = Offset(thumbX, centerY),
+                                strokeWidth = 4.dp.toPx(),
+                                cap = StrokeCap.Round
+                            )
+                        } else {
+                            // 2. Active Squiggly Path
+                            val waveFreq = 32.dp.toPx()
+                            val maxAmp = currentAmplitude.dp.toPx()
+                            val taperDistance = 24.dp.toPx()
+
+                            path.reset()
+                            path.moveTo(horizontalPadding, centerY)
+
+                            val activeWidth = thumbX - horizontalPadding
+                            val step = 2.dp.toPx() // Density-aware step for smooth, high-performance drawing
+                            var x = 0f
+
+                            while (x < activeWidth) {
+                                val startTaper = (x / taperDistance).coerceIn(0f, 1f)
+                                val endTaper = ((activeWidth - x) / taperDistance).coerceIn(0f, 1f)
+                                val taperedAmp = maxAmp * startTaper * endTaper
+
+                                val y = centerY + taperedAmp * sin((2 * PI * x / waveFreq) - phase).toFloat()
+                                path.lineTo(horizontalPadding + x, y)
+                                x += step
+                            }
+
+                            path.lineTo(thumbX, centerY)
+
+                            // Liquid glass refractive aura behind squiggly wave
+                            if (liquidGlassEnabled && !performanceMode) {
+                                drawPath(
+                                    path = path,
+                                    color = activeColor.copy(alpha = 0.28f),
+                                    style = Stroke(width = 8.dp.toPx(), cap = StrokeCap.Round)
+                                )
+                            }
+
+                            // Main crisp line
+                            drawPath(
+                                path = path,
+                                color = activeColor,
+                                style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round)
+                            )
                         }
 
-                        interactionSource.tryEmit(DragInteraction.Stop(dragStart))
-                        currentOnValueChangeFinished()
-                    }
-                },
-        ) {
-            val paddingPx = horizontalPadding.toPx()
-            val startX = paddingPx
-            val endX = size.width - paddingPx
-            if (endX <= startX) return@Canvas
+                        // 3. Thumb Drawing
+                        if (liquidGlassEnabled && !performanceMode) {
+                            // Authentic Liquid Glass Jewel Orb
+                            val orbRadius = 12.dp.toPx() * thumbScale
 
-            val centerY = size.height / 2f
-            val usable = endX - startX
-            val thumbX = startX + usable * progress
-            val amplitude = amplitudeDp.dp.toPx()
-            val strokeWidth = trackHeight.toPx()
+                            // Ambient soft drop shadow
+                            drawCircle(
+                                color = Color.Black.copy(alpha = 0.16f),
+                                radius = orbRadius + 3.dp.toPx(),
+                                center = Offset(thumbX, centerY + 2.dp.toPx())
+                            )
 
-            val trackPath = Path().apply {
-                moveTo(startX, centerY)
-                if (amplitude <= 0.05f) {
-                    lineTo(endX, centerY)
-                } else {
-                    val step = 2.dp.toPx()
-                    val frequency = 42.dp.toPx()
-                    val edgeFade = 14.dp.toPx()
-                    var x = 0f
-                    while (x < usable) {
-                        val fadeIn = (x / edgeFade).coerceIn(0f, 1f)
-                        val fadeOut = ((usable - x) / edgeFade).coerceIn(0f, 1f)
-                        val envelope = fadeIn * fadeOut
-                        val y = centerY + amplitude * envelope *
-                            sin((2 * PI * x / frequency) - phase).toFloat()
-                        lineTo(startX + x, y)
-                        x += step
+                            // Refractive glass body with radial dispersion
+                            drawCircle(
+                                brush = Brush.radialGradient(
+                                    colors = listOf(
+                                        Color.White.copy(alpha = 0.65f),
+                                        activeColor.copy(alpha = 0.45f),
+                                        activeColor.copy(alpha = 0.90f)
+                                    ),
+                                    center = Offset(thumbX - 3.dp.toPx(), centerY - 3.dp.toPx()),
+                                    radius = orbRadius
+                                ),
+                                radius = orbRadius,
+                                center = Offset(thumbX, centerY)
+                            )
+
+                            // Specular glass edge highlight (lens refraction ring)
+                            drawCircle(
+                                brush = Brush.sweepGradient(
+                                    listOf(
+                                        Color.White.copy(alpha = 0.85f),
+                                        activeColor.copy(alpha = 0.35f),
+                                        Color(0xFFC4B5FD).copy(alpha = 0.70f),
+                                        Color.White.copy(alpha = 0.85f)
+                                    ),
+                                    center = Offset(thumbX, centerY)
+                                ),
+                                radius = orbRadius,
+                                center = Offset(thumbX, centerY),
+                                style = Stroke(width = 1.5.dp.toPx())
+                            )
+
+                            // Inner gleaming highlight bead
+                            drawCircle(
+                                color = Color.White,
+                                radius = 3.5.dp.toPx() * thumbScale,
+                                center = Offset(thumbX - 2.5.dp.toPx() * thumbScale, centerY - 2.5.dp.toPx() * thumbScale)
+                            )
+                        } else {
+                            // Clean Material 3 Expressive Thumb
+                            drawCircle(
+                                color = activeColor,
+                                radius = 10.dp.toPx() * thumbScale,
+                                center = Offset(thumbX, centerY)
+                            )
+                            drawCircle(
+                                color = Color.White,
+                                radius = 4.dp.toPx() * thumbScale,
+                                center = Offset(thumbX, centerY)
+                            )
+                        }
                     }
-                    lineTo(endX, centerY)
                 }
-            }
+        )
 
-            drawPath(
-                path = trackPath,
-                color = inactiveColor.copy(alpha = 0.5f),
-                style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
-            )
-            clipRect(left = startX, top = 0f, right = thumbX, bottom = size.height) {
-                drawPath(
-                    path = trackPath,
-                    color = activeColor,
-                    style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
-                )
-            }
-
-            if (isDragged) {
-                drawCircle(
-                    color = activeColor.copy(alpha = 0.14f),
-                    radius = 16.dp.toPx(),
-                    center = Offset(thumbX, centerY),
-                )
-            }
-            drawCircle(
-                color = activeColor,
-                radius = thumbRadiusDp.dp.toPx(),
-                center = Offset(thumbX, centerY),
-            )
-            drawCircle(
-                color = thumbCenterColor,
-                radius = 3.dp.toPx(),
-                center = Offset(thumbX, centerY),
-            )
-        }
+        Slider(
+            value = value(),
+            onValueChange = currentOnValueChange,
+            onValueChangeFinished = {
+                haptic.click()
+                currentOnValueChangeFinished()
+            },
+            valueRange = valueRange,
+            interactionSource = interactionSource,
+            colors = SliderDefaults.colors(
+                thumbColor = Color.Transparent,
+                activeTrackColor = Color.Transparent,
+                inactiveTrackColor = Color.Transparent
+            ),
+            modifier = Modifier.fillMaxWidth()
+        )
     }
 }
 
@@ -295,12 +300,13 @@ private fun SquigglySliderPreview() {
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(24.dp),
+            contentAlignment = Alignment.Center
         ) {
             SquigglySlider(
                 value = value,
                 onValueChange = { value = it },
                 valueRange = 0f..1f,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth()
             )
         }
     }

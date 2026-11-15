@@ -40,6 +40,7 @@ fun Modifier.bouncyClick(
     enabled: Boolean = true,
     scaleDown: Float = 0.95f, // Tuned to the M3 Expressive sweet spot
     haptic: Boolean = true,
+    interactionSource: MutableInteractionSource? = null,
     onLongClick: (() -> Unit)? = null,
     onClick: (() -> Unit)? = null
 ) = composed {
@@ -47,8 +48,8 @@ fun Modifier.bouncyClick(
     val hapticFeedback = rememberToolzHapticFeedback()
 
     // Unified interaction tracking system
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
+    val actualInteractionSource = interactionSource ?: remember { MutableInteractionSource() }
+    val isPressed by actualInteractionSource.collectIsPressedAsState()
 
     // Premium M3 Expressive Elastic Physics
     val scale by animateFloatAsState(
@@ -60,30 +61,38 @@ fun Modifier.bouncyClick(
         label = "M3ExpressiveBouncyScale"
     )
 
+    val isClickable = enabled && (onClick != null || onLongClick != null)
+
     this
         .graphicsLayer {
             scaleX = scale
             scaleY = scale
         }
-        .combinedClickable(
-            enabled = enabled,
-            interactionSource = interactionSource,
-            indication = null,
-            onClick = {
-                if (onClick != null) {
-                    if (haptic) {
-                        hapticFeedback.click()
+        .then(
+            if (isClickable) {
+                Modifier.combinedClickable(
+                    enabled = true,
+                    interactionSource = actualInteractionSource,
+                    indication = null,
+                    onClick = {
+                        if (onClick != null) {
+                            if (haptic) {
+                                hapticFeedback.click()
+                            }
+                            onClick()
+                        }
+                    },
+                    onLongClick = onLongClick?.let { longClickAction ->
+                        {
+                            if (haptic) {
+                                hapticFeedback.longClick()
+                            }
+                            longClickAction()
+                        }
                     }
-                    onClick()
-                }
-            },
-            onLongClick = onLongClick?.let { longClickAction ->
-                {
-                    if (haptic) {
-                        hapticFeedback.longClick()
-                    }
-                    longClickAction()
-                }
+                )
+            } else {
+                Modifier
             }
         )
 }

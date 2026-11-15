@@ -24,6 +24,8 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import com.frerox.toolz.ui.liquidglass.liquidGlassEffect
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
@@ -65,6 +67,14 @@ fun ExpressiveTopAppBar(
     largeFlexible: Boolean = false,
     titleHorizontalAlignment: Alignment.Horizontal = Alignment.CenterHorizontally,
 ) {
+    val liquidGlass = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled.current
+    val effectiveColors = if (liquidGlass) {
+        colors.copy(
+            containerColor = Color.Transparent,
+            scrolledContainerColor = colors.scrolledContainerColor.copy(alpha = 0.35f),
+        )
+    } else colors
+
     if (largeFlexible) {
         LargeFlexibleTopAppBar(
             title = title,
@@ -73,7 +83,7 @@ fun ExpressiveTopAppBar(
             navigationIcon = navigationIcon,
             actions = actions,
             titleHorizontalAlignment = titleHorizontalAlignment,
-            colors = colors,
+            colors = effectiveColors,
             scrollBehavior = scrollBehavior,
         )
         return
@@ -127,7 +137,7 @@ fun ExpressiveTopAppBar(
             title = titleContent,
             navigationIcon = navigationIcon,
             actions = actions,
-            colors = colors,
+            colors = effectiveColors,
             scrollBehavior = scrollBehavior,
         )
     } else {
@@ -136,7 +146,7 @@ fun ExpressiveTopAppBar(
             title = titleContent,
             navigationIcon = navigationIcon,
             actions = actions,
-            colors = colors,
+            colors = effectiveColors,
             scrollBehavior = scrollBehavior,
         )
     }
@@ -207,11 +217,19 @@ fun ToolzHorizontalFloatingToolbar(
     content: @Composable RowScope.() -> Unit,
 ) {
     val haptic = rememberToolzHapticFeedback()
+    val liquidGlassEnabled = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled.current
+
+    val toolbarModifier = if (liquidGlassEnabled) {
+        modifier.liquidGlassEffect(
+            shape = RoundedCornerShape(32.dp),
+        )
+    } else modifier
+
     HorizontalFloatingToolbar(
-        modifier = modifier,
+        modifier = toolbarModifier,
         expanded = expanded,
         colors = FloatingToolbarColors(
-            toolbarContainerColor = containerColor,
+            toolbarContainerColor = if (liquidGlassEnabled) Color.Transparent else containerColor,
             toolbarContentColor = contentColor,
             fabContainerColor = MaterialTheme.colorScheme.primaryContainer,
             fabContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -255,11 +273,19 @@ fun ToolzVerticalFloatingToolbar(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val haptic = rememberToolzHapticFeedback()
+    val liquidGlassEnabled = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled.current
+
+    val toolbarModifier = if (liquidGlassEnabled) {
+        modifier.liquidGlassEffect(
+            shape = RoundedCornerShape(32.dp),
+        )
+    } else modifier
+
     VerticalFloatingToolbar(
-        modifier = modifier,
+        modifier = toolbarModifier,
         expanded = expanded,
         colors = FloatingToolbarColors(
-            toolbarContainerColor = containerColor,
+            toolbarContainerColor = if (liquidGlassEnabled) Color.Transparent else containerColor,
             toolbarContentColor = contentColor,
             fabContainerColor = MaterialTheme.colorScheme.primaryContainer,
             fabContentColor = MaterialTheme.colorScheme.onPrimaryContainer,

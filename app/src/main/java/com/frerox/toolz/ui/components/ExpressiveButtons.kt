@@ -109,19 +109,39 @@ fun ToolzExpressiveButton(
     val currentOnClick by rememberUpdatedState(onClick)
     val interactionSource = remember { MutableInteractionSource() }
 
-    Button(
-        onClick = {
-            haptic.click()
-            currentOnClick()
-        },
-        modifier = modifier.expressivePressScale(interactionSource, enabled),
-        enabled = enabled,
-        colors = colors,
-        shapes = if (shape != null) ButtonShapes(shape, shape) else shapes,
-        contentPadding = contentPadding,
-        interactionSource = interactionSource,
-        content = content,
-    )
+    val liquidGlassEnabled = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled.current
+    val backdrop = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassBackdrop.current
+
+    if (liquidGlassEnabled && backdrop != null) {
+        val resolvedShape = shape ?: shapes.shape
+        com.kyant.backdrop.catalog.components.LiquidButton(
+            onClick = {
+                haptic.click()
+                currentOnClick()
+            },
+            backdrop = backdrop,
+            modifier = modifier,
+            enabled = enabled,
+            shape = resolvedShape,
+            contentPadding = contentPadding,
+            tint = colors.containerColor,
+            content = content
+        )
+    } else {
+        Button(
+            onClick = {
+                haptic.click()
+                currentOnClick()
+            },
+            modifier = modifier.expressivePressScale(interactionSource, enabled),
+            enabled = enabled,
+            colors = colors,
+            shapes = if (shape != null) ButtonShapes(shape, shape) else shapes,
+            contentPadding = contentPadding,
+            interactionSource = interactionSource,
+            content = content,
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
@@ -140,6 +160,27 @@ fun ToolzOutlinedExpressiveButton(
 ) {
     val haptic = rememberToolzHapticFeedback()
     val currentOnClick by rememberUpdatedState(onClick)
+
+    val liquidGlassEnabled = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled.current
+    val backdrop = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassBackdrop.current
+
+    if (liquidGlassEnabled && backdrop != null) {
+        val resolvedShape = shape ?: shapes.shape
+        com.kyant.backdrop.catalog.components.LiquidButton(
+            onClick = {
+                haptic.click()
+                currentOnClick()
+            },
+            backdrop = backdrop,
+            modifier = modifier,
+            enabled = enabled,
+            shape = resolvedShape,
+            contentPadding = contentPadding,
+            tint = colors.contentColor.copy(alpha = 0.08f),
+            content = content
+        )
+        return
+    }
 
     OutlinedButton(
         onClick = {
@@ -173,19 +214,39 @@ fun ToolzElevatedExpressiveButton(
     val currentOnClick by rememberUpdatedState(onClick)
     val interactionSource = remember { MutableInteractionSource() }
 
-    ElevatedButton(
-        onClick = {
-            haptic.click()
-            currentOnClick()
-        },
-        modifier = modifier.expressivePressScale(interactionSource, enabled),
-        enabled = enabled,
-        colors = colors,
-        shapes = if (shape != null) ButtonShapes(shape, shape) else shapes,
-        contentPadding = contentPadding,
-        interactionSource = interactionSource,
-        content = content,
-    )
+    val liquidGlassEnabled = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled.current
+    val backdrop = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassBackdrop.current
+
+    if (liquidGlassEnabled && backdrop != null) {
+        val resolvedShape = shape ?: shapes.shape
+        com.kyant.backdrop.catalog.components.LiquidButton(
+            onClick = {
+                haptic.click()
+                currentOnClick()
+            },
+            backdrop = backdrop,
+            modifier = modifier,
+            enabled = enabled,
+            shape = resolvedShape,
+            contentPadding = contentPadding,
+            tint = colors.containerColor.copy(alpha = 0.35f),
+            content = content
+        )
+    } else {
+        ElevatedButton(
+            onClick = {
+                haptic.click()
+                currentOnClick()
+            },
+            modifier = modifier.expressivePressScale(interactionSource, enabled),
+            enabled = enabled,
+            colors = colors,
+            shapes = if (shape != null) ButtonShapes(shape, shape) else shapes,
+            contentPadding = contentPadding,
+            interactionSource = interactionSource,
+            content = content,
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
@@ -200,6 +261,33 @@ fun ToolzLargeExtendedFloatingActionButton(
     val haptic = rememberToolzHapticFeedback()
     val currentOnClick by rememberUpdatedState(onClick)
     val interactionSource = remember { MutableInteractionSource() }
+
+    val liquidGlassEnabled = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled.current
+    val backdrop = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassBackdrop.current
+
+    if (liquidGlassEnabled && backdrop != null) {
+        com.kyant.backdrop.catalog.components.LiquidButton(
+            onClick = {
+                if (enabled) {
+                    haptic.click()
+                    currentOnClick()
+                }
+            },
+            backdrop = backdrop,
+            modifier = modifier,
+            tint = MaterialTheme.colorScheme.primary,
+        ) {
+            Row(
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            ) {
+                icon()
+                text()
+            }
+        }
+        return
+    }
 
     LargeExtendedFloatingActionButton(
         onClick = {
@@ -261,19 +349,35 @@ fun ToolzTonalExpressiveButton(
     val currentOnClick by rememberUpdatedState(onClick)
     val interactionSource = remember { MutableInteractionSource() }
 
-    FilledTonalButton(
-        onClick = {
-            haptic.click()
-            currentOnClick()
-        },
-        modifier = modifier.expressivePressScale(interactionSource, enabled),
-        enabled = enabled,
-        colors = colors,
-        shapes = if (shape != null) ButtonShapes(shape, shape) else shapes,
-        contentPadding = contentPadding,
-        interactionSource = interactionSource,
-        content = content,
-    )
+    val liquidGlassEnabled = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled.current
+    val backdrop = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassBackdrop.current
+
+    if (liquidGlassEnabled && backdrop != null) {
+        com.kyant.backdrop.catalog.components.LiquidButton(
+            onClick = {
+                haptic.click()
+                currentOnClick()
+            },
+            backdrop = backdrop,
+            modifier = modifier,
+            tint = colors.containerColor.copy(alpha = 0.40f),
+            content = content
+        )
+    } else {
+        FilledTonalButton(
+            onClick = {
+                haptic.click()
+                currentOnClick()
+            },
+            modifier = modifier.expressivePressScale(interactionSource, enabled),
+            enabled = enabled,
+            colors = colors,
+            shapes = if (shape != null) ButtonShapes(shape, shape) else shapes,
+            contentPadding = contentPadding,
+            interactionSource = interactionSource,
+            content = content,
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
@@ -289,6 +393,25 @@ fun ToolzTonalExpressiveIconButton(
 ) {
     val haptic = rememberToolzHapticFeedback()
     val currentOnClick by rememberUpdatedState(onClick)
+
+    val liquidGlassEnabled = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled.current
+    val backdrop = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassBackdrop.current
+
+    if (liquidGlassEnabled && backdrop != null) {
+        val resolvedShape = shape ?: shapes.shape
+        com.frerox.toolz.ui.liquidglass.LiquidGlassIconButton(
+            onClick = {
+                haptic.click()
+                currentOnClick()
+            },
+            backdrop = backdrop,
+            modifier = modifier,
+            enabled = enabled,
+            shape = resolvedShape,
+            content = content
+        )
+        return
+    }
 
     FilledTonalIconButton(
         onClick = {
@@ -344,6 +467,25 @@ fun ToolzExpressiveIconButton(
 ) {
     val haptic = rememberToolzHapticFeedback()
     val currentOnClick by rememberUpdatedState(onClick)
+
+    val liquidGlassEnabled = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled.current
+    val backdrop = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassBackdrop.current
+
+    if (liquidGlassEnabled && backdrop != null) {
+        val resolvedShape = shape ?: shapes.shape
+        com.frerox.toolz.ui.liquidglass.LiquidGlassIconButton(
+            onClick = {
+                haptic.click()
+                currentOnClick()
+            },
+            backdrop = backdrop,
+            modifier = modifier,
+            enabled = enabled,
+            shape = resolvedShape,
+            content = content
+        )
+        return
+    }
 
     FilledIconButton(
         onClick = {
@@ -414,6 +556,28 @@ fun ExpressiveFilterChip(
     border: BorderStroke? = FilterChipDefaults.filterChipBorder(enabled = enabled, selected = selected),
     interactionSource: MutableInteractionSource? = null,
 ) {
+    val liquidGlassEnabled = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled.current
+    val backdrop = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassBackdrop.current
+
+    if (liquidGlassEnabled && backdrop != null) {
+        val haptic = rememberToolzHapticFeedback()
+        val currentOnClick by rememberUpdatedState(onClick)
+        com.frerox.toolz.ui.liquidglass.LiquidGlassChip(
+            selected = selected,
+            onClick = {
+                haptic.click()
+                currentOnClick()
+            },
+            backdrop = backdrop,
+            modifier = modifier,
+        ) {
+            leadingIcon?.invoke()
+            label()
+            trailingIcon?.invoke()
+        }
+        return
+    }
+
     val performanceMode = LocalPerformanceMode.current
     val haptic = rememberToolzHapticFeedback()
     val currentOnClick by rememberUpdatedState(onClick)
@@ -647,6 +811,25 @@ fun ToolzOutlinedExpressiveIconButton(
 ) {
     val haptic = rememberToolzHapticFeedback()
     val currentOnClick by rememberUpdatedState(onClick)
+
+    val liquidGlassEnabled = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled.current
+    val backdrop = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassBackdrop.current
+
+    if (liquidGlassEnabled && backdrop != null) {
+        val resolvedShape = shape ?: shapes.shape
+        com.frerox.toolz.ui.liquidglass.LiquidGlassIconButton(
+            onClick = {
+                haptic.click()
+                currentOnClick()
+            },
+            backdrop = backdrop,
+            modifier = modifier,
+            enabled = enabled,
+            shape = resolvedShape,
+            content = content
+        )
+        return
+    }
 
     OutlinedIconButton(
         onClick = {

@@ -51,6 +51,11 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.lens
+import com.kyant.backdrop.effects.vibrancy
+import com.kyant.backdrop.highlight.Highlight
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.ui.theme.ToolzTheme
@@ -65,9 +70,49 @@ fun ExpressiveNavigationBar(
     windowInsets: WindowInsets = NavigationBarDefaults.windowInsets,
     content: @Composable RowScope.() -> Unit
 ) {
+    val liquidGlass = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled.current
+    val backdrop = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassBackdrop.current
+    val config = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassConfig.current
+
+    val barModifier = if (liquidGlass && backdrop != null) {
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        val blurPx = with(density) { config.blurRadiusDp.dp.toPx() }
+        val lensHeight = with(density) { (config.refractionDp * 0.6f).dp.toPx() }
+        val lensAmount = with(density) { config.refractionDp.dp.toPx() }
+        val barShape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+        modifier.then(
+            Modifier.drawBackdrop(
+                backdrop = backdrop,
+                shape = { barShape },
+                effects = {
+                    vibrancy()
+                    blur(blurPx)
+                    lens(
+                        refractionHeight = lensHeight,
+                        refractionAmount = lensAmount,
+                        depthEffect = true,
+                        chromaticAberration = true,
+                    )
+                },
+                highlight = {
+                    Highlight(
+                        style = com.kyant.backdrop.highlight.HighlightStyle.Default(
+                            color = Color.White.copy(alpha = 0.55f),
+                            angle = 90f,
+                            falloff = 1.8f,
+                        )
+                    )
+                },
+                onDrawSurface = { drawRect(containerColor.copy(alpha = config.tintAlpha)) }
+            )
+        )
+    } else {
+        modifier
+    }
+
     NavigationBar(
-        modifier = modifier,
-        containerColor = containerColor,
+        modifier = barModifier,
+        containerColor = if (liquidGlass && backdrop != null) Color.Transparent else containerColor,
         contentColor = contentColor,
         tonalElevation = tonalElevation,
         windowInsets = windowInsets,

@@ -19,6 +19,8 @@ package com.frerox.toolz.ui.components
 
 import android.content.res.Configuration
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.padding
@@ -53,23 +55,84 @@ fun ExpressiveCard(
     content: @Composable ColumnScope.() -> Unit
 ) {
     val performanceMode = LocalPerformanceMode.current
-    
-    Surface(
-        modifier = modifier
-            .bouncyClick(
-                enabled = enabled,
-                onClick = onClick,
-                onLongClick = onLongClick
-            ),
-        shape = shape,
-        color = containerColor,
-        contentColor = contentColor,
-        tonalElevation = 0.dp,
-        shadowElevation = 0.dp,
-        border = border
-    ) {
-        Column(content = content)
+    val liquidGlassEnabled = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled.current
+    val backdrop = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassBackdrop.current
+    val isDark = isSystemInDarkTheme()
+    val surfaceColor = if (isDark) Color(0xFF1C1B1F) else Color(0xFFFFFBFE)
+    val effectiveBackdrop = if (liquidGlassEnabled && !performanceMode) {
+        backdrop ?: com.kyant.backdrop.backdrops.rememberCanvasBackdrop {
+            drawRect(surfaceColor)
+        }
+    } else null
+
+    if (liquidGlassEnabled && !performanceMode && effectiveBackdrop != null) {
+        val glassBorder = border ?: BorderStroke(1.dp, Color.White.copy(alpha = 0.16f))
+        com.frerox.toolz.ui.liquidglass.GlassCard(
+            backdrop = effectiveBackdrop,
+            modifier = modifier
+                .then(
+                    if (enabled) {
+                        Modifier.bouncyClick(
+                            enabled = enabled,
+                            onClick = onClick,
+                            onLongClick = onLongClick
+                        )
+                    } else Modifier
+                )
+                .then(
+                    if (glassBorder != null) {
+                        Modifier.border(glassBorder, shape)
+                    } else Modifier
+                ),
+            shape = shape,
+            tint = containerColor.copy(alpha = 0.12f),
+            content = content
+        )
+    } else {
+        Surface(
+            modifier = modifier
+                .then(
+                    if (enabled) {
+                        Modifier.bouncyClick(
+                            enabled = enabled,
+                            onClick = onClick,
+                            onLongClick = onLongClick
+                        )
+                    } else Modifier
+                ),
+            shape = shape,
+            color = containerColor,
+            contentColor = contentColor,
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
+            border = border
+        ) {
+            Column(content = content)
+        }
     }
+}
+
+@Composable
+fun ExpressiveCard(
+    modifier: Modifier = Modifier,
+    shape: Shape = RoundedCornerShape(32.dp),
+    containerColor: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    contentColor: Color = MaterialTheme.colorScheme.onSurface,
+    elevation: Dp = 2.dp,
+    border: BorderStroke? = null,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    ExpressiveCard(
+        onClick = {},
+        modifier = modifier,
+        enabled = false,
+        shape = shape,
+        containerColor = containerColor,
+        contentColor = contentColor,
+        elevation = elevation,
+        border = border,
+        content = content
+    )
 }
 
 @Preview(name = "Light", showBackground = true)

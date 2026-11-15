@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ToggleButtonDefaults
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 
 /**
@@ -94,6 +95,7 @@ fun ToolzConnectedButtonGroup(
     checkedIcons: List<ImageVector> = emptyList(),
 ) {
     val haptic = rememberToolzHapticFeedback()
+    val liquidGlassEnabled = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled.current
     
     Row(
         modifier = modifier.padding(horizontal = 8.dp),

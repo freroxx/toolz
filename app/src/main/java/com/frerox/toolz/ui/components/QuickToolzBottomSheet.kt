@@ -54,11 +54,18 @@ fun QuickToolzBottomSheet(
     val pinnedTools by viewModel.pinnedTools.collectAsState(initial = emptySet())
     val recentTools by viewModel.recentTools.collectAsState(initial = emptyList())
 
+    val liquidGlassEnabled = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled.current
+    val containerColor = if (liquidGlassEnabled) {
+        MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.72f)
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerLow
+    }
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         shape = RoundedCornerShape(topStart = 40.dp, topEnd = 40.dp),
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        containerColor = containerColor,
         dragHandle = {
             Box(
                 modifier = Modifier

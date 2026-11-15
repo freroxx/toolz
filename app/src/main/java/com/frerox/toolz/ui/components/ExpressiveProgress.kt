@@ -56,6 +56,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.frerox.toolz.ui.liquidglass.liquidGlassEffect
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.ToolzTheme
 import kotlinx.coroutines.launch
@@ -593,12 +594,24 @@ fun MorphingStatusPill(
         label = "pillFg",
     )
 
+    val liquidGlassEnabled = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled.current
+
+    val pillModifier = if (liquidGlassEnabled) {
+        modifier.liquidGlassEffect(
+            shape = androidx.compose.foundation.shape.CircleShape,
+            tint = if (isFilled) color.copy(alpha = 0.35f) else color.copy(alpha = 0.12f),
+            refractionFactor = 0.6f,
+        )
+    } else {
+        modifier
+    }
+
     Surface(
-        modifier = modifier,
+        modifier = pillModifier,
         shape = androidx.compose.foundation.shape.CircleShape,
-        color = animatedBackground,
+        color = if (liquidGlassEnabled) Color.Transparent else animatedBackground,
         contentColor = animatedContent,
-        border = if (isFilled) null else androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.2f))
+        border = if (isFilled || liquidGlassEnabled) null else androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.2f))
     ) {
         if (performanceMode) {
             PillRow(text = text, icon = icon)

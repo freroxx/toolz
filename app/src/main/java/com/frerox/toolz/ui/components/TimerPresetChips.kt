@@ -61,6 +61,9 @@ fun TimerPresetChips(
                 .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            val liquidGlassEnabled = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled.current
+            val backdrop = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassBackdrop.current
+
             val presets = if (timerHistory.isNotEmpty()) {
                 timerHistory.filter { (h, m, s) -> h > 0 || m > 0 || s > 0 }.take(3)
             } else {
@@ -80,34 +83,49 @@ fun TimerPresetChips(
                     String.format(Locale.getDefault(), "%d min", mins)
                 }
 
-                Box(
-                    modifier = Modifier
-                        .clip(MaterialTheme.shapes.small)
-                        .combinedClickable(
-                            enabled = enabled,
-                            onClick = { onPresetSelected(hrs, mins, secs) },
-                            onLongClick = onPresetLongClick?.let { cb -> { cb(index) } },
-                        )
-                        .semantics {
-                            contentDescription = "Preset $label"
-                        },
-                ) {
-                    FilterChip(
+                if (liquidGlassEnabled && backdrop != null) {
+                    com.frerox.toolz.ui.liquidglass.LiquidGlassChip(
                         selected = false,
-                        onClick = {},
-                        label = {
-                            Text(
-                                text = label,
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Black,
+                        onClick = { onPresetSelected(hrs, mins, secs) },
+                        backdrop = backdrop,
+                        modifier = Modifier.semantics { contentDescription = "Preset $label" }
+                    ) {
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Black,
+                        )
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .clip(MaterialTheme.shapes.small)
+                            .combinedClickable(
+                                enabled = enabled,
+                                onClick = { onPresetSelected(hrs, mins, secs) },
+                                onLongClick = onPresetLongClick?.let { cb -> { cb(index) } },
                             )
-                        },
-                        enabled = enabled,
-                        colors = FilterChipDefaults.filterChipColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
-                            labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        ),
-                    )
+                            .semantics {
+                                contentDescription = "Preset $label"
+                            },
+                    ) {
+                        FilterChip(
+                            selected = false,
+                            onClick = {},
+                            label = {
+                                Text(
+                                    text = label,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Black,
+                                )
+                            },
+                            enabled = enabled,
+                            colors = FilterChipDefaults.filterChipColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
+                                labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            ),
+                        )
+                    }
                 }
             }
         }
