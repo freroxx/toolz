@@ -50,9 +50,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -141,7 +139,7 @@ internal fun SwitchRow(title: String, subtitle: String, checked: Boolean, onChan
             )
         }
         Spacer(Modifier.width(12.dp))
-        Switch(checked = checked, onCheckedChange = onChange)
+        com.frerox.toolz.ui.components.ExpressiveSwitch(checked = checked, onCheckedChange = onChange)
     }
 }
 
@@ -152,11 +150,10 @@ internal fun StyledSlider(
     steps: Int,
     onChange: (Float) -> Unit
 ) {
-    Slider(
+    com.frerox.toolz.ui.components.ExpressiveSlider(
         value = value.coerceIn(range.start, range.endInclusive),
         onValueChange = onChange,
         valueRange = range,
-        steps = steps,
         colors = SliderDefaults.colors(
             thumbColor = MaterialTheme.colorScheme.primary,
             activeTrackColor = MaterialTheme.colorScheme.primary

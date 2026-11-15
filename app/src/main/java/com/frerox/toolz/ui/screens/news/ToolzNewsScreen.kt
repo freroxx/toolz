@@ -50,8 +50,8 @@ import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Warning
-import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import com.frerox.toolz.ui.components.ExpressiveCard
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -405,9 +405,9 @@ fun ToolzNewsScreen(
                     item(key = "news_tools") {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             if (historyError != null) {
-                                Card(
+                                ExpressiveCard(
                                     shape = RoundedCornerShape(20.dp),
-                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+                                    containerColor = MaterialTheme.colorScheme.errorContainer
                                 ) {
                                     Row(
                                         modifier = Modifier.fillMaxWidth().padding(14.dp),
@@ -443,9 +443,9 @@ fun ToolzNewsScreen(
                             }
                             if (!notifGranted && Build.VERSION.SDK_INT >= 33) {
                                 val afterDenial = notifDenials >= 1
-                                Card(
+                                ExpressiveCard(
                                     shape = RoundedCornerShape(24.dp),
-                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
+                                    containerColor = MaterialTheme.colorScheme.secondaryContainer
                                 ) {
                                     Row(
                                         modifier = Modifier.fillMaxWidth().padding(16.dp),
@@ -791,9 +791,9 @@ fun NewsHistoryCard(
             .build()
     }
 
-    Card(
+    ExpressiveCard(
         shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = cardColor),
+        containerColor = cardColor,
         modifier = Modifier
             .fillMaxWidth()
             .bouncyClick(

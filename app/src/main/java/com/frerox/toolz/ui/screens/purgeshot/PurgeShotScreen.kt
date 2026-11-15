@@ -565,7 +565,7 @@ private fun ToggleRow(title: String, subtitle: String, icon: ImageVector, checke
                     Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-            Switch(checked = checked, onCheckedChange = onCheckedChange)
+            com.frerox.toolz.ui.components.ExpressiveSwitch(checked = checked, onCheckedChange = onCheckedChange)
         }
     }
 }

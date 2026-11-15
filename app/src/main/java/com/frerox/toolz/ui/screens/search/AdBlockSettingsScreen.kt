@@ -214,7 +214,7 @@ fun AdBlockSettingsScreen(
                     title = stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_adblock_script_title),
                     icon = Icons.Rounded.Code,
                     trailing = {
-                        Switch(
+                        com.frerox.toolz.ui.components.ExpressiveSwitch(
                             checked = uiState.adScriptEnabled,
                             onCheckedChange = viewModel::toggleAdScriptBlock
                         )
@@ -241,7 +241,7 @@ fun AdBlockSettingsScreen(
                     title = stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_adblock_nextdns_title), 
                     icon = Icons.Rounded.Dns,
                     trailing = {
-                        Switch(
+                        com.frerox.toolz.ui.components.ExpressiveSwitch(
                             checked = uiState.isNextDnsEnabled,
                             onCheckedChange = viewModel::toggleNextDns
                         )

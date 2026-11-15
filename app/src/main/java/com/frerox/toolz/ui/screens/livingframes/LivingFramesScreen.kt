@@ -93,7 +93,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
+import com.frerox.toolz.ui.components.ExpressiveSlider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -1661,7 +1661,7 @@ private fun ClipSheet(
                             stringResource(R.string.lw_clip_start),
                             clock(startMs)
                         )
-                        Slider(
+                        ExpressiveSlider(
                             value = start.coerceIn(0f, maxStart),
                             onValueChange = { start = it },
                             valueRange = 0f..maxStart,
@@ -1678,7 +1678,7 @@ private fun ClipSheet(
                         stringResource(R.string.lw_clip_length),
                         seconds(lengthMs)
                     )
-                    Slider(
+                    ExpressiveSlider(
                         value = lengthMs.toFloat(),
                         onValueChange = { length = it },
                         valueRange = 500f..maxLenMs.toFloat().coerceAtLeast(501f),

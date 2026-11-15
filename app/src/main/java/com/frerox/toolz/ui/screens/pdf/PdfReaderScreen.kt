@@ -87,7 +87,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -1125,7 +1124,7 @@ private fun AppearanceSheet(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                Switch(checked = keepScreenOn, onCheckedChange = onKeepScreenOn)
+                com.frerox.toolz.ui.components.ExpressiveSwitch(checked = keepScreenOn, onCheckedChange = onKeepScreenOn)
             }
             Spacer(Modifier.navigationBarsPadding())
             Spacer(Modifier.height(16.dp))

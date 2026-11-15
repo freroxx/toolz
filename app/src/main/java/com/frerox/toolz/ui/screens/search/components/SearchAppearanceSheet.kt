@@ -33,9 +33,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Slider
+import com.frerox.toolz.ui.components.ExpressiveSlider
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -190,7 +189,7 @@ private fun AppearanceSettings(
                     }
                     Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_appearance_radius_value, cardRadius.toInt()), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                 }
-                Slider(value = cardRadius, onValueChange = onRadiusChange, valueRange = 12f..32f, steps = 9)
+                ExpressiveSlider(value = cardRadius, onValueChange = onRadiusChange, valueRange = 12f..32f)
             }
         }
     }
@@ -213,6 +212,6 @@ private fun ToggleRow(
                 Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        com.frerox.toolz.ui.components.ExpressiveSwitch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }

@@ -52,7 +52,6 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -370,7 +369,7 @@ private fun ReceiptsRow(on: Boolean, onChange: (Boolean) -> Unit) {
                 )
             }
             Spacer(Modifier.width(12.dp))
-            Switch(checked = on, onCheckedChange = onChange)
+            com.frerox.toolz.ui.components.ExpressiveSwitch(checked = on, onCheckedChange = onChange)
         }
     }
 }
