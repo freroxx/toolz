@@ -126,6 +126,20 @@
         <!-- ══════════════════════════════════════════════════════ -->
 
         <activity-alias
+            android:name=".Icon_liquid_glass"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_liquid_glass"
+            android:roundIcon="@mipmap/ic_icon_liquid_glass"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
             android:name=".Icon_grape_haze"
             android:enabled="true"
             android:exported="true"
@@ -711,6 +725,20 @@
         </activity-alias>
 
                 <activity-alias
+            android:name=".Icon_liquid_glass_circle"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_icon_liquid_glass_circle"
+            android:roundIcon="@mipmap/ic_icon_liquid_glass_circle"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
             android:name=".Icon_grape_haze_circle"
             android:enabled="false"
             android:exported="true"

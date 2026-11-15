@@ -168,10 +168,11 @@ fun toolzAppBackgroundBrush(
 fun Modifier.toolzBackground(): Modifier = composed {
     val performanceMode = LocalPerformanceMode.current
     val gradientEnabled = LocalBackgroundGradientEnabled.current
+    val liquidGlassEnabled = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled.current
     val colorScheme = MaterialTheme.colorScheme
     val isDark = LocalIsDarkTheme.current
     
-    if (!gradientEnabled) return@composed this.background(colorScheme.background)
+    if (!gradientEnabled && !liquidGlassEnabled) return@composed this.background(colorScheme.background)
 
     if (performanceMode) {
         return@composed this.background(
@@ -186,6 +187,27 @@ fun Modifier.toolzBackground(): Modifier = composed {
         animationSpec = infiniteRepeatable(tween(35000, easing = LinearEasing), RepeatMode.Restart),
         label = "angle"
     )
+
+    if (liquidGlassEnabled) {
+        val glassBrush = remember(angle, colorScheme.primary, colorScheme.secondary, isDark) {
+            val ox = (sin(angle) + 1f) / 2f
+            val oy = (cos(angle) + 1f) / 2f
+            val amethyst = if (isDark) Color(0xFF5B1B8E) else Color(0xFFD1C4E9)
+            val sapphire = if (isDark) Color(0xFF1E3A8A) else Color(0xFFBBDEFB)
+            val emerald = if (isDark) Color(0xFF0D5C54) else Color(0xFFB2DFDB)
+            val base = if (isDark) Color(0xFF0A0612) else Color(0xFFF7F5FA)
+
+            Brush.radialGradient(
+                0.00f to amethyst.copy(alpha = if (isDark) 0.55f else 0.45f),
+                0.35f to sapphire.copy(alpha = if (isDark) 0.40f else 0.32f),
+                0.65f to emerald.copy(alpha = if (isDark) 0.25f else 0.20f),
+                1.00f to base,
+                center = Offset(ox * 2000f, oy * 2000f),
+                radius = 2800f,
+            )
+        }
+        return@composed this.background(glassBrush)
+    }
 
     val brush = remember(angle, colorScheme.primary, colorScheme.secondary, isDark) {
         val offset = Offset(x = (sin(angle) + 1f) / 2f, y = (cos(angle) + 1f) / 2f)
@@ -224,6 +246,7 @@ fun ToolzTheme(
     hapticIntensity: Float = 0.5f,
     showTopAppBarDescriptions: Boolean = true,
     vibrationManager: VibrationManager? = null,
+    liquidGlassModeEnabled: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val colorScheme = when {
@@ -281,7 +304,8 @@ fun ToolzTheme(
         LocalBackgroundGradientEnabled provides backgroundGradientEnabled,
         LocalIsDarkTheme provides darkTheme,
         LocalVibrationManager provides vibrationManager,
-        LocalShowTopAppBarDescriptions provides showTopAppBarDescriptions
+        LocalShowTopAppBarDescriptions provides showTopAppBarDescriptions,
+        com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled provides liquidGlassModeEnabled
     ) {
         MaterialTheme(
             colorScheme = colorScheme,

@@ -130,6 +130,8 @@ import com.frerox.toolz.util.NotificationHelper
 import com.frerox.toolz.ui.components.MarkdownContent
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.theme.ToolzTheme
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.frerox.toolz.ui.theme.toolzBackground
 import androidx.compose.ui.tooling.preview.Preview
 import com.frerox.toolz.service.StepCounterService
@@ -296,6 +298,10 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
             val hapticEnabled by settingsRepository.hapticFeedback.collectAsState(initial = true)
             val hapticIntensity by settingsRepository.hapticIntensity.collectAsState(initial = 0.5f)
             val showTopAppBarDescriptions by settingsRepository.showTopAppBarDescriptions.collectAsState(initial = true)
+            val liquidGlassModeEnabled by settingsRepository.liquidGlassModeEnabled.collectAsState(initial = false)
+            val liquidGlassBlurRadius by settingsRepository.liquidGlassBlurRadius.collectAsState(initial = 8f)
+            val liquidGlassTintAlpha by settingsRepository.liquidGlassTintAlpha.collectAsState(initial = 0.25f)
+            val liquidGlassRefraction by settingsRepository.liquidGlassRefraction.collectAsState(initial = 24f)
 
             // Post-crash recovery: FastReportStore writes a snapshot from the
             // uncaught handler; on the next launch we offer to turn it into a
@@ -424,28 +430,47 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
                 hapticEnabled = hapticEnabled,
                 hapticIntensity = hapticIntensity,
                 showTopAppBarDescriptions = showTopAppBarDescriptions,
-                vibrationManager = vibrationManager
+                vibrationManager = vibrationManager,
+                liquidGlassModeEnabled = liquidGlassModeEnabled
             ) {
+                val rootBackdrop = com.kyant.backdrop.backdrops.rememberLayerBackdrop()
+
                 CompositionLocalProvider(
                     LocalFlashlightRepository provides flashlightRepository,
-                    com.frerox.toolz.ui.LocalWhisperAvatarLoader provides whisperAvatarLoader
+                    com.frerox.toolz.ui.LocalWhisperAvatarLoader provides whisperAvatarLoader,
+                    com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled provides liquidGlassModeEnabled,
+                    com.frerox.toolz.ui.liquidglass.LocalLiquidGlassBackdrop provides (if (liquidGlassModeEnabled) rootBackdrop else null),
+                    com.frerox.toolz.ui.liquidglass.LocalLiquidGlassConfig provides com.frerox.toolz.ui.liquidglass.LiquidGlassConfig(
+                        blurRadiusDp = liquidGlassBlurRadius,
+                        tintAlpha = liquidGlassTintAlpha,
+                        refractionDp = liquidGlassRefraction,
+                        performanceMode = performanceMode,
+                    )
                 ) {
                     Box(modifier = Modifier.fillMaxSize()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .toolzBackground()
-                            .then(
-                                if (safeBlurEffect != null) {
-                                    Modifier.graphicsLayer {
-                                        renderEffect = safeBlurEffect
-                                    }
-                                } else Modifier
-                            )
-                    ) {
+                        // Background Layer ONLY (recorded into rootBackdrop without enclosing child views)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .toolzBackground()
+                                .then(
+                                    if (liquidGlassModeEnabled) {
+                                        Modifier.layerBackdrop(rootBackdrop)
+                                    } else Modifier
+                                )
+                                .then(
+                                    if (safeBlurEffect != null) {
+                                        Modifier.graphicsLayer {
+                                            renderEffect = safeBlurEffect
+                                        }
+                                    } else Modifier
+                                )
+                        )
+
+                        // Foreground Content Layer (Sibling to background, renders on top and can safely sample rootBackdrop)
                         Surface(
                             modifier = Modifier.fillMaxSize(),
-                            color = MaterialTheme.colorScheme.background,
+                            color = if (liquidGlassModeEnabled || backgroundGradientEnabled) Color.Transparent else MaterialTheme.colorScheme.background,
                             contentColor = MaterialTheme.colorScheme.onBackground
                         ) {
                             val navController = rememberNavController()
@@ -508,7 +533,6 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
                                 },
                             )
                         }
-                    }
 
                     LoadingOverlay(
                         isVisible = loadingVisible,
