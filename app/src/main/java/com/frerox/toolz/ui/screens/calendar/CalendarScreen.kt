@@ -252,6 +252,9 @@ import com.frerox.toolz.ui.components.ToolzTonalExpressiveIconButton
 import com.frerox.toolz.ui.components.ToolzWavyCircularProgressIndicator
 import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import com.frerox.toolz.ui.liquidglass.GlassCard
+import com.frerox.toolz.ui.liquidglass.LocalLiquidGlassBackdrop
+import com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled
 import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.ui.theme.ToolzTheme
 import kotlinx.coroutines.delay
@@ -2301,179 +2304,362 @@ fun AgendaEventCard(
     var showMenu by remember { mutableStateOf(false) }
     val timeText = rememberTimeText(event.timestamp)
 
-    Surface(
-        // CAL-P2-04: agenda tap EDITS (accidental toggles had no undo); toggle via checkbox/menu.
-        // Selection mode reroutes taps to selection and exposes a long-press entry point.
-        color    = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.32f)
-        else MaterialTheme.colorScheme.surfaceContainerLow,
-        shape    = SquircleShape,
-        border   = if (selected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
-        modifier = Modifier
-            .fillMaxWidth()
-            .combinedClickable(
-                onClick = onEdit,
-                onLongClick = onLongClick,
-            )
-            .semantics { contentDescription = "${event.title} $timeText" }
-    ) {
-        Row(modifier = Modifier.height(IntrinsicSize.Min)) {
-            Box(
-                Modifier
-                    .width(4.dp)
-                    .fillMaxHeight()
-                    .clip(RoundedCornerShape(topStart = 28.dp, bottomStart = 28.dp))
-                    .background(resolved.copy(alpha = completedAlpha))
-            )
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(start = 14.dp, end = 8.dp, top = 14.dp, bottom = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                // Type icon box
+    val liquidGlassEnabled = LocalLiquidGlassEnabled.current
+    val backdrop = LocalLiquidGlassBackdrop.current
+
+    if (liquidGlassEnabled) {
+        GlassCard(
+            backdrop = backdrop,
+            shape = SquircleShape,
+            tint = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f)
+            else MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.18f),
+            modifier = Modifier
+                .fillMaxWidth()
+                .combinedClickable(
+                    onClick = onEdit,
+                    onLongClick = onLongClick,
+                )
+                .semantics { contentDescription = "${event.title} $timeText" },
+        ) {
+            Row(modifier = Modifier.height(IntrinsicSize.Min)) {
                 Box(
                     Modifier
-                        .size(44.dp)
-                        .background(resolved.copy(alpha = 0.1f), RoundedCornerShape(14.dp)),
-                    contentAlignment = Alignment.Center
+                        .width(4.dp)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(topStart = 28.dp, bottomStart = 28.dp))
+                        .background(resolved.copy(alpha = completedAlpha))
+                )
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(start = 14.dp, end = 8.dp, top = 14.dp, bottom = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    Icon(
-                        eventTypeIcon(event.eventType), null,
-                        tint     = resolved.copy(alpha = completedAlpha),
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        event.title,
-                        style          = MaterialTheme.typography.bodyLarge,
-                        fontWeight     = FontWeight.SemiBold,
-                        textDecoration = if (event.isCompleted) TextDecoration.LineThrough else null,
-                        color          = MaterialTheme.colorScheme.onSurface.copy(alpha = completedAlpha)
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            Icons.Rounded.Schedule, null,
-                            modifier = Modifier.size(12.dp),
-                            tint     = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.5f)
-                        )
-                        Text(
-                            timeText,
-                            style      = MaterialTheme.typography.labelMedium,
-                            color      = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.65f),
-                            fontWeight = FontWeight.Medium
-                        )
-                        Box(Modifier.size(3.dp).background(MaterialTheme.colorScheme.outlineVariant, CircleShape))
-                        Surface(color = resolved.copy(alpha = 0.09f), shape = RoundedCornerShape(4.dp)) {
-                            Text(
-                                event.eventType,
-                                style      = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                color      = resolved.copy(alpha = completedAlpha),
-                                modifier   = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                            )
-                        }
-                        if (event.remindersEnabled && !event.isCompleted) {
-                            Icon(
-                                Icons.Rounded.NotificationsActive, null,
-                                modifier = Modifier.size(11.dp),
-                                tint     = resolved.copy(0.5f)
-                            )
-                        }
-                    }
-                    if (!event.description.isNullOrBlank()) {
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            event.description,
-                            style    = MaterialTheme.typography.bodySmall,
-                            color    = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.6f),
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-                // CAL-P2-04: explicit checkbox toggles (tap on card edits).
-                // Selection mode replaces it with an animated selection indicator.
-                if (selectionMode) {
-                    val checkScale by animateFloatAsState(
-                        targetValue = if (selected) 1.15f else 1f,
-                        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow),
-                        label = "agendaCheckScale"
-                    )
+                    // Type icon box
                     Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .graphicsLayer { scaleX = checkScale; scaleY = checkScale },
+                        Modifier
+                            .size(44.dp)
+                            .background(resolved.copy(alpha = 0.1f), RoundedCornerShape(14.dp)),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = if (selected) Icons.Rounded.CheckCircle else Icons.Rounded.RadioButtonUnchecked,
-                            contentDescription = if (selected) "Deselect ${event.title}" else "Select ${event.title}",
-                            tint = if (selected) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
-                            modifier = Modifier.size(24.dp),
+                            eventTypeIcon(event.eventType), null,
+                            tint     = resolved.copy(alpha = completedAlpha),
+                            modifier = Modifier.size(22.dp)
                         )
                     }
-                } else {
-                    Checkbox(
-                        checked = event.isCompleted,
-                        onCheckedChange = {
-                            vibrationManager?.vibrateTick()
-                            onToggle()
-                        },
-                        modifier = Modifier.semantics {
-                            contentDescription = if (event.isCompleted) "Mark ${event.title} as not done" else "Mark ${event.title} as done"
-                            role = Role.Checkbox
-                        }
-                    )
-                }
-                if (!selectionMode) {
-                    Box {
-                        IconButton(onClick = { showMenu = true }, Modifier.size(36.dp)) {
-                            Icon(
-                                Icons.Rounded.MoreVert, null,
-                                modifier = Modifier.size(17.dp),
-                                tint     = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.35f)
-                            )
-                        }
-                        DropdownMenu(
-                            expanded         = showMenu,
-                            onDismissRequest = { showMenu = false },
-                            shape            = SmallExpressiveShape
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            event.title,
+                            style          = MaterialTheme.typography.bodyLarge,
+                            fontWeight     = FontWeight.SemiBold,
+                            textDecoration = if (event.isCompleted) TextDecoration.LineThrough else null,
+                            color          = MaterialTheme.colorScheme.onSurface.copy(alpha = completedAlpha)
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            DropdownMenuItem(
-                                text = { Text(if (event.isCompleted) stringResource(R.string.st_CalendarScreen_o5p6) else stringResource(R.string.st_CalendarScreen_q7r8)) },
-                                onClick = {
-                                    vibrationManager?.vibrateTick()
-                                    onToggle(); showMenu = false
-                                },
-                                leadingIcon = {
-                                    Icon(
-                                        if (event.isCompleted) Icons.Rounded.RadioButtonUnchecked
-                                        else Icons.Rounded.CheckCircle,
-                                        null
-                                    )
-                                }
+                            Icon(
+                                Icons.Rounded.Schedule, null,
+                                modifier = Modifier.size(12.dp),
+                                tint     = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.5f)
                             )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.st_CalendarScreen_9f0a)) },
-                                onClick = { onEdit(); showMenu = false },
-                                leadingIcon = { Icon(Icons.Rounded.Edit, null) }
+                            Text(
+                                timeText,
+                                style      = MaterialTheme.typography.labelMedium,
+                                color      = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.65f),
+                                fontWeight = FontWeight.Medium
                             )
-                            HorizontalDivider()
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.st_CalendarScreen_a1b2), color = MaterialTheme.colorScheme.error) },
-                                onClick = {
-                                    vibrationManager?.vibrateTick()
-                                    onDelete(); showMenu = false
-                                },
-                                leadingIcon = { Icon(Icons.Rounded.Delete, null, tint = MaterialTheme.colorScheme.error) }
+                            Box(Modifier.size(3.dp).background(MaterialTheme.colorScheme.outlineVariant, CircleShape))
+                            Surface(color = resolved.copy(alpha = 0.09f), shape = RoundedCornerShape(4.dp)) {
+                                Text(
+                                    event.eventType,
+                                    style      = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color      = resolved.copy(alpha = completedAlpha),
+                                    modifier   = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                )
+                            }
+                            if (event.remindersEnabled && !event.isCompleted) {
+                                Icon(
+                                    Icons.Rounded.NotificationsActive, null,
+                                    modifier = Modifier.size(11.dp),
+                                    tint     = resolved.copy(0.5f)
+                                )
+                            }
+                        }
+                        if (!event.description.isNullOrBlank()) {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                event.description,
+                                style    = MaterialTheme.typography.bodySmall,
+                                color    = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.6f),
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
                             )
+                        }
+                    }
+                    // CAL-P2-04: explicit checkbox toggles (tap on card edits).
+                    // Selection mode replaces it with an animated selection indicator.
+                    if (selectionMode) {
+                        val checkScale by animateFloatAsState(
+                            targetValue = if (selected) 1.15f else 1f,
+                            animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow),
+                            label = "agendaCheckScale"
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .graphicsLayer { scaleX = checkScale; scaleY = checkScale },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (selected) Icons.Rounded.CheckCircle else Icons.Rounded.RadioButtonUnchecked,
+                                contentDescription = if (selected) "Deselect ${event.title}" else "Select ${event.title}",
+                                tint = if (selected) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
+                                modifier = Modifier.size(24.dp),
+                            )
+                        }
+                    } else {
+                        Checkbox(
+                            checked = event.isCompleted,
+                            onCheckedChange = {
+                                vibrationManager?.vibrateTick()
+                                onToggle()
+                            },
+                            modifier = Modifier.semantics {
+                                contentDescription = if (event.isCompleted) "Mark ${event.title} as not done" else "Mark ${event.title} as done"
+                                role = Role.Checkbox
+                            }
+                        )
+                    }
+                    if (!selectionMode) {
+                        Box {
+                            IconButton(onClick = { showMenu = true }, Modifier.size(36.dp)) {
+                                Icon(
+                                    Icons.Rounded.MoreVert, null,
+                                    modifier = Modifier.size(17.dp),
+                                    tint     = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.35f)
+                                )
+                            }
+                            DropdownMenu(
+                                expanded         = showMenu,
+                                onDismissRequest = { showMenu = false },
+                                shape            = SmallExpressiveShape
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text(if (event.isCompleted) stringResource(R.string.st_CalendarScreen_o5p6) else stringResource(R.string.st_CalendarScreen_q7r8)) },
+                                    onClick = {
+                                        vibrationManager?.vibrateTick()
+                                        onToggle(); showMenu = false
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            if (event.isCompleted) Icons.Rounded.RadioButtonUnchecked
+                                            else Icons.Rounded.CheckCircle,
+                                            null
+                                        )
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.st_CalendarScreen_9f0a)) },
+                                    onClick = { onEdit(); showMenu = false },
+                                    leadingIcon = { Icon(Icons.Rounded.Edit, null) }
+                                )
+                                HorizontalDivider()
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.st_CalendarScreen_a1b2), color = MaterialTheme.colorScheme.error) },
+                                    onClick = {
+                                        vibrationManager?.vibrateTick()
+                                        onDelete(); showMenu = false
+                                    },
+                                    leadingIcon = { Icon(Icons.Rounded.Delete, null, tint = MaterialTheme.colorScheme.error) }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        Surface(
+            // CAL-P2-04: agenda tap EDITS (accidental toggles had no undo); toggle via checkbox/menu.
+            // Selection mode reroutes taps to selection and exposes a long-press entry point.
+            color    = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.32f)
+            else MaterialTheme.colorScheme.surfaceContainerLow,
+            shape    = SquircleShape,
+            border   = if (selected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
+            modifier = Modifier
+                .fillMaxWidth()
+                .combinedClickable(
+                    onClick = onEdit,
+                    onLongClick = onLongClick,
+                )
+                .semantics { contentDescription = "${event.title} $timeText" }
+        ) {
+            Row(modifier = Modifier.height(IntrinsicSize.Min)) {
+                Box(
+                    Modifier
+                        .width(4.dp)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(topStart = 28.dp, bottomStart = 28.dp))
+                        .background(resolved.copy(alpha = completedAlpha))
+                )
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(start = 14.dp, end = 8.dp, top = 14.dp, bottom = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    // Type icon box
+                    Box(
+                        Modifier
+                            .size(44.dp)
+                            .background(resolved.copy(alpha = 0.1f), RoundedCornerShape(14.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            eventTypeIcon(event.eventType), null,
+                            tint     = resolved.copy(alpha = completedAlpha),
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            event.title,
+                            style          = MaterialTheme.typography.bodyLarge,
+                            fontWeight     = FontWeight.SemiBold,
+                            textDecoration = if (event.isCompleted) TextDecoration.LineThrough else null,
+                            color          = MaterialTheme.colorScheme.onSurface.copy(alpha = completedAlpha)
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                Icons.Rounded.Schedule, null,
+                                modifier = Modifier.size(12.dp),
+                                tint     = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.5f)
+                            )
+                            Text(
+                                timeText,
+                                style      = MaterialTheme.typography.labelMedium,
+                                color      = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.65f),
+                                fontWeight = FontWeight.Medium
+                            )
+                            Box(Modifier.size(3.dp).background(MaterialTheme.colorScheme.outlineVariant, CircleShape))
+                            Surface(color = resolved.copy(alpha = 0.09f), shape = RoundedCornerShape(4.dp)) {
+                                Text(
+                                    event.eventType,
+                                    style      = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color      = resolved.copy(alpha = completedAlpha),
+                                    modifier   = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                )
+                            }
+                            if (event.remindersEnabled && !event.isCompleted) {
+                                Icon(
+                                    Icons.Rounded.NotificationsActive, null,
+                                    modifier = Modifier.size(11.dp),
+                                    tint     = resolved.copy(0.5f)
+                                )
+                            }
+                        }
+                        if (!event.description.isNullOrBlank()) {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                event.description,
+                                style    = MaterialTheme.typography.bodySmall,
+                                color    = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.6f),
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                    // CAL-P2-04: explicit checkbox toggles (tap on card edits).
+                    // Selection mode replaces it with an animated selection indicator.
+                    if (selectionMode) {
+                        val checkScale by animateFloatAsState(
+                            targetValue = if (selected) 1.15f else 1f,
+                            animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow),
+                            label = "agendaCheckScale"
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .graphicsLayer { scaleX = checkScale; scaleY = checkScale },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (selected) Icons.Rounded.CheckCircle else Icons.Rounded.RadioButtonUnchecked,
+                                contentDescription = if (selected) "Deselect ${event.title}" else "Select ${event.title}",
+                                tint = if (selected) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
+                                modifier = Modifier.size(24.dp),
+                            )
+                        }
+                    } else {
+                        Checkbox(
+                            checked = event.isCompleted,
+                            onCheckedChange = {
+                                vibrationManager?.vibrateTick()
+                                onToggle()
+                            },
+                            modifier = Modifier.semantics {
+                                contentDescription = if (event.isCompleted) "Mark ${event.title} as not done" else "Mark ${event.title} as done"
+                                role = Role.Checkbox
+                            }
+                        )
+                    }
+                    if (!selectionMode) {
+                        Box {
+                            IconButton(onClick = { showMenu = true }, Modifier.size(36.dp)) {
+                                Icon(
+                                    Icons.Rounded.MoreVert, null,
+                                    modifier = Modifier.size(17.dp),
+                                    tint     = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.35f)
+                                )
+                            }
+                            DropdownMenu(
+                                expanded         = showMenu,
+                                onDismissRequest = { showMenu = false },
+                                shape            = SmallExpressiveShape
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text(if (event.isCompleted) stringResource(R.string.st_CalendarScreen_o5p6) else stringResource(R.string.st_CalendarScreen_q7r8)) },
+                                    onClick = {
+                                        vibrationManager?.vibrateTick()
+                                        onToggle(); showMenu = false
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            if (event.isCompleted) Icons.Rounded.RadioButtonUnchecked
+                                            else Icons.Rounded.CheckCircle,
+                                            null
+                                        )
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.st_CalendarScreen_9f0a)) },
+                                    onClick = { onEdit(); showMenu = false },
+                                    leadingIcon = { Icon(Icons.Rounded.Edit, null) }
+                                )
+                                HorizontalDivider()
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.st_CalendarScreen_a1b2), color = MaterialTheme.colorScheme.error) },
+                                    onClick = {
+                                        vibrationManager?.vibrateTick()
+                                        onDelete(); showMenu = false
+                                    },
+                                    leadingIcon = { Icon(Icons.Rounded.Delete, null, tint = MaterialTheme.colorScheme.error) }
+                                )
+                            }
                         }
                     }
                 }
@@ -2487,61 +2673,126 @@ fun AgendaTaskCard(
     task: TaskEntry,
     onToggle: (TaskEntry) -> Unit = {},
 ) {
-    Surface(
-        color    = MaterialTheme.colorScheme.surfaceContainerLow,
-        shape    = SquircleShape,
-        modifier = Modifier
-            .fillMaxWidth()
-            .semantics { contentDescription = "Task ${task.title}" }
-    ) {
-        Row(Modifier.height(IntrinsicSize.Min)) {
-            Box(
-                Modifier
-                    .width(4.dp)
-                    .fillMaxHeight()
-                    .clip(RoundedCornerShape(topStart = 28.dp, bottomStart = 28.dp))
-                    .background(TaskGreen)
-            )
-            Row(
-                Modifier
-                    .weight(1f)
-                    .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
+    val liquidGlassEnabled = LocalLiquidGlassEnabled.current
+    val backdrop = LocalLiquidGlassBackdrop.current
+
+    if (liquidGlassEnabled) {
+        GlassCard(
+            backdrop = backdrop,
+            shape = SquircleShape,
+            tint = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.18f),
+            modifier = Modifier
+                .fillMaxWidth()
+                .semantics { contentDescription = "Task ${task.title}" }
+        ) {
+            Row(Modifier.height(IntrinsicSize.Min)) {
                 Box(
-                    Modifier.size(44.dp).background(TaskGreen.copy(0.1f), RoundedCornerShape(14.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Rounded.Checklist, null, tint = TaskGreen, modifier = Modifier.size(22.dp))
-                }
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        task.title,
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        textDecoration = if (task.isCompleted) TextDecoration.LineThrough else null
-                    )
-                    Spacer(Modifier.height(2.dp))
-                    Surface(color = TaskGreen.copy(0.12f), shape = RoundedCornerShape(4.dp)) {
-                        Text(
-                            "Task · ${task.category}",
-                            style    = MaterialTheme.typography.labelSmall,
-                            color    = TaskGreen,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                        )
-                    }
-                }
-                // CAL-P2-11: tasks are toggleable (was read-only).
-                Checkbox(
-                    checked = task.isCompleted,
-                    onCheckedChange = { onToggle(task) },
-                    modifier = Modifier.semantics {
-                        contentDescription = if (task.isCompleted) "Mark task ${task.title} as not done" else "Mark task ${task.title} as done"
-                        role = Role.Checkbox
-                    }
+                    Modifier
+                        .width(4.dp)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(topStart = 28.dp, bottomStart = 28.dp))
+                        .background(TaskGreen)
                 )
+                Row(
+                    Modifier
+                        .weight(1f)
+                        .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Box(
+                        Modifier.size(44.dp).background(TaskGreen.copy(0.1f), RoundedCornerShape(14.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Rounded.Checklist, null, tint = TaskGreen, modifier = Modifier.size(22.dp))
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            task.title,
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            textDecoration = if (task.isCompleted) TextDecoration.LineThrough else null
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Surface(color = TaskGreen.copy(0.12f), shape = RoundedCornerShape(4.dp)) {
+                            Text(
+                                "Task · ${task.category}",
+                                style    = MaterialTheme.typography.labelSmall,
+                                color    = TaskGreen,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                    // CAL-P2-11: tasks are toggleable (was read-only).
+                    Checkbox(
+                        checked = task.isCompleted,
+                        onCheckedChange = { onToggle(task) },
+                        modifier = Modifier.semantics {
+                            contentDescription = if (task.isCompleted) "Mark task ${task.title} as not done" else "Mark task ${task.title} as done"
+                            role = Role.Checkbox
+                        }
+                    )
+                }
+            }
+        }
+    } else {
+        Surface(
+            color    = MaterialTheme.colorScheme.surfaceContainerLow,
+            shape    = SquircleShape,
+            modifier = Modifier
+                .fillMaxWidth()
+                .semantics { contentDescription = "Task ${task.title}" }
+        ) {
+            Row(Modifier.height(IntrinsicSize.Min)) {
+                Box(
+                    Modifier
+                        .width(4.dp)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(topStart = 28.dp, bottomStart = 28.dp))
+                        .background(TaskGreen)
+                )
+                Row(
+                    Modifier
+                        .weight(1f)
+                        .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Box(
+                        Modifier.size(44.dp).background(TaskGreen.copy(0.1f), RoundedCornerShape(14.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Rounded.Checklist, null, tint = TaskGreen, modifier = Modifier.size(22.dp))
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            task.title,
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            textDecoration = if (task.isCompleted) TextDecoration.LineThrough else null
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Surface(color = TaskGreen.copy(0.12f), shape = RoundedCornerShape(4.dp)) {
+                            Text(
+                                "Task · ${task.category}",
+                                style    = MaterialTheme.typography.labelSmall,
+                                color    = TaskGreen,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                    // CAL-P2-11: tasks are toggleable (was read-only).
+                    Checkbox(
+                        checked = task.isCompleted,
+                        onCheckedChange = { onToggle(task) },
+                        modifier = Modifier.semantics {
+                            contentDescription = if (task.isCompleted) "Mark task ${task.title} as not done" else "Mark task ${task.title} as done"
+                            role = Role.Checkbox
+                        }
+                    )
+                }
             }
         }
     }
@@ -2718,53 +2969,108 @@ fun SyncResultCard(result: SyncResult, onClick: () -> Unit) {
     val isReschedule = result is SyncResult.Reschedule
     val vibrationManager = LocalVibrationManager.current
 
-    Surface(
-        onClick = {
-            vibrationManager?.vibrateTick()
-            onClick()
-        },
-        color   = color.copy(alpha = 0.05f),
-        shape   = SquircleShape,
-        border  = BorderStroke(1.dp, color.copy(alpha = 0.14f))
-    ) {
-        Row(
-            Modifier.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
+    val liquidGlassEnabled = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled.current
+    val backdrop = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassBackdrop.current
+
+    if (liquidGlassEnabled) {
+        com.frerox.toolz.ui.liquidglass.GlassCard(
+            backdrop = backdrop,
+            modifier = Modifier.clickable {
+                vibrationManager?.vibrateTick()
+                onClick()
+            },
+            shape = SquircleShape,
+            tint = color.copy(alpha = 0.15f),
         ) {
-            Box(
-                Modifier.size(44.dp).background(color.copy(0.1f), RoundedCornerShape(14.dp)),
-                contentAlignment = Alignment.Center
+            Row(
+                Modifier.padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                Icon(
-                    if (isReschedule) Icons.Rounded.Update else Icons.Rounded.AddCircleOutline,
-                    null, tint = color, modifier = Modifier.size(22.dp)
-                )
-            }
-            Column(Modifier.weight(1f)) {
-                Text(event.title, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyLarge)
-                Text(
-                    rememberDateTimeText(event.timestamp),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                if (isReschedule) {
-                    Spacer(Modifier.height(4.dp))
-                    Surface(
-                        color = MaterialTheme.colorScheme.tertiaryContainer,
-                        shape = RoundedCornerShape(4.dp)
-                    ) {
-                        Text(
-                            stringResource(R.string.st_CalendarScreen_c9d0),
-                            style    = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.ExtraBold,
-                            color    = MaterialTheme.colorScheme.onTertiaryContainer,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
+                Box(
+                    Modifier.size(44.dp).background(color.copy(0.1f), RoundedCornerShape(14.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        if (isReschedule) Icons.Rounded.Update else Icons.Rounded.AddCircleOutline,
+                        null, tint = color, modifier = Modifier.size(22.dp)
+                    )
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(event.title, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        rememberDateTimeText(event.timestamp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (isReschedule) {
+                        Spacer(Modifier.height(4.dp))
+                        Surface(
+                            color = MaterialTheme.colorScheme.tertiaryContainer,
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text(
+                                stringResource(R.string.st_CalendarScreen_c9d0),
+                                style    = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.ExtraBold,
+                                color    = MaterialTheme.colorScheme.onTertiaryContainer,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
                     }
                 }
+                Icon(Icons.Rounded.Edit, null, modifier = Modifier.size(17.dp), tint = color.copy(0.6f))
             }
-            Icon(Icons.Rounded.Edit, null, modifier = Modifier.size(17.dp), tint = color.copy(0.6f))
+        }
+    } else {
+        Surface(
+            onClick = {
+                vibrationManager?.vibrateTick()
+                onClick()
+            },
+            color   = color.copy(alpha = 0.05f),
+            shape   = SquircleShape,
+            border  = BorderStroke(1.dp, color.copy(alpha = 0.14f))
+        ) {
+            Row(
+                Modifier.padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Box(
+                    Modifier.size(44.dp).background(color.copy(0.1f), RoundedCornerShape(14.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        if (isReschedule) Icons.Rounded.Update else Icons.Rounded.AddCircleOutline,
+                        null, tint = color, modifier = Modifier.size(22.dp)
+                    )
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(event.title, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        rememberDateTimeText(event.timestamp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (isReschedule) {
+                        Spacer(Modifier.height(4.dp))
+                        Surface(
+                            color = MaterialTheme.colorScheme.tertiaryContainer,
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text(
+                                stringResource(R.string.st_CalendarScreen_c9d0),
+                                style    = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.ExtraBold,
+                                color    = MaterialTheme.colorScheme.onTertiaryContainer,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
+                Icon(Icons.Rounded.Edit, null, modifier = Modifier.size(17.dp), tint = color.copy(0.6f))
+            }
         }
     }
 }

@@ -66,6 +66,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.frerox.toolz.ui.components.ExpressiveCard
 import com.frerox.toolz.data.calendar.CalDavSyncClient
 import com.frerox.toolz.data.calendar.UserCalendar
 import com.frerox.toolz.ui.components.ExpressiveFilterChip
@@ -222,14 +223,12 @@ fun CalendarSettingsSheet(
 
             // Status message banner
             uiState.settingsMessage?.let { msg ->
-                Card(
+                ExpressiveCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(bottom = 12.dp),
                     shape = SmallExpressiveShape,
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer
-                    )
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
                 ) {
                     Row(
                         modifier = Modifier
@@ -280,11 +279,9 @@ fun CalendarSettingsSheet(
                 // OVERVIEW & SYNC DASHBOARD
                 // ─────────────────────────────────────────────────────────────
                 item {
-                    Card(
+                    ExpressiveCard(
                         shape = MediumExpressiveShape,
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
-                        ),
+                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
@@ -403,11 +400,9 @@ fun CalendarSettingsSheet(
                         subtitle = "Read and import events from Android's system calendars (Google, Device, etc.)"
                     ) {
                         if (!hasCalendarPermission) {
-                            Card(
+                            ExpressiveCard(
                                 shape = SmallExpressiveShape,
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceContainer
-                                ),
+                                containerColor = MaterialTheme.colorScheme.surfaceContainer,
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Column(
@@ -449,19 +444,16 @@ fun CalendarSettingsSheet(
                                 } else {
                                     uiState.phoneCalendars.forEach { pCal ->
                                         val isSelected = uiState.selectedPhoneCalendarIds.contains(pCal.id)
-                                        Card(
+                                        ExpressiveCard(
+                                            onClick = { viewModel.togglePhoneCalendar(pCal.id) },
                                             shape = SmallExpressiveShape,
-                                            colors = CardDefaults.cardColors(
-                                                containerColor = if (isSelected) {
-                                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.32f)
-                                                } else {
-                                                    MaterialTheme.colorScheme.surfaceContainer
-                                                }
-                                            ),
+                                            containerColor = if (isSelected) {
+                                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.32f)
+                                            } else {
+                                                MaterialTheme.colorScheme.surfaceContainer
+                                            },
                                             border = if (isSelected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clickable { viewModel.togglePhoneCalendar(pCal.id) }
+                                            modifier = Modifier.fillMaxWidth()
                                         ) {
                                             Row(
                                                 modifier = Modifier
@@ -539,11 +531,9 @@ fun CalendarSettingsSheet(
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             // Accounts list
                             uiState.calDavAccounts.forEach { acc ->
-                                Card(
+                                ExpressiveCard(
                                     shape = SmallExpressiveShape,
-                                    colors = CardDefaults.cardColors(
-                                        containerColor = MaterialTheme.colorScheme.surfaceContainer
-                                    ),
+                                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Row(
@@ -624,11 +614,9 @@ fun CalendarSettingsSheet(
                         icon = Icons.Rounded.Update,
                         subtitle = "Periodic background synchronization using WorkManager"
                     ) {
-                        Card(
+                        ExpressiveCard(
                             shape = SmallExpressiveShape,
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceContainer
-                            ),
+                            containerColor = MaterialTheme.colorScheme.surfaceContainer,
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(
@@ -720,11 +708,9 @@ fun CalendarSettingsSheet(
                         icon = Icons.Rounded.DeleteSweep,
                         subtitle = "Clean up duplicates or wipe stored calendar events"
                     ) {
-                        Card(
+                        ExpressiveCard(
                             shape = SmallExpressiveShape,
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceContainer
-                            ),
+                            containerColor = MaterialTheme.colorScheme.surfaceContainer,
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(
@@ -806,11 +792,9 @@ fun CalendarSettingsSheet(
                         icon = Icons.Rounded.Tune,
                         subtitle = "Calendar layout and numbering options"
                     ) {
-                        Card(
+                        ExpressiveCard(
                             shape = SmallExpressiveShape,
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceContainer
-                            ),
+                            containerColor = MaterialTheme.colorScheme.surfaceContainer,
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(
@@ -973,11 +957,9 @@ private fun CalendarRowItem(
     onDelete: (() -> Unit)?
 ) {
     val calColor = runCatching { Color(android.graphics.Color.parseColor(calendar.color)) }.getOrDefault(Color.Blue)
-    Card(
+    ExpressiveCard(
         shape = SmallExpressiveShape,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer
-        ),
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(
@@ -1044,11 +1026,9 @@ private fun CreateCalendarCard(
     var calName by remember { mutableStateOf("") }
     var selectedColor by remember { mutableStateOf(EventColorPalette.first()) }
 
-    Card(
+    ExpressiveCard(
         shape = SmallExpressiveShape,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-        ),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         modifier = Modifier
             .fillMaxWidth()
             .animateContentSize(spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow))
@@ -1181,11 +1161,9 @@ private fun AddCalDavCard(
     var testResult by remember { mutableStateOf<String?>(null) }
     var isTesting by remember { mutableStateOf(false) }
 
-    Card(
+    ExpressiveCard(
         shape = SmallExpressiveShape,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-        ),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         modifier = Modifier
             .fillMaxWidth()
             .animateContentSize(spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow))
