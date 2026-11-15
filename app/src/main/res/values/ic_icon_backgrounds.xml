@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <color name="ic_bg_liquid_glass">#FF120A22</color>
     <color name="ic_bg_grape_haze">#FF8534CE</color>
     <color name="ic_bg_grape_deep">#FF370068</color>
     <color name="ic_bg_lagoon">#FF00393F</color>
