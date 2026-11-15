@@ -2411,12 +2411,9 @@ private fun OptionToggleRow(
         Icon(icon, null, modifier = Modifier.size(24.dp), tint = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.width(16.dp))
         Text(label, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-        Switch(
+        com.frerox.toolz.ui.components.ExpressiveSwitch(
             checked = checked,
             onCheckedChange = onCheckedChange,
-            thumbContent = if (checked) {
-                { Icon(Icons.Filled.Check, null, Modifier.size(SwitchDefaults.IconSize)) }
-            } else null
         )
     }
 }

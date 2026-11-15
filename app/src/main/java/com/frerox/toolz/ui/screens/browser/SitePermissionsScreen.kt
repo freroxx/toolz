@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.frerox.toolz.data.browser.BrowserPermissionType
 import com.frerox.toolz.data.browser.BrowserSitePermission
+import com.frerox.toolz.ui.components.ExpressiveCard
 import com.frerox.toolz.ui.components.LargeExpressiveShape
 
 @Composable
@@ -245,11 +246,9 @@ private fun SitePermissionCard(
     onToggle: (BrowserPermissionType, BrowserSitePermission) -> Unit,
     onClear: () -> Unit
 ) {
-    Surface(
+    ExpressiveCard(
         shape = LargeExpressiveShape,
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        tonalElevation = 0.dp,
-        shadowElevation = 0.dp,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         modifier = Modifier
             .fillMaxWidth()
             .animateContentSize(),

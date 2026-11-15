@@ -353,18 +353,15 @@ private fun TabCard(
         else -> MaterialTheme.colorScheme.surfaceContainerHigh
     }
 
-    Surface(
+    ExpressiveCard(
         onClick = onClick,
+        onLongClick = onLongClick,
         shape = RoundedCornerShape(20.dp),
-        color = containerColor,
+        containerColor = containerColor,
         border = BorderStroke(if (isActive || isSelected) 2.dp else 1.dp, borderColor),
         modifier = Modifier
             .fillMaxWidth()
             .height(200.dp)
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = onLongClick
-            )
     ) {
         Column(
             modifier = Modifier
