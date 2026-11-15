@@ -133,6 +133,42 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.ContentPaste
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.Functions
+import androidx.compose.material.icons.rounded.GridView
+import androidx.compose.material.icons.rounded.Memory
+import androidx.compose.material.icons.rounded.Numbers
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Science
+import androidx.compose.material.icons.rounded.SwapHoriz
+import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.isSpecified
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.stateDescription
 import com.frerox.toolz.R
 import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.components.ExtraLargeExpressiveShape
@@ -143,12 +179,15 @@ import com.frerox.toolz.ui.components.ToolzExpressiveIconButton
 import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.components.horizontalFadingEdges
 import com.frerox.toolz.ui.theme.LocalHapticEnabled
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.ui.theme.toolzBackground
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.PI
 import kotlin.math.roundToInt
+import kotlin.math.sin
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // ROOT
@@ -161,6 +200,12 @@ fun CalculatorScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     var showHistorySheet by remember { mutableStateOf(false) }
+    val vibrationManager = LocalVibrationManager.current
+    val hapticEnabled = LocalHapticEnabled.current
+
+    LaunchedEffect(state.error) {
+        if (state.error != null && hapticEnabled) vibrationManager?.vibrateError()
+    }
 
     Box(modifier = Modifier.fillMaxSize().toolzBackground()) {
         Scaffold(
@@ -233,13 +278,14 @@ fun CalculatorScreen(
     if (showHistorySheet) {
         ModalBottomSheet(
             onDismissRequest = { showHistorySheet = false },
-            shape = RoundedCornerShape(topStart = 36.dp, topEnd = 36.dp),
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
             dragHandle = {
                 BottomSheetDefaults.DragHandle(
-                    width = 56.dp,
+                    width = 48.dp,
                     height = 4.dp,
-                    color = MaterialTheme.colorScheme.outlineVariant,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
                 )
             },
         ) {
@@ -248,7 +294,7 @@ fun CalculatorScreen(
                 viewModel = viewModel,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .fillMaxHeight(0.86f)
+                    .fillMaxHeight(0.9f)
                     .navigationBarsPadding(),
                 onPicked = { showHistorySheet = false },
             )
@@ -287,13 +333,13 @@ private fun ToolSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        shape = RoundedCornerShape(topStart = 36.dp, topEnd = 36.dp),
+        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         dragHandle = {
             BottomSheetDefaults.DragHandle(
-                width = 56.dp,
+                width = 48.dp,
                 height = 4.dp,
-                color = MaterialTheme.colorScheme.outlineVariant,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
             )
         },
     ) {
@@ -334,8 +380,8 @@ private fun CalculatorMain(
     val vibrationManager = LocalVibrationManager.current
     val hapticEnabled = LocalHapticEnabled.current
     val padWeight by animateFloatAsState(
-        targetValue = if (state.scientific) 2.4f else 1.7f,
-        animationSpec = tween(220),
+        targetValue = if (state.scientific) 2.35f else 1.62f,
+        animationSpec = spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMediumLow),
         label = "padWeight",
     )
 
@@ -357,8 +403,9 @@ private fun CalculatorMain(
             viewModel = viewModel,
             modifier = Modifier
                 .weight(1f)
+                .heightIn(min = 132.dp)
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 4.dp),
+                .padding(horizontal = 14.dp, vertical = 5.dp),
         )
         CalculatorKeypad(
             state = state,
@@ -383,40 +430,157 @@ private fun StatusChip(
     container: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
     content: Color = MaterialTheme.colorScheme.onSurface,
     selected: Boolean = false,
+    icon: ImageVector? = null,
 ) {
-    val shape = CircleShape
-    val border = if (selected) {
-        BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.55f))
-    } else {
-        null
-    }
+    val scheme = MaterialTheme.colorScheme
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.94f else 1f,
+        animationSpec = spring(dampingRatio = 0.62f, stiffness = Spring.StiffnessMediumLow),
+        label = "chipScale",
+    )
+    val bg by animateColorAsState(container, tween(180), label = "chipContainer")
+    val fg by animateColorAsState(content, tween(180), label = "chipContent")
+    val border = BorderStroke(
+        width = 1.dp,
+        color = if (selected) fg.copy(alpha = 0.24f) else scheme.outlineVariant.copy(alpha = 0.18f),
+    )
     val label: @Composable () -> Unit = {
-        Text(
-            text = text,
-            modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-        )
+        Row(
+            modifier = Modifier.padding(start = if (icon != null) 10.dp else 12.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (icon != null) {
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint = fg.copy(alpha = if (selected) 1f else 0.72f),
+                )
+            }
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 0.1.sp,
+                maxLines = 1,
+            )
+        }
     }
 
     if (onClick != null) {
         Surface(
             onClick = onClick,
-            shape = shape,
-            color = container,
-            contentColor = content,
+            modifier = Modifier.graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            },
+            interactionSource = interaction,
+            shape = CircleShape,
+            color = bg,
+            contentColor = fg,
             border = border,
             content = label,
         )
     } else {
         Surface(
-            shape = shape,
-            color = container,
-            contentColor = content,
+            shape = CircleShape,
+            color = bg,
+            contentColor = fg,
             border = border,
             content = label,
         )
+    }
+}
+
+@Composable
+private fun StatusBadge(text: String, container: Color, content: Color) {
+    Surface(
+        shape = CircleShape,
+        color = container,
+        contentColor = content,
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.7.sp,
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
+private fun KeypadModeButton(scientific: Boolean, onClick: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    val vibrationManager = LocalVibrationManager.current
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.94f else 1f,
+        animationSpec = spring(dampingRatio = 0.62f, stiffness = Spring.StiffnessMediumLow),
+        label = "modeScale",
+    )
+    val bg by animateColorAsState(
+        targetValue = if (scientific) scheme.primary else scheme.surfaceContainerHigh,
+        animationSpec = tween(200),
+        label = "modeContainer",
+    )
+    val fg by animateColorAsState(
+        targetValue = if (scientific) scheme.onPrimary else scheme.onSurface,
+        animationSpec = tween(200),
+        label = "modeContent",
+    )
+
+    Surface(
+        onClick = {
+            vibrationManager?.vibrateTick()
+            onClick()
+        },
+        modifier = Modifier
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .animateContentSize(),
+        interactionSource = interaction,
+        shape = CircleShape,
+        color = bg,
+        contentColor = fg,
+        border = BorderStroke(
+            1.dp,
+            if (scientific) fg.copy(alpha = 0.2f) else scheme.outlineVariant.copy(alpha = 0.18f),
+        ),
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 10.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            AnimatedContent(
+                targetState = scientific,
+                transitionSpec = {
+                    (fadeIn(tween(140)) + scaleIn(initialScale = 0.7f))
+                        .togetherWith(fadeOut(tween(90)) + scaleOut(targetScale = 0.7f))
+                },
+                label = "modeIcon",
+            ) { sci ->
+                Icon(
+                    imageVector = if (sci) Icons.Rounded.Functions else Icons.Rounded.Calculate,
+                    contentDescription = null,
+                    modifier = Modifier.size(15.dp),
+                )
+            }
+            Text(
+                text = if (scientific) "Scientific" else "Basic",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+            )
+        }
     }
 }
 
@@ -434,7 +598,7 @@ private fun StatusStrip(state: CalculatorState, viewModel: CalculatorViewModel) 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 14.dp, vertical = 3.dp),
+            .padding(horizontal = 14.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(
@@ -447,6 +611,7 @@ private fun StatusStrip(state: CalculatorState, viewModel: CalculatorViewModel) 
         ) {
             StatusChip(
                 text = state.angle.label,
+                icon = Icons.Rounded.Functions,
                 onClick = {
                     vibrationManager?.vibrateTick()
                     viewModel.onCycleAngle()
@@ -454,6 +619,7 @@ private fun StatusStrip(state: CalculatorState, viewModel: CalculatorViewModel) 
             )
             StatusChip(
                 text = format,
+                icon = Icons.Rounded.Numbers,
                 onClick = {
                     vibrationManager?.vibrateTick()
                     viewModel.onSheet(CalcSheet.SETUP)
@@ -461,6 +627,7 @@ private fun StatusStrip(state: CalculatorState, viewModel: CalculatorViewModel) 
             )
             StatusChip(
                 text = if (state.showFraction) "n/d" else "dec",
+                icon = Icons.Rounded.SwapHoriz,
                 onClick = {
                     vibrationManager?.vibrateTick()
                     viewModel.onSetShowFraction(!state.showFraction)
@@ -469,42 +636,37 @@ private fun StatusStrip(state: CalculatorState, viewModel: CalculatorViewModel) 
                 content = if (state.showFraction) scheme.onSecondaryContainer else scheme.onSurfaceVariant,
                 selected = state.showFraction,
             )
-            if (state.layer == KeyLayer.SHIFT) {
-                StatusChip(
-                    text = "SHIFT",
-                    container = scheme.tertiary,
-                    content = scheme.onTertiary,
-                )
+            AnimatedVisibility(
+                visible = state.layer == KeyLayer.SHIFT,
+                enter = fadeIn(tween(140)) + scaleIn(initialScale = 0.82f),
+                exit = fadeOut(tween(80)) + scaleOut(targetScale = 0.86f),
+            ) {
+                StatusBadge("SHIFT", scheme.tertiary, scheme.onTertiary)
             }
-            if (state.layer == KeyLayer.ALPHA) {
-                StatusChip(
-                    text = "ALPHA",
-                    container = scheme.secondary,
-                    content = scheme.onSecondary,
-                )
+            AnimatedVisibility(
+                visible = state.layer == KeyLayer.ALPHA,
+                enter = fadeIn(tween(140)) + scaleIn(initialScale = 0.82f),
+                exit = fadeOut(tween(80)) + scaleOut(targetScale = 0.86f),
+            ) {
+                StatusBadge("ALPHA", scheme.secondary, scheme.onSecondary)
             }
-            if (state.hyp) {
-                StatusChip(
-                    text = "HYP",
-                    container = scheme.primary,
-                    content = scheme.onPrimary,
-                )
+            AnimatedVisibility(
+                visible = state.hyp,
+                enter = fadeIn(tween(140)) + scaleIn(initialScale = 0.82f),
+                exit = fadeOut(tween(80)) + scaleOut(targetScale = 0.86f),
+            ) {
+                StatusBadge("HYP", scheme.primary, scheme.onPrimary)
             }
         }
 
         Spacer(Modifier.width(8.dp))
-        StatusChip(
-            text = if (state.scientific) "Scientific" else "Basic",
-            onClick = {
-                vibrationManager?.vibrateTick()
-                viewModel.onToggleScientific()
-            },
-            container = if (state.scientific) scheme.primaryContainer else scheme.surfaceContainerHigh,
-            content = if (state.scientific) scheme.onPrimaryContainer else scheme.onSurface,
-            selected = state.scientific,
+        KeypadModeButton(
+            scientific = state.scientific,
+            onClick = viewModel::onToggleScientific,
         )
     }
 }
+
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // DISPLAY
@@ -522,15 +684,44 @@ private fun CalculatorDisplay(
 
     Surface(
         modifier = modifier,
-        shape = ExtraLargeExpressiveShape,
+        shape = RoundedCornerShape(36.dp),
         color = scheme.surfaceContainerLowest,
-        border = BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = 0.18f)),
+        border = BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = 0.22f)),
+        tonalElevation = 2.dp,
     ) {
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .drawBehind {
+                    drawRect(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                scheme.primary.copy(alpha = 0.10f),
+                                scheme.primary.copy(alpha = 0.035f),
+                                Color.Transparent,
+                            ),
+                            center = Offset(size.width * 0.9f, 0f),
+                            radius = size.width * 0.85f,
+                        ),
+                    )
+                    drawLine(
+                        brush = Brush.horizontalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                scheme.primary.copy(alpha = 0.18f),
+                                Color.Transparent,
+                            ),
+                        ),
+                        start = Offset(size.width * 0.16f, 0f),
+                        end = Offset(size.width * 0.84f, 0f),
+                        strokeWidth = 1.dp.toPx(),
+                    )
+                },
+        ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 20.dp, vertical = 14.dp),
+                    .padding(horizontal = 20.dp, vertical = 16.dp),
             ) {
                 ScrollingExpression(
                     text = field.text,
@@ -542,8 +733,8 @@ private fun CalculatorDisplay(
                 )
 
                 HorizontalDivider(
-                    modifier = Modifier.padding(top = 8.dp),
-                    color = scheme.outlineVariant.copy(alpha = 0.28f),
+                    modifier = Modifier.padding(top = 10.dp),
+                    color = scheme.outlineVariant.copy(alpha = 0.22f),
                 )
 
                 ResultArea(
@@ -554,20 +745,21 @@ private fun CalculatorDisplay(
                     },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 66.dp)
-                        .padding(top = 8.dp),
+                        .heightIn(min = 76.dp)
+                        .padding(top = 10.dp),
                 )
             }
 
             ToastPill(
                 text = state.toast,
                 modifier = Modifier
-                    .align(Alignment.TopEnd)
+                    .align(Alignment.TopCenter)
                     .padding(12.dp),
             )
         }
     }
 }
+
 
 @Composable
 private fun ScrollingExpression(
@@ -578,103 +770,118 @@ private fun ScrollingExpression(
 ) {
     val scheme = MaterialTheme.colorScheme
     val density = LocalDensity.current
-    var textWidth by remember { mutableStateOf(0f) }
+    val performanceMode = LocalPerformanceMode.current
+    val cur = cursor.coerceIn(0, text.length)
+    var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+
+    val fontSizeTarget = when {
+        text.length > 48 -> 24f
+        text.length > 28 -> 28f
+        else -> 34f
+    }
+    val fontSize by animateFloatAsState(
+        targetValue = fontSizeTarget,
+        animationSpec = tween(180),
+        label = "expressionSize",
+    )
+    val style = MaterialTheme.typography.headlineLarge.copy(
+        fontSize = fontSize.sp,
+        lineHeight = (fontSize * 1.18f).sp,
+        fontWeight = FontWeight.Medium,
+        letterSpacing = (-0.3).sp,
+        fontFeatureSettings = "tnum",
+    )
+
+    val caretTransition = rememberInfiniteTransition(label = "caret")
+    val blink by caretTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(520, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "caretBlink",
+    )
+    val caretAlpha = if (performanceMode) 1f else blink
 
     BoxWithConstraints(
         modifier = modifier
             .clipToBounds()
-            .horizontalFadingEdges(left = 18.dp, right = 18.dp),
+            .horizontalFadingEdges(left = 16.dp, right = 18.dp),
         contentAlignment = Alignment.BottomStart,
     ) {
         val viewport = with(density) { maxWidth.toPx() }
-        val overflow = (textWidth - viewport).coerceAtLeast(0f)
-        val cursorFraction = if (text.isEmpty()) 1f else {
-            (cursor.toFloat() / text.length).coerceIn(0f, 1f)
-        }
-        val targetShift = if (textWidth <= 0f) {
-            0f
-        } else if (overflow > 0f) {
-            -overflow * cursorFraction
-        } else {
-            viewport - textWidth
+        val rightInset = with(density) { 18.dp.toPx() }
+        val textWidth = layout?.size?.width?.toFloat() ?: 0f
+        val caretX = layout?.getHorizontalPosition(cur, usePrimaryDirection = true) ?: 0f
+        val targetShift = when {
+            layout == null -> 0f
+            textWidth <= viewport - rightInset -> viewport - textWidth - rightInset
+            else -> (viewport - rightInset - caretX)
+                .coerceIn(viewport - textWidth - rightInset, 0f)
         }
         val shift by animateFloatAsState(
             targetValue = targetShift,
-            animationSpec = tween(140),
+            animationSpec = tween(160),
             label = "expressionShift",
         )
-        val fontSize = when {
-            text.length > 48 -> 23.sp
-            text.length > 28 -> 27.sp
-            else -> 33.sp
-        }
 
-        CaretText(
-            text = text,
-            cursor = cursor,
-            focused = true,
-            style = MaterialTheme.typography.headlineLarge.copy(
-                fontSize = fontSize,
-                lineHeight = fontSize * 1.2f,
-                fontWeight = FontWeight.Medium,
-            ),
-            color = scheme.onSurface,
+        Box(
             modifier = Modifier
                 .offset { IntOffset(shift.roundToInt(), 0) }
                 .wrapContentWidth(unbounded = true),
-            onTapOffset = onCursor,
-            onTextWidth = { textWidth = it },
-        )
+        ) {
+            Text(
+                text = if (text.isEmpty()) "0" else text,
+                style = style,
+                color = if (text.isEmpty()) {
+                    scheme.onSurfaceVariant.copy(alpha = 0.32f)
+                } else {
+                    scheme.onSurface
+                },
+                maxLines = 1,
+                softWrap = false,
+                onTextLayout = { layout = it },
+                modifier = Modifier.pointerInput(text, cur) {
+                    detectTapGestures { pos ->
+                        val current = layout
+                        if (current == null || text.isEmpty()) {
+                            onCursor(0)
+                        } else {
+                            onCursor(
+                                current.getOffsetForPosition(pos).coerceIn(0, text.length),
+                            )
+                        }
+                    }
+                },
+            )
+
+            if (text.isNotEmpty()) {
+                val caretHeight = with(density) {
+                    ((layout?.size?.height ?: 0).toFloat()).toDp()
+                }
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .offset { IntOffset(caretX.roundToInt() - 1, 0) }
+                        .width(2.dp)
+                        .height(caretHeight)
+                        .background(
+                            color = scheme.primary.copy(alpha = 0.9f * caretAlpha),
+                            shape = RoundedCornerShape(1.dp),
+                        ),
+                )
+            }
+        }
     }
 }
 
-@Composable
-private fun CaretText(
-    text: String,
-    cursor: Int,
-    focused: Boolean,
-    style: TextStyle,
-    color: Color,
-    modifier: Modifier = Modifier,
-    onTapOffset: (Int) -> Unit,
-    onTextWidth: (Float) -> Unit,
-) {
-    val cur = cursor.coerceIn(0, text.length)
-    val caretColor = MaterialTheme.colorScheme.primary
-    val annotated = buildAnnotatedString {
-        append(text.substring(0, cur))
-        if (focused) {
-            withStyle(SpanStyle(color = caretColor, fontWeight = FontWeight.Medium)) {
-                append("▏")
-            }
-        }
-        append(text.substring(cur))
-    }
-    var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
-    Text(
-        text = annotated,
-        style = style,
-        color = color,
-        maxLines = 1,
-        softWrap = false,
-        modifier = modifier.pointerInput(text, cur, focused) {
-            detectTapGestures { pos ->
-                val l = layout
-                if (l == null || text.isEmpty()) {
-                    onTapOffset(0)
-                } else {
-                    val raw = l.getOffsetForPosition(pos)
-                    val mapped = if (focused && raw > cur) raw - 1 else raw
-                    onTapOffset(mapped.coerceIn(0, text.length))
-                }
-            }
-        },
-        onTextLayout = {
-            layout = it
-            onTextWidth(it.size.width.toFloat())
-        },
-    )
-}
+
+private data class ResultSnapshot(
+    val error: String?,
+    val line: OutLine?,
+    val note: String?,
+)
 
 @Composable
 private fun ResultArea(
@@ -684,64 +891,169 @@ private fun ResultArea(
 ) {
     val scheme = MaterialTheme.colorScheme
     val out = state.outputs.firstOrNull()
+    val hasResult = out != null && state.error == null
+    val copied = state.toast == "Copied"
     val resultSize by animateFloatAsState(
-        targetValue = if (state.evaluated) 46f else 30f,
-        animationSpec = tween(180),
+        targetValue = if (state.evaluated) 48f else 30f,
+        animationSpec = spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMediumLow),
         label = "resultSize",
     )
+    val resultInteraction = remember { MutableInteractionSource() }
 
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(14.dp))
-            .clickable(enabled = out != null && state.error == null) { onCopy() },
-        contentAlignment = Alignment.CenterEnd,
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        when {
-            state.error != null -> {
-                Surface(
-                    shape = SmallExpressiveShape,
-                    color = scheme.errorContainer,
-                    contentColor = scheme.onErrorContainer,
-                ) {
-                    Text(
-                        text = state.error,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
+        AnimatedVisibility(
+            visible = hasResult,
+            enter = fadeIn(tween(160)) + scaleIn(initialScale = 0.85f),
+            exit = fadeOut(tween(90)) + scaleOut(targetScale = 0.88f),
+        ) {
+            CopyAction(copied = copied, onClick = onCopy)
+        }
+        Spacer(Modifier.width(if (hasResult) 10.dp else 0.dp))
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .clickable(
+                    enabled = hasResult,
+                    interactionSource = resultInteraction,
+                    indication = null,
+                    onClickLabel = stringResource(R.string.st_CalculatorScreen_1a2b),
+                    onClick = onCopy,
+                ),
+            contentAlignment = Alignment.CenterEnd,
+        ) {
+            AnimatedContent(
+                targetState = ResultSnapshot(state.error, out, state.note),
+                transitionSpec = {
+                    (
+                        fadeIn(tween(180)) +
+                            slideInVertically(tween(220)) { it / 5 } +
+                            scaleIn(initialScale = 0.94f)
+                        ).togetherWith(
+                        fadeOut(tween(110)) +
+                            slideOutVertically(tween(110)) { -it / 5 },
                     )
-                }
-            }
-
-            out != null -> {
-                Crossfade(
-                    targetState = out,
-                    animationSpec = tween(160),
-                    label = "resultValue",
-                ) { line ->
-                    ResultText(
-                        line = line,
+                },
+                contentAlignment = Alignment.CenterEnd,
+                label = "resultValue",
+            ) { snapshot ->
+                when {
+                    snapshot.error != null -> ErrorChip(snapshot.error)
+                    snapshot.line != null -> ResultText(
+                        line = snapshot.line,
                         sizeSp = resultSize,
                         color = if (state.evaluated) {
                             scheme.primary
                         } else {
-                            scheme.onSurfaceVariant.copy(alpha = 0.72f)
+                            scheme.onSurfaceVariant.copy(alpha = 0.78f)
                         },
                         weight = if (state.evaluated) FontWeight.Bold else FontWeight.Medium,
                     )
+                    snapshot.note != null -> Text(
+                        text = snapshot.note,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = scheme.onSurfaceVariant,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.End,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
             }
+        }
+    }
+}
 
-            state.note != null -> {
-                Text(
-                    text = state.note.orEmpty(),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = scheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
+@Composable
+private fun CopyAction(copied: Boolean, onClick: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    val container by animateColorAsState(
+        targetValue = if (copied) scheme.primaryContainer else scheme.surfaceContainerHigh,
+        animationSpec = tween(160),
+        label = "copyContainer",
+    )
+    val content by animateColorAsState(
+        targetValue = if (copied) scheme.onPrimaryContainer else scheme.onSurfaceVariant,
+        animationSpec = tween(160),
+        label = "copyContent",
+    )
+
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.size(38.dp),
+        shape = CircleShape,
+        color = container,
+        contentColor = content,
+        border = BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = 0.18f)),
+    ) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            AnimatedContent(
+                targetState = copied,
+                transitionSpec = {
+                    (fadeIn(tween(120)) + scaleIn(initialScale = 0.7f))
+                        .togetherWith(fadeOut(tween(80)) + scaleOut(targetScale = 0.7f))
+                },
+                label = "copyIcon",
+            ) { done ->
+                Icon(
+                    imageVector = if (done) Icons.Rounded.Check else Icons.Rounded.ContentCopy,
+                    contentDescription = if (done) "Copied" else stringResource(R.string.st_CalculatorScreen_1a2b),
+                    modifier = Modifier.size(17.dp),
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun ErrorChip(text: String, modifier: Modifier = Modifier) {
+    val scheme = MaterialTheme.colorScheme
+    val performanceMode = LocalPerformanceMode.current
+    val density = LocalDensity.current
+    val shake = remember { Animatable(0f) }
+
+    LaunchedEffect(text, performanceMode) {
+        if (performanceMode) {
+            shake.snapTo(1f)
+            return@LaunchedEffect
+        }
+        shake.snapTo(0f)
+        shake.animateTo(1f, tween(400, easing = LinearEasing))
+    }
+    val offsetX = if (performanceMode) {
+        0f
+    } else {
+        sin(shake.value * PI.toFloat() * 6f) *
+            (1f - shake.value) *
+            with(density) { 9.dp.toPx() }
+    }
+
+    Surface(
+        modifier = modifier.offset { IntOffset(offsetX.roundToInt(), 0) },
+        shape = SmallExpressiveShape,
+        color = scheme.errorContainer,
+        contentColor = scheme.onErrorContainer,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Rounded.ErrorOutline,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
+            Text(
+                text = text,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
@@ -765,6 +1077,8 @@ private fun ResultText(
         fontSize = (sizeSp * factor).sp,
         fontWeight = weight,
         lineHeight = (sizeSp * factor * 1.15f).sp,
+        letterSpacing = (-0.6).sp,
+        fontFeatureSettings = "tnum",
     )
     if (line.num != null && line.den != null) {
         Box(
@@ -777,12 +1091,30 @@ private fun ResultText(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (line.negative) Text("−", style = style, color = color)
                 Column(
-                    modifier = Modifier.width(IntrinsicSize.Max).padding(horizontal = 2.dp),
+                    modifier = Modifier
+                        .width(IntrinsicSize.Max)
+                        .padding(horizontal = 4.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    Text(line.num, style = style.copy(fontSize = style.fontSize * 0.82f), color = color)
-                    HorizontalDivider(thickness = 2.dp, color = color.copy(alpha = 0.7f))
-                    Text(line.den, style = style.copy(fontSize = style.fontSize * 0.82f), color = color)
+                    Text(
+                        line.num,
+                        style = style.copy(fontSize = style.fontSize * 0.8f),
+                        color = color,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                    HorizontalDivider(
+                        modifier = Modifier.padding(vertical = 2.dp),
+                        thickness = 2.dp,
+                        color = color.copy(alpha = 0.75f),
+                    )
+                    Text(
+                        line.den,
+                        style = style.copy(fontSize = style.fontSize * 0.8f),
+                        color = color,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
                 }
             }
         }
@@ -812,26 +1144,43 @@ private fun ResultText(
 
 @Composable
 private fun ToastPill(text: String?, modifier: Modifier = Modifier) {
+    val icon = when {
+        text == null -> Icons.Rounded.Check
+        text.startsWith("Nothing") -> Icons.Rounded.ErrorOutline
+        text == "DEG" || text == "RAD" || text == "GRA" -> Icons.Rounded.Functions
+        else -> Icons.Rounded.Check
+    }
+
     AnimatedVisibility(
         visible = text != null,
         modifier = modifier,
-        enter = fadeIn(tween(140)) + scaleIn(initialScale = 0.94f),
-        exit = fadeOut(tween(90)) + scaleOut(targetScale = 0.96f),
+        enter = fadeIn(tween(140)) +
+            scaleIn(initialScale = 0.9f) +
+            slideInVertically(tween(180)) { -it / 2 },
+        exit = fadeOut(tween(90)) + scaleOut(targetScale = 0.94f),
     ) {
         Surface(
             shape = CircleShape,
             color = MaterialTheme.colorScheme.inverseSurface,
             contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+            shadowElevation = 4.dp,
         ) {
-            Text(
-                text ?: "",
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
+            Row(
+                modifier = Modifier.padding(start = 11.dp, end = 13.dp, top = 7.dp, bottom = 7.dp),
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(icon, contentDescription = null, modifier = Modifier.size(14.dp))
+                Text(
+                    text ?: "",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
         }
     }
 }
+
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // KEYPAD
@@ -843,30 +1192,60 @@ private fun CalculatorKeypad(
     onKey: (KeyDef) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val scheme = MaterialTheme.colorScheme
+    val layerAccent by animateColorAsState(
+        targetValue = when (state.layer) {
+            KeyLayer.SHIFT -> scheme.tertiary.copy(alpha = 0.055f)
+            KeyLayer.ALPHA -> scheme.secondary.copy(alpha = 0.055f)
+            KeyLayer.NONE -> Color.Transparent
+        },
+        animationSpec = tween(180),
+        label = "layerAccent",
+    )
+    val layerBorder by animateColorAsState(
+        targetValue = when (state.layer) {
+            KeyLayer.SHIFT -> scheme.tertiary.copy(alpha = 0.16f)
+            KeyLayer.ALPHA -> scheme.secondary.copy(alpha = 0.16f)
+            KeyLayer.NONE -> Color.Transparent
+        },
+        animationSpec = tween(180),
+        label = "layerBorder",
+    )
+
     AnimatedContent(
         targetState = state.scientific,
         modifier = modifier,
         transitionSpec = {
-            (fadeIn(tween(170)) + expandVertically(tween(170), expandFrom = Alignment.Bottom))
-                .togetherWith(fadeOut(tween(100)) + shrinkVertically(tween(100), shrinkTowards = Alignment.Top))
+            (fadeIn(tween(220)) +
+                scaleIn(initialScale = 0.94f, transformOrigin = TransformOrigin(0.5f, 1f)))
+                .togetherWith(fadeOut(tween(120)) + scaleOut(targetScale = 0.98f))
         },
         contentAlignment = Alignment.BottomCenter,
         label = "keypadDensity",
     ) { scientific ->
-        Column(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(RoundedCornerShape(30.dp))
+                .background(layerAccent)
+                .border(BorderStroke(1.dp, layerBorder), RoundedCornerShape(30.dp))
+                .padding(2.dp),
         ) {
-            if (scientific) {
-                CalcKeys.fullFunctions.forEach { keys ->
-                    KeyRow(keys, weight = 0.84f, state = state, hints = true, big = false, onKey = onKey)
-                }
-                CalcKeys.numbers.forEach { keys ->
-                    KeyRow(keys, weight = 1f, state = state, hints = false, big = false, onKey = onKey)
-                }
-            } else {
-                CalcKeys.basic.forEach { keys ->
-                    KeyRow(keys, weight = 1f, state = state, hints = false, big = true, onKey = onKey)
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                if (scientific) {
+                    CalcKeys.fullFunctions.forEach { keys ->
+                        KeyRow(keys, weight = 0.82f, state = state, hints = true, big = false, onKey = onKey)
+                    }
+                    CalcKeys.numbers.forEach { keys ->
+                        KeyRow(keys, weight = 1f, state = state, hints = false, big = false, onKey = onKey)
+                    }
+                } else {
+                    CalcKeys.basic.forEach { keys ->
+                        KeyRow(keys, weight = 1f, state = state, hints = false, big = true, onKey = onKey)
+                    }
                 }
             }
         }
@@ -933,7 +1312,7 @@ private fun CalcKey(
             KeyKind.DELETE -> scheme.surfaceContainerHighest to scheme.onSurface
             KeyKind.FUNCTION -> scheme.surfaceContainer to scheme.onSurfaceVariant
             KeyKind.MODIFIER -> scheme.tertiaryContainer to scheme.onTertiaryContainer
-            KeyKind.NAV -> scheme.surfaceContainerHighest to scheme.primary
+            KeyKind.NAV -> scheme.surfaceContainerHighest to scheme.onSurfaceVariant
         }
     }
 
@@ -947,36 +1326,44 @@ private fun CalcKey(
         layer == KeyLayer.ALPHA && def.alphaLabel != null && !active -> scheme.secondary
         else -> baseFg
     }
-    val showIcon = layer == KeyLayer.NONE && (def.id == "left" || def.id == "right" || def.label == "DEL")
+    val showIcon = def.id == "left" || def.id == "right" || def.label == "DEL"
     val shape = when (def.kind) {
-        KeyKind.DIGIT -> RoundedCornerShape(20.dp)
+        KeyKind.DIGIT -> RoundedCornerShape(22.dp)
         KeyKind.OPERATOR -> RoundedCornerShape(24.dp)
-        KeyKind.EQUALS -> RoundedCornerShape(28.dp)
+        KeyKind.EQUALS -> RoundedCornerShape(30.dp)
         KeyKind.FUNCTION -> RoundedCornerShape(18.dp)
         KeyKind.MODIFIER -> RoundedCornerShape(18.dp)
         KeyKind.NAV -> RoundedCornerShape(18.dp)
         KeyKind.CLEAR, KeyKind.DELETE -> RoundedCornerShape(20.dp)
     }
-    val borderColor = when (def.kind) {
-        KeyKind.DIGIT, KeyKind.FUNCTION -> scheme.outlineVariant.copy(alpha = 0.22f)
-        KeyKind.DELETE, KeyKind.NAV -> scheme.outlineVariant.copy(alpha = 0.18f)
+    val borderBase = when {
+        active -> baseFg.copy(alpha = 0.28f)
+        def.kind == KeyKind.EQUALS -> baseFg.copy(alpha = 0.12f)
+        def.kind == KeyKind.DIGIT || def.kind == KeyKind.FUNCTION ->
+            scheme.outlineVariant.copy(alpha = 0.20f)
+        def.kind == KeyKind.DELETE || def.kind == KeyKind.NAV ->
+            scheme.outlineVariant.copy(alpha = 0.18f)
         else -> Color.Transparent
     }
 
-    var pressed by remember { mutableStateOf(false) }
+    var pressed by remember(def.id) { mutableStateOf(false) }
+    var pressPoint by remember(def.id) { mutableStateOf(Offset.Unspecified) }
+    val pressProgress by animateFloatAsState(
+        targetValue = if (pressed) 1f else 0f,
+        animationSpec = spring(dampingRatio = 0.55f, stiffness = 900f),
+        label = "keyPress",
+    )
     val bg by animateColorAsState(
-        targetValue = if (pressed) lerp(baseBg, baseFg, 0.18f) else baseBg,
-        animationSpec = tween(70),
+        targetValue = if (pressed) lerp(baseBg, baseFg, 0.16f) else baseBg,
+        animationSpec = tween(80),
         label = "keyBackground",
     )
-    val scale by animateFloatAsState(
-        targetValue = if (pressed) 0.955f else 1f,
-        animationSpec = spring(
-            dampingRatio = 0.82f,
-            stiffness = Spring.StiffnessHigh,
-        ),
-        label = "keyScale",
+    val borderColor by animateColorAsState(
+        targetValue = if (pressed) baseFg.copy(alpha = 0.22f) else borderBase,
+        animationSpec = tween(80),
+        label = "keyBorder",
     )
+    val scale = 1f - 0.05f * pressProgress
     val onKeyState by rememberUpdatedState(onKey)
     val scope = rememberCoroutineScope()
 
@@ -989,9 +1376,29 @@ private fun CalcKey(
             .clip(shape)
             .background(bg)
             .border(BorderStroke(1.dp, borderColor), shape)
+            .drawWithContent {
+                drawContent()
+                if (pressProgress > 0.01f && pressPoint.isSpecified) {
+                    val radius = size.maxDimension * (0.35f + 0.9f * pressProgress)
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                baseFg.copy(alpha = 0.20f * pressProgress),
+                                baseFg.copy(alpha = 0.05f * pressProgress),
+                                Color.Transparent,
+                            ),
+                            center = pressPoint,
+                            radius = radius,
+                        ),
+                        radius = radius,
+                        center = pressPoint,
+                    )
+                }
+            }
             .pointerInput(def, onKeyState) {
                 detectTapGestures(
-                    onPress = {
+                    onPress = { offset ->
+                        pressPoint = offset
                         pressed = true
                         onKeyState(def)
                         var repeatJob: Job? = null
@@ -1016,6 +1423,9 @@ private fun CalcKey(
             .semantics {
                 role = Role.Button
                 contentDescription = label
+                if (def.kind == KeyKind.MODIFIER) {
+                    stateDescription = if (active) "On" else "Off"
+                }
                 onClick {
                     onKeyState(def)
                     true
@@ -1029,9 +1439,10 @@ private fun CalcKey(
                     def.shiftLabel,
                     modifier = Modifier
                         .align(Alignment.TopStart)
-                        .padding(start = 6.dp, top = 2.dp),
+                        .padding(start = 7.dp, top = 3.dp),
                     style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.5.sp),
-                    color = scheme.tertiary,
+                    fontWeight = FontWeight.SemiBold,
+                    color = scheme.tertiary.copy(alpha = 0.95f),
                     maxLines = 1,
                 )
             }
@@ -1040,9 +1451,10 @@ private fun CalcKey(
                     def.alphaLabel,
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(end = 6.dp, top = 2.dp),
+                        .padding(end = 7.dp, top = 3.dp),
                     style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.5.sp),
-                    color = scheme.secondary,
+                    fontWeight = FontWeight.SemiBold,
+                    color = scheme.secondary.copy(alpha = 0.95f),
                     maxLines = 1,
                 )
             }
@@ -1061,30 +1473,35 @@ private fun CalcKey(
             }
             Icon(
                 icon,
-                contentDescription = def.label,
-                tint = baseFg,
+                contentDescription = null,
+                tint = labelColor,
                 modifier = Modifier.size(if (def.label == "DEL") 22.dp else 26.dp),
             )
         } else {
             val size = when {
-                def.kind == KeyKind.DIGIT -> if (big) 30.sp else 21.sp
-                def.kind == KeyKind.OPERATOR -> if (big) 30.sp else 23.sp
-                def.kind == KeyKind.EQUALS -> if (big) 32.sp else 25.sp
-                def.kind == KeyKind.MODIFIER -> 10.sp
-                label.length <= 2 -> if (big) 22.sp else 16.sp
-                label.length == 3 -> if (big) 18.sp else 13.sp
-                else -> if (big) 15.sp else 11.sp
+                def.kind == KeyKind.DIGIT -> if (big) 32.sp else 20.sp
+                def.kind == KeyKind.OPERATOR -> if (big) 32.sp else 22.sp
+                def.kind == KeyKind.EQUALS -> if (big) 34.sp else 24.sp
+                def.kind == KeyKind.MODIFIER -> if (big) 11.sp else 9.sp
+                label.length <= 1 -> if (big) 26.sp else 17.sp
+                label.length == 2 -> if (big) 22.sp else 14.5.sp
+                label.length == 3 -> if (big) 18.sp else 12.sp
+                else -> if (big) 15.sp else 10.5.sp
             }
             Text(
                 text = label,
                 modifier = Modifier.padding(top = topPad),
                 style = MaterialTheme.typography.titleMedium.copy(
                     fontSize = size,
+                    lineHeight = (size.value * 1.1f).sp,
                     fontWeight = when (def.kind) {
                         KeyKind.DIGIT -> FontWeight.SemiBold
                         KeyKind.EQUALS -> FontWeight.Bold
+                        KeyKind.MODIFIER -> FontWeight.SemiBold
                         else -> FontWeight.Medium
                     },
+                    letterSpacing = (-0.2).sp,
+                    fontFeatureSettings = "tnum",
                 ),
                 color = labelColor,
                 textAlign = TextAlign.Center,
@@ -1094,6 +1511,7 @@ private fun CalcKey(
         }
     }
 }
+
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // SHEETS
