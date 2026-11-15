@@ -22,6 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.data.cleaner.StorageInfo
+import com.frerox.toolz.ui.components.ExpressiveCard
 
 @Composable
 fun CleanerOverviewCard(
@@ -77,10 +78,12 @@ private fun MiniStat(
     accent: Color,
     onClick: (() -> Unit)? = null
 ) {
-    Surface(
-        modifier = modifier.then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+    ExpressiveCard(
+        modifier = modifier,
         shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        onClick = onClick ?: {},
+        enabled = onClick != null,
     ) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Icon(icon, null, Modifier.size(16.dp), tint = accent)
@@ -98,10 +101,10 @@ fun CleanerDashboardHeader(
     onOpenTrash: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
-    Surface(
+    ExpressiveCard(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(22.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerLow
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow
     ) {
         Box(modifier = Modifier.padding(16.dp)) {
             CleanerStorageArc(storageInfo, cleanableBytes)

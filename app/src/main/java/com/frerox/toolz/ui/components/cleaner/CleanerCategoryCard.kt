@@ -55,10 +55,10 @@ fun CleanerCategoryCard(
         if (totalCleanableBytes > 0) (category.totalSize.toFloat() / totalCleanableBytes).coerceIn(0f, 1f) else 0f
     }
 
-    Surface(
+    com.frerox.toolz.ui.components.ExpressiveCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
         onClick = { vibration?.vibrateClick(); onOpenSheet() }
     ) {
         Column(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
