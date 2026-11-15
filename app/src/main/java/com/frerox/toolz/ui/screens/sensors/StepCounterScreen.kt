@@ -622,10 +622,10 @@ private fun StatChip(
     modifier: Modifier = Modifier,
     valueColor: Color = MaterialTheme.colorScheme.onSurface
 ) {
-    Surface(
+    ExpressiveCard(
         modifier = modifier,
         shape = SmallExpressiveShape,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
     ) {
         Column(
             modifier = Modifier

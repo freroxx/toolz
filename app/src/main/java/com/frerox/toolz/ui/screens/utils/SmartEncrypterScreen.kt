@@ -457,10 +457,9 @@ fun SmartEncrypterScreen(
                                     Icon(Icons.Rounded.Timer, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                                     Text(stringResource(R.string.st_SmartEncrypterScreen_u7v8), style = MaterialTheme.typography.bodyMedium)
                                 }
-                                Switch(
+                                com.frerox.toolz.ui.components.ExpressiveSwitch(
                                     checked = uiState.isAutoClearEnabled,
                                     onCheckedChange = { viewModel.toggleAutoClear() },
-                                    modifier = Modifier.scale(0.8f)
                                 )
                             }
                         }
@@ -994,7 +993,7 @@ private fun FileModePanel(
                                     Icon(Icons.Rounded.DriveFileRenameOutline, null, modifier = Modifier.size(18.dp), tint = if (isRenamerEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                                     Text("Custom output name", style = MaterialTheme.typography.labelLarge)
                                 }
-                                Switch(checked = isRenamerEnabled, onCheckedChange = { onToggleRenamer() }, modifier = Modifier.scale(0.7f))
+                                com.frerox.toolz.ui.components.ExpressiveSwitch(checked = isRenamerEnabled, onCheckedChange = { onToggleRenamer() })
                             }
                             
                             AnimatedVisibility(visible = isRenamerEnabled) {
@@ -1987,7 +1986,7 @@ fun FullScreenQrDialog(
                                     Icon(Icons.AutoMirrored.Rounded.StickyNote2, null, tint = MaterialTheme.colorScheme.primary)
                                     Text("Include note", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                                 }
-                                Switch(
+                                com.frerox.toolz.ui.components.ExpressiveSwitch(
                                     checked = isNoteEnabled,
                                     onCheckedChange = { onUpdateCustomization(foreColor, backColor, dotStyle, noteText.ifEmpty { "Your note" }, noteSize, notePosition, it) }
                                 )

@@ -93,9 +93,8 @@ import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
-import androidx.compose.material3.Slider
+import com.frerox.toolz.ui.components.ExpressiveSlider
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
@@ -1267,11 +1266,10 @@ private fun SettingsSheet(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     val unit = settings.unit
-                    Slider(
+                    ExpressiveSlider(
                         value = settings.speedLimit.toFloat(),
                         onValueChange = { onLimit(it.roundToInt()) },
                         valueRange = unit.limitMin.toFloat()..unit.limitMax.toFloat(),
-                        steps = (unit.limitMax - unit.limitMin) / 5 - 1,
                         modifier = Modifier.weight(1f),
                     )
                     Text(
@@ -1308,11 +1306,10 @@ private fun SettingsSheet(
                     modifier = Modifier.padding(horizontal = 24.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Slider(
+                    ExpressiveSlider(
                         value = settings.strideCm.toFloat(),
                         onValueChange = { onStride(it.roundToInt()) },
                         valueRange = STRIDE_MIN_CM.toFloat()..STRIDE_MAX_CM.toFloat(),
-                        steps = (STRIDE_MAX_CM - STRIDE_MIN_CM) / 5 - 1,
                         modifier = Modifier.weight(1f),
                     )
                     Text(
@@ -1371,7 +1368,12 @@ private fun SettingsSwitch(
     ListItem(
         headlineContent = { Text(title) },
         supportingContent = supporting,
-        trailingContent = { Switch(checked = checked, onCheckedChange = null) },
+        trailingContent = {
+            com.frerox.toolz.ui.components.ExpressiveSwitch(
+                checked = checked,
+                onCheckedChange = {}, // tap handled by ListItem.clickable above
+            )
+        },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         modifier = Modifier
             .fillMaxWidth()

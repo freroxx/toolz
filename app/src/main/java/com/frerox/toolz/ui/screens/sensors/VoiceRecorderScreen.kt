@@ -297,12 +297,10 @@ private fun RecordingStatusCard(
     else
         MaterialTheme.colorScheme.primary
 
-    ElevatedCard(
+    ExpressiveCard(
         modifier = modifier,
         shape = LargeExpressiveShape,
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-        )
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow
     ) {
         Column(
             modifier = Modifier
@@ -914,7 +912,7 @@ fun VoiceRecorderSettingsSheet(
             )
 
             // Gain
-            ElevatedCard(shape = SquircleShape) {
+            ExpressiveCard(shape = SquircleShape, modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -938,7 +936,7 @@ fun VoiceRecorderSettingsSheet(
             }
 
             // Background recording
-            ElevatedCard(shape = SquircleShape) {
+            ExpressiveCard(shape = SquircleShape, modifier = Modifier.fillMaxWidth()) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()

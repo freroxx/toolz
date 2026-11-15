@@ -224,12 +224,22 @@ private fun CompassContent(
                     contentAlignment = Alignment.Center
                 ) {
                     // Soft Outer Shadow/Ring
-                    Surface(
-                        modifier = Modifier.fillMaxSize(),
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.15f),
-                        border = if (state.isFullScreen) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
-                    ) {}
+                    if (com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled.current) {
+                        val backdrop = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassBackdrop.current
+                        com.frerox.toolz.ui.liquidglass.GlassCard(
+                            backdrop = backdrop,
+                            modifier = Modifier.fillMaxSize(),
+                            shape = CircleShape,
+                            tint = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.15f),
+                        ) {}
+                    } else {
+                        Surface(
+                            modifier = Modifier.fillMaxSize(),
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.15f),
+                            border = if (state.isFullScreen) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
+                        ) {}
+                    }
 
                     val onSurface = MaterialTheme.colorScheme.onSurface
                     val cardinalLabelStyle = TextStyle(
