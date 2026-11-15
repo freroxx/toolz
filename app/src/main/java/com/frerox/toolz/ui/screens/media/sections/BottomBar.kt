@@ -58,6 +58,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.annotation.OptIn as AnnotationOptIn
 import androidx.media3.common.util.UnstableApi
+import com.frerox.toolz.ui.liquidglass.GlassCard
+import com.frerox.toolz.ui.liquidglass.LocalLiquidGlassBackdrop
+import com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled
+import com.frerox.toolz.ui.liquidglass.liquidGlassEffect
 import coil3.compose.AsyncImage
 import com.frerox.toolz.data.music.MusicTrack
 import com.frerox.toolz.ui.components.*
@@ -168,16 +172,10 @@ private fun PillTabRow(
     selectedTab: Int,
     onTabChange: (Int) -> Unit
 ) {
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp)
-            .height(64.dp),
-        shape = CircleShape,
-        color = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp).copy(alpha = 0.85f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.1f)),
-        shadowElevation = 8.dp
-    ) {
+    val liquidGlassEnabled = LocalLiquidGlassEnabled.current
+    val backdrop = LocalLiquidGlassBackdrop.current
+
+    val rowContent = @Composable {
         Row(
             modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
@@ -192,8 +190,15 @@ private fun PillTabRow(
                         .padding(vertical = 6.dp, horizontal = 2.dp)
                         .clip(CircleShape)
                         .background(
-                            if (selected) MaterialTheme.colorScheme.primaryContainer
-                            else Color.Transparent
+                            if (selected) {
+                                if (liquidGlassEnabled) MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
+                                else MaterialTheme.colorScheme.primaryContainer
+                            } else Color.Transparent
+                        )
+                        .then(
+                            if (selected && liquidGlassEnabled) {
+                                Modifier.border(1.dp, Color.White.copy(alpha = 0.35f), CircleShape)
+                            } else Modifier
                         )
                         .clickable { onTabChange(index) },
                     contentAlignment = Alignment.Center
@@ -204,8 +209,10 @@ private fun PillTabRow(
                     ) {
                         Icon(
                             icon, null, modifier = Modifier.size(24.dp),
-                            tint = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
-                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                            tint = if (selected) {
+                                if (liquidGlassEnabled) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onPrimaryContainer
+                            } else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
                         )
                         AnimatedVisibility(
                             visible = selected,
@@ -216,7 +223,8 @@ private fun PillTabRow(
                                 label,
                                 fontWeight = FontWeight.SemiBold,
                                 style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                color = if (selected && liquidGlassEnabled) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onPrimaryContainer,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -224,6 +232,33 @@ private fun PillTabRow(
                     }
                 }
             }
+        }
+    }
+
+    if (liquidGlassEnabled && backdrop != null) {
+        GlassCard(
+            backdrop = backdrop,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .height(64.dp),
+            shape = CircleShape,
+            tint = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)
+        ) {
+            rowContent()
+        }
+    } else {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .height(64.dp),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp).copy(alpha = 0.85f),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.1f)),
+            shadowElevation = 8.dp
+        ) {
+            rowContent()
         }
     }
 }
@@ -407,22 +442,26 @@ fun MiniPlayer(
         )
 
         val miniPlayerShape = RoundedCornerShape(cornerRadius)
-        Box(
-            modifier = Modifier
-                // Shadow first, BEFORE clip — shadow needs to paint outside the
-                // shape's bounds (that's the whole point of a shadow), so it must
-                // not be clipped. clip = false here is what actually fixes the
-                // dark square scrim: Surface's shadowElevation draws its shadow as
-                // a separate rectangular graphicsLayer pass that wasn't reliably
-                // re-clipping to `shape` on every frame while cornerRadius was
-                // mid-animation, so a faint dark rectangle leaked out from behind
-                // the rounded pill. Modifier.shadow always re-evaluates against
-                // the live `shape` instance we pass it, so it stays in sync with
-                // the animated corner radius every frame.
+        val liquidGlassEnabled = LocalLiquidGlassEnabled.current
+        val backdrop = LocalLiquidGlassBackdrop.current
+
+        val containerModifier = if (liquidGlassEnabled && backdrop != null) {
+            Modifier
+                .shadow(elevation, miniPlayerShape, clip = false)
+                .liquidGlassEffect(
+                    shape = miniPlayerShape,
+                    tint = lighterSurface.copy(alpha = 0.25f)
+                )
+        } else {
+            Modifier
                 .shadow(elevation, miniPlayerShape, clip = false)
                 .clip(miniPlayerShape)
                 .background(Brush.verticalGradient(listOf(lighterSurface.copy(alpha = 0.9f), darkerSurface.copy(alpha = 0.9f))))
                 .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.1f), miniPlayerShape)
+        }
+
+        Box(
+            modifier = containerModifier
         ) {
             Box(
                 modifier = Modifier
@@ -651,7 +690,8 @@ fun MiniPlayer(
 
                     // Play/Pause
                     ToolzExpressiveButton(
-                        onClick = if (isResolving) ({}) else onTogglePlay,
+                        onClick = onTogglePlay,
+                        enabled = !isResolving,
                         modifier = Modifier.size(54.dp).alpha(if (isResolving) 0.6f else 1f),
                         shape = CircleShape,
                         contentPadding = PaddingValues(0.dp),

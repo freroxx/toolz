@@ -2685,13 +2685,9 @@ private fun SettingsToggleRow(
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.48f))
                 }
             }
-            Switch(
+            com.frerox.toolz.ui.components.ExpressiveSwitch(
                 checked         = checked,
                 onCheckedChange = onCheckedChange,
-                colors          = SwitchDefaults.colors(
-                    checkedThumbColor = MaterialTheme.colorScheme.primary,
-                    checkedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
-                )
             )
         }
     }

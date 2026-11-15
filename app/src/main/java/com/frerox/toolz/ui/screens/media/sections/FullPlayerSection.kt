@@ -155,6 +155,10 @@ import com.frerox.toolz.ui.components.dragDropColumn
 import com.frerox.toolz.ui.components.dragDropItem
 import com.frerox.toolz.ui.components.SquigglySlider
 import com.frerox.toolz.ui.components.KaraokeMicIcon
+import com.frerox.toolz.ui.liquidglass.GlassCard
+import com.frerox.toolz.ui.liquidglass.LocalLiquidGlassBackdrop
+import com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled
+import com.frerox.toolz.ui.liquidglass.liquidGlassEffect
 import com.frerox.toolz.ui.screens.media.*
 import com.frerox.toolz.ui.screens.media.ai.*
 import com.frerox.toolz.ui.screens.media.catalog.*
@@ -1043,21 +1047,21 @@ fun FullPlayerView(
                             // ── 4. Slider ──
                             Spacer(Modifier.height(18.dp))
                             val currentPos = sliderPos ?: playbackPosition
-                            // Track-switched slider: snap to 0 on new track (no cross-track glide),
-                            // then fast smooth glide for normal progress. While scrubbing/tapping
-                            // (sliderPos != null) drive 1:1 with no delay; after finger lifts,
-                            // snap then fast 180ms glide to seek target.
+                            // Track-switched slider: snap instantly on new track, tap, or seek (> 1.5s delta),
+                            // and smooth 180ms glide only for incremental playback progress.
                             val sliderAnim = remember(track.uri) { Animatable(currentPos.toFloat()) }
+                            val lastPos = remember(track.uri) { mutableFloatStateOf(currentPos.toFloat()) }
                             LaunchedEffect(currentPos, state.performanceMode, sliderPos) {
                                 val target = currentPos.toFloat()
-                                if (state.performanceMode || sliderPos != null) {
-                                    // Direct finger tracking — no tween, feels instant on tap/drag.
+                                val delta = kotlin.math.abs(target - lastPos.floatValue)
+                                val isJump = delta > 1500f || target < sliderAnim.value
+                                lastPos.floatValue = target
+                                if (state.performanceMode || sliderPos != null || isJump) {
+                                    // Direct finger tracking or instant snap on tap/seek/skip — zero sluggish lag!
                                     sliderAnim.snapTo(target)
                                 } else {
-                                    // Fast smooth glide for playback progress (180ms). The
-                                    // Animatable was already at 0 for a fresh track via
-                                    // remember(track.uri), so a skip at 0s stays at 0.
-                                    sliderAnim.animateTo(target, tween(180, easing = FastOutSlowInEasing))
+                                    // Smooth glide for tiny 100ms playback progress ticks
+                                    sliderAnim.animateTo(target, tween(180, easing = LinearEasing))
                                 }
                             }
                             val sliderValue = if (sliderPos != null) currentPos.toFloat() else sliderAnim.value
@@ -1161,11 +1165,10 @@ fun FullPlayerView(
 
                             // ── 6. Secondary controls — segmented toggle group ──
                             Spacer(Modifier.height(16.dp))
-                            Surface(
-                                modifier = Modifier.fillMaxWidth().height(56.dp),
-                                shape = RoundedCornerShape(28.dp),
-                                color = MaterialTheme.colorScheme.surfaceContainerHigh
-                            ) {
+                            val liquidGlassEnabled = LocalLiquidGlassEnabled.current
+                            val backdrop = LocalLiquidGlassBackdrop.current
+
+                            val secondaryContent = @Composable {
                                 Row(
                                     modifier = Modifier.fillMaxSize().padding(horizontal = 6.dp),
                                     horizontalArrangement = Arrangement.SpaceEvenly,
@@ -1219,6 +1222,25 @@ fun FullPlayerView(
                                             contentDescription = stringResource(R.string.st_MusicPlayerScreen_ail73)
                                         )
                                     }
+                                }
+                            }
+
+                            if (liquidGlassEnabled && backdrop != null) {
+                                GlassCard(
+                                    backdrop = backdrop,
+                                    modifier = Modifier.fillMaxWidth().height(56.dp),
+                                    shape = RoundedCornerShape(28.dp),
+                                    tint = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.25f)
+                                ) {
+                                    secondaryContent()
+                                }
+                            } else {
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth().height(56.dp),
+                                    shape = RoundedCornerShape(28.dp),
+                                    color = MaterialTheme.colorScheme.surfaceContainerHigh
+                                ) {
+                                    secondaryContent()
                                 }
                             }
 

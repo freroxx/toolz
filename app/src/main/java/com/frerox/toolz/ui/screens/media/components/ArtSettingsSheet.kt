@@ -87,7 +87,7 @@ fun ArtSettingsSheet(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                Switch(
+                com.frerox.toolz.ui.components.ExpressiveSwitch(
                     checked = rotationEnabled,
                     onCheckedChange = { onToggleRotation() }
                 )

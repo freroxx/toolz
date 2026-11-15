@@ -44,7 +44,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SheetState
-import androidx.compose.material3.Slider
+import com.frerox.toolz.ui.components.ExpressiveSlider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -289,7 +289,7 @@ fun BackgroundPickerSheet(
                                 )
                             )
                     )
-                    Slider(
+                    ExpressiveSlider(
                         value = value,
                         onValueChange = { v ->
                             value = v
@@ -395,7 +395,7 @@ fun BackgroundPickerSheet(
                                         color = MaterialTheme.colorScheme.primary,
                                     )
                                 }
-                                Slider(
+                                ExpressiveSlider(
                                     value = current.blurRadius,
                                     onValueChange = { onSelect(current.copy(blurRadius = it)) },
                                     valueRange = 0f..1f,
@@ -421,7 +421,7 @@ fun BackgroundPickerSheet(
                                         color = MaterialTheme.colorScheme.primary,
                                     )
                                 }
-                                Slider(
+                                ExpressiveSlider(
                                     value = current.dimAmount,
                                     onValueChange = { onSelect(current.copy(dimAmount = it)) },
                                     valueRange = 0f..0.8f,
