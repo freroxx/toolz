@@ -74,18 +74,20 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Backspace
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Calculate
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.History
-import androidx.compose.material.icons.rounded.KeyboardArrowLeft
-import androidx.compose.material.icons.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -95,10 +97,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -118,18 +121,18 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -278,7 +281,10 @@ fun CalculatorScreen(
     if (showHistorySheet) {
         ModalBottomSheet(
             onDismissRequest = { showHistorySheet = false },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            sheetState = rememberBottomSheetState(
+                initialValue = SheetValue.Hidden,
+                enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
+            ),
             shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
             dragHandle = {
@@ -332,7 +338,10 @@ private fun ToolSheet(
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        sheetState = rememberBottomSheetState(
+            initialValue = SheetValue.Hidden,
+            enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
+        ),
         shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         dragHandle = {
@@ -395,6 +404,7 @@ private fun CalculatorMain(
         }
         viewModel.onKey(def)
     }
+    val onRepeatKey: (KeyDef) -> Unit = { viewModel.onKey(it) }
 
     Column(modifier = modifier.fillMaxSize()) {
         StatusStrip(state, viewModel)
@@ -410,6 +420,7 @@ private fun CalculatorMain(
         CalculatorKeypad(
             state = state,
             onKey = onKey,
+            onRepeatKey = onRepeatKey,
             modifier = Modifier
                 .weight(padWeight)
                 .fillMaxWidth()
@@ -813,7 +824,10 @@ private fun ScrollingExpression(
         val viewport = with(density) { maxWidth.toPx() }
         val rightInset = with(density) { 18.dp.toPx() }
         val textWidth = layout?.size?.width?.toFloat() ?: 0f
-        val caretX = layout?.getHorizontalPosition(cur, usePrimaryDirection = true) ?: 0f
+        val caretX = layout?.let { current ->
+            val safe = cur.coerceIn(0, current.layoutInput.text.length)
+            current.getHorizontalPosition(safe, usePrimaryDirection = true)
+        } ?: 0f
         val targetShift = when {
             layout == null -> 0f
             textWidth <= viewport - rightInset -> viewport - textWidth - rightInset
@@ -915,7 +929,6 @@ private fun ResultArea(
         Box(
             modifier = Modifier
                 .weight(1f)
-                .fillMaxHeight()
                 .clickable(
                     enabled = hasResult,
                     interactionSource = resultInteraction,
@@ -1032,7 +1045,9 @@ private fun ErrorChip(text: String, modifier: Modifier = Modifier) {
     }
 
     Surface(
-        modifier = modifier.offset { IntOffset(offsetX.roundToInt(), 0) },
+        modifier = modifier
+            .offset { IntOffset(offsetX.roundToInt(), 0) }
+            .semantics { liveRegion = LiveRegionMode.Polite },
         shape = SmallExpressiveShape,
         color = scheme.errorContainer,
         contentColor = scheme.onErrorContainer,
@@ -1064,23 +1079,22 @@ private fun ResultText(
     sizeSp: Float,
     color: Color,
     weight: FontWeight = FontWeight.SemiBold,
-    align: Alignment.Horizontal = Alignment.End,
 ) {
-    val len = if (line.num != null) maxOf(line.num.length, line.den?.length ?: 0) + 2 else line.text.length
-    val factor = when {
-        len > 22 -> 0.56f
-        len > 16 -> 0.72f
-        len > 11 -> 0.86f
-        else -> 1f
-    }
-    val style = MaterialTheme.typography.displaySmall.copy(
-        fontSize = (sizeSp * factor).sp,
-        fontWeight = weight,
-        lineHeight = (sizeSp * factor * 1.15f).sp,
-        letterSpacing = (-0.6).sp,
-        fontFeatureSettings = "tnum",
-    )
     if (line.num != null && line.den != null) {
+        val len = maxOf(line.num.length, line.den.length) + 2
+        val factor = when {
+            len > 22 -> 0.56f
+            len > 16 -> 0.72f
+            len > 11 -> 0.86f
+            else -> 1f
+        }
+        val style = MaterialTheme.typography.displaySmall.copy(
+            fontSize = (sizeSp * factor).sp,
+            fontWeight = weight,
+            lineHeight = (sizeSp * factor * 1.15f).sp,
+            letterSpacing = (-0.6).sp,
+            fontFeatureSettings = "tnum",
+        )
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1098,7 +1112,10 @@ private fun ResultText(
                 ) {
                     Text(
                         line.num,
-                        style = style.copy(fontSize = style.fontSize * 0.8f),
+                        style = style.copy(
+                            fontSize = style.fontSize * 0.72f,
+                            lineHeight = style.lineHeight * 0.72f,
+                        ),
                         color = color,
                         maxLines = 1,
                         softWrap = false,
@@ -1110,7 +1127,10 @@ private fun ResultText(
                     )
                     Text(
                         line.den,
-                        style = style.copy(fontSize = style.fontSize * 0.8f),
+                        style = style.copy(
+                            fontSize = style.fontSize * 0.72f,
+                            lineHeight = style.lineHeight * 0.72f,
+                        ),
                         color = color,
                         maxLines = 1,
                         softWrap = false,
@@ -1119,26 +1139,40 @@ private fun ResultText(
             }
         }
     } else {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalFadingEdges(left = 12.dp, right = 12.dp)
-                .horizontalScroll(rememberScrollState(), reverseScrolling = true),
-            contentAlignment = when (align) {
-                Alignment.Start -> Alignment.CenterStart
-                Alignment.CenterHorizontally -> Alignment.Center
-                else -> Alignment.CenterEnd
+        val needsAutoSize = line.text.length > 7
+        Text(
+            text = line.text,
+            style = if (needsAutoSize) {
+                TextStyle(
+                    fontFamily = MaterialTheme.typography.displaySmall.fontFamily,
+                    fontWeight = weight,
+                    letterSpacing = (-0.6).sp,
+                    fontFeatureSettings = "tnum",
+                )
+            } else {
+                MaterialTheme.typography.displaySmall.copy(
+                    fontSize = sizeSp.sp,
+                    fontWeight = weight,
+                    lineHeight = (sizeSp * 1.15f).sp,
+                    letterSpacing = (-0.6).sp,
+                    fontFeatureSettings = "tnum",
+                )
             },
-        ) {
-            Text(
-                line.text,
-                style = style,
-                color = color,
-                maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.Visible,
-            )
-        }
+            color = color,
+            maxLines = 1,
+            softWrap = false,
+            autoSize = if (needsAutoSize) {
+                TextAutoSize.StepBased(
+                    minFontSize = 12.sp,
+                    maxFontSize = sizeSp.sp,
+                    stepSize = 1.sp,
+                )
+            } else {
+                null
+            },
+            textAlign = TextAlign.End,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 
@@ -1160,6 +1194,7 @@ private fun ToastPill(text: String?, modifier: Modifier = Modifier) {
         exit = fadeOut(tween(90)) + scaleOut(targetScale = 0.94f),
     ) {
         Surface(
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
             shape = CircleShape,
             color = MaterialTheme.colorScheme.inverseSurface,
             contentColor = MaterialTheme.colorScheme.inverseOnSurface,
@@ -1190,6 +1225,7 @@ private fun ToastPill(text: String?, modifier: Modifier = Modifier) {
 private fun CalculatorKeypad(
     state: CalculatorState,
     onKey: (KeyDef) -> Unit,
+    onRepeatKey: (KeyDef) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scheme = MaterialTheme.colorScheme
@@ -1237,14 +1273,14 @@ private fun CalculatorKeypad(
             ) {
                 if (scientific) {
                     CalcKeys.fullFunctions.forEach { keys ->
-                        KeyRow(keys, weight = 0.82f, state = state, hints = true, big = false, onKey = onKey)
+                        KeyRow(keys, weight = 0.82f, state = state, hints = true, big = false, onKey = onKey, onRepeatKey = onRepeatKey)
                     }
                     CalcKeys.numbers.forEach { keys ->
-                        KeyRow(keys, weight = 1f, state = state, hints = false, big = false, onKey = onKey)
+                        KeyRow(keys, weight = 1f, state = state, hints = false, big = false, onKey = onKey, onRepeatKey = onRepeatKey)
                     }
                 } else {
                     CalcKeys.basic.forEach { keys ->
-                        KeyRow(keys, weight = 1f, state = state, hints = false, big = true, onKey = onKey)
+                        KeyRow(keys, weight = 1f, state = state, hints = false, big = true, onKey = onKey, onRepeatKey = onRepeatKey)
                     }
                 }
             }
@@ -1260,6 +1296,7 @@ private fun ColumnScope.KeyRow(
     hints: Boolean,
     big: Boolean,
     onKey: (KeyDef) -> Unit,
+    onRepeatKey: (KeyDef) -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -1274,6 +1311,7 @@ private fun ColumnScope.KeyRow(
                 hints = hints,
                 big = big,
                 onKey = onKey,
+                onRepeatKey = onRepeatKey,
                 modifier = Modifier
                     .weight(def.wide)
                     .fillMaxHeight(),
@@ -1289,6 +1327,7 @@ private fun CalcKey(
     hints: Boolean,
     big: Boolean,
     onKey: (KeyDef) -> Unit,
+    onRepeatKey: (KeyDef) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scheme = MaterialTheme.colorScheme
@@ -1365,6 +1404,7 @@ private fun CalcKey(
     )
     val scale = 1f - 0.05f * pressProgress
     val onKeyState by rememberUpdatedState(onKey)
+    val onRepeatKeyState by rememberUpdatedState(onRepeatKey)
     val scope = rememberCoroutineScope()
 
     Box(
@@ -1377,7 +1417,6 @@ private fun CalcKey(
             .background(bg)
             .border(BorderStroke(1.dp, borderColor), shape)
             .drawWithContent {
-                drawContent()
                 if (pressProgress > 0.01f && pressPoint.isSpecified) {
                     val radius = size.maxDimension * (0.35f + 0.9f * pressProgress)
                     drawCircle(
@@ -1394,8 +1433,9 @@ private fun CalcKey(
                         center = pressPoint,
                     )
                 }
+                drawContent()
             }
-            .pointerInput(def, onKeyState) {
+            .pointerInput(def.id) {
                 detectTapGestures(
                     onPress = { offset ->
                         pressPoint = offset
@@ -1406,7 +1446,7 @@ private fun CalcKey(
                             repeatJob = scope.launch {
                                 delay(400)
                                 while (true) {
-                                    onKeyState(def)
+                                    onRepeatKeyState(def)
                                     delay(55)
                                 }
                             }
@@ -1420,9 +1460,14 @@ private fun CalcKey(
                     },
                 )
             }
-            .semantics {
+            .clearAndSetSemantics {
                 role = Role.Button
-                contentDescription = label
+                contentDescription = when (def.id) {
+                    "left" -> "Move cursor left"
+                    "right" -> "Move cursor right"
+                    "del", "b_del" -> "Delete"
+                    else -> label
+                }
                 if (def.kind == KeyKind.MODIFIER) {
                     stateDescription = if (active) "On" else "Off"
                 }
@@ -1467,8 +1512,8 @@ private fun CalcKey(
         }
         if (showIcon) {
             val icon = when (def.id) {
-                "left" -> Icons.Rounded.KeyboardArrowLeft
-                "right" -> Icons.Rounded.KeyboardArrowRight
+                "left" -> Icons.AutoMirrored.Rounded.KeyboardArrowLeft
+                "right" -> Icons.AutoMirrored.Rounded.KeyboardArrowRight
                 else -> Icons.AutoMirrored.Rounded.Backspace
             }
             Icon(
@@ -1518,32 +1563,278 @@ private fun CalcKey(
 // ═══════════════════════════════════════════════════════════════════════════════
 
 @Composable
-private fun SheetTitle(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.titleLarge,
-        fontWeight = FontWeight.Bold,
-        modifier = Modifier.padding(top = 4.dp, bottom = 14.dp),
+private fun SheetHeader(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    trailing: (@Composable () -> Unit)? = null,
+) {
+    val scheme = MaterialTheme.colorScheme
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 2.dp, bottom = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .clip(RoundedCornerShape(15.dp))
+                .background(scheme.primaryContainer.copy(alpha = 0.55f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                modifier = Modifier.size(22.dp),
+                tint = scheme.primary,
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = scheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (trailing != null) {
+            Spacer(Modifier.width(8.dp))
+            trailing()
+        }
+    }
+}
+
+@Composable
+private fun SectionLabel(text: String, icon: ImageVector? = null) {
+    Row(
+        modifier = Modifier.padding(top = 6.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        if (icon != null) {
+            Icon(
+                icon,
+                contentDescription = null,
+                modifier = Modifier.size(13.dp),
+                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
+            )
+        }
+        Text(
+            text.uppercase(),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.primary,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.2.sp,
+        )
+    }
+}
+
+@Composable
+private fun SheetSearchField(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    placeholder: String,
+) {
+    val scheme = MaterialTheme.colorScheme
+    OutlinedTextField(
+        value = query,
+        onValueChange = onQueryChange,
+        modifier = Modifier.fillMaxWidth(),
+        singleLine = true,
+        placeholder = {
+            Text(
+                placeholder,
+                style = MaterialTheme.typography.bodyMedium,
+                color = scheme.onSurfaceVariant.copy(alpha = 0.7f),
+            )
+        },
+        leadingIcon = {
+            Icon(
+                Icons.Rounded.Search,
+                contentDescription = null,
+                modifier = Modifier.size(19.dp),
+                tint = scheme.onSurfaceVariant,
+            )
+        },
+        trailingIcon = {
+            AnimatedVisibility(
+                visible = query.isNotEmpty(),
+                enter = fadeIn(tween(100)) + scaleIn(initialScale = 0.7f),
+                exit = fadeOut(tween(100)) + scaleOut(targetScale = 0.7f),
+            ) {
+                IconButton(onClick = { onQueryChange("") }) {
+                    Icon(
+                        Icons.Rounded.Close,
+                        contentDescription = "Clear search",
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+        },
+        shape = RoundedCornerShape(18.dp),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = scheme.primary.copy(alpha = 0.55f),
+            unfocusedBorderColor = scheme.outlineVariant.copy(alpha = 0.45f),
+            focusedContainerColor = scheme.surfaceContainerHigh.copy(alpha = 0.55f),
+            unfocusedContainerColor = scheme.surfaceContainerHigh.copy(alpha = 0.55f),
+            cursorColor = scheme.primary,
+        ),
     )
 }
 
 @Composable
-private fun SectionLabel(text: String) {
-    Text(
-        text.uppercase(),
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.primary,
-        fontWeight = FontWeight.Bold,
-        letterSpacing = 1.2.sp,
-        modifier = Modifier.padding(top = 6.dp, bottom = 6.dp),
-    )
+private fun SheetEmptyState(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    modifier: Modifier = Modifier,
+) {
+    val scheme = MaterialTheme.colorScheme
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(64.dp)
+                .clip(CircleShape)
+                .background(scheme.primaryContainer.copy(alpha = 0.4f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                modifier = Modifier.size(28.dp),
+                tint = scheme.primary.copy(alpha = 0.8f),
+            )
+        }
+        Spacer(Modifier.height(14.dp))
+        Text(
+            title,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            subtitle,
+            style = MaterialTheme.typography.bodySmall,
+            color = scheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+@Composable
+private fun DigitStepper(
+    label: String,
+    caption: String,
+    value: Int,
+    range: IntRange,
+    onValueChange: (Int) -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    Surface(
+        shape = RoundedCornerShape(22.dp),
+        color = scheme.surfaceContainerHigh.copy(alpha = 0.65f),
+        border = BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = 0.3f)),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    label,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
+                )
+                Text(
+                    caption,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = scheme.onSurfaceVariant,
+                )
+            }
+            FilledTonalIconButton(
+                onClick = { onValueChange(value - 1) },
+                enabled = value > range.first,
+                modifier = Modifier.size(36.dp),
+                shape = SmallExpressiveShape,
+                colors = IconButtonDefaults.filledTonalIconButtonColors(
+                    containerColor = scheme.surfaceContainerHighest,
+                    contentColor = scheme.primary,
+                ),
+            ) {
+                Icon(
+                    Icons.Rounded.Remove,
+                    contentDescription = "Fewer digits",
+                    modifier = Modifier.size(17.dp),
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .padding(horizontal = 6.dp)
+                    .size(width = 42.dp, height = 36.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(scheme.primaryContainer.copy(alpha = 0.45f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                AnimatedContent(
+                    targetState = value,
+                    transitionSpec = {
+                        (fadeIn(tween(130)) + scaleIn(initialScale = 0.8f)) togetherWith
+                            (fadeOut(tween(90)) + scaleOut(targetScale = 0.8f))
+                    },
+                    label = "digitValue",
+                ) { digits ->
+                    Text(
+                        digits.toString(),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = scheme.onPrimaryContainer,
+                    )
+                }
+            }
+            FilledTonalIconButton(
+                onClick = { onValueChange(value + 1) },
+                enabled = value < range.last,
+                modifier = Modifier.size(36.dp),
+                shape = SmallExpressiveShape,
+                colors = IconButtonDefaults.filledTonalIconButtonColors(
+                    containerColor = scheme.surfaceContainerHighest,
+                    contentColor = scheme.primary,
+                ),
+            ) {
+                Icon(
+                    Icons.Rounded.Add,
+                    contentDescription = "More digits",
+                    modifier = Modifier.size(17.dp),
+                )
+            }
+        }
+    }
 }
 
 @Composable
 private fun SetupSheetContent(state: CalculatorState, viewModel: CalculatorViewModel) {
-    SheetTitle("Setup")
+    val scheme = MaterialTheme.colorScheme
 
-    SectionLabel("Angle unit")
+    SheetHeader(
+        icon = Icons.Rounded.Tune,
+        title = "Setup",
+        subtitle = "Angle, number format, and exact results",
+    )
+
+    SectionLabel("Angle unit", Icons.Rounded.Functions)
     val angles = AngleUnit.values().toList()
     ToolzConnectedButtonGroup(
         selectedIndex = angles.indexOf(state.angle),
@@ -1552,8 +1843,8 @@ private fun SetupSheetContent(state: CalculatorState, viewModel: CalculatorViewM
         modifier = Modifier.fillMaxWidth(),
     )
 
-    Spacer(Modifier.height(14.dp))
-    SectionLabel("Number format")
+    Spacer(Modifier.height(16.dp))
+    SectionLabel("Number format", Icons.Rounded.Numbers)
     val kinds = FormatKind.values().toList()
     ToolzConnectedButtonGroup(
         selectedIndex = kinds.indexOf(state.fmtKind),
@@ -1561,36 +1852,25 @@ private fun SetupSheetContent(state: CalculatorState, viewModel: CalculatorViewM
         onOptionSelected = { viewModel.onSetFormat(kinds[it], state.fmtDigits) },
         modifier = Modifier.fillMaxWidth(),
     )
-    AnimatedVisibility(visible = state.fmtKind != FormatKind.NORM) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                if (state.fmtKind == FormatKind.FIX) "Decimal places" else "Significant digits − 1",
-                style = MaterialTheme.typography.bodyLarge,
-                modifier = Modifier.weight(1f),
+    AnimatedVisibility(
+        visible = state.fmtKind != FormatKind.NORM,
+        enter = fadeIn(tween(140)) + expandVertically(tween(180)),
+        exit = fadeOut(tween(100)) + shrinkVertically(tween(140)),
+    ) {
+        Column {
+            Spacer(Modifier.height(10.dp))
+            DigitStepper(
+                label = if (state.fmtKind == FormatKind.FIX) "Decimal places" else "Significant digits − 1",
+                caption = "Between 0 and 9 digits",
+                value = state.fmtDigits,
+                range = 0..9,
+                onValueChange = { viewModel.onSetFormat(state.fmtKind, it) },
             )
-            IconButton(onClick = { viewModel.onSetFormat(state.fmtKind, state.fmtDigits - 1) }) {
-                Icon(Icons.Rounded.Remove, contentDescription = "Fewer digits")
-            }
-            Text(
-                state.fmtDigits.toString(),
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.widthIn(min = 28.dp),
-                textAlign = TextAlign.Center,
-            )
-            IconButton(onClick = { viewModel.onSetFormat(state.fmtKind, state.fmtDigits + 1) }) {
-                Icon(Icons.Rounded.Add, contentDescription = "More digits")
-            }
         }
     }
 
-    Spacer(Modifier.height(14.dp))
-    SectionLabel("Exact results")
+    Spacer(Modifier.height(16.dp))
+    SectionLabel("Exact results", Icons.Rounded.SwapHoriz)
     ToolzConnectedButtonGroup(
         selectedIndex = if (state.showFraction) 0 else 1,
         options = listOf("Fractions", "Decimals"),
@@ -1600,23 +1880,61 @@ private fun SetupSheetContent(state: CalculatorState, viewModel: CalculatorViewM
     Text(
         "Fractions stay exact. S⇔D or the n/d status chip flips the result at any time.",
         style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = scheme.onSurfaceVariant,
         modifier = Modifier.padding(top = 10.dp, bottom = 8.dp),
     )
 }
 
 @Composable
-private fun CatalogSheetContent(viewModel: CalculatorViewModel) {
+private fun ColumnScope.CatalogSheetContent(viewModel: CalculatorViewModel) {
     val vibrationManager = LocalVibrationManager.current
     val scheme = MaterialTheme.colorScheme
-    SheetTitle("Catalog")
+    var query by remember { mutableStateOf("") }
+    val needle = query.trim()
+    val sections = remember(needle) {
+        CalcCatalog.sections.mapNotNull { (title, items) ->
+            val matches = if (needle.isBlank()) {
+                items
+            } else {
+                items.filter {
+                    it.label.contains(needle, ignoreCase = true) ||
+                        it.insert.contains(needle, ignoreCase = true) ||
+                        it.hint.contains(needle, ignoreCase = true)
+                }
+            }
+            if (matches.isEmpty()) null else title to matches
+        }
+    }
+
+    SheetHeader(
+        icon = Icons.Rounded.GridView,
+        title = "Catalog",
+        subtitle = "Insert a function at the cursor",
+    )
+    SheetSearchField(
+        query = query,
+        onQueryChange = { query = it },
+        placeholder = "Search functions",
+    )
+    Spacer(Modifier.height(12.dp))
+
+    if (sections.isEmpty()) {
+        SheetEmptyState(
+            icon = Icons.Rounded.Search,
+            title = "No functions found",
+            subtitle = "Try another name, like root, log, or sin.",
+            modifier = Modifier.padding(vertical = 40.dp),
+        )
+        return
+    }
+
     Column(
         modifier = Modifier
-            .heightIn(max = 560.dp)
+            .weight(1f, fill = false)
             .fadingEdges(top = 4.dp, bottom = 16.dp)
             .verticalScroll(rememberScrollState()),
     ) {
-        CalcCatalog.sections.forEach { (title, items) ->
+        sections.forEach { (title, items) ->
             SectionLabel(title)
             FlowRow(
                 modifier = Modifier
@@ -1633,6 +1951,7 @@ private fun CatalogSheetContent(viewModel: CalculatorViewModel) {
                         },
                         shape = MediumExpressiveShape,
                         color = scheme.surfaceContainerHigh,
+                        border = BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = 0.2f)),
                     ) {
                         Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp)) {
                             Text(
@@ -1656,31 +1975,48 @@ private fun CatalogSheetContent(viewModel: CalculatorViewModel) {
 }
 
 @Composable
-private fun ConstantsSheetContent(state: CalculatorState, viewModel: CalculatorViewModel) {
+private fun ColumnScope.ConstantsSheetContent(state: CalculatorState, viewModel: CalculatorViewModel) {
     val scheme = MaterialTheme.colorScheme
     val vibrationManager = LocalVibrationManager.current
     var query by remember { mutableStateOf("") }
+    val needle = query.trim()
     val filtered = CalcConstants.all.filter {
-        query.isBlank() || it.name.contains(query, ignoreCase = true) || it.symbol.contains(query, ignoreCase = true)
+        needle.isBlank() ||
+            it.name.contains(needle, ignoreCase = true) ||
+            it.symbol.contains(needle, ignoreCase = true) ||
+            it.unit.contains(needle, ignoreCase = true) ||
+            it.value.replace("ᴇ", "E").contains(needle, ignoreCase = true)
     }
     val prev = state.activeField.let { field ->
         if (field.cursor > 0 && field.cursor <= field.text.length) field.text[field.cursor - 1] else null
     }
     val needsTimes = prev != null && (prev in '0'..'9' || prev == '.' || prev == ')')
 
-    SheetTitle(stringResource(R.string.st_CalculatorScreen_1b2c))
-    OutlinedTextField(
-        value = query,
-        onValueChange = { query = it },
-        modifier = Modifier.fillMaxWidth(),
-        singleLine = true,
-        placeholder = { Text("Search constants") },
-        shape = RoundedCornerShape(16.dp),
+    SheetHeader(
+        icon = Icons.Rounded.Science,
+        title = stringResource(R.string.st_CalculatorScreen_1b2c),
+        subtitle = "Physical and mathematical constants",
     )
-    Spacer(Modifier.height(10.dp))
+    SheetSearchField(
+        query = query,
+        onQueryChange = { query = it },
+        placeholder = "Search constants",
+    )
+    Spacer(Modifier.height(12.dp))
+
+    if (filtered.isEmpty()) {
+        SheetEmptyState(
+            icon = Icons.Rounded.Search,
+            title = "No constants found",
+            subtitle = "Try a name or symbol, like Planck or π.",
+            modifier = Modifier.padding(vertical = 36.dp),
+        )
+        return
+    }
+
     LazyColumn(
         modifier = Modifier
-            .heightIn(max = 480.dp)
+            .weight(1f, fill = false)
             .fadingEdges(top = 4.dp, bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
         contentPadding = PaddingValues(vertical = 4.dp),
@@ -1693,20 +2029,30 @@ private fun ConstantsSheetContent(state: CalculatorState, viewModel: CalculatorV
                 },
                 shape = MediumExpressiveShape,
                 color = scheme.surfaceContainerHigh,
+                border = BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = 0.2f)),
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                        .padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        constant.symbol,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = scheme.primary,
-                        modifier = Modifier.width(56.dp),
-                    )
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(scheme.primaryContainer.copy(alpha = 0.45f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            constant.symbol,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = scheme.primary,
+                            maxLines = 1,
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             constant.name,
@@ -1718,8 +2064,16 @@ private fun ConstantsSheetContent(state: CalculatorState, viewModel: CalculatorV
                                 if (constant.unit.isNotEmpty()) "  ${constant.unit}" else "",
                             style = MaterialTheme.typography.labelMedium,
                             color = scheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
+                    Icon(
+                        Icons.Rounded.Add,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = scheme.primary.copy(alpha = 0.65f),
+                    )
                 }
             }
         }
@@ -1736,7 +2090,11 @@ private fun VariablesSheetContent(
     val vibrationManager = LocalVibrationManager.current
     var storeMode by remember(store) { mutableStateOf(store) }
 
-    SheetTitle("Variables")
+    SheetHeader(
+        icon = Icons.Rounded.Memory,
+        title = "Variables",
+        subtitle = if (storeMode) "Store the current value" else "Insert a stored value",
+    )
     ToolzConnectedButtonGroup(
         selectedIndex = if (storeMode) 0 else 1,
         options = listOf("Store", "Recall"),
@@ -1756,6 +2114,8 @@ private fun VariablesSheetContent(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             rowNames.forEach { name ->
+                val value = state.variables[name] ?: "0"
+                val filled = value != "0"
                 Surface(
                     onClick = {
                         vibrationManager?.vibrateClick()
@@ -1763,7 +2123,19 @@ private fun VariablesSheetContent(
                     },
                     modifier = Modifier.weight(1f),
                     shape = MediumExpressiveShape,
-                    color = scheme.surfaceContainerHigh,
+                    color = if (filled) {
+                        scheme.primaryContainer.copy(alpha = 0.38f)
+                    } else {
+                        scheme.surfaceContainerHigh
+                    },
+                    border = BorderStroke(
+                        1.dp,
+                        if (filled) {
+                            scheme.primary.copy(alpha = 0.24f)
+                        } else {
+                            scheme.outlineVariant.copy(alpha = 0.2f)
+                        },
+                    ),
                 ) {
                     Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
                         Text(
@@ -1773,9 +2145,9 @@ private fun VariablesSheetContent(
                             color = scheme.primary,
                         )
                         Text(
-                            state.variables[name] ?: "0",
+                            value,
                             style = MaterialTheme.typography.labelMedium,
-                            color = scheme.onSurfaceVariant,
+                            color = if (filled) scheme.onPrimaryContainer else scheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -1802,53 +2174,41 @@ private fun CalculatorHistoryContent(
 ) {
     val scheme = MaterialTheme.colorScheme
     val vibrationManager = LocalVibrationManager.current
+    var confirmClear by remember { mutableStateOf(false) }
 
     Column(modifier = modifier.padding(horizontal = 20.dp)) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 4.dp, bottom = 14.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column {
-                Text(
-                    text = "History",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                )
-                if (state.history.isNotEmpty()) {
-                    Text(
-                        text = "${state.history.size} calculations",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = scheme.onSurfaceVariant,
-                    )
+        SheetHeader(
+            icon = Icons.Rounded.History,
+            title = "History",
+            subtitle = if (state.history.isEmpty()) {
+                "Your calculations will show up here"
+            } else {
+                "${state.history.size} calculation${if (state.history.size == 1) "" else "s"}"
+            },
+            trailing = if (state.history.isEmpty()) {
+                null
+            } else {
+                {
+                    ToolzExpressiveIconButton(
+                        onClick = {
+                            vibrationManager?.vibrateClick()
+                            confirmClear = true
+                        },
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = scheme.errorContainer.copy(alpha = 0.5f),
+                            contentColor = scheme.error,
+                        ),
+                        shape = SmallExpressiveShape,
+                    ) {
+                        Icon(
+                            Icons.Rounded.DeleteOutline,
+                            contentDescription = stringResource(R.string.st_CalculatorScreen_5f6e),
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
                 }
-            }
-            AnimatedVisibility(
-                visible = state.history.isNotEmpty(),
-                enter = fadeIn(tween(120)),
-                exit = fadeOut(tween(100)),
-            ) {
-                ToolzExpressiveIconButton(
-                    onClick = {
-                        vibrationManager?.vibrateClick()
-                        viewModel.clearHistory()
-                    },
-                    colors = IconButtonDefaults.filledIconButtonColors(
-                        containerColor = scheme.errorContainer.copy(alpha = 0.5f),
-                        contentColor = scheme.error,
-                    ),
-                    shape = SmallExpressiveShape,
-                ) {
-                    Icon(
-                        Icons.Rounded.DeleteOutline,
-                        contentDescription = stringResource(R.string.st_CalculatorScreen_5f6e),
-                        modifier = Modifier.size(18.dp),
-                    )
-                }
-            }
-        }
+            },
+        )
 
         if (state.history.isEmpty()) {
             Box(
@@ -1857,29 +2217,12 @@ private fun CalculatorHistoryContent(
                     .weight(1f),
                 contentAlignment = Alignment.Center,
             ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Icon(
-                        Icons.Rounded.Calculate,
-                        contentDescription = null,
-                        modifier = Modifier.size(40.dp),
-                        tint = scheme.primary.copy(alpha = 0.35f),
-                    )
-                    Text(
-                        stringResource(R.string.st_CalculatorScreen_2b8a),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = scheme.onSurfaceVariant,
-                        fontWeight = FontWeight.Medium,
-                    )
-                    Text(
-                        stringResource(R.string.st_CalculatorScreen_4d9c),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = scheme.onSurfaceVariant.copy(alpha = 0.75f),
-                        textAlign = TextAlign.Center,
-                    )
-                }
+                SheetEmptyState(
+                    icon = Icons.Rounded.Calculate,
+                    title = stringResource(R.string.st_CalculatorScreen_2b8a),
+                    subtitle = stringResource(R.string.st_CalculatorScreen_4d9c),
+                    modifier = Modifier.padding(bottom = 48.dp),
+                )
             }
         } else {
             LazyColumn(
@@ -1897,11 +2240,12 @@ private fun CalculatorHistoryContent(
                     Surface(
                         shape = MediumExpressiveShape,
                         color = scheme.surfaceContainerHigh,
+                        border = BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = 0.2f)),
                     ) {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(start = 18.dp, end = 8.dp, top = 12.dp, bottom = 4.dp),
+                                .padding(start = 18.dp, end = 8.dp, top = 12.dp, bottom = 2.dp),
                             horizontalAlignment = Alignment.End,
                         ) {
                             Text(
@@ -1913,7 +2257,7 @@ private fun CalculatorHistoryContent(
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.padding(end = 10.dp),
                             )
-                            Spacer(Modifier.height(2.dp))
+                            Spacer(Modifier.height(3.dp))
                             Text(
                                 text = "= $result",
                                 style = MaterialTheme.typography.titleLarge,
@@ -1922,26 +2266,89 @@ private fun CalculatorHistoryContent(
                                 textAlign = TextAlign.End,
                                 modifier = Modifier.padding(end = 10.dp),
                             )
-                            Row {
+                            HorizontalDivider(
+                                modifier = Modifier.padding(top = 10.dp),
+                                color = scheme.outlineVariant.copy(alpha = 0.18f),
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End,
+                            ) {
                                 TextButton(
                                     onClick = {
                                         vibrationManager?.vibrateClick()
                                         viewModel.onUseHistoryExpression(expression)
                                         onPicked()
                                     },
-                                ) { Text("Edit") }
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.Edit,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(15.dp),
+                                    )
+                                    Spacer(Modifier.width(5.dp))
+                                    Text("Edit")
+                                }
                                 TextButton(
                                     onClick = {
                                         vibrationManager?.vibrateClick()
                                         viewModel.onUseHistoryResult(result)
                                         onPicked()
                                     },
-                                ) { Text("Use result") }
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.ContentPaste,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(15.dp),
+                                    )
+                                    Spacer(Modifier.width(5.dp))
+                                    Text("Use result")
+                                }
                             }
                         }
                     }
                 }
             }
         }
+    }
+
+    if (confirmClear) {
+        AlertDialog(
+            onDismissRequest = { confirmClear = false },
+            title = { Text("Clear history?") },
+            text = {
+                Text(
+                    if (state.history.size == 1) {
+                        "1 calculation will be permanently removed from this device."
+                    } else {
+                        "${state.history.size} calculations will be permanently removed from this device."
+                    },
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        vibrationManager?.vibrateLongClick()
+                        viewModel.clearHistory()
+                        confirmClear = false
+                    },
+                ) {
+                    Text(
+                        "Clear",
+                        color = scheme.error,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmClear = false }) {
+                    Text("Cancel")
+                }
+            },
+            shape = RoundedCornerShape(28.dp),
+            containerColor = scheme.surfaceContainerHigh,
+        )
     }
 }
