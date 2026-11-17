@@ -25,7 +25,6 @@ package com.frerox.toolz.ui.screens.math
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
@@ -44,6 +43,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -161,7 +161,6 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Science
 import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material.icons.rounded.Tune
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.draw.drawBehind
@@ -173,14 +172,18 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.stateDescription
 import com.frerox.toolz.R
+import com.frerox.toolz.ui.components.ExpressiveCard
 import com.frerox.toolz.ui.components.ExpressiveTopAppBar
-import com.frerox.toolz.ui.components.ExtraLargeExpressiveShape
 import com.frerox.toolz.ui.components.MediumExpressiveShape
 import com.frerox.toolz.ui.components.SmallExpressiveShape
 import com.frerox.toolz.ui.components.ToolzConnectedButtonGroup
 import com.frerox.toolz.ui.components.ToolzExpressiveIconButton
+import com.frerox.toolz.ui.components.ToolzTonalExpressiveIconButton
 import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.components.horizontalFadingEdges
+import com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled
+import com.frerox.toolz.ui.liquidglass.liquidGlassEffect
+import com.frerox.toolz.ui.liquidglass.liquidGlassTile
 import com.frerox.toolz.ui.theme.LocalHapticEnabled
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
@@ -279,6 +282,7 @@ fun CalculatorScreen(
     }
 
     if (showHistorySheet) {
+        val glass = LocalLiquidGlassEnabled.current
         ModalBottomSheet(
             onDismissRequest = { showHistorySheet = false },
             sheetState = rememberBottomSheetState(
@@ -286,12 +290,20 @@ fun CalculatorScreen(
                 enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
             ),
             shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            containerColor = if (glass) {
+                MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.78f)
+            } else {
+                MaterialTheme.colorScheme.surfaceContainerLow
+            },
             dragHandle = {
                 BottomSheetDefaults.DragHandle(
                     width = 48.dp,
                     height = 4.dp,
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                    color = if (glass) {
+                        Color.White.copy(alpha = 0.45f)
+                    } else {
+                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+                    },
                 )
             },
         ) {
@@ -336,6 +348,7 @@ private fun ToolSheet(
     scrollable: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val glass = LocalLiquidGlassEnabled.current
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberBottomSheetState(
@@ -343,12 +356,21 @@ private fun ToolSheet(
             enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
         ),
         shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        containerColor = if (glass) {
+            // Same frosted-sheet convention as the app's Quick Access sheet.
+            MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.78f)
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerLow
+        },
         dragHandle = {
             BottomSheetDefaults.DragHandle(
                 width = 48.dp,
                 height = 4.dp,
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                color = if (glass) {
+                    Color.White.copy(alpha = 0.45f)
+                } else {
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+                },
             )
         },
     ) {
@@ -415,7 +437,7 @@ private fun CalculatorMain(
                 .weight(1f)
                 .heightIn(min = 132.dp)
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 5.dp),
+                .padding(horizontal = 12.dp, vertical = 5.dp),
         )
         CalculatorKeypad(
             state = state,
@@ -424,7 +446,7 @@ private fun CalculatorMain(
             modifier = Modifier
                 .weight(padWeight)
                 .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 6.dp),
+                .padding(horizontal = 12.dp, vertical = 6.dp),
         )
         Spacer(Modifier.navigationBarsPadding())
     }
@@ -453,6 +475,16 @@ private fun StatusChip(
     )
     val bg by animateColorAsState(container, tween(180), label = "chipContainer")
     val fg by animateColorAsState(content, tween(180), label = "chipContent")
+    val glass = LocalLiquidGlassEnabled.current
+    val glassDark = isSystemInDarkTheme()
+    // Mostly clear glass; only the selected chip carries real colour, and the
+    // animated background keeps press feedback visible through the material.
+    val glassTint = bg.copy(alpha = if (selected) 0.46f else 0.20f)
+    val glassRim = if (selected) {
+        fg.copy(alpha = 0.34f)
+    } else {
+        Color.White.copy(alpha = if (glassDark) 0.20f else 0.55f)
+    }
     val border = BorderStroke(
         width = 1.dp,
         color = if (selected) fg.copy(alpha = 0.24f) else scheme.outlineVariant.copy(alpha = 0.18f),
@@ -484,23 +516,40 @@ private fun StatusChip(
     if (onClick != null) {
         Surface(
             onClick = onClick,
-            modifier = Modifier.graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            },
+            modifier = Modifier
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                }
+                .liquidGlassTile(
+                    shape = CircleShape,
+                    tint = glassTint,
+                    rimColor = glassRim,
+                    shadowRadius = 3.dp,
+                )
+                .semantics {
+                    role = Role.Button
+                    if (selected) stateDescription = "Selected"
+                },
             interactionSource = interaction,
             shape = CircleShape,
-            color = bg,
+            color = if (glass) Color.Transparent else bg,
             contentColor = fg,
-            border = border,
+            border = if (glass) null else border,
             content = label,
         )
     } else {
         Surface(
+            modifier = Modifier.liquidGlassTile(
+                shape = CircleShape,
+                tint = glassTint,
+                rimColor = glassRim,
+                shadowRadius = 3.dp,
+            ),
             shape = CircleShape,
-            color = bg,
+            color = if (glass) Color.Transparent else bg,
             contentColor = fg,
-            border = border,
+            border = if (glass) null else border,
             content = label,
         )
     }
@@ -508,9 +557,16 @@ private fun StatusChip(
 
 @Composable
 private fun StatusBadge(text: String, container: Color, content: Color) {
+    val glass = LocalLiquidGlassEnabled.current
     Surface(
+        modifier = Modifier.liquidGlassTile(
+            shape = CircleShape,
+            tint = container.copy(alpha = 0.72f),
+            rimColor = content.copy(alpha = 0.30f),
+            shadowRadius = 2.dp,
+        ),
         shape = CircleShape,
-        color = container,
+        color = if (glass) Color.Transparent else container,
         contentColor = content,
     ) {
         Text(
@@ -545,6 +601,18 @@ private fun KeypadModeButton(scientific: Boolean, onClick: () -> Unit) {
         animationSpec = tween(200),
         label = "modeContent",
     )
+    val glass = LocalLiquidGlassEnabled.current
+    val glassDark = isSystemInDarkTheme()
+    val glassTint = if (scientific) {
+        scheme.primary.copy(alpha = 0.66f)
+    } else {
+        scheme.surfaceContainerHigh.copy(alpha = 0.22f)
+    }
+    val glassRim = if (scientific) {
+        Color.White.copy(alpha = 0.40f)
+    } else {
+        Color.White.copy(alpha = if (glassDark) 0.20f else 0.55f)
+    }
 
     Surface(
         onClick = {
@@ -556,15 +624,26 @@ private fun KeypadModeButton(scientific: Boolean, onClick: () -> Unit) {
                 scaleX = scale
                 scaleY = scale
             }
-            .animateContentSize(),
+            .animateContentSize()
+            .liquidGlassTile(
+                shape = CircleShape,
+                tint = glassTint,
+                rimColor = glassRim,
+                shadowRadius = 3.dp,
+            )
+            .semantics { role = Role.Button },
         interactionSource = interaction,
         shape = CircleShape,
-        color = bg,
+        color = if (glass) Color.Transparent else bg,
         contentColor = fg,
-        border = BorderStroke(
-            1.dp,
-            if (scientific) fg.copy(alpha = 0.2f) else scheme.outlineVariant.copy(alpha = 0.18f),
-        ),
+        border = if (glass) {
+            null
+        } else {
+            BorderStroke(
+                1.dp,
+                if (scientific) fg.copy(alpha = 0.2f) else scheme.outlineVariant.copy(alpha = 0.18f),
+            )
+        },
     ) {
         Row(
             modifier = Modifier.padding(start = 10.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
@@ -609,7 +688,7 @@ private fun StatusStrip(state: CalculatorState, viewModel: CalculatorViewModel) 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 14.dp, vertical = 4.dp),
+            .padding(horizontal = 12.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(
@@ -692,13 +771,34 @@ private fun CalculatorDisplay(
     val scheme = MaterialTheme.colorScheme
     val vibrationManager = LocalVibrationManager.current
     val field = state.fields.firstOrNull() ?: EditField()
+    val glass = LocalLiquidGlassEnabled.current
+    val glassDark = isSystemInDarkTheme()
+    val shape = RoundedCornerShape(36.dp)
 
     Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(36.dp),
-        color = scheme.surfaceContainerLowest,
-        border = BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = 0.22f)),
-        tonalElevation = 2.dp,
+        modifier = modifier.then(
+            if (glass) {
+                Modifier.liquidGlassEffect(
+                    shape = shape,
+                    tint = scheme.surfaceContainerLowest.copy(alpha = 0.12f),
+                    refractionFactor = 0.9f,
+                    shadowRadius = 10.dp,
+                )
+            } else {
+                Modifier
+            },
+        ),
+        shape = shape,
+        color = if (glass) Color.Transparent else scheme.surfaceContainerLowest,
+        // Surface would fall back to Color.Unspecified for a transparent container,
+        // which would drop the inherited content colour and render text unpainted.
+        contentColor = scheme.onSurface,
+        border = BorderStroke(
+            1.dp,
+            if (glass) Color.White.copy(alpha = if (glassDark) 0.16f else 0.45f)
+            else scheme.outlineVariant.copy(alpha = 0.22f),
+        ),
+        tonalElevation = if (glass) 0.dp else 2.dp,
     ) {
         Box(
             modifier = Modifier
@@ -707,8 +807,8 @@ private fun CalculatorDisplay(
                     drawRect(
                         brush = Brush.radialGradient(
                             colors = listOf(
-                                scheme.primary.copy(alpha = 0.10f),
-                                scheme.primary.copy(alpha = 0.035f),
+                                scheme.primary.copy(alpha = if (glass) 0.06f else 0.10f),
+                                scheme.primary.copy(alpha = if (glass) 0.02f else 0.035f),
                                 Color.Transparent,
                             ),
                             center = Offset(size.width * 0.9f, 0f),
@@ -719,7 +819,7 @@ private fun CalculatorDisplay(
                         brush = Brush.horizontalGradient(
                             colors = listOf(
                                 Color.Transparent,
-                                scheme.primary.copy(alpha = 0.18f),
+                                scheme.primary.copy(alpha = if (glass) 0.12f else 0.18f),
                                 Color.Transparent,
                             ),
                         ),
@@ -923,9 +1023,11 @@ private fun ResultArea(
             enter = fadeIn(tween(160)) + scaleIn(initialScale = 0.85f),
             exit = fadeOut(tween(90)) + scaleOut(targetScale = 0.88f),
         ) {
-            CopyAction(copied = copied, onClick = onCopy)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CopyAction(copied = copied, onClick = onCopy)
+                Spacer(Modifier.width(10.dp))
+            }
         }
-        Spacer(Modifier.width(if (hasResult) 10.dp else 0.dp))
         Box(
             modifier = Modifier
                 .weight(1f)
@@ -994,13 +1096,26 @@ private fun CopyAction(copied: Boolean, onClick: () -> Unit) {
         label = "copyContent",
     )
 
+    val glass = LocalLiquidGlassEnabled.current
+
     Surface(
         onClick = onClick,
-        modifier = Modifier.size(38.dp),
+        modifier = Modifier
+            .size(38.dp)
+            .liquidGlassTile(
+                shape = CircleShape,
+                tint = container.copy(alpha = 0.34f),
+                rimColor = content.copy(alpha = 0.30f),
+                shadowRadius = 2.dp,
+            ),
         shape = CircleShape,
-        color = container,
+        color = if (glass) Color.Transparent else container,
         contentColor = content,
-        border = BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = 0.18f)),
+        border = if (glass) {
+            null
+        } else {
+            BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = 0.18f))
+        },
     ) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             AnimatedContent(
@@ -1247,6 +1362,8 @@ private fun CalculatorKeypad(
         animationSpec = tween(180),
         label = "layerBorder",
     )
+    val glass = LocalLiquidGlassEnabled.current
+    val padShape = RoundedCornerShape(30.dp)
 
     AnimatedContent(
         targetState = state.scientific,
@@ -1262,9 +1379,30 @@ private fun CalculatorKeypad(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .clip(RoundedCornerShape(30.dp))
+                .liquidGlassEffect(
+                    shape = padShape,
+                    tint = scheme.surfaceContainerLowest.copy(alpha = 0.10f),
+                    refractionFactor = 0.45f,
+                    shadowRadius = 8.dp,
+                    innerGlow = false,
+                )
+                .clip(padShape)
                 .background(layerAccent)
-                .border(BorderStroke(1.dp, layerBorder), RoundedCornerShape(30.dp))
+                .border(
+                    BorderStroke(
+                        1.dp,
+                        if (glass) {
+                            // Keep the shift/alpha tint cue on top of the glass rim.
+                            if (state.layer != KeyLayer.NONE) layerBorder
+                            else Color.White.copy(
+                                alpha = if (isSystemInDarkTheme()) 0.14f else 0.40f,
+                            )
+                        } else {
+                            layerBorder
+                        },
+                    ),
+                    padShape,
+                )
                 .padding(2.dp),
         ) {
             Column(
@@ -1366,7 +1504,7 @@ private fun CalcKey(
         else -> baseFg
     }
     val showIcon = def.id == "left" || def.id == "right" || def.label == "DEL"
-    val shape = when (def.kind) {
+    val keyShape = when (def.kind) {
         KeyKind.DIGIT -> RoundedCornerShape(22.dp)
         KeyKind.OPERATOR -> RoundedCornerShape(24.dp)
         KeyKind.EQUALS -> RoundedCornerShape(30.dp)
@@ -1397,8 +1535,35 @@ private fun CalcKey(
         animationSpec = tween(80),
         label = "keyBackground",
     )
-    val borderColor by animateColorAsState(
-        targetValue = if (pressed) baseFg.copy(alpha = 0.22f) else borderBase,
+    val glass = LocalLiquidGlassEnabled.current
+    val glassDark = isSystemInDarkTheme()
+    // Neutral glass carries the keypad; colour is reserved for the keys that
+    // actually mean something (equals, modifiers, clears) so the pad reads as
+    // one material instead of a tray of painted tiles.
+    val glassKeyTint = bg.copy(
+        alpha = when {
+            def.kind == KeyKind.EQUALS -> 0.70f
+            active -> 0.58f
+            def.kind == KeyKind.OPERATOR -> 0.34f
+            def.kind == KeyKind.CLEAR -> 0.34f
+            def.kind == KeyKind.DIGIT -> 0.26f
+            def.kind == KeyKind.MODIFIER -> 0.26f
+            def.kind == KeyKind.DELETE -> 0.26f
+            def.kind == KeyKind.NAV -> 0.22f
+            else -> 0.24f
+        },
+    )
+    val glassRimBase = when {
+        def.kind == KeyKind.EQUALS -> Color.White.copy(alpha = 0.42f)
+        else -> Color.White.copy(alpha = if (glassDark) 0.18f else 0.55f)
+    }
+    val keyBorder by animateColorAsState(
+        targetValue = when {
+            glass && pressed -> baseFg.copy(alpha = 0.34f)
+            glass -> glassRimBase
+            pressed -> baseFg.copy(alpha = 0.22f)
+            else -> borderBase
+        },
         animationSpec = tween(80),
         label = "keyBorder",
     )
@@ -1412,10 +1577,29 @@ private fun CalcKey(
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
+                if (glass) {
+                    // Cast the key's depth from the transform layer we already own
+                    // instead of paying for a second shadow layer on every key.
+                    shadowElevation = 2.dp.toPx()
+                    shape = keyShape
+                }
             }
-            .clip(shape)
-            .background(bg)
-            .border(BorderStroke(1.dp, borderColor), shape)
+            .liquidGlassTile(
+                shape = keyShape,
+                tint = glassKeyTint,
+                rimColor = keyBorder,
+                // Depth comes from the layer above.
+                shadowRadius = null,
+            )
+            .clip(keyShape)
+            .background(if (glass) Color.Transparent else bg)
+            .then(
+                if (glass) {
+                    Modifier
+                } else {
+                    Modifier.border(BorderStroke(1.dp, keyBorder), keyShape)
+                },
+            )
             .drawWithContent {
                 if (pressProgress > 0.01f && pressPoint.isSpecified) {
                     val radius = size.maxDimension * (0.35f + 0.9f * pressProgress)
@@ -1570,6 +1754,8 @@ private fun SheetHeader(
     trailing: (@Composable () -> Unit)? = null,
 ) {
     val scheme = MaterialTheme.colorScheme
+    val glass = LocalLiquidGlassEnabled.current
+    val iconShape = RoundedCornerShape(15.dp)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1579,8 +1765,16 @@ private fun SheetHeader(
         Box(
             modifier = Modifier
                 .size(44.dp)
-                .clip(RoundedCornerShape(15.dp))
-                .background(scheme.primaryContainer.copy(alpha = 0.55f)),
+                .background(
+                    color = if (glass) Color.Transparent else scheme.primaryContainer.copy(alpha = 0.55f),
+                    shape = iconShape,
+                )
+                .liquidGlassTile(
+                    shape = iconShape,
+                    tint = scheme.primaryContainer.copy(alpha = 0.32f),
+                    rimColor = scheme.primary.copy(alpha = 0.30f),
+                    shadowRadius = 2.dp,
+                ),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
@@ -1624,15 +1818,14 @@ private fun SectionLabel(text: String, icon: ImageVector? = null) {
                 icon,
                 contentDescription = null,
                 modifier = Modifier.size(13.dp),
-                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
             )
         }
         Text(
-            text.uppercase(),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.primary,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 1.2.sp,
+            text,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = FontWeight.SemiBold,
         )
     }
 }
@@ -1644,10 +1837,20 @@ private fun SheetSearchField(
     placeholder: String,
 ) {
     val scheme = MaterialTheme.colorScheme
+    val glass = LocalLiquidGlassEnabled.current
+    val searchShape = RoundedCornerShape(18.dp)
     OutlinedTextField(
         value = query,
         onValueChange = onQueryChange,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .liquidGlassTile(
+                shape = searchShape,
+                tint = scheme.surfaceContainerHigh.copy(alpha = 0.26f),
+                shadowRadius = 2.dp,
+                // Keep the field calm so the query stays the loudest thing in it.
+                sheenAlpha = if (isSystemInDarkTheme()) 0.06f else 0.14f,
+            ),
         singleLine = true,
         placeholder = {
             Text(
@@ -1681,10 +1884,19 @@ private fun SheetSearchField(
         },
         shape = RoundedCornerShape(18.dp),
         colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = scheme.primary.copy(alpha = 0.55f),
-            unfocusedBorderColor = scheme.outlineVariant.copy(alpha = 0.45f),
-            focusedContainerColor = scheme.surfaceContainerHigh.copy(alpha = 0.55f),
-            unfocusedContainerColor = scheme.surfaceContainerHigh.copy(alpha = 0.55f),
+            focusedBorderColor = if (glass) {
+                // Focus still needs a colour cue; the unfocused rim comes from the tile.
+                scheme.primary.copy(alpha = 0.70f)
+            } else {
+                scheme.primary.copy(alpha = 0.55f)
+            },
+            unfocusedBorderColor = if (glass) {
+                Color.Transparent
+            } else {
+                scheme.outlineVariant.copy(alpha = 0.45f)
+            },
+            focusedContainerColor = if (glass) Color.Transparent else scheme.surfaceContainerHigh.copy(alpha = 0.55f),
+            unfocusedContainerColor = if (glass) Color.Transparent else scheme.surfaceContainerHigh.copy(alpha = 0.55f),
             cursorColor = scheme.primary,
         ),
     )
@@ -1742,11 +1954,26 @@ private fun DigitStepper(
     onValueChange: (Int) -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
+    val glass = LocalLiquidGlassEnabled.current
+    val stepperShape = RoundedCornerShape(22.dp)
     Surface(
-        shape = RoundedCornerShape(22.dp),
-        color = scheme.surfaceContainerHigh.copy(alpha = 0.65f),
-        border = BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = 0.3f)),
-        modifier = Modifier.fillMaxWidth(),
+        shape = stepperShape,
+        color = if (glass) Color.Transparent else scheme.surfaceContainerHigh.copy(alpha = 0.65f),
+        // A transparent Surface resolves its content colour to Unspecified,
+        // which would leave the default-coloured label text unpainted.
+        contentColor = scheme.onSurface,
+        border = if (glass) {
+            null
+        } else {
+            BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = 0.3f))
+        },
+        modifier = Modifier
+            .fillMaxWidth()
+            .liquidGlassTile(
+                shape = stepperShape,
+                tint = scheme.surfaceContainerHigh.copy(alpha = 0.28f),
+                shadowRadius = 2.dp,
+            ),
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
@@ -1764,7 +1991,7 @@ private fun DigitStepper(
                     color = scheme.onSurfaceVariant,
                 )
             }
-            FilledTonalIconButton(
+            ToolzTonalExpressiveIconButton(
                 onClick = { onValueChange(value - 1) },
                 enabled = value > range.first,
                 modifier = Modifier.size(36.dp),
@@ -1804,7 +2031,7 @@ private fun DigitStepper(
                     )
                 }
             }
-            FilledTonalIconButton(
+            ToolzTonalExpressiveIconButton(
                 onClick = { onValueChange(value + 1) },
                 enabled = value < range.last,
                 modifier = Modifier.size(36.dp),
@@ -1887,8 +2114,8 @@ private fun SetupSheetContent(state: CalculatorState, viewModel: CalculatorViewM
 
 @Composable
 private fun ColumnScope.CatalogSheetContent(viewModel: CalculatorViewModel) {
-    val vibrationManager = LocalVibrationManager.current
     val scheme = MaterialTheme.colorScheme
+    val glass = LocalLiquidGlassEnabled.current
     var query by remember { mutableStateOf("") }
     val needle = query.trim()
     val sections = remember(needle) {
@@ -1944,14 +2171,16 @@ private fun ColumnScope.CatalogSheetContent(viewModel: CalculatorViewModel) {
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items.forEach { item ->
-                    Surface(
-                        onClick = {
-                            vibrationManager?.vibrateClick()
-                            viewModel.onInsertText(item.insert)
-                        },
+                    ExpressiveCard(
+                        onClick = { viewModel.onInsertText(item.insert) },
                         shape = MediumExpressiveShape,
-                        color = scheme.surfaceContainerHigh,
-                        border = BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = 0.2f)),
+                        containerColor = scheme.surfaceContainerHigh,
+                        border = if (glass) {
+                            null
+                        } else {
+                            BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = 0.2f))
+                        },
+                        compactGlass = true,
                     ) {
                         Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp)) {
                             Text(
@@ -1977,7 +2206,7 @@ private fun ColumnScope.CatalogSheetContent(viewModel: CalculatorViewModel) {
 @Composable
 private fun ColumnScope.ConstantsSheetContent(state: CalculatorState, viewModel: CalculatorViewModel) {
     val scheme = MaterialTheme.colorScheme
-    val vibrationManager = LocalVibrationManager.current
+    val glass = LocalLiquidGlassEnabled.current
     var query by remember { mutableStateOf("") }
     val needle = query.trim()
     val filtered = CalcConstants.all.filter {
@@ -2022,14 +2251,18 @@ private fun ColumnScope.ConstantsSheetContent(state: CalculatorState, viewModel:
         contentPadding = PaddingValues(vertical = 4.dp),
     ) {
         items(filtered, key = { it.symbol + it.name }) { constant ->
-            Surface(
+            ExpressiveCard(
                 onClick = {
-                    vibrationManager?.vibrateClick()
                     viewModel.onInsertText((if (needsTimes) "×" else "") + constant.value)
                 },
                 shape = MediumExpressiveShape,
-                color = scheme.surfaceContainerHigh,
-                border = BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = 0.2f)),
+                containerColor = scheme.surfaceContainerHigh,
+                border = if (glass) {
+                    null
+                } else {
+                    BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = 0.2f))
+                },
+                compactGlass = true,
             ) {
                 Row(
                     modifier = Modifier
@@ -2087,7 +2320,7 @@ private fun VariablesSheetContent(
     viewModel: CalculatorViewModel,
 ) {
     val scheme = MaterialTheme.colorScheme
-    val vibrationManager = LocalVibrationManager.current
+    val glass = LocalLiquidGlassEnabled.current
     var storeMode by remember(store) { mutableStateOf(store) }
 
     SheetHeader(
@@ -2098,10 +2331,8 @@ private fun VariablesSheetContent(
     ToolzConnectedButtonGroup(
         selectedIndex = if (storeMode) 0 else 1,
         options = listOf("Store", "Recall"),
-        onOptionSelected = {
-            vibrationManager?.vibrateTick()
-            storeMode = it == 0
-        },
+        // The group fires its own tick haptic.
+        onOptionSelected = { storeMode = it == 0 },
         modifier = Modifier.fillMaxWidth(),
     )
     Spacer(Modifier.height(14.dp))
@@ -2116,26 +2347,25 @@ private fun VariablesSheetContent(
             rowNames.forEach { name ->
                 val value = state.variables[name] ?: "0"
                 val filled = value != "0"
-                Surface(
+                ExpressiveCard(
                     onClick = {
-                        vibrationManager?.vibrateClick()
                         if (storeMode) viewModel.onStoreVar(name) else viewModel.onRecallVar(name)
                     },
                     modifier = Modifier.weight(1f),
                     shape = MediumExpressiveShape,
-                    color = if (filled) {
+                    containerColor = if (filled) {
                         scheme.primaryContainer.copy(alpha = 0.38f)
                     } else {
                         scheme.surfaceContainerHigh
                     },
-                    border = BorderStroke(
-                        1.dp,
-                        if (filled) {
-                            scheme.primary.copy(alpha = 0.24f)
-                        } else {
-                            scheme.outlineVariant.copy(alpha = 0.2f)
-                        },
-                    ),
+                    border = when {
+                        // In glass mode the fill is only a light tint, so a filled
+                        // variable leans on the primary rim and ink to stay legible.
+                        filled -> BorderStroke(1.dp, scheme.primary.copy(alpha = 0.42f))
+                        glass -> null
+                        else -> BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = 0.2f))
+                    },
+                    compactGlass = true,
                 ) {
                     Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
                         Text(
@@ -2174,6 +2404,7 @@ private fun CalculatorHistoryContent(
 ) {
     val scheme = MaterialTheme.colorScheme
     val vibrationManager = LocalVibrationManager.current
+    val glass = LocalLiquidGlassEnabled.current
     var confirmClear by remember { mutableStateOf(false) }
 
     Column(modifier = modifier.padding(horizontal = 20.dp)) {
@@ -2189,22 +2420,31 @@ private fun CalculatorHistoryContent(
                 null
             } else {
                 {
-                    ToolzExpressiveIconButton(
+                    Surface(
                         onClick = {
                             vibrationManager?.vibrateClick()
                             confirmClear = true
                         },
-                        colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = scheme.errorContainer.copy(alpha = 0.5f),
-                            contentColor = scheme.error,
-                        ),
+                        modifier = Modifier
+                            .size(40.dp)
+                            .liquidGlassTile(
+                                shape = SmallExpressiveShape,
+                                tint = scheme.errorContainer.copy(alpha = 0.38f),
+                                rimColor = scheme.error.copy(alpha = 0.40f),
+                                shadowRadius = 2.dp,
+                            ),
                         shape = SmallExpressiveShape,
+                        // Destructive actions keep their colour even on glass.
+                        color = if (glass) Color.Transparent else scheme.errorContainer.copy(alpha = 0.5f),
+                        contentColor = scheme.error,
                     ) {
-                        Icon(
-                            Icons.Rounded.DeleteOutline,
-                            contentDescription = stringResource(R.string.st_CalculatorScreen_5f6e),
-                            modifier = Modifier.size(18.dp),
-                        )
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Rounded.DeleteOutline,
+                                contentDescription = stringResource(R.string.st_CalculatorScreen_5f6e),
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
                     }
                 }
             },
@@ -2237,10 +2477,15 @@ private fun CalculatorHistoryContent(
                     items = state.history,
                     key = { index, item -> "$index-${item.first}" },
                 ) { _, (expression, result) ->
-                    Surface(
+                    ExpressiveCard(
                         shape = MediumExpressiveShape,
-                        color = scheme.surfaceContainerHigh,
-                        border = BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = 0.2f)),
+                        containerColor = scheme.surfaceContainerHigh,
+                        border = if (glass) {
+                            null
+                        } else {
+                            BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = 0.2f))
+                        },
+                        compactGlass = true,
                     ) {
                         Column(
                             modifier = Modifier

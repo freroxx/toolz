@@ -47,7 +47,7 @@ android {
 
     defaultConfig {
         applicationId = "com.frerox.toolz"
-        minSdk = 26
+        minSdk = 31 // Liquid Glass requires Android 12 (API 31) for AGSL RuntimeShader
         targetSdk = 37
         versionCode = 19
         versionName = "1.1.8"
@@ -162,7 +162,11 @@ kotlin {
 
 dependencies {
     coreLibraryDesugaring(libs.desugar.jdk.libs)
-    
+
+    // ── Liquid Glass (Apache 2.0, compatible with GPL-3.0) ──────────────────
+    implementation("io.github.kyant0:backdrop-android:2.0.1")
+    implementation("io.github.kyant0:shapes-android:1.2.1")
+
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
