@@ -48,9 +48,13 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.unit.Dp
@@ -390,6 +394,8 @@ fun Modifier.liquidGlassEffect(
     shape: CornerBasedShape = RoundedCornerShape(28.dp),
     tint: Color = Color.Unspecified,
     refractionFactor: Float = 1.0f,
+    shadowRadius: Dp = 12.dp,
+    innerGlow: Boolean = true,
 ): Modifier {
     val enabled = LocalLiquidGlassEnabled.current
     if (!enabled) return this
@@ -405,45 +411,128 @@ fun Modifier.liquidGlassEffect(
     val effBlur = if (performanceMode) (config.blurRadiusDp * 0.4f).coerceIn(2f, 6f) else config.blurRadiusDp.coerceIn(3f, 16f)
     val effRefractH = if (performanceMode) (config.refractionDp * 0.20f * refractionFactor) else (config.refractionDp * 0.5f * refractionFactor)
     val effRefractAmt = if (performanceMode) (config.refractionDp * 0.35f * refractionFactor) else (config.refractionDp * 0.8f * refractionFactor)
+    val effShadow = if (performanceMode) shadowRadius * 0.33f else shadowRadius
 
-    return this.drawBackdrop(
-        backdrop = effectiveBackdrop,
-        shape = { shape },
-        effects = {
-            if (!performanceMode) {
-                vibrancy()
-            }
-            blur(effBlur.dp.toPx())
-            lens(
-                refractionHeight = effRefractH.dp.toPx(),
-                refractionAmount = effRefractAmt.dp.toPx(),
-                depthEffect = !performanceMode,
-                chromaticAberration = !performanceMode,
-            )
-        },
-        highlight = {
-            Highlight(
-                style = HighlightStyle.Default(
-                    color = Color.White.copy(alpha = if (performanceMode) 0.35f else 0.5f),
-                    angle = if (performanceMode) 135f else uiSensor.gravityAngle,
-                    falloff = 1.3f,
+    // Keep the node itself stable across recompositions. Rebuilding it would
+    // re-create the internal ShapeProvider and every effect lambda, which makes
+    // the draw node re-record its offscreen layers even when nothing changed —
+    // on a calculator that happens on every key press because the screen state
+    // recomposes. Hoisting it means those layers stay cached until the glass
+    // actually changes.
+    val glassModifier = remember(
+        effectiveBackdrop,
+        shape,
+        tint,
+        refractionFactor,
+        shadowRadius,
+        innerGlow,
+        performanceMode,
+        config,
+        uiSensor,
+    ) {
+        Modifier.drawBackdrop(
+            backdrop = effectiveBackdrop,
+            shape = { shape },
+            effects = {
+                if (!performanceMode) {
+                    vibrancy()
+                }
+                blur(effBlur.dp.toPx())
+                lens(
+                    refractionHeight = effRefractH.dp.toPx(),
+                    refractionAmount = effRefractAmt.dp.toPx(),
+                    depthEffect = !performanceMode,
+                    chromaticAberration = !performanceMode,
                 )
+            },
+            highlight = {
+                Highlight(
+                    style = HighlightStyle.Default(
+                        color = Color.White.copy(alpha = if (performanceMode) 0.35f else 0.5f),
+                        angle = if (performanceMode) 135f else uiSensor.gravityAngle,
+                        falloff = 1.3f,
+                    )
+                )
+            },
+            shadow = { Shadow(radius = effShadow, color = Color.Black.copy(alpha = 0.18f)) },
+            innerShadow = {
+                if (!performanceMode && innerGlow) {
+                    InnerShadow(radius = 3.dp, color = Color.White.copy(alpha = 0.18f))
+                } else null
+            },
+            onDrawSurface = {
+                if (tint.isSpecified) {
+                    drawRect(tint)
+                } else {
+                    drawRect(Color.White.copy(alpha = config.tintAlpha * 0.65f))
+                }
+            },
+        )
+    }
+
+    return this.then(glassModifier)
+}
+
+/**
+ * Compact liquid glass surface for small or repeated elements — keycaps, chips,
+ * badges, segmented controls and dense list tiles.
+ *
+ * [liquidGlassEffect] is the full material: it records a refracted backdrop layer
+ * plus dedicated specular-highlight, drop-shadow and inner-shadow layers, four
+ * offscreen layers per element. That is the right price for a handful of large
+ * hero surfaces, but across a 30-key keypad or a scrolling grid it dominates the
+ * frame — and the extra layers buy nothing when the surface already sits on a
+ * frosted, low-detail backdrop.
+ *
+ * This variant keeps the same material read — translucent tint, top-lit sheen,
+ * gradient rim, soft depth — drawn in a single cheap pass with no offscreen
+ * layers and no runtime shaders. Reach for it whenever glass is dense, small or
+ * repeated; keep [liquidGlassEffect] for large surfaces over rich content.
+ */
+@Composable
+fun Modifier.liquidGlassTile(
+    shape: CornerBasedShape,
+    tint: Color,
+    rimColor: Color = Color.White.copy(alpha = if (isSystemInDarkTheme()) 0.24f else 0.55f),
+    shadowRadius: Dp? = 3.dp,
+    sheenAlpha: Float = if (isSystemInDarkTheme()) 0.10f else 0.26f,
+): Modifier {
+    if (!LocalLiquidGlassEnabled.current) return this
+    val shadeAlpha = if (isSystemInDarkTheme()) 0.18f else 0.05f
+    var tile = this
+    if (shadowRadius != null) {
+        tile = tile.shadow(
+            elevation = shadowRadius,
+            shape = shape,
+            clip = false,
+            ambientColor = Color.Black.copy(alpha = 0.10f),
+            spotColor = Color.Black.copy(alpha = 0.16f),
+        )
+    }
+    return tile
+        .background(color = tint, shape = shape)
+        .background(
+            brush = Brush.verticalGradient(
+                0f to Color.White.copy(alpha = sheenAlpha),
+                0.42f to Color.Transparent,
+                0.72f to Color.Transparent,
+                1f to Color.Black.copy(alpha = shadeAlpha),
+            ),
+            shape = shape,
+        )
+        .drawWithContent {
+            drawContent()
+            // A lit rim reads as glass; a flat outline reads as a sticker.
+            drawOutline(
+                outline = shape.createOutline(size, layoutDirection, this),
+                brush = Brush.verticalGradient(
+                    0f to rimColor,
+                    0.55f to rimColor.copy(alpha = rimColor.alpha * 0.4f),
+                    1f to rimColor.copy(alpha = rimColor.alpha * 0.75f),
+                ),
+                style = Stroke(width = 1.dp.toPx()),
             )
-        },
-        shadow = { Shadow(radius = if (performanceMode) 4.dp else 12.dp, color = Color.Black.copy(alpha = 0.18f)) },
-        innerShadow = {
-            if (!performanceMode) {
-                InnerShadow(radius = 3.dp, color = Color.White.copy(alpha = 0.18f))
-            } else null
-        },
-        onDrawSurface = {
-            if (tint.isSpecified) {
-                drawRect(tint)
-            } else {
-                drawRect(Color.White.copy(alpha = config.tintAlpha * 0.65f))
-            }
-        },
-    )
+        }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

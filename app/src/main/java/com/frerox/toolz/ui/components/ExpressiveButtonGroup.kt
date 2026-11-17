@@ -20,6 +20,8 @@ package com.frerox.toolz.ui.components
 import android.content.res.Configuration
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.shape.CornerBasedShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material3.*
@@ -50,6 +52,7 @@ import androidx.compose.material3.ToggleButtonDefaults
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import com.frerox.toolz.ui.liquidglass.liquidGlassTile
 
 /**
  * Expressive Button Group with overflow support.
@@ -103,9 +106,16 @@ fun ToolzConnectedButtonGroup(
     ) {
         options.forEachIndexed { index, label ->
             val interactionSource = remember { MutableInteractionSource() }
+            val shapes = when (index) {
+                0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
+                options.lastIndex -> ButtonGroupDefaults.connectedTrailingButtonShapes()
+                else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
+            }
+            val checked = selectedIndex == index
+            val scheme = MaterialTheme.colorScheme
 
             ToggleButton(
-                checked = selectedIndex == index,
+                checked = checked,
                 onCheckedChange = {
                     if (it) {
                         haptic.tick()
@@ -114,14 +124,38 @@ fun ToolzConnectedButtonGroup(
                 },
                 modifier = Modifier.weight(1f)
                     .expressivePressScale(interactionSource, enabled)
+                    .liquidGlassTile(
+                        // Connected segments keep their own corner treatment in glass mode.
+                        shape = (shapes.shape as? CornerBasedShape) ?: RoundedCornerShape(8.dp),
+                        tint = if (checked) {
+                            scheme.secondaryContainer.copy(alpha = 0.44f)
+                        } else {
+                            scheme.surfaceContainerHigh.copy(alpha = 0.20f)
+                        },
+                        rimColor = if (checked) {
+                            scheme.onSecondaryContainer.copy(alpha = 0.26f)
+                        } else {
+                            Color.White.copy(alpha = 0.20f)
+                        },
+                        // One flush control, not a row of floating stickers.
+                        shadowRadius = null,
+                    )
                     .semantics { role = Role.RadioButton },
                 enabled = enabled,
                 interactionSource = interactionSource,
-                shapes = when (index) {
-                    0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
-                    options.lastIndex -> ButtonGroupDefaults.connectedTrailingButtonShapes()
-                    else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
-                }
+                shapes = shapes,
+                colors = if (liquidGlassEnabled) {
+                    ToggleButtonDefaults.colors(
+                        containerColor = Color.Transparent,
+                        contentColor = scheme.onSurfaceVariant,
+                        disabledContainerColor = Color.Transparent,
+                        disabledContentColor = scheme.onSurfaceVariant.copy(alpha = 0.38f),
+                        checkedContainerColor = Color.Transparent,
+                        checkedContentColor = scheme.onSecondaryContainer,
+                    )
+                } else {
+                    ToggleButtonDefaults.colors()
+                },
             ) {
                 val hasIcons = unCheckedIcons.size > index && checkedIcons.size > index
                 if (hasIcons) {

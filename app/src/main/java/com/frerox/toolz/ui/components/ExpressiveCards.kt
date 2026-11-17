@@ -21,25 +21,34 @@ import android.content.res.Configuration
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.CornerBasedShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.frerox.toolz.ui.liquidglass.liquidGlassTile
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.ToolzTheme
 
 /**
  * Premium card with physics-based scaling and expressive state changes.
+ *
+ * [compactGlass] selects the lightweight single-pass glass treatment for dense
+ * grids and long lists, where the full multi-layer refraction is invisible but
+ * expensive per item.
  */
 @Composable
 fun ExpressiveCard(
@@ -52,6 +61,7 @@ fun ExpressiveCard(
     contentColor: Color = MaterialTheme.colorScheme.onSurface,
     elevation: Dp = 2.dp,
     border: BorderStroke? = null,
+    compactGlass: Boolean = false,
     content: @Composable ColumnScope.() -> Unit
 ) {
     val performanceMode = LocalPerformanceMode.current
@@ -59,47 +69,63 @@ fun ExpressiveCard(
     val backdrop = com.frerox.toolz.ui.liquidglass.LocalLiquidGlassBackdrop.current
     val isDark = isSystemInDarkTheme()
     val surfaceColor = if (isDark) Color(0xFF1C1B1F) else Color(0xFFFFFBFE)
-    val effectiveBackdrop = if (liquidGlassEnabled && !performanceMode) {
+    // Compact tiles do not touch the backdrop at all, so they stay available in
+    // performance mode where the full refraction path is disabled.
+    val useCompactGlass = liquidGlassEnabled && compactGlass
+    val useFullGlass = liquidGlassEnabled && !performanceMode && !compactGlass
+    val effectiveBackdrop = if (useFullGlass) {
         backdrop ?: com.kyant.backdrop.backdrops.rememberCanvasBackdrop {
             drawRect(surfaceColor)
         }
     } else null
+    val clickModifier = if (enabled) {
+        Modifier.bouncyClick(
+            enabled = enabled,
+            onClick = onClick,
+            onLongClick = onLongClick
+        )
+    } else Modifier
+    val glassContent: @Composable ColumnScope.() -> Unit = {
+        // The glass paths paint no surface, so re-provide the requested ink
+        // colour instead of silently inheriting the parent's.
+        CompositionLocalProvider(LocalContentColor provides contentColor) {
+            content()
+        }
+    }
 
-    if (liquidGlassEnabled && !performanceMode && effectiveBackdrop != null) {
+    if (useCompactGlass) {
+        val cornerShape = shape as? CornerBasedShape ?: RoundedCornerShape(28.dp)
+        Box(
+            modifier = modifier
+                .then(clickModifier)
+                .liquidGlassTile(
+                    shape = cornerShape,
+                    tint = containerColor.copy(alpha = 0.22f),
+                    rimColor = if (border != null) {
+                        Color.Transparent
+                    } else {
+                        Color.White.copy(alpha = 0.26f)
+                    },
+                    shadowRadius = 2.dp,
+                )
+                .then(if (border != null) Modifier.border(border, shape) else Modifier)
+        ) {
+            Column(content = glassContent)
+        }
+    } else if (useFullGlass && effectiveBackdrop != null) {
         val glassBorder = border ?: BorderStroke(1.dp, Color.White.copy(alpha = 0.16f))
         com.frerox.toolz.ui.liquidglass.GlassCard(
             backdrop = effectiveBackdrop,
             modifier = modifier
-                .then(
-                    if (enabled) {
-                        Modifier.bouncyClick(
-                            enabled = enabled,
-                            onClick = onClick,
-                            onLongClick = onLongClick
-                        )
-                    } else Modifier
-                )
-                .then(
-                    if (glassBorder != null) {
-                        Modifier.border(glassBorder, shape)
-                    } else Modifier
-                ),
+                .then(clickModifier)
+                .border(glassBorder, shape),
             shape = shape,
             tint = containerColor.copy(alpha = 0.12f),
-            content = content
+            content = glassContent
         )
     } else {
         Surface(
-            modifier = modifier
-                .then(
-                    if (enabled) {
-                        Modifier.bouncyClick(
-                            enabled = enabled,
-                            onClick = onClick,
-                            onLongClick = onLongClick
-                        )
-                    } else Modifier
-                ),
+            modifier = modifier.then(clickModifier),
             shape = shape,
             color = containerColor,
             contentColor = contentColor,
@@ -120,6 +146,7 @@ fun ExpressiveCard(
     contentColor: Color = MaterialTheme.colorScheme.onSurface,
     elevation: Dp = 2.dp,
     border: BorderStroke? = null,
+    compactGlass: Boolean = false,
     content: @Composable ColumnScope.() -> Unit
 ) {
     ExpressiveCard(
@@ -131,6 +158,7 @@ fun ExpressiveCard(
         contentColor = contentColor,
         elevation = elevation,
         border = border,
+        compactGlass = compactGlass,
         content = content
     )
 }

@@ -400,10 +400,8 @@ fun ToolzTonalExpressiveIconButton(
     if (liquidGlassEnabled && backdrop != null) {
         val resolvedShape = shape ?: shapes.shape
         com.frerox.toolz.ui.liquidglass.LiquidGlassIconButton(
-            onClick = {
-                haptic.click()
-                currentOnClick()
-            },
+            // Handled inside the glass button itself.
+            onClick = currentOnClick,
             backdrop = backdrop,
             modifier = modifier,
             enabled = enabled,
@@ -474,10 +472,9 @@ fun ToolzExpressiveIconButton(
     if (liquidGlassEnabled && backdrop != null) {
         val resolvedShape = shape ?: shapes.shape
         com.frerox.toolz.ui.liquidglass.LiquidGlassIconButton(
-            onClick = {
-                haptic.click()
-                currentOnClick()
-            },
+            // LiquidGlassIconButton fires its own haptic, so wrapping it here would
+            // double-vibrate every glass icon button tap.
+            onClick = currentOnClick,
             backdrop = backdrop,
             modifier = modifier,
             enabled = enabled,
