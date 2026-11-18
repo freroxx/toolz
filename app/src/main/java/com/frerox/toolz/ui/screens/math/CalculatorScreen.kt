@@ -903,17 +903,23 @@ private fun ScrollingExpression(
         fontFeatureSettings = "tnum",
     )
 
-    val caretTransition = rememberInfiniteTransition(label = "caret")
-    val blink by caretTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(520, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "caretBlink",
-    )
-    val caretAlpha = if (performanceMode) 1f else blink
+    // The caret only needs to repaint a 2dp rectangle. Keeping the blink on the
+    // draw path means the infinite transition no longer recomposes this whole
+    // text cluster 60 times a second, and it is skipped entirely in performance
+    // mode.
+    val caretAlpha = if (performanceMode) {
+        null
+    } else {
+        rememberInfiniteTransition(label = "caret").animateFloat(
+            initialValue = 1f,
+            targetValue = 0f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(520, easing = LinearEasing),
+                repeatMode = RepeatMode.Reverse,
+            ),
+            label = "caretBlink",
+        )
+    }
 
     BoxWithConstraints(
         modifier = modifier
@@ -980,8 +986,9 @@ private fun ScrollingExpression(
                         .offset { IntOffset(caretX.roundToInt() - 1, 0) }
                         .width(2.dp)
                         .height(caretHeight)
+                        .graphicsLayer { alpha = caretAlpha?.value ?: 1f }
                         .background(
-                            color = scheme.primary.copy(alpha = 0.9f * caretAlpha),
+                            color = scheme.primary.copy(alpha = 0.9f),
                             shape = RoundedCornerShape(1.dp),
                         ),
                 )
@@ -1379,29 +1386,24 @@ private fun CalculatorKeypad(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .liquidGlassEffect(
-                    shape = padShape,
-                    tint = scheme.surfaceContainerLowest.copy(alpha = 0.10f),
-                    refractionFactor = 0.45f,
-                    shadowRadius = 8.dp,
-                    innerGlow = false,
-                )
+                // The pad itself is deliberately not a glass slab. Every key in
+                // it is already glass, so a second full-screen blur stacked ~4
+                // offscreen layers underneath 30 others and only darkened the
+                // material. A flat scrim still groups the pad without costing a
+                // single extra layer, and the layer wash / rim below is all the
+                // shift-alpha slab ever actually communicated.
                 .clip(padShape)
+                .background(
+                    color = if (glass) scheme.surfaceContainerLow.copy(alpha = 0.12f) else Color.Transparent,
+                    shape = padShape,
+                )
                 .background(layerAccent)
-                .border(
-                    BorderStroke(
-                        1.dp,
-                        if (glass) {
-                            // Keep the shift/alpha tint cue on top of the glass rim.
-                            if (state.layer != KeyLayer.NONE) layerBorder
-                            else Color.White.copy(
-                                alpha = if (isSystemInDarkTheme()) 0.14f else 0.40f,
-                            )
-                        } else {
-                            layerBorder
-                        },
-                    ),
-                    padShape,
+                .then(
+                    if (state.layer != KeyLayer.NONE) {
+                        Modifier.border(BorderStroke(1.dp, layerBorder), padShape)
+                    } else {
+                        Modifier
+                    },
                 )
                 .padding(2.dp),
         ) {
@@ -1504,14 +1506,12 @@ private fun CalcKey(
         else -> baseFg
     }
     val showIcon = def.id == "left" || def.id == "right" || def.label == "DEL"
-    val keyShape = when (def.kind) {
-        KeyKind.DIGIT -> RoundedCornerShape(22.dp)
-        KeyKind.OPERATOR -> RoundedCornerShape(24.dp)
-        KeyKind.EQUALS -> RoundedCornerShape(30.dp)
-        KeyKind.FUNCTION -> RoundedCornerShape(18.dp)
-        KeyKind.MODIFIER -> RoundedCornerShape(18.dp)
-        KeyKind.NAV -> RoundedCornerShape(18.dp)
-        KeyKind.CLEAR, KeyKind.DELETE -> RoundedCornerShape(20.dp)
+    // One corner language for the whole pad. Per-kind radii turned the keypad
+    // into a patchwork; only the equals key is allowed to be a hero shape.
+    val keyShape = if (def.kind == KeyKind.EQUALS) {
+        RoundedCornerShape(28.dp)
+    } else {
+        RoundedCornerShape(20.dp)
     }
     val borderBase = when {
         active -> baseFg.copy(alpha = 0.28f)
@@ -1542,10 +1542,10 @@ private fun CalcKey(
     // one material instead of a tray of painted tiles.
     val glassKeyTint = bg.copy(
         alpha = when {
-            def.kind == KeyKind.EQUALS -> 0.70f
-            active -> 0.58f
-            def.kind == KeyKind.OPERATOR -> 0.34f
-            def.kind == KeyKind.CLEAR -> 0.34f
+            def.kind == KeyKind.EQUALS -> 0.72f
+            active -> 0.60f
+            def.kind == KeyKind.OPERATOR -> 0.44f
+            def.kind == KeyKind.CLEAR -> 0.42f
             def.kind == KeyKind.DIGIT -> 0.26f
             def.kind == KeyKind.MODIFIER -> 0.26f
             def.kind == KeyKind.DELETE -> 0.26f
@@ -1670,8 +1670,8 @@ private fun CalcKey(
                         .align(Alignment.TopStart)
                         .padding(start = 7.dp, top = 3.dp),
                     style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.5.sp),
-                    fontWeight = FontWeight.SemiBold,
-                    color = scheme.tertiary.copy(alpha = 0.95f),
+                    fontWeight = FontWeight.Medium,
+                    color = scheme.onSurfaceVariant.copy(alpha = 0.62f),
                     maxLines = 1,
                 )
             }
@@ -1682,8 +1682,8 @@ private fun CalcKey(
                         .align(Alignment.TopEnd)
                         .padding(end = 7.dp, top = 3.dp),
                     style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.5.sp),
-                    fontWeight = FontWeight.SemiBold,
-                    color = scheme.secondary.copy(alpha = 0.95f),
+                    fontWeight = FontWeight.Medium,
+                    color = scheme.onSurfaceVariant.copy(alpha = 0.62f),
                     maxLines = 1,
                 )
             }

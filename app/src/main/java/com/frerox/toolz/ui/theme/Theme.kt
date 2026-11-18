@@ -27,6 +27,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -189,49 +190,53 @@ fun Modifier.toolzBackground(): Modifier = composed {
     )
 
     if (liquidGlassEnabled) {
-        val glassBrush = remember(angle, colorScheme.primary, colorScheme.secondary, isDark) {
-            val ox = (sin(angle) + 1f) / 2f
-            val oy = (cos(angle) + 1f) / 2f
-            val amethyst = if (isDark) Color(0xFF5B1B8E) else Color(0xFFD1C4E9)
-            val sapphire = if (isDark) Color(0xFF1E3A8A) else Color(0xFFBBDEFB)
-            val emerald = if (isDark) Color(0xFF0D5C54) else Color(0xFFB2DFDB)
-            val base = if (isDark) Color(0xFF0A0612) else Color(0xFFF7F5FA)
-
-            Brush.radialGradient(
-                0.00f to amethyst.copy(alpha = if (isDark) 0.55f else 0.45f),
-                0.35f to sapphire.copy(alpha = if (isDark) 0.40f else 0.32f),
-                0.65f to emerald.copy(alpha = if (isDark) 0.25f else 0.20f),
-                1.00f to base,
-                center = Offset(ox * 2000f, oy * 2000f),
-                radius = 2800f,
+        val amethyst = if (isDark) Color(0xFF5B1B8E) else Color(0xFFD1C4E9)
+        val sapphire = if (isDark) Color(0xFF1E3A8A) else Color(0xFFBBDEFB)
+        val emerald = if (isDark) Color(0xFF0D5C54) else Color(0xFFB2DFDB)
+        val base = if (isDark) Color(0xFF0A0612) else Color(0xFFF7F5FA)
+        val stops = arrayOf(
+            0.00f to amethyst.copy(alpha = if (isDark) 0.55f else 0.45f),
+            0.35f to sapphire.copy(alpha = if (isDark) 0.40f else 0.32f),
+            0.65f to emerald.copy(alpha = if (isDark) 0.25f else 0.20f),
+            1.00f to base,
+        )
+        // Read the orbit in the draw phase. The gradient is the backdrop every
+        // glass surface samples, so recomposing for each 1/60 s of drift forced
+        // the whole background subtree (and its brush) to rebuild continuously.
+        // Drawing it here keeps the animation, but only invalidates draw.
+        return@composed this.drawBehind {
+            drawRect(
+                Brush.radialGradient(
+                    *stops,
+                    center = Offset((sin(angle) + 1f) / 2f * 2000f, (cos(angle) + 1f) / 2f * 2000f),
+                    radius = 2800f,
+                )
             )
         }
-        return@composed this.background(glassBrush)
     }
 
-    val brush = remember(angle, colorScheme.primary, colorScheme.secondary, isDark) {
-        val offset = Offset(x = (sin(angle) + 1f) / 2f, y = (cos(angle) + 1f) / 2f)
-        Brush.radialGradient(
-            colors = if (isDark) {
-                listOf(
-                    colorScheme.primary.copy(alpha = 0.15f), 
-                    colorScheme.secondary.copy(alpha = 0.08f), 
-                    colorScheme.background
-                )
-            } else {
-                listOf(
-                    colorScheme.primary.copy(alpha = 0.20f),
-                    colorScheme.secondary.copy(alpha = 0.12f),
-                    colorScheme.background
-                )
-            },
-            center = Offset(offset.x * 2000f, offset.y * 2000f),
-            radius = 3000f
-        )
+    val inner = if (isDark) {
+        colorScheme.primary.copy(alpha = 0.15f)
+    } else {
+        colorScheme.primary.copy(alpha = 0.20f)
     }
-
+    val outer = if (isDark) {
+        colorScheme.secondary.copy(alpha = 0.08f)
+    } else {
+        colorScheme.secondary.copy(alpha = 0.12f)
+    }
     val overlayAlpha = if (isDark) 0.25f else 0.12f
-    this.background(brush).background(colorScheme.background.copy(alpha = overlayAlpha))
+    val overlayColor = colorScheme.background.copy(alpha = overlayAlpha)
+    this.drawBehind {
+        drawRect(
+            Brush.radialGradient(
+                colors = listOf(inner, outer, colorScheme.background),
+                center = Offset((sin(angle) + 1f) / 2f * 2000f, (cos(angle) + 1f) / 2f * 2000f),
+                radius = 3000f,
+            )
+        )
+        drawRect(overlayColor)
+    }
 }
 
 @Composable

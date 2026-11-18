@@ -493,12 +493,16 @@ fun Modifier.liquidGlassEffect(
 fun Modifier.liquidGlassTile(
     shape: CornerBasedShape,
     tint: Color,
-    rimColor: Color = Color.White.copy(alpha = if (isSystemInDarkTheme()) 0.24f else 0.55f),
+    rimColor: Color = Color.White.copy(alpha = if (isSystemInDarkTheme()) 0.26f else 0.62f),
     shadowRadius: Dp? = 3.dp,
     sheenAlpha: Float = if (isSystemInDarkTheme()) 0.10f else 0.26f,
 ): Modifier {
     if (!LocalLiquidGlassEnabled.current) return this
-    val shadeAlpha = if (isSystemInDarkTheme()) 0.18f else 0.05f
+    val dark = isSystemInDarkTheme()
+    val shadeAlpha = if (dark) 0.18f else 0.05f
+    // Light glass needs a shaded lower edge to hold its silhouette; without one
+    // a near-white sheet over a light backdrop just smears into it.
+    val edgeAlpha = if (dark) 0.22f else 0.09f
     var tile = this
     if (shadowRadius != null) {
         tile = tile.shadow(
@@ -522,16 +526,20 @@ fun Modifier.liquidGlassTile(
         )
         .drawWithContent {
             drawContent()
-            // A lit rim reads as glass; a flat outline reads as a sticker.
-            drawOutline(
-                outline = shape.createOutline(size, layoutDirection, this),
-                brush = Brush.verticalGradient(
-                    0f to rimColor,
-                    0.55f to rimColor.copy(alpha = rimColor.alpha * 0.4f),
-                    1f to rimColor.copy(alpha = rimColor.alpha * 0.75f),
-                ),
-                style = Stroke(width = 1.dp.toPx()),
-            )
+            // A lit top edge falling into a shaded lower edge is what makes this
+            // read as a sheet of glass rather than a flat outline or a sticker.
+            if (rimColor.alpha > 0f) {
+                drawOutline(
+                    outline = shape.createOutline(size, layoutDirection, this),
+                    brush = Brush.verticalGradient(
+                        0f to rimColor,
+                        0.40f to rimColor.copy(alpha = rimColor.alpha * 0.32f),
+                        0.58f to Color.Black.copy(alpha = edgeAlpha * 0.55f),
+                        1f to Color.Black.copy(alpha = edgeAlpha),
+                    ),
+                    style = Stroke(width = 1.dp.toPx()),
+                )
+            }
         }
 }
 
