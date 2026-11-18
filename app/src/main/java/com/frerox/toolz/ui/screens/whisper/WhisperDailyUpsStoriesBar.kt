@@ -32,7 +32,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -73,6 +75,7 @@ internal fun DailyUpsStoriesBar(
     val newUpLabel = stringResource(R.string.st_Whisper_DailyUp_NewUp)
     val seenLabel = stringResource(R.string.st_Whisper_DailyUp_SeenState)
     val unseenLabel = stringResource(R.string.st_Whisper_DailyUp_UnseenState)
+    val createActionLabel = stringResource(R.string.st_Whisper_DailyUp_CreateAction)
 
     // The own bubble is ALWAYS present: it is the compose entry, exactly like
     // Instagram keeps "your story" on an empty day.
@@ -94,6 +97,18 @@ internal fun DailyUpsStoriesBar(
                 .width(68.dp)
                 .clip(RoundedCornerShape(16.dp))
                 .semantics {
+                    // A live own bubble opens the ring on tap, so the "+" badge
+                    // (cleared from semantics with the bubble) would otherwise
+                    // leave no screen-reader path to posting a new Up.
+                    if (strip.mineLive) {
+                        customActions = listOf(
+                            CustomAccessibilityAction(createActionLabel) {
+                                haptic.click()
+                                onCompose()
+                                true
+                            },
+                        )
+                    }
                     onClick(label = ownLabel) {
                         haptic.click()
                         if (strip.mineLive && me?.id != null) {

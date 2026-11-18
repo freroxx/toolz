@@ -10,6 +10,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.whisper.GroupInviteInfo
 import com.frerox.toolz.data.whisper.GroupNotifScope
+import com.frerox.toolz.data.whisper.WhisperDailyUpsConfig
 import com.frerox.toolz.data.whisper.WhisperGroupChatMessage
 import com.frerox.toolz.data.whisper.WhisperGroupEntity
 import com.frerox.toolz.data.whisper.WhisperGroupMembership
@@ -42,6 +43,7 @@ import com.frerox.toolz.data.whisper.openGroupPicture
 import com.frerox.toolz.data.whisper.requestGroupJoin
 import com.frerox.toolz.data.whisper.setGroupPicture
 import com.frerox.toolz.data.whisper.shouldNotifyGroupEvent
+import com.frerox.toolz.data.whisper.syncDailyUps
 import com.frerox.toolz.data.whisper.syncGroups
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
@@ -266,6 +268,9 @@ class WhisperGroupsViewModel @Inject constructor(
 
     private var loadJob: Job? = null
 
+    /** [SystemClock.elapsedRealtime] anchor for [syncDailyUpsThrottled]; 0 = never. */
+    private var lastDailyUpsSyncAtMs = 0L
+
     @Volatile
     private var loadQueued = false
 
@@ -306,6 +311,9 @@ class WhisperGroupsViewModel @Inject constructor(
             repository.getMyProfile()
                 .onSuccess { _myProfile.value = it }
         }
+        // The rail above observes Room only, so this throttled reconcile is
+        // what keeps it fresh WITHOUT the Daily Ups hub being opened.
+        syncDailyUpsThrottled()
         // Drain queued group sends first so they land before the sync reads.
         runCatching { repository.flushGroupOutbox() }
         val invites = repository.myGroupInvites().getOrNull().orEmpty()
@@ -363,6 +371,31 @@ class WhisperGroupsViewModel @Inject constructor(
         viewModelScope.launch {
             delay(minOf(30_000L * quietResyncAttempts, 120_000L))
             load()
+        }
+    }
+
+    /**
+     * Throttled Daily Ups reconcile for the Chats-tab rail.
+     *
+     * The rail is deliberately Room-only (no server round trip at render), so
+     * without this it stays stale until the Daily Ups hub happens to open.
+     * Hub loads fire on tab returns, realtime pings and quiet resyncs alike, so
+     * the sync is throttled instead of running once per pass; the hub itself
+     * still does its own full refresh. Fire-and-forget: a failure leaves the
+     * cached rail intact and the next window retries.
+     */
+    private fun syncDailyUpsThrottled() {
+        if (!WhisperDailyUpsConfig.ENABLED) return
+        val now = SystemClock.elapsedRealtime()
+        // 0 means "never synced this process" — don't let a freshly booted
+        // device's small uptime suppress the first reconcile.
+        if (lastDailyUpsSyncAtMs != 0L && now - lastDailyUpsSyncAtMs < DAILY_UPS_SYNC_THROTTLE_MS) {
+            return
+        }
+        lastDailyUpsSyncAtMs = now
+        viewModelScope.launch {
+            // Result-returning: failures are silent by design (see above).
+            repository.syncDailyUps()
         }
     }
 
@@ -897,5 +930,12 @@ class WhisperGroupsViewModel @Inject constructor(
 
         /** A burst of structural events is one full hub pass. */
         const val HUB_RELOAD_DEBOUNCE_MS = 1_200L
+
+        /**
+         * The rail's server reconcile is expensive (paged story reads + sweep
+         * ping), so a hub pass at most once per window; the hub's own refresh
+         * is unaffected.
+         */
+        const val DAILY_UPS_SYNC_THROTTLE_MS = 90_000L
     }
 }

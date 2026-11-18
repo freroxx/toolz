@@ -1269,7 +1269,13 @@ bright, ≥2-unseen count badge — horizontally scrollable (§12.4). Both Daily
 Ups rails expose each friend bubble as one merged TalkBack node labelled
 "name, N live ups, seen/unseen", with the ring and count badge treated as
 decorative. Tapping a friend bubble routes to the hub already aimed at that
-poster; the `+` opens the composer directly. Creation offers friend picking,
+poster; the `+` opens the composer directly. That bar is deliberately
+Room-only — no story-server round trip at render — so a throttled reconcile
+(90 s, skipped when `WhisperDailyUpsConfig.ENABLED` is false) rides the
+Groups load: the strip converges after a friend posts without the Daily Ups
+hub ever being opened. On a live own bubble, where the tap opens my ring, the
+merged node additionally exposes a "Create Daily Up" custom action, since the
+`+` badge is cleared from semantics. Creation offers friend picking,
 an optional picture, and an invite-mode choice that is fixed at creation (see
 the permissions edge note below).
 

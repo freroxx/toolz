@@ -29,6 +29,7 @@ import com.frerox.toolz.data.whisper.observeMyDailyUps
 import com.frerox.toolz.data.whisper.syncDailyUps
 import com.frerox.toolz.data.whisper.toggleDailyUpReaction
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -265,13 +266,23 @@ class WhisperDailyUpsViewModel @Inject constructor(
         _error.value = null
         _refreshing.value = true
         refreshJob = viewModelScope.launch {
-            repository.syncDailyUps()
-                .onFailure { e -> _error.value = dailyUpErrorText(appContext, e) }
-            // Drop seen ids whose story expired while the app was away. Runs on
-            // both success and failure: the local clock is authority for expiry.
-            seenStore.prune(System.currentTimeMillis())
-            _quotaUsed.value = repository.dailyUpsPostedToday()
-            _refreshing.value = false
+            try {
+                repository.syncDailyUps()
+                    .onFailure { e -> _error.value = dailyUpErrorText(appContext, e) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                // syncDailyUps reports through Result; anything thrown still has
+                // to surface inline instead of stranding the spinner.
+                _error.value = dailyUpErrorText(appContext, e)
+            } finally {
+                // Drop seen ids whose story expired while the app was away. Runs
+                // on every exit: the local clock is authority for expiry, and a
+                // stranded _refreshing would disable the hub's pull for good.
+                runCatching { seenStore.prune(System.currentTimeMillis()) }
+                runCatching { _quotaUsed.value = repository.dailyUpsPostedToday() }
+                _refreshing.value = false
+            }
         }
     }
 
