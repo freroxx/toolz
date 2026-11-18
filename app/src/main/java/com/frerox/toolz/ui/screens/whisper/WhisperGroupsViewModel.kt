@@ -6,6 +6,8 @@
 package com.frerox.toolz.ui.screens.whisper
 
 import android.os.SystemClock
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.whisper.GroupInviteInfo
@@ -248,7 +250,13 @@ class WhisperGroupsViewModel @Inject constructor(
     fun setHubVisible(visible: Boolean) {
         val was = hubVisible
         hubVisible = visible
-        if (visible && !was) load()
+        if (visible && !was) {
+            load()
+            startDailyUpsTicker()
+        } else if (!visible && was) {
+            dailyUpsTickerJob?.cancel()
+            dailyUpsTickerJob = null
+        }
     }
 
     /** Adds [key] once; trims the oldest half when the dedupe set grows too big. */
@@ -270,6 +278,9 @@ class WhisperGroupsViewModel @Inject constructor(
 
     /** [SystemClock.elapsedRealtime] anchor for [syncDailyUpsThrottled]; 0 = never. */
     private var lastDailyUpsSyncAtMs = 0L
+
+    /** Runs only while the Chats tab is composed (see [setHubVisible]). */
+    private var dailyUpsTickerJob: Job? = null
 
     @Volatile
     private var loadQueued = false
@@ -379,23 +390,52 @@ class WhisperGroupsViewModel @Inject constructor(
      *
      * The rail is deliberately Room-only (no server round trip at render), so
      * without this it stays stale until the Daily Ups hub happens to open.
-     * Hub loads fire on tab returns, realtime pings and quiet resyncs alike, so
-     * the sync is throttled instead of running once per pass; the hub itself
-     * still does its own full refresh. Fire-and-forget: a failure leaves the
-     * cached rail intact and the next window retries.
+     * Callers are the hub load (tab returns, realtime pings, quiet resyncs)
+     * and the visibility ticker, so the sync is throttled within a window
+     * instead of running once per pass; the hub itself still does its own full
+     * refresh. Fire-and-forget: a failure leaves the cached rail intact and
+     * the next window retries.
      */
     private fun syncDailyUpsThrottled() {
         if (!WhisperDailyUpsConfig.ENABLED) return
         val now = SystemClock.elapsedRealtime()
         // 0 means "never synced this process" — don't let a freshly booted
-        // device's small uptime suppress the first reconcile.
-        if (lastDailyUpsSyncAtMs != 0L && now - lastDailyUpsSyncAtMs < DAILY_UPS_SYNC_THROTTLE_MS) {
+        // device's small uptime suppress the first reconcile (see the pure
+        // helper's test).
+        if (!dailyUpsSyncDue(lastDailyUpsSyncAtMs, now, DAILY_UPS_SYNC_THROTTLE_MS)) {
             return
         }
         lastDailyUpsSyncAtMs = now
         viewModelScope.launch {
             // Result-returning: failures are silent by design (see above).
             repository.syncDailyUps()
+        }
+    }
+
+    /**
+     * Keeps the rail converging while the Chats tab is parked on screen.
+     *
+     * Rides [hubVisible], so it stops the moment the section leaves
+     * composition (chat push, tab switch); each tick also checks the process
+     * lifecycle so a backgrounded hub is never polled. The 90 s throttle
+     * still bounds actual reads, so a load + tick in the same window is one
+     * reconcile.
+     */
+    private fun startDailyUpsTicker() {
+        if (!WhisperDailyUpsConfig.ENABLED) return
+        if (dailyUpsTickerJob?.isActive == true) return
+        dailyUpsTickerJob = viewModelScope.launch {
+            while (isActive) {
+                delay(DAILY_UPS_STRIP_TICK_MS)
+                // A backgrounded hub stays composed; never poll the story
+                // plane while the process is not visible.
+                if (!ProcessLifecycleOwner.get().lifecycle.currentState
+                        .isAtLeast(Lifecycle.State.STARTED)
+                ) {
+                    continue
+                }
+                syncDailyUpsThrottled()
+            }
         }
     }
 
@@ -937,5 +977,19 @@ class WhisperGroupsViewModel @Inject constructor(
          * is unaffected.
          */
         const val DAILY_UPS_SYNC_THROTTLE_MS = 90_000L
+
+        /** While the Chats tab is on screen, re-check the rail this often. */
+        const val DAILY_UPS_STRIP_TICK_MS = 120_000L
     }
 }
+
+/**
+ * Pure throttle decision for the Chats-tab rail's Daily Ups reconcile.
+ *
+ * [lastAtMs] of `0` means "never synced this process" and always passes, so a
+ * device that just booted cannot skip its first reconcile because uptime is
+ * shorter than the window. A clock reading before the anchor (only possible
+ * across a clock source change) rejects rather than wedging the throttle open.
+ */
+internal fun dailyUpsSyncDue(lastAtMs: Long, nowMs: Long, windowMs: Long): Boolean =
+    lastAtMs == 0L || nowMs - lastAtMs >= windowMs

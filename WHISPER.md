@@ -1272,8 +1272,10 @@ decorative. Tapping a friend bubble routes to the hub already aimed at that
 poster; the `+` opens the composer directly. That bar is deliberately
 Room-only — no story-server round trip at render — so a throttled reconcile
 (90 s, skipped when `WhisperDailyUpsConfig.ENABLED` is false) rides the
-Groups load: the strip converges after a friend posts without the Daily Ups
-hub ever being opened. On a live own bubble, where the tap opens my ring, the
+Groups load and, while the Chats tab is on screen, a 2-minute ticker: the
+strip converges after a friend posts without the Daily Ups hub ever being
+opened, and the ticker stops with the section's composition. On a live own
+bubble, where the tap opens my ring, the
 merged node additionally exposes a "Create Daily Up" custom action, since the
 `+` badge is cleared from semantics. Creation offers friend picking,
 an optional picture, and an invite-mode choice that is fixed at creation (see
@@ -1652,6 +1654,11 @@ Whisper's cryptography is pinned with a deliberately paranoid test stack:
   composition-locked timer anymore. Hub sync failures render inline (failure
   panel with no cache, banner over stale content with a cache); only
   viewer-scoped failures reach the snackbar.
+- **Stories-strip freshness pin.** `WhisperDailyUpsSyncThrottleTest` fixes the
+  pure `dailyUpsSyncDue` window behind the Chats-tab rail's reconcile: the
+  first pass in a process, inside/exact/one-millisecond-early boundaries, and
+  a clock reading behind the anchor. The throttle can therefore neither spam
+  the story plane nor wedge itself shut.
 - **Compose share-block pins.** `WhisperComposeCtaTest` fixes the pinned
   CTA precedence — Busy (publishing or published) wins over NoPhoto, which wins
   over NoAudience, which wins over NoQuota; only a ready draft returns None.
