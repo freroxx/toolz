@@ -112,6 +112,8 @@ class WhisperDailyUpsViewModel @Inject constructor(
         val ownerName: String?,
         val isMine: Boolean,
         val stories: List<StoryItem>,
+        /** Decrypted owner picture if the hub already had it; viewer shows it. */
+        val picture: ByteArray? = null,
     )
 
     /** Full-screen viewer overlay; null = hidden. Immutable per open gesture. */
@@ -345,6 +347,7 @@ class WhisperDailyUpsViewModel @Inject constructor(
                     ownerName = if (poster.isMine) null else poster.ownerName,
                     isMine = poster.isMine,
                     stories = items,
+                    picture = poster.picture,
                 )
             }
         }

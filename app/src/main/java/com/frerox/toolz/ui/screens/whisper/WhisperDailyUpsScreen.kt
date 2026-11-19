@@ -30,6 +30,8 @@ import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -43,10 +45,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
@@ -55,13 +55,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.AddCircle
-import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.PhotoLibrary
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -69,6 +67,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -94,6 +93,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.Color
@@ -130,7 +130,6 @@ import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.components.ToolzExpressiveTextButton
 import com.frerox.toolz.ui.components.ToolzTonalExpressiveButton
-import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.rememberToolzHapticFeedback
 import com.frerox.toolz.ui.theme.toolzBackground
 import kotlinx.coroutines.Job
@@ -236,45 +235,32 @@ fun WhisperDailyUpsScreen(
                 },
                 actions = {
                     val quotaLeft = (WhisperDailyUpsConfig.DAILY_LIMIT - state.quotaUsed).coerceAtLeast(0)
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        modifier = Modifier.padding(end = 4.dp),
-                    ) {
-                        Text(
-                            text = "$quotaLeft/${WhisperDailyUpsConfig.DAILY_LIMIT}",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        )
-                    }
+                    // One fixed 48dp slot: swapping a spinner for the icon used to
+                    // shave 4dp off the row and shift Add on every refresh.
                     IconButton(
-                        onClick = {
-                            if (viewModel.acceptNavigation()) onNavigateToCompose()
-                        },
+                        onClick = { viewModel.refresh() },
+                        enabled = !state.loading,
                     ) {
-                        Icon(
-                            Icons.Rounded.AddCircle,
-                            contentDescription = stringResource(R.string.st_Whisper_DailyUp_AddCd),
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                    if (state.loading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier
-                                .padding(horizontal = 12.dp)
-                                .size(20.dp),
-                            strokeWidth = 2.dp,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    } else {
-                        IconButton(onClick = { viewModel.refresh() }) {
+                        if (state.loading) {
+                            GroupUiInlineLoading(modifier = Modifier.size(20.dp))
+                        } else {
                             Icon(
                                 Icons.Rounded.Refresh,
                                 contentDescription = stringResource(R.string.st_Whisper_DailyUp_RefreshCd),
                             )
                         }
+                    }
+                    FilledTonalIconButton(
+                        onClick = {
+                            if (viewModel.acceptNavigation()) onNavigateToCompose()
+                        },
+                        enabled = quotaLeft > 0,
+                    ) {
+                        Icon(
+                            Icons.Rounded.Add,
+                            contentDescription = stringResource(R.string.st_Whisper_DailyUp_AddCd),
+                            modifier = Modifier.size(22.dp),
+                        )
                     }
                 },
             )
@@ -298,102 +284,121 @@ fun WhisperDailyUpsScreen(
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            // Pre-PTR the hub was a static Column: on small screens the lower
-            // content simply CLIPPED with no way to reach it, and a pull had
-            // nothing to grab — vertical scroll fixes both.
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState()),
-            ) {
+            // A keyed LazyColumn, not Column+verticalScroll: with a large
+            // friend list the old body composed and decoded EVERY avatar and
+            // photo up front. Lazy composition bounds that to what is on
+            // screen, and the pull gesture still finds a scrollable child in
+            // the loading/error branches because they are items too.
             // Branch order is the honesty contract: a failed sync with no cache
             // is a FAILURE panel, never a "nothing shared" empty day. A
             // successful empty day is still the Your-day card + no-friend line.
             val hasData = state.posterGroups.isNotEmpty()
-            when {
-                state.loading && !hasData -> {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 48.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        CircularProgressIndicator()
-                    }
-                }
-                state.error != null && !hasData -> {
-                    GroupUiDeadEnd(
-                        message = stringResource(R.string.st_Whisper_DailyUp_ErrSync),
-                        onBack = onNavigateBack,
-                        onRetry = { viewModel.refresh() },
-                    )
-                }
-                else -> {
-                    // Cached content survives a failed refresh: keep the hub on
-                    // screen and say the sync failed above it.
-                    GroupUiBanner(
-                        message = state.error.orEmpty(),
-                        visible = state.error != null,
-                        isError = true,
-                        actionLabel = stringResource(R.string.st_Whisper_DailyUp_Retry),
-                        onAction = { viewModel.refresh() },
-                        onDismiss = { viewModel.clearError() },
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                    )
-                    val ownCount = remember(state.posterGroups) {
-                        state.posterGroups.firstOrNull { it.isMine }?.stories?.size ?: 0
-                    }
-                    val friendPosters = remember(state.posterGroups) {
-                        state.posterGroups.filterNot { it.isMine }
-                    }
-                    val quotaLeft =
-                        (WhisperDailyUpsConfig.DAILY_LIMIT - state.quotaUsed).coerceAtLeast(0)
+            val ownCount = remember(state.posterGroups) {
+                state.posterGroups.firstOrNull { it.isMine }?.stories?.size ?: 0
+            }
+            val friendPosters = remember(state.posterGroups) {
+                state.posterGroups.filterNot { it.isMine }
+            }
+            val quotaLeft =
+                (WhisperDailyUpsConfig.DAILY_LIMIT - state.quotaUsed)
+                    .coerceAtLeast(0)
 
-                    YourDayCard(
-                        myId = state.myId,
-                        myName = state.myName,
-                        ownCount = ownCount,
-                        quotaLeft = quotaLeft,
-                        onView = viewModel::openMyViewer,
-                        onAdd = {
-                            if (viewModel.acceptNavigation()) onNavigateToCompose()
-                        },
-                    )
-                    Spacer(Modifier.height(20.dp))
-                    SectionHeader(
-                        text = stringResource(R.string.st_Whisper_DailyUp_RecentUpdates) +
-                            if (friendPosters.isNotEmpty()) " (${friendPosters.size})" else "",
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    if (friendPosters.isEmpty()) {
-                        DailyUpsEmptyState(
-                            modifier = Modifier.padding(horizontal = 16.dp),
-                        )
-                    } else {
-                        FriendsRail(
-                            posters = friendPosters,
-                            onOpen = { ownerId -> viewModel.openViewerForOwner(ownerId) },
-                        )
-                        Spacer(Modifier.height(16.dp))
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            friendPosters.forEach { poster ->
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(top = 8.dp, bottom = 32.dp),
+            ) {
+                when {
+                    state.loading && !hasData -> {
+                        item(key = "loading") {
+                            GroupUiCenterLoading(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 48.dp),
+                            )
+                        }
+                    }
+                    state.error != null && !hasData -> {
+                        item(key = "dead_end") {
+                            GroupUiDeadEnd(
+                                message = stringResource(R.string.st_Whisper_DailyUp_ErrSync),
+                                onBack = onNavigateBack,
+                                onRetry = { viewModel.refresh() },
+                            )
+                        }
+                    }
+                    else -> {
+                        // Cached content survives a failed refresh: keep the
+                        // hub on screen and say the sync failed above it.
+                        item(key = "banner") {
+                            GroupUiBanner(
+                                message = state.error.orEmpty(),
+                                visible = state.error != null,
+                                isError = true,
+                                actionLabel = stringResource(R.string.st_Whisper_DailyUp_Retry),
+                                onAction = { viewModel.refresh() },
+                                onDismiss = { viewModel.clearError() },
+                                modifier = Modifier.padding(horizontal = 16.dp),
+                            )
+                        }
+                        item(key = "your_day") {
+                            YourDayCard(
+                                myId = state.myId,
+                                myName = state.myName,
+                                ownCount = ownCount,
+                                quotaLeft = quotaLeft,
+                                onView = viewModel::openMyViewer,
+                                onAdd = {
+                                    if (viewModel.acceptNavigation()) onNavigateToCompose()
+                                },
+                            )
+                        }
+                        item(key = "section_header") {
+                            SectionHeader(
+                                text = stringResource(R.string.st_Whisper_DailyUp_SectionTitle) +
+                                    if (friendPosters.isNotEmpty()) {
+                                        " (${friendPosters.size})"
+                                    } else {
+                                        ""
+                                    },
+                                modifier = Modifier.padding(
+                                    start = 16.dp,
+                                    end = 16.dp,
+                                    top = 20.dp,
+                                    bottom = 6.dp,
+                                ),
+                            )
+                        }
+                        if (friendPosters.isEmpty()) {
+                            item(key = "empty") {
+                                DailyUpsEmptyState(
+                                    modifier = Modifier.padding(horizontal = 16.dp),
+                                )
+                            }
+                        } else {
+                            // The rail used to repeat this exact list as rings
+                            // above the cards. One scannable surface, not two:
+                            // the card carries the ring, the name, and the
+                            // new-count together.
+                            itemsIndexed(
+                                items = friendPosters,
+                                key = { _, poster -> poster.ownerId },
+                            ) { index, poster ->
                                 FriendStoryCard(
                                     poster = poster,
-                                    onClick = { viewModel.openViewerForOwner(poster.ownerId) },
+                                    onClick = {
+                                        viewModel.openViewerForOwner(poster.ownerId)
+                                    },
+                                    modifier = Modifier.padding(
+                                        start = 16.dp,
+                                        end = 16.dp,
+                                        top = if (index == 0) 0.dp else 10.dp,
+                                    ),
                                 )
                             }
                         }
                     }
-                    Spacer(Modifier.height(32.dp))
                 }
             }
-        }
         }
     }
 
@@ -450,6 +455,7 @@ fun WhisperDailyUpsScreen(
 // Hub parts
 // ────────────────────────────────────────────────────────────────────────────
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun YourDayCard(
     myId: String,
@@ -462,9 +468,16 @@ private fun YourDayCard(
     val youLabel = stringResource(R.string.st_Whisper_You)
     val name = myName.ifBlank { youLabel }
     val isLive = ownCount > 0
+    val canAdd = quotaLeft > 0
+    val quotaText = stringResource(
+        R.string.st_Whisper_DailyUp_QuotaLeft,
+        quotaLeft,
+        WhisperDailyUpsConfig.DAILY_LIMIT,
+    )
 
     ExpressiveCard(
         onClick = { if (isLive) onView() else onAdd() },
+        enabled = isLive || canAdd,
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp),
@@ -556,26 +569,28 @@ private fun YourDayCard(
                 }
             }
             Spacer(Modifier.height(16.dp))
-            Row(
+            // The quota is DAILY allowance, not a status of this card: keep it
+            // on its own line so the action row can wrap at 200% font instead
+            // of squeezing "Create Daily Up" off the edge.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                DailyQuotaSegments(
+                    left = quotaLeft,
+                    total = WhisperDailyUpsConfig.DAILY_LIMIT,
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = quotaText,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+            FlowRow(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                ) {
-                    Text(
-                        text = stringResource(
-                            R.string.st_Whisper_DailyUp_QuotaLeft,
-                            quotaLeft,
-                            WhisperDailyUpsConfig.DAILY_LIMIT,
-                        ),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                    )
-                }
-                Spacer(Modifier.weight(1f))
                 if (isLive) {
                     ToolzTonalExpressiveButton(
                         onClick = onView,
@@ -589,10 +604,10 @@ private fun YourDayCard(
                         Spacer(Modifier.width(6.dp))
                         Text(stringResource(R.string.st_Whisper_DailyUp_View))
                     }
-                    Spacer(Modifier.width(8.dp))
                 }
                 ToolzExpressiveButton(
                     onClick = onAdd,
+                    enabled = canAdd,
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
                 ) {
                     Icon(
@@ -614,108 +629,28 @@ private fun YourDayCard(
     }
 }
 
-/** One 64dp ring per live friend; unseen rings bright, swimlane badge ≥2. */
+/**
+ * Five short bars for the daily allowance: filled = still available. The
+ * textual quota sits next to it, so this is decoration for sighted users and
+ * carries no semantics of its own.
+ */
 @Composable
-private fun FriendsRail(
-    posters: List<StoryPoster>,
-    onOpen: (String) -> Unit,
-) {
-    val someone = stringResource(R.string.st_Whisper_DailyUp_Someone)
-    val seenLabel = stringResource(R.string.st_Whisper_DailyUp_SeenState)
-    val unseenLabel = stringResource(R.string.st_Whisper_DailyUp_UnseenState)
-    val haptic = rememberToolzHapticFeedback()
-    LazyRow(
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        items(items = posters, key = { it.ownerId }) { poster ->
-            val name = poster.ownerName?.takeIf { it.isNotBlank() } ?: someone
-            val storyCount = poster.stories.size
-            val openLabel = stringResource(
-                if (storyCount == 1) {
-                    R.string.st_Whisper_DailyUp_RailLabelOne
-                } else {
-                    R.string.st_Whisper_DailyUp_RailLabel
-                },
-                name,
-                storyCount,
-                if (poster.unseenCount > 0) unseenLabel else seenLabel,
-            )
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
+private fun DailyQuotaSegments(left: Int, total: Int) {
+    Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+        repeat(total) { index ->
+            Box(
                 modifier = Modifier
-                    .width(72.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .semantics {
-                        onClick(label = openLabel) {
-                            haptic.click()
-                            onOpen(poster.ownerId)
-                            true
-                        }
-                    }
-                    .bouncyClick {
-                        haptic.click()
-                        onOpen(poster.ownerId)
-                    }
-                    .padding(vertical = 4.dp),
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(64.dp)
-                        .clearAndSetSemantics {},
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(64.dp)
-                            .border(
-                                width = if (poster.unseenCount > 0) 3.dp else 2.dp,
-                                color = if (poster.unseenCount > 0) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.outlineVariant
-                                },
-                                shape = CircleShape,
-                            ),
-                    )
-                    GroupAvatar(
-                        name = name,
-                        groupId = poster.ownerId,
-                        size = 54.dp,
-                        picture = poster.picture,
-                    )
-                    if (poster.unseenCount >= 2) {
-                        Surface(
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.primary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary,
-                            modifier = Modifier
-                                .size(22.dp)
-                                .align(Alignment.TopEnd),
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text(
-                                    text = poster.unseenCount.toString(),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Bold,
-                                )
-                            }
-                        }
-                    }
-                }
-                Text(
-                    text = name,
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = if (poster.unseenCount > 0) FontWeight.Bold else FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier
-                        .width(72.dp)
-                        .padding(top = 6.dp),
-                )
-            }
+                    .width(14.dp)
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(
+                        if (index < left) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
+                        },
+                    ),
+            )
         }
     }
 }
@@ -724,6 +659,7 @@ private fun FriendsRail(
 private fun FriendStoryCard(
     poster: StoryPoster,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val someone = stringResource(R.string.st_Whisper_DailyUp_Someone)
     val name = poster.ownerName?.takeIf { it.isNotBlank() } ?: someone
@@ -731,6 +667,7 @@ private fun FriendStoryCard(
     val unseenCount = poster.unseenCount
     val isUnseen = unseenCount > 0
 
+    val haptic = rememberToolzHapticFeedback()
     val ringColor = if (isUnseen) {
         MaterialTheme.colorScheme.primary
     } else {
@@ -738,23 +675,27 @@ private fun FriendStoryCard(
     }
 
     ExpressiveCard(
-        onClick = onClick,
-        shape = RoundedCornerShape(20.dp),
-        modifier = Modifier.fillMaxWidth(),
+        onClick = {
+            haptic.click()
+            onClick()
+        },
+        shape = RoundedCornerShape(24.dp),
+        modifier = modifier.fillMaxWidth(),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
+                .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Box(
-                modifier = Modifier.size(54.dp),
+                modifier = Modifier.size(52.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Box(
                     modifier = Modifier
-                        .size(54.dp)
+                        .size(52.dp)
                         .border(
                             width = if (isUnseen) 2.5.dp else 1.5.dp,
                             color = ringColor,
@@ -764,7 +705,7 @@ private fun FriendStoryCard(
                 GroupAvatar(
                     name = name,
                     groupId = poster.ownerId,
-                    size = 46.dp,
+                    size = 44.dp,
                     picture = poster.picture,
                 )
                 if (unseenCount >= 2) {
@@ -786,16 +727,17 @@ private fun FriendStoryCard(
                     }
                 }
             }
-            Spacer(Modifier.width(14.dp))
-            Column(modifier = Modifier.weight(1f)) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
                 Text(
                     text = name,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.bodyLarge,
                     fontWeight = if (isUnseen) FontWeight.Bold else FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Spacer(Modifier.height(2.dp))
                 val subtitleText = when {
                     isUnseen -> stringResource(R.string.st_Whisper_DailyUp_UnseenPill, unseenCount)
                     storyCount == 1 -> stringResource(R.string.st_Whisper_DailyUp_StoriesCountOne)
@@ -804,23 +746,24 @@ private fun FriendStoryCard(
                 Text(
                     text = subtitleText,
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (isUnseen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (isUnseen) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                     fontWeight = if (isUnseen) FontWeight.SemiBold else FontWeight.Normal,
                 )
             }
-            Surface(
-                shape = CircleShape,
-                color = if (isUnseen) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
-                contentColor = if (isUnseen) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-            ) {
-                Icon(
-                    Icons.AutoMirrored.Rounded.KeyboardArrowRight,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .padding(8.dp)
-                        .size(18.dp),
-                )
-            }
+            Icon(
+                Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                contentDescription = null,
+                tint = if (isUnseen) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.outline
+                },
+                modifier = Modifier.size(20.dp),
+            )
         }
     }
 }
@@ -841,14 +784,14 @@ private fun DailyUpsEmptyState(modifier: Modifier = Modifier) {
             Box(
                 modifier = Modifier
                     .size(56.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primaryContainer),
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(MaterialTheme.colorScheme.secondaryContainer),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    Icons.Rounded.AutoAwesome,
+                    Icons.Rounded.PhotoLibrary,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
                     modifier = Modifier.size(28.dp),
                 )
             }
@@ -1143,6 +1086,36 @@ private fun StoryViewerOverlay(
                 )
             }
 
+            // White chrome floats over arbitrary photos. These gradients sit
+            // under the controls (and consume no touches), so the progress
+            // bar, owner, expiry and reactions stay legible on a bright sky.
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .height(132.dp)
+                    .background(
+                        Brush.verticalGradient(
+                            0f to Color.Black.copy(alpha = 0.62f),
+                            0.55f to Color.Black.copy(alpha = 0.28f),
+                            1f to Color.Transparent,
+                        ),
+                    ),
+            )
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(240.dp)
+                    .background(
+                        Brush.verticalGradient(
+                            0f to Color.Transparent,
+                            0.45f to Color.Black.copy(alpha = 0.35f),
+                            1f to Color.Black.copy(alpha = 0.78f),
+                        ),
+                    ),
+            )
+
             // Top chrome: one progress segment per story of the CURRENT poster,
             // avatar + owner + honest expiry, and the 48dp close target.
             Column(
@@ -1173,6 +1146,7 @@ private fun StoryViewerOverlay(
                         name = if (segment?.isMine == true) ownName else segmentName,
                         groupId = segment?.ownerId ?: "daily_ups_viewer",
                         size = 32.dp,
+                        picture = segment?.picture,
                     )
                     Spacer(Modifier.width(8.dp))
                     Column(modifier = Modifier.weight(1f)) {
@@ -1219,12 +1193,13 @@ private fun StoryViewerOverlay(
                 ) {
                     if (c.isMine) {
                         val stats = receipts.ownStats[c.storyId]
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
+                        Box(modifier = Modifier.fillMaxWidth()) {
                             Column(
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier
+                                    .align(Alignment.Center)
+                                    // Keep the delete target clear even at
+                                    // large font sizes; centred means centred.
+                                    .padding(horizontal = 56.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally,
                             ) {
                                 when {
@@ -1245,7 +1220,7 @@ private fun StoryViewerOverlay(
                                                 R.string.st_Whisper_DailyUp_ViewsCount,
                                                 stats.views,
                                             ),
-                                            color = Color.White.copy(alpha = 0.85f),
+                                            color = Color.White.copy(alpha = 0.9f),
                                             style = MaterialTheme.typography.labelLarge,
                                         )
                                         Text(
@@ -1257,13 +1232,16 @@ private fun StoryViewerOverlay(
                                                     stats.reactions,
                                                 )
                                             },
-                                            color = Color.White.copy(alpha = 0.7f),
+                                            color = Color.White.copy(alpha = 0.75f),
                                             style = MaterialTheme.typography.labelMedium,
                                         )
                                     }
                                 }
                             }
-                            IconButton(onClick = { pendingDeleteId = c.storyId }) {
+                            IconButton(
+                                onClick = { pendingDeleteId = c.storyId },
+                                modifier = Modifier.align(Alignment.CenterEnd),
+                            ) {
                                 Icon(
                                     Icons.Rounded.Delete,
                                     contentDescription = stringResource(R.string.st_Whisper_DailyUp_DeleteCd),
@@ -1278,7 +1256,7 @@ private fun StoryViewerOverlay(
                         ) {
                             Text(
                                 text = stringResource(R.string.st_Whisper_DailyUp_ReactHint),
-                                color = Color.White.copy(alpha = 0.6f),
+                                color = Color.White.copy(alpha = 0.8f),
                                 style = MaterialTheme.typography.labelMedium,
                                 textAlign = TextAlign.Center,
                             )
@@ -1470,7 +1448,7 @@ private fun ReactionPalette(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(24.dp))
-            .background(Color.White.copy(alpha = 0.12f))
+            .background(Color.Black.copy(alpha = 0.38f))
             .padding(horizontal = 4.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

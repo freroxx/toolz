@@ -79,11 +79,13 @@ internal fun DailyUpsStoriesBar(
 
     // The own bubble is ALWAYS present: it is the compose entry, exactly like
     // Instagram keeps "your story" on an empty day.
+    // The parent Chats list already insets its items: adding 16dp here pushed
+    // the strip 16dp further in than the group cards below it.
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalAlignment = Alignment.Top,
     ) {
@@ -132,10 +134,11 @@ internal fun DailyUpsStoriesBar(
             StoryBubble(
                 ownerId = myId,
                 name = ownName,
+                picture = null,
                 ringColor = if (strip.mineLive) {
                     MaterialTheme.colorScheme.primary
                 } else {
-                    MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
+                    MaterialTheme.colorScheme.outlineVariant
                 },
                 ringWidth = if (strip.mineLive) 3.dp else 2.dp,
                 plusBadge = true,
@@ -149,7 +152,7 @@ internal fun DailyUpsStoriesBar(
                 text = ownLabel,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontWeight = if (strip.mineLive) FontWeight.SemiBold else FontWeight.Normal,
+                fontWeight = if (strip.mineLive) FontWeight.Bold else FontWeight.Medium,
                 textAlign = TextAlign.Center,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -189,6 +192,7 @@ internal fun DailyUpsStoriesBar(
                 StoryBubble(
                     ownerId = poster.ownerId,
                     name = name,
+                    picture = poster.picture,
                     ringColor = if (poster.unseenCount > 0) {
                         MaterialTheme.colorScheme.primary
                     } else {
@@ -200,7 +204,8 @@ internal fun DailyUpsStoriesBar(
                 Text(
                     text = name,
                     style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = if (poster.unseenCount > 0) FontWeight.Bold else FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 4.dp),
@@ -222,6 +227,7 @@ private fun StoryBubble(
     plusBadge: Boolean,
     badgeCount: Int,
     ringWidth: Dp = 2.dp,
+    picture: ByteArray? = null,
     onPlusClick: (() -> Unit)? = null,
 ) {
     Box(
@@ -236,6 +242,7 @@ private fun StoryBubble(
             name = name,
             groupId = ownerId,
             size = 48.dp,
+            picture = picture,
         )
         if (plusBadge) {
             Surface(

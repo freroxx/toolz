@@ -199,7 +199,7 @@ fun WhisperGroupsSection(
 
     Column(
         modifier = Modifier.fillMaxWidth().animateContentSize(),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         // Instagram-stories circles first (own + live friends), then the groups
         // header — the strip owns the very top like stories sit above the feed.
@@ -224,16 +224,6 @@ fun WhisperGroupsSection(
                 modifier = Modifier.weight(1f),
                 maxLines = 1,
             )
-            FilledTonalIconButton(
-                onClick = { showCreate = true },
-                modifier = Modifier.size(48.dp),
-            ) {
-                Icon(
-                    Icons.Rounded.Add,
-                    contentDescription = stringResource(R.string.st_Whisper_Groups_New),
-                    modifier = Modifier.size(22.dp),
-                )
-            }
             Box {
                 IconButton(
                     onClick = { showMore = true },
@@ -257,6 +247,18 @@ fun WhisperGroupsSection(
                         },
                     )
                 }
+            }
+            Spacer(Modifier.width(4.dp))
+            // Primary action sits last (rightmost), the platform convention.
+            FilledTonalIconButton(
+                onClick = { showCreate = true },
+                modifier = Modifier.size(48.dp),
+            ) {
+                Icon(
+                    Icons.Rounded.Add,
+                    contentDescription = stringResource(R.string.st_Whisper_Groups_New),
+                    modifier = Modifier.size(22.dp),
+                )
             }
         }
         GroupUiBanner(
@@ -388,12 +390,15 @@ private fun GroupInviteCard(
                     if (working) GroupUiInlineLoading()
                     else Text(stringResource(R.string.st_Whisper_Groups_Join), fontWeight = FontWeight.Bold)
                 }
-                ToolzTonalExpressiveButton(
+                ToolzExpressiveTextButton(
                     onClick = onDecline,
                     enabled = !working,
                     modifier = Modifier.weight(1f),
                 ) {
-                    Text(stringResource(R.string.st_Whisper_Groups_Decline), fontWeight = FontWeight.Bold)
+                    Text(
+                        stringResource(R.string.st_Whisper_Groups_Decline),
+                        fontWeight = FontWeight.SemiBold,
+                    )
                 }
             }
         }
@@ -504,13 +509,20 @@ private fun GroupRowCard(
         },
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(28.dp),
+        // Same unread tint as the 1:1 conversation rows so the two lists
+        // read as one Chats surface.
+        containerColor = if (hasUnread) {
+            scheme.primaryContainer.copy(alpha = 0.35f)
+        } else {
+            scheme.surfaceContainerHigh
+        },
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            GroupAvatar(name = name, groupId = groupId, size = 56.dp, picture = picture)
+            GroupAvatar(name = name, groupId = groupId, size = 54.dp, picture = picture)
             Column(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
