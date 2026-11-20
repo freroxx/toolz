@@ -7,16 +7,16 @@ package com.frerox.toolz.ui.screens.whisper
 
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -46,6 +46,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.WhisperDailyUpsConfig
+import com.frerox.toolz.data.whisper.WhisperProfile
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.rememberToolzHapticFeedback
 
@@ -81,85 +82,88 @@ internal fun DailyUpsStoriesBar(
     // Instagram keeps "your story" on an empty day.
     // The parent Chats list already insets its items: adding 16dp here pushed
     // the strip 16dp further in than the group cards below it.
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(vertical = 8.dp),
+    // LazyRow, not Row+horizontalScroll: with a long friend list the eager
+    // Row composed (and queued decode for) every avatar at once. Lazy keeps
+    // that bounded to the circles that are actually visible.
+    LazyRow(
+        modifier = Modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalAlignment = Alignment.Top,
     ) {
-        val me = strip.me
-        val ownName = me?.effectiveName?.takeIf { it.isNotBlank() } ?: youLabel
-        val myId = me?.id ?: "daily_ups_me"
-        val ownLabel = if (strip.mineLive) stringResource(R.string.st_Whisper_DailyUp_YourDay) else newUpLabel
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier
-                .width(68.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .semantics {
-                    // A live own bubble opens the ring on tap, so the "+" badge
-                    // (cleared from semantics with the bubble) would otherwise
-                    // leave no screen-reader path to posting a new Up.
-                    if (strip.mineLive) {
-                        customActions = listOf(
-                            CustomAccessibilityAction(createActionLabel) {
-                                haptic.click()
+        item(key = "me") {
+            val me = strip.me
+            val ownName = me?.effectiveName?.takeIf { it.isNotBlank() } ?: youLabel
+            val myId = me?.id ?: "daily_ups_me"
+            val ownLabel = if (strip.mineLive) stringResource(R.string.st_Whisper_DailyUp_YourDay) else newUpLabel
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier
+                    .width(68.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .semantics {
+                        // A live own bubble opens the ring on tap, so the "+" badge
+                        // (cleared from semantics with the bubble) would otherwise
+                        // leave no screen-reader path to posting a new Up.
+                        if (strip.mineLive) {
+                            customActions = listOf(
+                                CustomAccessibilityAction(createActionLabel) {
+                                    haptic.click()
+                                    onCompose()
+                                    true
+                                },
+                            )
+                        }
+                        onClick(label = ownLabel) {
+                            haptic.click()
+                            if (strip.mineLive && me?.id != null) {
+                                onOpenPoster(me.id)
+                            } else {
                                 onCompose()
-                                true
-                            },
-                        )
+                            }
+                            true
+                        }
                     }
-                    onClick(label = ownLabel) {
+                    .bouncyClick {
                         haptic.click()
                         if (strip.mineLive && me?.id != null) {
                             onOpenPoster(me.id)
                         } else {
                             onCompose()
                         }
-                        true
                     }
-                }
-                .bouncyClick {
-                    haptic.click()
-                    if (strip.mineLive && me?.id != null) {
-                        onOpenPoster(me.id)
+                    .padding(vertical = 4.dp),
+            ) {
+                StoryBubble(
+                    ownerId = myId,
+                    name = ownName,
+                    profile = strip.me,
+                    ringColor = if (strip.mineLive) {
+                        MaterialTheme.colorScheme.primary
                     } else {
+                        MaterialTheme.colorScheme.outlineVariant
+                    },
+                    ringWidth = if (strip.mineLive) 3.dp else 2.dp,
+                    plusBadge = true,
+                    badgeCount = 0,
+                    onPlusClick = {
+                        haptic.click()
                         onCompose()
-                    }
-                }
-                .padding(vertical = 4.dp),
-        ) {
-            StoryBubble(
-                ownerId = myId,
-                name = ownName,
-                picture = null,
-                ringColor = if (strip.mineLive) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.outlineVariant
-                },
-                ringWidth = if (strip.mineLive) 3.dp else 2.dp,
-                plusBadge = true,
-                badgeCount = 0,
-                onPlusClick = {
-                    haptic.click()
-                    onCompose()
-                },
-            )
-            Text(
-                text = ownLabel,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontWeight = if (strip.mineLive) FontWeight.Bold else FontWeight.Medium,
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = 4.dp),
-            )
+                    },
+                )
+                Text(
+                    text = ownLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = if (strip.mineLive) FontWeight.Bold else FontWeight.Medium,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
         }
-        strip.friendPosters.forEach { poster ->
+        items(strip.friendPosters, key = { it.ownerId }) { poster ->
             val name = poster.name.ifBlank { someone }
             val openLabel = stringResource(
                 if (poster.storyCount == 1) {
@@ -192,7 +196,7 @@ internal fun DailyUpsStoriesBar(
                 StoryBubble(
                     ownerId = poster.ownerId,
                     name = name,
-                    picture = poster.picture,
+                    profile = strip.friendsById[poster.ownerId],
                     ringColor = if (poster.unseenCount > 0) {
                         MaterialTheme.colorScheme.primary
                     } else {
@@ -227,7 +231,7 @@ private fun StoryBubble(
     plusBadge: Boolean,
     badgeCount: Int,
     ringWidth: Dp = 2.dp,
-    picture: ByteArray? = null,
+    profile: WhisperProfile? = null,
     onPlusClick: (() -> Unit)? = null,
 ) {
     Box(
@@ -238,12 +242,21 @@ private fun StoryBubble(
             .clearAndSetSemantics {},
         contentAlignment = Alignment.Center,
     ) {
-        GroupAvatar(
-            name = name,
-            groupId = ownerId,
-            size = 48.dp,
-            picture = picture,
-        )
+        if (profile != null) {
+            // Same decrypt/cache path as chat rows, so the strip shows the
+            // friend's real picture instead of initials.
+            WhisperAvatar(
+                profile = profile,
+                size = 48.dp,
+                modifier = Modifier.clearAndSetSemantics {},
+            )
+        } else {
+            GroupAvatar(
+                name = name,
+                groupId = ownerId,
+                size = 48.dp,
+            )
+        }
         if (plusBadge) {
             Surface(
                 shape = CircleShape,

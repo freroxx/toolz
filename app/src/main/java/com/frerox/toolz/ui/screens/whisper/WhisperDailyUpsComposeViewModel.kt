@@ -16,7 +16,8 @@ import com.frerox.toolz.data.whisper.WhisperProfile
 import com.frerox.toolz.data.whisper.WhisperRepository
 import com.frerox.toolz.data.whisper.applyWhisperImageExifOrientation
 import com.frerox.toolz.data.whisper.dailyUpErrorText
-import com.frerox.toolz.data.whisper.dailyUpsPostedToday
+import com.frerox.toolz.data.whisper.dailyUpsPostedTodayOrNull
+import com.frerox.toolz.data.whisper.quotaAfterRead
 import com.frerox.toolz.data.whisper.getFriends
 import com.frerox.toolz.data.whisper.publishDailyUp
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -148,13 +149,15 @@ class WhisperDailyUpsComposeViewModel @Inject constructor(
                 } else {
                     emptySet()
                 }
+                val usedToday = repository.dailyUpsPostedTodayOrNull()
                 _state.update {
                     it.copy(
                         friends = friends,
                         friendsLoading = false,
                         friendsFailed = false,
                         excluded = it.excluded + capExclusions,
-                        quotaUsed = repository.dailyUpsPostedToday(),
+                        // Null = read failed: keep whatever we showed before.
+                        quotaUsed = quotaAfterRead(it.quotaUsed, usedToday),
                     )
                 }
             }
@@ -179,7 +182,9 @@ class WhisperDailyUpsComposeViewModel @Inject constructor(
 
     fun refreshQuota() {
         viewModelScope.launch {
-            _state.update { it.copy(quotaUsed = repository.dailyUpsPostedToday()) }
+            // Failed read must not look like "nothing posted today".
+            val used = repository.dailyUpsPostedTodayOrNull()
+            _state.update { it.copy(quotaUsed = quotaAfterRead(it.quotaUsed, used)) }
         }
     }
 
@@ -270,12 +275,14 @@ class WhisperDailyUpsComposeViewModel @Inject constructor(
                     _state.update { it.copy(publishing = false, published = true) }
                 }
                 .onFailure { e ->
-                    // Server quota may have moved while composing — re-read it.
+                    // Server quota may have moved while composing — re-read it,
+                    // but never downgrade a known count to "unknown as zero".
+                    val usedToday = repository.dailyUpsPostedTodayOrNull()
                     _state.update {
                         it.copy(
                             publishing = false,
                             error = dailyUpErrorText(appContext, e),
-                            quotaUsed = repository.dailyUpsPostedToday(),
+                            quotaUsed = quotaAfterRead(it.quotaUsed, usedToday),
                         )
                     }
                 }

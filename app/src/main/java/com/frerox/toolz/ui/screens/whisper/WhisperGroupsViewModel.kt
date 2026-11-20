@@ -141,6 +141,8 @@ class WhisperGroupsViewModel @Inject constructor(
         val mySoonestExpiryMs: Long? = null,
         /** One ring per live friend, unseen-first then oldest-expiring. */
         val friendPosters: List<StoryPosterRing> = emptyList(),
+        /** Profiles for the visible posters (real avatar instead of initials). */
+        val friendsById: Map<String, WhisperProfile> = emptyMap(),
     )
 
     private val stripTicker = flow {
@@ -162,10 +164,11 @@ class WhisperGroupsViewModel @Inject constructor(
         _myProfile,
         stripTicker,
     ) { (mine, friendRows, seen), ui, me, now ->
+        val friendsById = ui.friends.associateBy { it.id }
         val groups = buildPosterGroups(
             mine = mine,
             friends = friendRows,
-            profiles = ui.friends.associateBy { it.id },
+            profiles = friendsById,
             seen = seen.keys,
             nowMs = now,
         )
@@ -185,6 +188,7 @@ class WhisperGroupsViewModel @Inject constructor(
                     soonestExpiryMs = poster.soonestExpiryMs,
                 )
             },
+            friendsById = friendsById,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DailyUpsStripState())
 

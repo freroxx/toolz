@@ -17,7 +17,8 @@ import com.frerox.toolz.data.whisper.WhisperProfile
 import com.frerox.toolz.data.whisper.WhisperRepository
 import com.frerox.toolz.data.whisper.WhisperStorySeenStore
 import com.frerox.toolz.data.whisper.dailyUpErrorText
-import com.frerox.toolz.data.whisper.dailyUpsPostedToday
+import com.frerox.toolz.data.whisper.dailyUpsPostedTodayOrNull
+import com.frerox.toolz.data.whisper.deleteDailyUp
 import com.frerox.toolz.data.whisper.deleteDailyUp
 import com.frerox.toolz.data.whisper.downloadDailyUpImage
 import com.frerox.toolz.data.whisper.fetchDailyUpReceipts
@@ -99,6 +100,8 @@ class WhisperDailyUpsViewModel @Inject constructor(
         val seenIds: Set<String> = emptySet(),
         val myId: String = "",
         val myName: String = "",
+        /** Profile lookup for real avatars on the hero, cards and viewer. */
+        val profiles: Map<String, WhisperProfile> = emptyMap(),
         val quotaUsed: Int = 0,
         /** Hub-scoped sync failure: inline banner, never a snackbar. */
         val error: String? = null,
@@ -112,8 +115,6 @@ class WhisperDailyUpsViewModel @Inject constructor(
         val ownerName: String?,
         val isMine: Boolean,
         val stories: List<StoryItem>,
-        /** Decrypted owner picture if the hub already had it; viewer shows it. */
-        val picture: ByteArray? = null,
     )
 
     /** Full-screen viewer overlay; null = hidden. Immutable per open gesture. */
@@ -173,6 +174,7 @@ class WhisperDailyUpsViewModel @Inject constructor(
         val seenIds: Set<String>,
         val myId: String,
         val myName: String,
+        val profiles: Map<String, WhisperProfile>,
     )
 
     /** Rows→poster groups; names land via [collectProfileNames], seen via the store. */
@@ -188,6 +190,7 @@ class WhisperDailyUpsViewModel @Inject constructor(
             seenIds = seen.keys.toSet(),
             myId = repository.myId,
             myName = profiles[repository.myId]?.effectiveName.orEmpty(),
+            profiles = profiles,
         )
     }
 
@@ -204,6 +207,7 @@ class WhisperDailyUpsViewModel @Inject constructor(
             seenIds = data.seenIds,
             myId = data.myId,
             myName = data.myName,
+            profiles = data.profiles,
             quotaUsed = quotaUsed,
             error = error,
             viewerError = viewerError,
@@ -282,7 +286,12 @@ class WhisperDailyUpsViewModel @Inject constructor(
                 // on every exit: the local clock is authority for expiry, and a
                 // stranded _refreshing would disable the hub's pull for good.
                 runCatching { seenStore.prune(System.currentTimeMillis()) }
-                runCatching { _quotaUsed.value = repository.dailyUpsPostedToday() }
+                // Keep the last known quota on a failed read: 0 here would
+                // advertise five free slots the server will refuse.
+                _quotaUsed.value = quotaAfterRead(
+                    _quotaUsed.value,
+                    repository.dailyUpsPostedTodayOrNull(),
+                )
                 _refreshing.value = false
             }
         }
@@ -347,7 +356,6 @@ class WhisperDailyUpsViewModel @Inject constructor(
                     ownerName = if (poster.isMine) null else poster.ownerName,
                     isMine = poster.isMine,
                     stories = items,
-                    picture = poster.picture,
                 )
             }
         }
@@ -718,7 +726,10 @@ class WhisperDailyUpsViewModel @Inject constructor(
                     // overlay would yank a reader who swiped on to another
                     // poster while the delete was still in flight.
                     dropViewerStory(storyId)
-                    _quotaUsed.value = repository.dailyUpsPostedToday()
+                    _quotaUsed.value = quotaAfterRead(
+                        _quotaUsed.value,
+                        repository.dailyUpsPostedTodayOrNull(),
+                    )
                 }
                 .onFailure { e -> _viewerError.value = dailyUpErrorText(appContext, e) }
         }

@@ -649,10 +649,27 @@ private fun boundedStoryIds(storyIds: List<String>): List<String> =
         .toList()
 
 /** Stories I posted so far TODAY (server quota: 5 per UTC day). */
-suspend fun WhisperRepository.dailyUpsPostedToday(): Int {
+suspend fun WhisperRepository.dailyUpsPostedToday(): Int =
+    dailyUpsPostedTodayOrNull() ?: 0
+
+/**
+ * Quota fallback rule shared by the hub and the composer: a failed read
+ * (null) keeps the last known count instead of advertising a fresh day.
+ */
+internal fun quotaAfterRead(previous: Int, fresh: Int?): Int = fresh ?: previous
+
+/**
+ * Quota read that keeps "unknown" apart from "none spent".
+ *
+ * A failed read (offline, timeout, signed out) used to come back as 0, so a
+ * transient error overwrote a correct 4/5 meter with 5/5 — the composer then
+ * let the user pick, crop and upload a photo the server rejects for quota.
+ * Callers pass null through unchanged and keep their last known value.
+ */
+suspend fun WhisperRepository.dailyUpsPostedTodayOrNull(): Int? {
     if (!WhisperDailyUpsConfig.ENABLED) return 0
     val me = myId
-    if (me.isBlank()) return 0
+    if (me.isBlank()) return null
     // Quota is advisory client-side; the server is the real ceiling.
     return runCatching {
         storyIo(WhisperDailyUpsConfig.SYNC_TIMEOUT_MS) {
@@ -661,7 +678,7 @@ suspend fun WhisperRepository.dailyUpsPostedToday(): Int {
                 filter { eq("poster_id", me); eq("day", today) }
             }.decodeList<StoryQuotaRow>().sumOf { it.successfulCount }
         }
-    }.getOrDefault(0).coerceAtMost(WhisperDailyUpsConfig.DAILY_LIMIT)
+    }.getOrNull()?.coerceIn(0, WhisperDailyUpsConfig.DAILY_LIMIT)
 }
 
 // ────────────────────────────────────────────────────────────────────────────

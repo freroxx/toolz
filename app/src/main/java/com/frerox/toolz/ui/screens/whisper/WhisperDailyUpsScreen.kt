@@ -124,6 +124,7 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.WhisperDailyUpsConfig
+import com.frerox.toolz.data.whisper.WhisperProfile
 import com.frerox.toolz.ui.components.ExpressiveCard
 import com.frerox.toolz.ui.components.ExpressiveRefreshIndicator
 import com.frerox.toolz.ui.components.ExpressiveTopAppBar
@@ -344,6 +345,7 @@ fun WhisperDailyUpsScreen(
                             YourDayCard(
                                 myId = state.myId,
                                 myName = state.myName,
+                                profile = state.profiles[state.myId],
                                 ownCount = ownCount,
                                 quotaLeft = quotaLeft,
                                 onView = viewModel::openMyViewer,
@@ -385,6 +387,7 @@ fun WhisperDailyUpsScreen(
                             ) { index, poster ->
                                 FriendStoryCard(
                                     poster = poster,
+                                    profile = state.profiles[poster.ownerId],
                                     onClick = {
                                         viewModel.openViewerForOwner(poster.ownerId)
                                     },
@@ -423,6 +426,7 @@ fun WhisperDailyUpsScreen(
             images = images,
             failedImages = failedImages,
             receipts = receipts,
+            profiles = state.profiles,
             ownName = state.myName.ifBlank { mineFallback },
             onShown = viewModel::onStoryDisplayed,
             onReady = viewModel::markCurrentSeen,
@@ -460,6 +464,7 @@ fun WhisperDailyUpsScreen(
 private fun YourDayCard(
     myId: String,
     myName: String,
+    profile: WhisperProfile?,
     ownCount: Int,
     quotaLeft: Int,
     onView: () -> Unit,
@@ -507,11 +512,19 @@ private fun YourDayCard(
                                 shape = CircleShape,
                             ),
                     )
-                    GroupAvatar(
-                        name = name,
-                        groupId = myId.ifBlank { "daily_ups_me" },
-                        size = 58.dp,
-                    )
+                    if (profile != null) {
+                        WhisperAvatar(
+                            profile = profile,
+                            size = 58.dp,
+                            modifier = Modifier.clearAndSetSemantics {},
+                        )
+                    } else {
+                        GroupAvatar(
+                            name = name,
+                            groupId = myId.ifBlank { "daily_ups_me" },
+                            size = 58.dp,
+                        )
+                    }
                     if (isLive) {
                         Surface(
                             shape = CircleShape,
@@ -658,6 +671,7 @@ private fun DailyQuotaSegments(left: Int, total: Int) {
 @Composable
 private fun FriendStoryCard(
     poster: StoryPoster,
+    profile: WhisperProfile?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -702,12 +716,19 @@ private fun FriendStoryCard(
                             shape = CircleShape,
                         ),
                 )
-                GroupAvatar(
-                    name = name,
-                    groupId = poster.ownerId,
-                    size = 44.dp,
-                    picture = poster.picture,
-                )
+                if (profile != null) {
+                    WhisperAvatar(
+                        profile = profile,
+                        size = 44.dp,
+                        modifier = Modifier.clearAndSetSemantics {},
+                    )
+                } else {
+                    GroupAvatar(
+                        name = name,
+                        groupId = poster.ownerId,
+                        size = 44.dp,
+                    )
+                }
                 if (unseenCount >= 2) {
                     Surface(
                         shape = CircleShape,
@@ -828,6 +849,7 @@ private fun StoryViewerOverlay(
     images: Map<String, ImageBitmap>,
     failedImages: Set<String>,
     receipts: WhisperDailyUpsViewModel.ReceiptsUi,
+    profiles: Map<String, WhisperProfile>,
     ownName: String,
     onShown: (String) -> Unit,
     onReady: () -> Unit,
@@ -1142,12 +1164,20 @@ private fun StoryViewerOverlay(
                         !segment.ownerName.isNullOrBlank() -> segment.ownerName.orEmpty().trim()
                         else -> someone
                     }
-                    GroupAvatar(
-                        name = if (segment?.isMine == true) ownName else segmentName,
-                        groupId = segment?.ownerId ?: "daily_ups_viewer",
-                        size = 32.dp,
-                        picture = segment?.picture,
-                    )
+                    val segmentProfile = segment?.let { profiles[it.ownerId] }
+                    if (segmentProfile != null) {
+                        WhisperAvatar(
+                            profile = segmentProfile,
+                            size = 32.dp,
+                            modifier = Modifier.clearAndSetSemantics {},
+                        )
+                    } else {
+                        GroupAvatar(
+                            name = if (segment?.isMine == true) ownName else segmentName,
+                            groupId = segment?.ownerId ?: "daily_ups_viewer",
+                            size = 32.dp,
+                        )
+                    }
                     Spacer(Modifier.width(8.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
