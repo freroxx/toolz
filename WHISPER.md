@@ -1461,17 +1461,18 @@ sealed before the publish RPC so a self-seal failure publishes nothing).
 
 ### 12.4 Viewing, receipts, reactions
 
-The **hub** opens with a **Your day** card — my avatar, a live-up count
+The **hub** opens with a **Your day** hero card — my avatar, a live-up count
 ("`N` live today") or a one-line share prompt, `View` only when I have a live
-up, `Add` always, and the day's quota line exactly once. Below it is one
-64dp ring per live friend **poster** (not per story): the poster's picture
-with the stable initials fallback, unseen rings bright, a count badge when
-two or more are unseen, one line when nobody else has shared. Each ring is one
-merged TalkBack node whose action label carries the name, live-story count,
-and `seen`/`unseen` state; the ring and badge themselves are decorative. The
-old full-width empty panel and separate quota chip are gone; a successful
-empty day still shows the card, while a failed sync with no cache is an
-explicit dead-end panel with Retry. Opening a ring
+up, and a `Create`/`Add` action, with the day's allowance shown exactly once as
+a five-segment meter plus localized "`N` of 5 left" text. Below it is a single
+scannable **card list** — one card per live friend **poster** (not per story),
+carrying the poster's picture behind the same ring language (`unseen` bright, a
+count badge at two or more) and a one-line `N new` / `N stories` subtitle. The
+duplicated ring rail is gone: one surface, not two. Each card is one merged
+TalkBack tap target; the ring and badge are decorative. A successful empty day
+still shows the hero card and a no-friend panel, while a failed sync with no
+cache is an explicit dead-end panel with Retry; a failed refresh over cached
+content keeps the hub and shows an inline banner. Opening a card
 launches the in-place **viewer overlay**: a flat horizontal pager over an
 immutable poster order, one progress segment per story of the current poster,
 5-second ready-gated auto-advance, decrypt-on-demand images with next-story
@@ -1479,6 +1480,19 @@ preload, and one failure snackbar across hub + viewer. **View receipts
 (optional per poster)**, reactions, and who deleted/expired what are all
 resolved server-side (RLS-visible only for rows the viewer genuinely may see —
 the poster sees reaction counts and names resolved on-device on demand).
+
+**Bounded composition.** The hub body is a keyed `LazyColumn`
+(hero/header/banner + one keyed item per poster) and the Chats stories strip is
+a `LazyRow`; with a long friend list only the visible cards and avatars are
+composed and decoded, and keyed items keep scroll position across a sync. The
+avatar itself is the same decrypting `WhisperAvatar` used by chat rows (real
+picture when available, stable initials otherwise), so Daily Ups no longer
+falls back to initials-only circles. The
+loading and dead-end branches are list items too, so pull-to-refresh always has
+a scrollable child. The quota meter is advisory but **never fabricates a fresh
+day**: a failed quota read returns "unknown" and both the hub and the composer
+keep their last known count instead of resetting to 0/5 (the server remains the
+real ceiling).
 
 **Poster-grouped viewing.** The viewer is ordered per open gesture: my card
 opens only my own ups; a friend's ring starts with that friend and then the
@@ -1499,10 +1513,14 @@ own ups never write. The same moment sends at most one view receipt per open
 (when the poster enabled receipts), which is separate from the local seen set.
 
 **Viewer mechanics.** The overlay is a flat pager over the immutable order
-built at open. The top progress row has one segment per story of the CURRENT
+built at open, with functional top (132dp) and bottom (240dp) black gradient
+scrims under the chrome so white progress/name/expiry/reactions stay legible on
+a bright sky without dimming the photo's centre. The top progress row has one
+segment per story of the CURRENT
 poster only: past solid, current animated, future a 25% track; its
 accessibility state reads "Story x of y" over the whole open order. The header
-carries the poster avatar, name (or "Your day" for my own), relative expiry
+carries the poster's decrypted picture (falling back to stable initials), name
+(or "Your day" for my own), relative expiry
 ("3h left"), and a 48dp top-right X; status and navigation insets are
 respected. A story's 5-second clock starts only when its image is decoded AND
 the pager has settled; a spinner shows until then, and a failed image shows
@@ -1513,7 +1531,6 @@ dialog also hold the clock. At the end of the last story the overlay closes —
 no loop and no long delay. Next-story preload warms one frame inside the same
 immutable order (segment boundary included), still inside the six-frame
 decoded window.
-
 **Gestures, stats, and accessibility.** Tap right two-thirds = next (closes
 after the last story), left third = previous (clamps at the very first); taps
 land on loading and failed pages too, while the header and bottom chrome
@@ -1523,7 +1540,10 @@ end) ticks haptics. Swipe down
 translates the content with damping past 280dp while the scrim fades; release
 past 120dp or at >1000px/s closes, otherwise a spring returns it. The
 horizontal pager keeps horizontal drags. On my own up, the bottom bar is inset
-for navigation bars: receipts on → "N views" plus a reaction count ("No
+for navigation bars and reserves 56dp side gutters: the stats block is truly
+centred while delete stays pinned to the end, so neither a large font nor a
+wide gesture bar can push them into each other. Receipts on → "N views" plus a
+reaction count ("No
 reactions yet." at zero); receipts off → `View receipts are off for this up.`
 and never a fabricated "0 views"; delete always keeps its confirm dialog. On a
 friend's story, the reaction palette appears only after that image is ready
