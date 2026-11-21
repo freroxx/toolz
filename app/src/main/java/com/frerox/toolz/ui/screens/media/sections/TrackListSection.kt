@@ -123,6 +123,9 @@ import coil3.compose.AsyncImage
 import com.frerox.toolz.data.music.MusicTrack
 import com.frerox.toolz.data.music.*
 import com.frerox.toolz.ui.components.*
+import com.frerox.toolz.ui.liquidglass.LocalLiquidGlassBackdrop
+import com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled
+import com.frerox.toolz.ui.liquidglass.liquidGlassEffect
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalIsDarkTheme
 import java.util.*
@@ -163,8 +166,7 @@ fun TrackList(
     val onlineTracks = remember(tracks) { tracks.filter { it.path == null && it.sourceUrl != null } }
     val showOnlineSection = onlineTracks.isNotEmpty() && state.isOnline
 
-    // Index of the online header within the flattened lazy item list, so the
-    // tween arrow can jump straight to it — 1 offset for the offline header.
+    // Index of the online header within the flattened lazy item list.
     val onlineHeaderIndex = if (offlineTracks.isNotEmpty()) offlineTracks.size + 1 else 0
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -512,6 +514,8 @@ fun TrackItem(
         isCurrent  -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.14f)
         else       -> Color.Transparent
     }
+    val glassEnabled = LocalLiquidGlassEnabled.current
+    val glassBackdrop = LocalLiquidGlassBackdrop.current
     val artCorner = 12.dp
     val artShape = RoundedCornerShape(artCorner)
     val cardShape = RoundedCornerShape(16.dp)
@@ -522,9 +526,23 @@ fun TrackItem(
     ExpressiveCard(
         onClick = onClick,
         onLongClick = onLongClick,
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            // Active and selected rows get the expensive physical treatment;
+            // keeping resting rows quiet preserves scroll performance and makes
+            // the active song unmistakable in a long collection.
+            .then(
+                if (glassEnabled && glassBackdrop != null && (isCurrent || isSelected)) {
+                    Modifier.liquidGlassEffect(
+                        shape = cardShape,
+                        tint = MaterialTheme.colorScheme.primary.copy(alpha = if (isSelected) 0.17f else 0.10f),
+                        refractionFactor = 0.65f,
+                        shadowRadius = 6.dp
+                    )
+                } else Modifier
+            ),
         shape = cardShape,
-        containerColor = cardColors,
+        containerColor = if (glassEnabled && glassBackdrop != null && (isCurrent || isSelected)) Color.Transparent else cardColors,
         elevation = 0.dp,
         border = if (isCurrent) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)) else null
     ) {
@@ -619,14 +637,25 @@ fun TrackItem(
                     style = MaterialTheme.typography.bodyLarge
                 )
                 val artistText = track.artist?.takeIf { it.isNotBlank() && it != "<unknown>" } ?: "Unknown artist"
-                Text(
-                    text = artistText,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontWeight = FontWeight.Normal,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = artistText,
+                        modifier = Modifier.weight(1f, fill = false),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = FontWeight.Normal,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (track.duration > 0L) {
+                        Text(
+                            text = formatTrackDuration(track.duration),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f),
+                            modifier = Modifier.padding(start = 8.dp)
+                        )
+                    }
+                }
             }
 
             if (isSelectionMode) {
@@ -924,4 +953,9 @@ fun highlightSearch(text: String, query: String, highlightColor: Color): Annotat
         }
         append(text.substring(index + query.length))
     }
+}
+
+private fun formatTrackDuration(durationMs: Long): String {
+    val totalSeconds = (durationMs / 1000L).coerceAtLeast(0L)
+    return "%d:%02d".format(totalSeconds / 60L, totalSeconds % 60L)
 }
