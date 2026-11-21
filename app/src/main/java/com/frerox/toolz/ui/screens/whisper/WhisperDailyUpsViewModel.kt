@@ -19,7 +19,6 @@ import com.frerox.toolz.data.whisper.WhisperStorySeenStore
 import com.frerox.toolz.data.whisper.dailyUpErrorText
 import com.frerox.toolz.data.whisper.dailyUpsPostedTodayOrNull
 import com.frerox.toolz.data.whisper.deleteDailyUp
-import com.frerox.toolz.data.whisper.deleteDailyUp
 import com.frerox.toolz.data.whisper.downloadDailyUpImage
 import com.frerox.toolz.data.whisper.fetchDailyUpReceipts
 import com.frerox.toolz.data.whisper.fetchMyDailyUpReactions
@@ -29,6 +28,7 @@ import com.frerox.toolz.data.whisper.observeFriendDailyUps
 import com.frerox.toolz.data.whisper.observeMyDailyUps
 import com.frerox.toolz.data.whisper.syncDailyUps
 import com.frerox.toolz.data.whisper.toggleDailyUpReaction
+import com.frerox.toolz.data.whisper.quotaAfterRead
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers

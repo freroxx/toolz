@@ -62,6 +62,7 @@ import io.github.jan.supabase.realtime.decodeOldRecord
 import io.github.jan.supabase.realtime.decodeRecord
 import io.github.jan.supabase.realtime.postgresChangeFlow
 import io.github.jan.supabase.realtime.realtime
+import io.github.jan.supabase.postgrest.query.Count
 import io.github.jan.supabase.postgrest.query.Order
 
 /** Compile-time gate for the Groups surface.
@@ -1846,7 +1847,13 @@ suspend fun WhisperRepository.removeGroupMember(groupId: String, userId: String)
     // Delete the convenience row immediately: RLS membership checks read THIS
     // table, so a lingering row keeps the server letting the removed member
     // read group content even though the signed log says they are out.
-    db.from("whisper_group_members").delete { filter { eq("group_id", groupId); eq("user_id", userId) } }
+    val removed = db.from("whisper_group_members").delete {
+        count(Count.EXACT)
+        filter { eq("group_id", groupId); eq("user_id", userId) }
+    }.countOrNull()
+    check(removed == 1L) {
+        "Removal was logged, but the server did not delete the member row. Retry to finish."
+    }
     syncGroup(groupId).getOrThrow()
 }
 
@@ -1992,7 +1999,14 @@ suspend fun WhisperRepository.leaveGroup(groupId: String): Result<Unit> = runCat
     require(!(m.isAdmin(me) && m.admins.size <= 1)) { "The last admin cannot leave — promote someone first." }
     val (seq, epoch) = nextGroupSeqEpoch(groupId)
     publishGroupEvent(groupId, seq, epoch + 1, WhisperGroupEventType.LEAVE, me, "\"\"").getOrThrow()
-    db.from("whisper_group_members").delete { filter { eq("group_id", groupId); eq("user_id", me) } }
+    val removed = db.from("whisper_group_members").delete {
+        count(Count.EXACT)
+        filter { eq("group_id", groupId); eq("user_id", me) }
+    }.countOrNull()
+    // The log says I left; keep the local cache until the server row follows,
+    // otherwise a failed delete silently restores my RLS read access while the
+    // UI pretends the group is gone.
+    check(removed == 1L) { "Left the group, but the server did not remove the membership row." }
     purgeDepartedGroup(groupId)
 }
 
@@ -2008,8 +2022,43 @@ suspend fun WhisperRepository.disbandGroup(groupId: String): Result<Unit> = runC
     val m = syncGroup(groupId).getOrThrow()
     require(m.isMember(me)) { "You are not a member." }
     require(m.members.size <= 1) { "Only the last remaining member can disband the group." }
-    db.from("whisper_groups").delete { filter { eq("id", groupId) } }
+    // The group DELETE policy requires ZERO other member rows. Older builds
+    // silently failed leaves/removals (recursive policies rejected them), so
+    // the convenience table can still list users the signed log already
+    // removed. Delete ONLY rows absent from the verified membership — those
+    // are stale by definition — then re-check rather than claiming success on
+    // a no-op delete.
+    repairStaleGroupMembers(groupId, m.members.keys)
+    val deleted = db.from("whisper_groups").delete {
+        count(Count.EXACT)
+        filter { eq("id", groupId) }
+    }.countOrNull()
+    check(deleted == 1L) {
+        "The server did not delete the group. Another member row may still exist — retry after syncing."
+    }
     purgeDepartedGroup(groupId)
+}
+
+/**
+ * Removes convenience member rows whose user id is not in the verified event
+ * log. Never touches a row the log still calls a member; no-op when the table
+ * already matches. Admin-only in practice (the members delete policy); a
+ * non-admin last member surfaces a clear error from the group delete check.
+ */
+private suspend fun WhisperRepository.repairStaleGroupMembers(
+    groupId: String,
+    verifiedMemberIds: Set<String>,
+) {
+    val serverIds = runCatching {
+        db.from("whisper_group_members").select {
+            filter { eq("group_id", groupId) }
+        }.decodeList<GroupMemberRow>().map { it.userId }.toSet()
+    }.getOrNull() ?: return
+    val stale = serverIds - verifiedMemberIds
+    if (stale.isEmpty()) return
+    db.from("whisper_group_members").delete {
+        filter { eq("group_id", groupId); isIn("user_id", stale.toList()) }
+    }
 }
 
 /** Sends one message to every current member (fail-closed: all legs or nothing). */

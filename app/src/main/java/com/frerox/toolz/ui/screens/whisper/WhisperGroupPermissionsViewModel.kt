@@ -112,19 +112,30 @@ class WhisperGroupPermissionsViewModel @Inject constructor(
                 _uiState.update { it.copy(isWorking = false) }
                 return@launch
             }
+            val next = GroupPolicyV1(
+                ownerId = m.policy.ownerId,
+                adminCapabilities = current.adminCaps,
+                memberCapabilities = current.memberCaps,
+            )
             runCatching {
-                val next = GroupPolicyV1(
-                    ownerId = m.policy.ownerId,
-                    adminCapabilities = current.adminCaps,
-                    memberCapabilities = current.memberCaps,
-                )
                 repository.updateGroupPolicy(groupId, next).getOrThrow()
-            }.onSuccess {
-                // Re-sync proves the event round-tripped before claiming saved.
-                repository.syncGroup(groupId).onSuccess { verified ->
-                    _uiState.update { it.copy(isWorking = false, saved = true, membership = verified) }
-                }.onFailure { e ->
-                    _uiState.update { it.copy(isWorking = false, error = err(e)) }
+                // Re-sync and PROVE the signed log carries the requested
+                // policy before claiming "saved". A no-op server write or a
+                // truncated log must surface as an error, not silent success.
+                val verified = repository.syncGroup(groupId).getOrThrow()
+                check(verified.policy == next) {
+                    "The server did not accept the new permissions. Try again."
+                }
+                verified
+            }.onSuccess { verified ->
+                _uiState.update {
+                    it.copy(
+                        isWorking = false,
+                        saved = true,
+                        membership = verified,
+                        adminCaps = verified.policy.adminCapabilities,
+                        memberCaps = verified.policy.memberCapabilities,
+                    )
                 }
             }.onFailure { e ->
                 _uiState.update { it.copy(isWorking = false, error = err(e)) }

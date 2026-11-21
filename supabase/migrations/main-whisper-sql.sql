@@ -4607,6 +4607,34 @@ with check (
   public.is_group_admin(group_id, (select auth.uid()))
 );
 
+-- Insert/delete must NEVER probe whisper_group_members from a policy on
+-- whisper_group_members: PostgreSQL treats the self-reference as infinite
+-- recursion and rejects EVERY member add/leave/remove with
+-- `42P17 infinite recursion detected in policy`. That silently broke group
+-- creation, leaves, removals and disband (the last-member DELETE then found
+-- stale rows and removed 0 groups while the client reported success). The
+-- SECURITY DEFINER helpers read the table with RLS bypassed, so the same rules
+-- apply without the recursion.
+drop policy if exists whisper_group_members_insert on public.whisper_group_members;
+create policy whisper_group_members_insert
+on public.whisper_group_members
+for insert
+to authenticated
+with check (
+  user_id = (select auth.uid())
+  or public.is_group_admin(group_id, (select auth.uid()))
+);
+
+drop policy if exists whisper_group_members_delete on public.whisper_group_members;
+create policy whisper_group_members_delete
+on public.whisper_group_members
+for delete
+to authenticated
+using (
+  user_id = (select auth.uid())
+  or public.is_group_admin(group_id, (select auth.uid()))
+);
+
 -- 4. Upgrade RLS on whisper_groups
 drop policy if exists whisper_groups_delete_last_member on public.whisper_groups;
 drop policy if exists whisper_groups_delete_creator_or_last_member on public.whisper_groups;
