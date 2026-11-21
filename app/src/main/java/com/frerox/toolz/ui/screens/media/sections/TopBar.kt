@@ -84,6 +84,9 @@ import androidx.compose.ui.unit.dp
 import com.frerox.toolz.R
 import com.frerox.toolz.ui.components.ExpressiveSearchField
 import com.frerox.toolz.ui.components.ToolzExpressiveIconButton
+import com.frerox.toolz.ui.liquidglass.LocalLiquidGlassBackdrop
+import com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled
+import com.frerox.toolz.ui.liquidglass.liquidGlassEffect
 import com.frerox.toolz.ui.screens.media.MusicUiState
 import com.frerox.toolz.ui.screens.media.SortOrder
 import com.frerox.toolz.ui.screens.media.catalog.LayoutMode
@@ -159,6 +162,8 @@ fun ScreenTopBar(
     onCatalogScrollToTop: () -> Unit = {},
 ) {
     val header = rememberMusicHeader(state, currentTabLabel)
+    val liquidGlassEnabled = LocalLiquidGlassEnabled.current
+    val glassBackdrop = LocalLiquidGlassBackdrop.current
     val isCatalog = currentTabLabel == "Catalog"
     val isTracks = !state.isSelectionMode && !isCatalog &&
         currentTabLabel != "Library" && currentTabLabel != "Karaoke"
@@ -289,6 +294,16 @@ fun ScreenTopBar(
                 label = "topBarActions",
             ) { key ->
                 Row(
+                    modifier = Modifier.then(
+                        if (liquidGlassEnabled && glassBackdrop != null) {
+                            Modifier.liquidGlassEffect(
+                                shape = RoundedCornerShape(24.dp),
+                                tint = MaterialTheme.colorScheme.surface.copy(alpha = 0.14f),
+                                refractionFactor = 0.55f,
+                                shadowRadius = 5.dp
+                            )
+                        } else Modifier
+                    ),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
@@ -477,7 +492,7 @@ fun ScreenTopBar(
 
 @Composable
 private fun topBarActionColors() = IconButtonDefaults.filledIconButtonColors(
-    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+    containerColor = if (LocalLiquidGlassEnabled.current && LocalLiquidGlassBackdrop.current != null) Color.Transparent else MaterialTheme.colorScheme.surfaceContainerHigh,
     contentColor = MaterialTheme.colorScheme.onSurface,
 )
 
