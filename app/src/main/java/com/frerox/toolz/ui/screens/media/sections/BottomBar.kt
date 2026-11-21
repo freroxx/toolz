@@ -54,6 +54,11 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.annotation.OptIn as AnnotationOptIn
@@ -200,6 +205,11 @@ private fun PillTabRow(
                                 Modifier.border(1.dp, Color.White.copy(alpha = 0.35f), CircleShape)
                             } else Modifier
                         )
+                        .semantics {
+                            role = Role.Tab
+                            this.selected = selected
+                            contentDescription = "$label tab"
+                        }
                         .clickable { onTabChange(index) },
                     contentAlignment = Alignment.Center
                 ) {
@@ -286,14 +296,19 @@ fun MiniPlayer(
     val progress by progressFlow.collectAsStateWithLifecycle()
     val performanceMode = LocalPerformanceMode.current
     val isDark = LocalIsDarkTheme.current
-    val dynamicColors = rememberDynamicColors(track.thumbnailUri)
-    val targetProgress = if (duration > 0) progress.toFloat() / duration else 0f
+    val dynamicColors = rememberDynamicColors(track.thumbnailUri, isDark)
+    val targetProgress = if (duration > 0) {
+        (progress.toFloat() / duration).coerceIn(0f, 1f)
+    } else 0f
 
     val pauseCd = stringResource(R.string.st_MusicPlayerScreen_pause68)
     val playCd = stringResource(R.string.st_MusicPlayerScreen_play69)
     val enjoyMusicText = stringResource(R.string.st_MusicPlayerScreen_etm87)
 
     var offsetX by remember { mutableFloatStateOf(0f) }
+    // A track switch can arrive while a swipe is settling. Never let that
+    // transient offset carry into the newly selected song.
+    LaunchedEffect(track.uri) { offsetX = 0f }
     val animatedOffsetX by animateFloatAsState(
         targetValue = offsetX,
         // No-bounce spring: this drives the snap-back-to-center after every
@@ -326,14 +341,17 @@ fun MiniPlayer(
 
     // Art rotation (only when expanded + playing)
     val infiniteTransition = rememberInfiniteTransition(label = "miniArt")
-    val artRotation by if (performanceMode) {
-        remember { mutableFloatStateOf(0f) }
-    } else {
+    // Only keep an infinite animation alive while its value is visible. This
+    // mini player is persistent, so continuously rotating a paused/hidden
+    // thumbnail was needless composition work and cost battery.
+    val artRotation by if (rotationEnabled && isPlaying && !performanceMode) {
         infiniteTransition.animateFloat(
             0f, 360f,
             infiniteRepeatable(tween(14_000, easing = LinearEasing), RepeatMode.Restart),
             label = "artRot"
         )
+    } else {
+        remember { mutableFloatStateOf(0f) }
     }
 
     // ── Crash-safe lyric resolution ───────────────────────────────────────────
@@ -405,7 +423,7 @@ fun MiniPlayer(
                 // trigger next/previous.
                 alpha = 1f - (kotlin.math.abs(animatedOffsetX) / 260f).coerceIn(0f, 0.45f)
             }
-            .pointerInput(Unit) {
+            .pointerInput(track.uri) {
                 detectHorizontalDragGestures(
                     onDragEnd = {
                         if (offsetX > 150) onPrevious()
