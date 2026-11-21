@@ -93,6 +93,7 @@ import androidx.compose.material.icons.automirrored.rounded.FormatAlignRight
 import androidx.compose.material.icons.automirrored.rounded.Notes
 import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
 import androidx.compose.material.icons.automirrored.rounded.Sort
+import androidx.compose.material.icons.automirrored.rounded.TrendingUp
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import kotlinx.coroutines.delay
@@ -328,9 +329,8 @@ fun LibrarySection(
         contentPadding = PaddingValues(bottom = 130.dp, top = 6.dp),
         verticalArrangement = Arrangement.spacedBy(26.dp)
     ) {
-        // ── Quick access ───────────────────────────────────────────────────────
-        // One balanced three-up row: favourites, history and listening time stay
-        // together as a single glanceable summary above the content rails.
+        // A balanced three-up summary keeps saved music and listening history
+        // visible without taking focus away from the content rails below.
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
