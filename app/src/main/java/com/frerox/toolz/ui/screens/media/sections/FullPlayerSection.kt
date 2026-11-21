@@ -231,6 +231,12 @@ fun FullPlayerView(
     val playbackPosition by playbackPositionFlow.collectAsStateWithLifecycle()
     val track = state.currentTrack ?: return
     val configuration = LocalConfiguration.current
+    // Palette extraction needs the actual app luminance. The previous default
+    // always extracted a dark swatch, which could make a light player feel
+    // muddy and leave the primary transport control with weak contrast.
+    val isDarkTheme = LocalIsDarkTheme.current
+    val isLiquidGlass = LocalLiquidGlassEnabled.current
+    val glassBackdrop = LocalLiquidGlassBackdrop.current
     // Full-screen drop distance for the exit choreography: the sheet slides
     // down past the bottom of the screen before it's dismissed.
     val screenHeightPx = with(LocalDensity.current) { configuration.screenHeightDp.dp.toPx() }
@@ -388,13 +394,13 @@ fun FullPlayerView(
 
     ModalBottomSheet(
         onDismissRequest = requestClose,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        sheetState = sheetState,
         containerColor = Color.Transparent,
         dragHandle = null,
         modifier = Modifier.fillMaxSize(),
         properties = ModalBottomSheetProperties(shouldDismissOnBackPress = true)
     ) {
-        val dynamicColors = rememberDynamicColors(track.thumbnailUri)
+        val dynamicColors = rememberDynamicColors(track.thumbnailUri, isDarkTheme)
 
         Surface(
             modifier = Modifier
@@ -501,17 +507,36 @@ fun FullPlayerView(
                         ) {
                             // ── 1. Header — quiet, functional, no branding ──
                             Spacer(Modifier.height(12.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
+                            Box(
+                                modifier = Modifier.fillMaxWidth().height(44.dp),
+                                contentAlignment = Alignment.Center
                             ) {
+                                Text(
+                                    text = "Now playing",
+                                    modifier = Modifier.padding(horizontal = 108.dp),
+                                    textAlign = TextAlign.Center,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                                 ToolzExpressiveIconButton(
-                                    onClick = onDismiss,
-                                    modifier = Modifier.size(44.dp),
+                                    onClick = requestClose,
+                                    modifier = Modifier
+                                        .size(44.dp)
+                                        .align(Alignment.CenterStart)
+                                        .then(
+                                            if (isLiquidGlass && glassBackdrop != null) {
+                                                Modifier.liquidGlassEffect(
+                                                    shape = CircleShape,
+                                                    tint = MaterialTheme.colorScheme.surface.copy(alpha = 0.12f)
+                                                )
+                                            } else Modifier
+                                        ),
                                     shape = CircleShape,
                                     colors = IconButtonDefaults.filledIconButtonColors(
-                                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                        containerColor = if (isLiquidGlass && glassBackdrop != null) Color.Transparent else MaterialTheme.colorScheme.surfaceContainerHigh,
                                         contentColor = MaterialTheme.colorScheme.onSurface
                                     )
                                 ) {
@@ -522,7 +547,11 @@ fun FullPlayerView(
                                     )
                                 }
 
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Row(
+                                    modifier = Modifier.align(Alignment.CenterEnd),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
                                     AnimatedVisibility(
                                         visible = state.sleepTimerActive && state.sleepTimerRemaining != null,
                                         enter = fadeIn(tween(250)) + scaleIn(
@@ -562,10 +591,19 @@ fun FullPlayerView(
                                     Box {
                                         ToolzExpressiveIconButton(
                                             onClick = { showOverflowMenu = true },
-                                            modifier = Modifier.size(44.dp),
+                                            modifier = Modifier
+                                                .size(44.dp)
+                                                .then(
+                                                    if (isLiquidGlass && glassBackdrop != null) {
+                                                        Modifier.liquidGlassEffect(
+                                                            shape = CircleShape,
+                                                            tint = MaterialTheme.colorScheme.surface.copy(alpha = 0.12f)
+                                                        )
+                                                    } else Modifier
+                                                ),
                                             shape = CircleShape,
                                             colors = IconButtonDefaults.filledIconButtonColors(
-                                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                                containerColor = if (isLiquidGlass && glassBackdrop != null) Color.Transparent else MaterialTheme.colorScheme.surfaceContainerHigh,
                                                 contentColor = MaterialTheme.colorScheme.onSurface
                                             )
                                         ) {
@@ -690,7 +728,6 @@ fun FullPlayerView(
                             val prevPreviewTrack = remember(queueTracks, currentQueueIndex) {
                                 if (currentQueueIndex > 0) queueTracks.getOrNull(currentQueueIndex - 1) else null
                             }
-
                             // ── Unified drag-to-skip: one offset drives both the outgoing
                             // and incoming disk every frame, so the incoming disk visibly
                             // pushes the current one aside instead of appearing only after
@@ -729,12 +766,12 @@ fun FullPlayerView(
                                             onDragEnd = {
                                                 val offset = dragOffsetPx.value
                                                 val committed = kotlin.math.abs(offset) > commitThresholdPx
+                                                val committingNext = offset < 0f
                                                 coroutineScope.launch {
                                                     if (committed) {
                                                         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                                                         // dragging right (offset > 0) reveals the prev disk from
                                                         // the left, so a positive offset commit means "prev"
-                                                        val committingNext = offset < 0f
                                                         dragOffsetPx.animateTo(
                                                             targetValue = if (committingNext) -screenWidthPx else screenWidthPx,
                                                             animationSpec = spring(Spring.DampingRatioLowBouncy, Spring.StiffnessMediumLow)
@@ -1003,6 +1040,15 @@ fun FullPlayerView(
                                             overflow = TextOverflow.Ellipsis
                                         )
                                     }
+                                    track.album?.takeIf { it.isNotBlank() && it != "<unknown>" }?.let { album ->
+                                        Text(
+                                            text = album,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
                                 }
 
                                 // ── Favorite button — one quiet scale on toggle ──
@@ -1046,7 +1092,12 @@ fun FullPlayerView(
 
                             // ── 4. Slider ──
                             Spacer(Modifier.height(18.dp))
-                            val currentPos = sliderPos ?: playbackPosition
+                            // Player events can report a final position a few
+                            // milliseconds beyond duration. Keeping the UI in
+                            // range prevents an overrun time label and a thumb
+                            // rendered past the end of the progress track.
+                            val currentPos = (sliderPos ?: playbackPosition)
+                                .coerceIn(0L, duration.coerceAtLeast(0L))
                             // Track-switched slider: snap instantly on new track, tap, or seek (> 1.5s delta),
                             // and smooth 180ms glide only for incremental playback progress.
                             val sliderAnim = remember(track.uri) { Animatable(currentPos.toFloat()) }
@@ -1079,98 +1130,78 @@ fun FullPlayerView(
                                 }
                             }
 
-                            // ── 5. Transport controls ──
+                            // The deck is deliberately one surface: transport
+                            // is the primary action, with playback modes in a
+                            // quieter second row. This removes the "row of
+                            // unrelated pills" look without hiding features.
                             Spacer(Modifier.height(20.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth().height(80.dp).padding(horizontal = 14.dp),
-                                horizontalArrangement = Arrangement.SpaceEvenly,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                ToolzExpressiveIconButton(
-                                    onClick = {
-                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        animatedSkip(false)
-                                    },
-                                    modifier = Modifier.size(58.dp),
-                                    shape = CircleShape,
-                                    colors = IconButtonDefaults.filledIconButtonColors(
-                                        containerColor = Color.Transparent,
-                                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                ) {
-                                    Icon(Icons.Rounded.SkipPrevious, contentDescription = stringResource(R.string.st_MusicPlayerScreen_pt67), modifier = Modifier.size(36.dp))
-                                }
-
-                                val playScale by animateFloatAsState(
-                                    if (state.isPlaying) 1f else 1.06f,
-                                    spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMediumLow),
-                                    label = "playScale"
-                                )
-                                val playOnColor = if (dynamicColors.primary.luminance() > 0.5f) Color(0xFF1A1A1A) else Color.White
-                                ToolzExpressiveButton(
-                                    onClick = {
-                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        onTogglePlay()
-                                    },
-                                    modifier = Modifier
-                                        .width(110.dp)
-                                        .height(64.dp)
-                                        .scale(if (state.performanceMode) 1f else playScale)
-                                        .semantics { contentDescription = if (state.isPlaying) pauseCd else playCd },
-                                    shape = RoundedCornerShape(28.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = dynamicColors.primary,
-                                        contentColor = playOnColor
-                                    )
-                                ) {
-                                    // Real morph instead of a plain crossfade: the outgoing icon
-                                    // scales down while fading fast, the incoming one springs up
-                                    // from below full size — reads as one shape transforming into
-                                    // the other rather than two icons dissolving into each other.
-                                    AnimatedContent(
-                                        targetState = state.isPlaying,
-                                        transitionSpec = {
-                                            (scaleIn(
-                                                initialScale = 0.5f,
-                                                animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMediumLow)
-                                            ) + fadeIn(tween(140)))
-                                                .togetherWith(
-                                                    scaleOut(
-                                                        targetScale = 0.5f,
-                                                        animationSpec = spring(Spring.DampingRatioNoBouncy, Spring.StiffnessHigh)
-                                                    ) + fadeOut(tween(100))
-                                                )
-                                        },
-                                        label = "playPauseMorph"
-                                    ) { playing ->
-                                        Icon(if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(36.dp))
-                                    }
-                                }
-
-                                ToolzExpressiveIconButton(
-                                    onClick = {
-                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        animatedSkip(true)
-                                    },
-                                    modifier = Modifier.size(58.dp),
-                                    shape = CircleShape,
-                                    colors = IconButtonDefaults.filledIconButtonColors(
-                                        containerColor = Color.Transparent,
-                                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                ) {
-                                    Icon(Icons.Rounded.SkipNext, contentDescription = stringResource(R.string.st_MusicPlayerScreen_nt70), modifier = Modifier.size(36.dp))
-                                }
-                            }
-
-                            // ── 6. Secondary controls — segmented toggle group ──
-                            Spacer(Modifier.height(16.dp))
-                            val liquidGlassEnabled = LocalLiquidGlassEnabled.current
-                            val backdrop = LocalLiquidGlassBackdrop.current
-
-                            val secondaryContent = @Composable {
+                            val controlDeckShape = RoundedCornerShape(32.dp)
+                            val controlDeck: @Composable ColumnScope.() -> Unit = {
                                 Row(
-                                    modifier = Modifier.fillMaxSize().padding(horizontal = 6.dp),
+                                    modifier = Modifier.fillMaxWidth().height(84.dp).padding(horizontal = 18.dp),
+                                    horizontalArrangement = Arrangement.SpaceEvenly,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    ToolzExpressiveIconButton(
+                                        onClick = {
+                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            animatedSkip(false)
+                                        },
+                                        modifier = Modifier.size(56.dp),
+                                        shape = CircleShape,
+                                        colors = IconButtonDefaults.filledIconButtonColors(
+                                            containerColor = Color.Transparent,
+                                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    ) { Icon(Icons.Rounded.SkipPrevious, stringResource(R.string.st_MusicPlayerScreen_pt67), Modifier.size(34.dp)) }
+
+                                    val playScale by animateFloatAsState(
+                                        if (state.isPlaying) 1f else 1.04f,
+                                        spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMediumLow),
+                                        label = "playScale"
+                                    )
+                                    val playOnColor = if (dynamicColors.primary.luminance() > 0.5f) Color(0xFF1A1A1A) else Color.White
+                                    ToolzExpressiveButton(
+                                        onClick = {
+                                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            onTogglePlay()
+                                        },
+                                        modifier = Modifier
+                                            .width(116.dp)
+                                            .height(62.dp)
+                                            .scale(if (state.performanceMode) 1f else playScale)
+                                            .semantics { contentDescription = if (state.isPlaying) pauseCd else playCd },
+                                        shape = RoundedCornerShape(24.dp),
+                                        colors = ButtonDefaults.buttonColors(dynamicColors.primary, playOnColor)
+                                    ) {
+                                        AnimatedContent(
+                                            targetState = state.isPlaying,
+                                            transitionSpec = {
+                                                (scaleIn(initialScale = 0.70f, animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMedium)) + fadeIn(tween(120)))
+                                                    .togetherWith(scaleOut(targetScale = 0.70f, animationSpec = spring(Spring.DampingRatioNoBouncy, Spring.StiffnessHigh)) + fadeOut(tween(90)))
+                                            },
+                                            label = "playPauseMorph"
+                                        ) { playing ->
+                                            Icon(if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, null, Modifier.size(34.dp))
+                                        }
+                                    }
+
+                                    ToolzExpressiveIconButton(
+                                        onClick = {
+                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            animatedSkip(true)
+                                        },
+                                        modifier = Modifier.size(56.dp),
+                                        shape = CircleShape,
+                                        colors = IconButtonDefaults.filledIconButtonColors(
+                                            containerColor = Color.Transparent,
+                                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    ) { Icon(Icons.Rounded.SkipNext, stringResource(R.string.st_MusicPlayerScreen_nt70), Modifier.size(34.dp)) }
+                                }
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.30f))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 8.dp),
                                     horizontalArrangement = Arrangement.SpaceEvenly,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
@@ -1201,7 +1232,8 @@ fun FullPlayerView(
                                         onClick = { showQueue = true },
                                         checkedIcon = Icons.AutoMirrored.Rounded.QueueMusic,
                                         uncheckedIcon = Icons.AutoMirrored.Rounded.QueueMusic,
-                                        contentDescription = stringResource(R.string.st_MusicPlayerScreen_q72)
+                                        contentDescription = stringResource(R.string.st_MusicPlayerScreen_q72),
+                                        badgeCount = (state.queue.size - state.currentQueueIndex - 1).coerceAtLeast(0).takeIf { it > 0 }
                                     )
                                     if (state.isOnline) {
                                         if (state.karaokeEnabled && (!track.aiLyrics.isNullOrEmpty() || track.sourceUrl != null || aiState.instrumentalMatch != null)) {
@@ -1225,22 +1257,22 @@ fun FullPlayerView(
                                 }
                             }
 
-                            if (liquidGlassEnabled && backdrop != null) {
+                            if (isLiquidGlass && glassBackdrop != null) {
                                 GlassCard(
-                                    backdrop = backdrop,
-                                    modifier = Modifier.fillMaxWidth().height(56.dp),
-                                    shape = RoundedCornerShape(28.dp),
-                                    tint = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.25f)
+                                    backdrop = glassBackdrop,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = controlDeckShape,
+                                    tint = dynamicColors.primary.copy(alpha = 0.12f)
                                 ) {
-                                    secondaryContent()
+                                    controlDeck()
                                 }
                             } else {
                                 Surface(
-                                    modifier = Modifier.fillMaxWidth().height(56.dp),
-                                    shape = RoundedCornerShape(28.dp),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = controlDeckShape,
                                     color = MaterialTheme.colorScheme.surfaceContainerHigh
                                 ) {
-                                    secondaryContent()
+                                    controlDeck()
                                 }
                             }
 
@@ -1287,7 +1319,8 @@ private fun SegmentToggle(
     onClick: () -> Unit,
     checkedIcon: androidx.compose.ui.graphics.vector.ImageVector,
     uncheckedIcon: androidx.compose.ui.graphics.vector.ImageVector,
-    contentDescription: String? = null
+    contentDescription: String? = null,
+    badgeCount: Int? = null,
 ) {
     val containerColor by animateColorAsState(
         targetValue = if (checked) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
@@ -1308,6 +1341,24 @@ private fun SegmentToggle(
     ) {
         Box(contentAlignment = Alignment.Center) {
             Icon(if (checked) checkedIcon else uncheckedIcon, contentDescription = contentDescription, modifier = Modifier.size(22.dp))
+            badgeCount?.let { count ->
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(x = 2.dp, y = 2.dp)
+                        .heightIn(min = 16.dp),
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ) {
+                    Text(
+                        text = if (count > 99) "99+" else count.toString(),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                    )
+                }
+            }
         }
     }
 }
@@ -1645,7 +1696,7 @@ fun AudioVisualizerHalo(
     sensitivity: Float = 1.0f,
     autoSensitivity: Boolean = true
 ) {
-    val dynamicColors = rememberDynamicColors(thumbnailUri)
+    val dynamicColors = rememberDynamicColors(thumbnailUri, LocalIsDarkTheme.current)
     val primary = dynamicColors.primary
     val secondary = dynamicColors.secondary
     val tertiary = androidx.compose.ui.graphics.lerp(primary, secondary, 0.5f)
