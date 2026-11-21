@@ -43,15 +43,15 @@ import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import coil3.compose.AsyncImage
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import coil3.compose.AsyncImage
 import com.frerox.toolz.data.music.MusicTrack
 import com.frerox.toolz.ui.components.AlbumArtImage
 import com.frerox.toolz.ui.components.DragDropState
@@ -61,7 +61,11 @@ import com.frerox.toolz.ui.components.rememberDragDropState
 import com.frerox.toolz.ui.screens.media.DynamicColors
 import com.frerox.toolz.ui.screens.media.QueueEntry
 import com.frerox.toolz.ui.screens.media.rememberDynamicColors
+import com.frerox.toolz.ui.liquidglass.LocalLiquidGlassBackdrop
+import com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled
+import com.frerox.toolz.ui.liquidglass.liquidGlassEffect
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import com.frerox.toolz.ui.theme.LocalIsDarkTheme
 import kotlinx.coroutines.delay
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -109,8 +113,8 @@ fun QueueSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
     val haptic = LocalHapticFeedback.current
-    val dynamicColors = rememberDynamicColors(currentTrack.thumbnailUri)
-    val reducedEffects = LocalPerformanceMode.current
+    val dynamicColors = rememberDynamicColors(currentTrack.thumbnailUri, LocalIsDarkTheme.current)
+    var showClearQueueDialog by remember { mutableStateOf(false) }
 
     // Upcoming queue elements strictly start from index currentQueueIndex + 1.
     // The very first item shown in "Up Next" is currentQueueIndex + 1 (the next song to play).
@@ -206,7 +210,7 @@ fun QueueSheet(
                                 fontWeight = FontWeight.SemiBold
                             )
                             AnimatedContent(
-                                targetState = queue.size,
+                                targetState = upcoming.size,
                                 transitionSpec = {
                                     (fadeIn(tween(180)) + scaleIn(initialScale = 0.6f, animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMedium)))
                                         .togetherWith(fadeOut(tween(120)) + scaleOut(targetScale = 0.6f))
@@ -231,12 +235,15 @@ fun QueueSheet(
                         }
 
                         AnimatedVisibility(
-                            visible = queue.isNotEmpty(),
+                            visible = upcoming.isNotEmpty(),
                             enter = fadeIn(tween(180)) + scaleIn(initialScale = 0.8f, animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMedium)),
                             exit = fadeOut(tween(120)) + scaleOut(targetScale = 0.8f)
                         ) {
                             FilledTonalIconButton(
-                                onClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onClear(); onDismiss() },
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    showClearQueueDialog = true
+                                },
                                 colors = IconButtonDefaults.filledTonalIconButtonColors(
                                     containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f),
                                     contentColor = MaterialTheme.colorScheme.error
@@ -339,18 +346,30 @@ fun QueueSheet(
             )
         }
     }
+
+    if (showClearQueueDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearQueueDialog = false },
+            icon = { Icon(Icons.Rounded.DeleteSweep, null, tint = MaterialTheme.colorScheme.error) },
+            title = { Text("Clear the entire queue?") },
+            text = { Text("Playback will stop and ${upcoming.size} upcoming ${if (upcoming.size == 1) "track" else "tracks"} will be removed.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onClear()
+                        showClearQueueDialog = false
+                    }
+                ) { Text("Clear queue", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { showClearQueueDialog = false }) { Text("Keep tracks") } },
+            shape = RoundedCornerShape(28.dp)
+        )
+    }
 }
 
 // ── Now-playing hero card ──
-// The sheet's signature element. A blurred wash of the actual album art
-// (not a flat gradient) sits behind the content for real "this track" color
-// presence. No decorative wavy/squiggly waveform line here anymore — it was
-// a permanent infinite animation running the entire time the sheet was
-// open, for a card that isn't even clickable, and it was one of the
-// contributors to the sheet feeling laggy. The small "NOW PLAYING" pill
-// with its playing-bars indicator already carries the "this is live" cue,
-// so the card stays calm, cheap to keep on screen, and still reads as the
-// one deliberately asymmetric, premium element here.
+// The active track gets one album-led anchor before the quiet upcoming list.
+// Its symmetric silhouette keeps the sheet visually aligned with the player.
 @Composable
 private fun NowPlayingHeroCard(
     track: MusicTrack,
@@ -358,34 +377,34 @@ private fun NowPlayingHeroCard(
     modifier: Modifier = Modifier
 ) {
     val reducedEffects = LocalPerformanceMode.current
-    val heroShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp, bottomStart = 28.dp, bottomEnd = 40.dp)
+    val glassEnabled = LocalLiquidGlassEnabled.current
+    val glassBackdrop = LocalLiquidGlassBackdrop.current
+    val heroShape = RoundedCornerShape(28.dp)
 
     Surface(
-        modifier = modifier,
+        modifier = modifier.then(
+            if (glassEnabled && glassBackdrop != null) {
+                Modifier.liquidGlassEffect(
+                    shape = heroShape,
+                    tint = dynamicColors.primary.copy(alpha = 0.16f),
+                    refractionFactor = 0.75f
+                )
+            } else Modifier
+        ),
         shape = heroShape,
-        color = Color.Transparent
+        color = if (glassEnabled && glassBackdrop != null) Color.Transparent else MaterialTheme.colorScheme.surfaceContainerHigh
     ) {
         Box(
             modifier = Modifier
                 .clip(heroShape)
                 .background(MaterialTheme.colorScheme.surfaceContainerHigh)
         ) {
-            // Blurred album-art backdrop — real color from the actual track,
-            // not a synthetic gradient guess. Radius dropped from 28.dp to
-            // 18.dp: past a certain point a bigger blur radius costs real GPU
-            // time (larger sample kernel, larger required layer bounds) for a
-            // visual difference nobody can actually see once it's sitting
-            // behind text and a gradient wash anyway — 18.dp is
-            // indistinguishable here at a third of the sample cost.
             if (!reducedEffects) {
                 AsyncImage(
                     model = track.thumbnailUri,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .matchParentSize()
-                        .blur(18.dp)
-                        .alpha(0.55f),
+                    modifier = Modifier.matchParentSize().blur(18.dp).alpha(0.48f),
                     error = rememberVectorPainter(Icons.Rounded.MusicNote)
                 )
             }
@@ -395,51 +414,51 @@ private fun NowPlayingHeroCard(
                     .background(
                         Brush.linearGradient(
                             colors = listOf(
-                                dynamicColors.primary.copy(alpha = if (reducedEffects) 0.22f else 0.30f),
-                                dynamicColors.secondary.copy(alpha = if (reducedEffects) 0.14f else 0.20f)
+                                dynamicColors.primary.copy(alpha = if (reducedEffects) 0.20f else 0.28f),
+                                dynamicColors.secondary.copy(alpha = if (reducedEffects) 0.12f else 0.18f)
                             )
                         )
                     )
                     .border(1.dp, dynamicColors.primary.copy(alpha = 0.18f), heroShape)
             )
-
-            Column(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Surface(
-                        modifier = Modifier.size(56.dp),
-                        shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 26.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        shadowElevation = 4.dp
-                    ) {
-                        AlbumArtImage(
-                            url = track.thumbnailUri,
-                            seed = track.uri,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize(),
-                            iconSize = 26.dp
-                        )
-                    }
-                    Spacer(Modifier.width(14.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            track.title,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            track.artist?.takeIf { it.isNotBlank() && it != "<unknown>" } ?: "Unknown artist",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    modifier = Modifier.size(56.dp),
+                    shape = RoundedCornerShape(18.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shadowElevation = 4.dp
+                ) {
+                    AlbumArtImage(
+                        url = track.thumbnailUri,
+                        seed = track.uri,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                        iconSize = 26.dp
+                    )
                 }
-
+                Spacer(Modifier.width(14.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        track.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        track.artist?.takeIf { it.isNotBlank() && it != "<unknown>" } ?: "Unknown artist",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                PlayingBarsIndicator()
             }
         }
     }
