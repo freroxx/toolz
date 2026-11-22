@@ -18,6 +18,9 @@
 package com.frerox.toolz.ui.screens.media.ai
 
 import androidx.compose.runtime.Immutable
+import androidx.compose.ui.text.font.DeviceFontFamilyName
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
 import com.frerox.toolz.data.catalog.CatalogTrack
 
 @Immutable
@@ -49,7 +52,48 @@ enum class LyricsLayout {
 }
 
 enum class LyricsFont {
-    SANS_SERIF, SERIF, MONOSPACE, CURSIVE, DISPLAY, HANDWRITING
+    SANS_SERIF,
+    SERIF,
+    MONOSPACE,
+    CURSIVE,
+    CONDENSED,
+    ROUNDED,
+    SLAB;
+
+    val label: String
+        get() = when (this) {
+            SANS_SERIF -> "Sans"
+            SERIF -> "Serif"
+            MONOSPACE -> "Mono"
+            CURSIVE -> "Script"
+            CONDENSED -> "Condensed"
+            ROUNDED -> "Rounded"
+            SLAB -> "Slab"
+        }
+
+    companion object {
+        /** Keeps existing lyric-style choices useful after the duplicate styles were removed. */
+        fun fromStored(value: String): LyricsFont = when (value) {
+            "DISPLAY" -> ROUNDED
+            "HANDWRITING" -> CURSIVE
+            else -> entries.firstOrNull { it.name == value } ?: SANS_SERIF
+        }
+    }
+}
+
+private val condensedLyricsFont = FontFamily(Font(DeviceFontFamilyName("sans-serif-condensed")))
+private val roundedLyricsFont = FontFamily(Font(DeviceFontFamilyName("sans-serif-rounded")))
+private val slabLyricsFont = FontFamily(Font(DeviceFontFamilyName("serif-monospace")))
+
+/** One source of truth for every lyric surface, so the picker never offers duplicate faces. */
+fun LyricsFont.toFontFamily(): FontFamily = when (this) {
+    LyricsFont.SANS_SERIF -> FontFamily.SansSerif
+    LyricsFont.SERIF -> FontFamily.Serif
+    LyricsFont.MONOSPACE -> FontFamily.Monospace
+    LyricsFont.CURSIVE -> FontFamily.Cursive
+    LyricsFont.CONDENSED -> condensedLyricsFont
+    LyricsFont.ROUNDED -> roundedLyricsFont
+    LyricsFont.SLAB -> slabLyricsFont
 }
 
 @Immutable

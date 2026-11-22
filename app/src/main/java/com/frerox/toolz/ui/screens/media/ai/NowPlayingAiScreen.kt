@@ -665,14 +665,7 @@ fun SyncedLyricLine(
         label = "lineAlpha"
     )
 
-    val fontFamily = when(font) {
-        LyricsFont.SANS_SERIF -> androidx.compose.ui.text.font.FontFamily.Default
-        LyricsFont.SERIF -> androidx.compose.ui.text.font.FontFamily.Serif
-        LyricsFont.MONOSPACE -> androidx.compose.ui.text.font.FontFamily.Monospace
-        LyricsFont.CURSIVE -> androidx.compose.ui.text.font.FontFamily.Cursive
-        LyricsFont.DISPLAY -> androidx.compose.ui.text.font.FontFamily.SansSerif
-        LyricsFont.HANDWRITING -> androidx.compose.ui.text.font.FontFamily.Cursive
-    }
+    val fontFamily = font.toFontFamily()
 
     val primary = MaterialTheme.colorScheme.primary
     val dim = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)
