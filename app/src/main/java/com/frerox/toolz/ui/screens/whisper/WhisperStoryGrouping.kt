@@ -6,6 +6,7 @@
 package com.frerox.toolz.ui.screens.whisper
 
 import com.frerox.toolz.data.whisper.WhisperProfile
+import com.frerox.toolz.data.whisper.WhisperStoryAudience
 import com.frerox.toolz.data.whisper.WhisperStoryLocalEntity
 
 /**
@@ -21,6 +22,8 @@ data class StoryPoster(
     val stories: List<WhisperStoryLocalEntity>,
     val soonestExpiryMs: Long,
     val unseenCount: Int,
+    /** At least one live up in this poster's stack was shared with close friends. */
+    val isCloseFriends: Boolean = false,
 )
 
 /** Lightweight per-poster row used by the Chats-tab stories strip. */
@@ -31,6 +34,7 @@ data class StoryPosterRing(
     val storyCount: Int,
     val unseenCount: Int,
     val soonestExpiryMs: Long,
+    val isCloseFriends: Boolean = false,
 )
 
 /**
@@ -171,5 +175,8 @@ private fun groupForOwner(
             stories = stories,
             soonestExpiryMs = stories.first().expiresAtMs,
             unseenCount = if (isMine) 0 else stories.count { it.storyId !in seen },
+            isCloseFriends = stories.any {
+                WhisperStoryAudience.fromWire(it.audienceKind) == WhisperStoryAudience.CLOSE_FRIENDS
+            },
         )
     }

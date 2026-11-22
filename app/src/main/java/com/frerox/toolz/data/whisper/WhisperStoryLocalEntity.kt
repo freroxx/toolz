@@ -26,6 +26,8 @@ data class WhisperStoryLocalEntity(
     val receiptsEnabled: Boolean,
     val state: String,
     val updatedAtMs: Long,
+    /** [WhisperStoryAudience.wire] of the story; labels close-friend rings offline. */
+    val audienceKind: String = WhisperStoryAudience.EVERYONE.wire,
 )
 
 @Dao
