@@ -361,7 +361,7 @@ fun WhisperDailyUpsScreen(
                                     ?.isCloseFriends == true,
                                 onView = viewModel::openMyViewer,
                                 onAdd = {
-                                    if (viewModel.acceptNavigation()) onNavigateToCompose()
+                                    if (viewModel.acceptNavigation()) openComposer()
                                 },
                             )
                         }
@@ -461,6 +461,16 @@ fun WhisperDailyUpsScreen(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = 16.dp),
+        )
+    }
+    if (showComposer) {
+        WhisperDailyUpsComposer(
+            viewModel = composerViewModel,
+            onDismiss = { showComposer = false },
+            onPublished = {
+                showComposer = false
+                viewModel.refresh()
+            },
         )
     }
     }

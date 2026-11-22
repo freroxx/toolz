@@ -471,6 +471,7 @@ private fun LiveCameraStep(
     snackbar: SnackbarHostState,
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var permissionGranted by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
@@ -621,9 +622,11 @@ private fun LiveCameraStep(
                                     image.close()
                                     capturing = false
                                     if (bytes == null || bytes.isEmpty()) {
-                                        snackbar.showSnackbar(
-                                            context.getString(R.string.st_Whisper_DailyUp_CaptureFailed),
-                                        )
+                                        scope.launch {
+                                            snackbar.showSnackbar(
+                                                context.getString(R.string.st_Whisper_DailyUp_CaptureFailed),
+                                            )
+                                        }
                                     } else {
                                         onCaptured(bytes, "image/jpeg")
                                     }
@@ -631,9 +634,11 @@ private fun LiveCameraStep(
 
                                 override fun onError(exception: ImageCaptureException) {
                                     capturing = false
-                                    snackbar.showSnackbar(
-                                        context.getString(R.string.st_Whisper_DailyUp_CaptureFailed),
-                                    )
+                                    scope.launch {
+                                        snackbar.showSnackbar(
+                                            context.getString(R.string.st_Whisper_DailyUp_CaptureFailed),
+                                        )
+                                    }
                                 }
                             },
                         )

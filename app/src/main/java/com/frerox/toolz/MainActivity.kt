@@ -2122,26 +2122,7 @@ fun ToolzNavHost(
         ) { backStackEntry ->
             com.frerox.toolz.ui.screens.whisper.WhisperDailyUpsScreen(
                 onNavigateBack = { toolOnBack() },
-                onNavigateToCompose = {
-                    navController.navigate(Screen.WhisperDailyUpsCompose.route)
-                },
                 ownerArg = backStackEntry.arguments?.getString("ownerId"),
-            )
-        }
-        composable(Screen.WhisperDailyUpsCompose.route) {
-            com.frerox.toolz.ui.screens.whisper.WhisperDailyUpsComposeScreen(
-                onNavigateBack = { toolOnBack() },
-                onPublished = {
-                    android.widget.Toast.makeText(
-                        context,
-                        context.getString(R.string.st_Whisper_DailyUp_Posted),
-                        android.widget.Toast.LENGTH_SHORT,
-                    ).show()
-                    navController.navigate(Screen.WhisperDailyUps.createRoute()) {
-                        popUpTo(Screen.WhisperDailyUpsCompose.route) { inclusive = true }
-                        launchSingleTop = true
-                    }
-                },
             )
         }
 
