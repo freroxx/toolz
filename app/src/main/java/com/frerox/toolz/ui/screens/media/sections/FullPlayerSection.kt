@@ -498,6 +498,7 @@ fun FullPlayerView(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .statusBarsPadding()
+                                .navigationBarsPadding()
                                 .padding(horizontal = 24.dp)
                                 .graphicsLayer {
                                     alpha = entranceAlpha
@@ -704,7 +705,9 @@ fun FullPlayerView(
                             }
 
                             // ── 2. Album art ──
-                            val artMaxSize = (configuration.screenWidthDp * 0.80f).dp.coerceAtMost(310.dp)
+                            val isCompactPlayer = configuration.screenHeightDp < 680
+                            val artMaxSize = (configuration.screenWidthDp * 0.80f).dp
+                                .coerceAtMost(if (isCompactPlayer) 240.dp else 310.dp)
                             val artShape = when (state.artShape) {
                                 "CIRCLE" -> CircleShape
                                 "SQUIRCLE", "SQUARE_ROUNDED" -> RoundedCornerShape(32.dp)
@@ -757,7 +760,10 @@ fun FullPlayerView(
                                 }
                             }
 
-                            Box(
+                            // The art is the flexible region of the player. On
+                            // shorter screens it must shrink inside its measured
+                            // slot instead of painting through the transport deck.
+                            BoxWithConstraints(
                                 modifier = Modifier
                                     .weight(1f)
                                     .fillMaxWidth()
@@ -804,12 +810,13 @@ fun FullPlayerView(
                                     },
                                 contentAlignment = Alignment.Center
                             ) {
+                                val artSize = artMaxSize.coerceAtMost(maxHeight.coerceAtLeast(0.dp))
                                 if (state.showVisualizer) {
                                     Box(contentAlignment = Alignment.Center) {
                                         AudioVisualizerHalo(
                                             visualizerData = visualizerData,
                                             isPlaying = state.isPlaying,
-                                            artMaxSize = artMaxSize,
+                                            artMaxSize = artSize,
                                             shape = state.artShape,
                                             thumbnailUri = track.thumbnailUri,
                                             trackKey = track.uri,
@@ -830,7 +837,7 @@ fun FullPlayerView(
                                     // phase and composites it as a pure transform instead.
                                     Box(
                                         modifier = Modifier
-                                            .size(artMaxSize)
+                                            .size(artSize)
                                             .graphicsLayer { scaleX = haloScale; scaleY = haloScale }
                                             .background(
                                                 Brush.radialGradient(listOf(dynamicColors.primary.copy(alpha = haloAlpha * 0.4f), Color.Transparent)),
@@ -857,7 +864,7 @@ fun FullPlayerView(
                                 if (nextArt != null) {
                                     Surface(
                                         modifier = Modifier
-                                            .size(artMaxSize)
+                                            .size(artSize)
                                             .graphicsLayer {
                                                 val fraction = (dragOffsetPx.value / screenWidthPx).coerceIn(-1f, 1f)
                                                 val revealing = fraction < 0f
@@ -884,7 +891,7 @@ fun FullPlayerView(
                                 if (prevArt != null) {
                                     Surface(
                                         modifier = Modifier
-                                            .size(artMaxSize)
+                                            .size(artSize)
                                             .graphicsLayer {
                                                 val fraction = (dragOffsetPx.value / screenWidthPx).coerceIn(-1f, 1f)
                                                 val revealing = fraction > 0f
@@ -916,7 +923,7 @@ fun FullPlayerView(
                                 // graphicsLayer, same reasoning as above.
                                 Surface(
                                     modifier = Modifier
-                                        .size(artMaxSize)
+                                        .size(artSize)
                                         .graphicsLayer {
                                             rotationZ = if (rotationFeatureOn) rotationAnimatable.value else 0f
                                             translationX = dragOffsetPx.value
@@ -945,7 +952,7 @@ fun FullPlayerView(
                             }
 
                             // ── 3. Track info — plain type hierarchy, no chrome ──
-                            Spacer(Modifier.height(20.dp))
+                            Spacer(Modifier.height(if (isCompactPlayer) 12.dp else 20.dp))
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically,
@@ -1040,7 +1047,9 @@ fun FullPlayerView(
                                             overflow = TextOverflow.Ellipsis
                                         )
                                     }
-                                    track.album?.takeIf { it.isNotBlank() && it != "<unknown>" }?.let { album ->
+                                    track.album
+                                        ?.takeIf { !isCompactPlayer && it.isNotBlank() && it != "<unknown>" }
+                                        ?.let { album ->
                                         Text(
                                             text = album,
                                             style = MaterialTheme.typography.labelMedium,
@@ -1091,7 +1100,7 @@ fun FullPlayerView(
                             }
 
                             // ── 4. Slider ──
-                            Spacer(Modifier.height(18.dp))
+                            Spacer(Modifier.height(if (isCompactPlayer) 12.dp else 18.dp))
                             // Player events can report a final position a few
                             // milliseconds beyond duration. Keeping the UI in
                             // range prevents an overrun time label and a thumb
@@ -1134,11 +1143,14 @@ fun FullPlayerView(
                             // is the primary action, with playback modes in a
                             // quieter second row. This removes the "row of
                             // unrelated pills" look without hiding features.
-                            Spacer(Modifier.height(20.dp))
+                            Spacer(Modifier.height(if (isCompactPlayer) 12.dp else 20.dp))
                             val controlDeckShape = RoundedCornerShape(32.dp)
                             val controlDeck: @Composable ColumnScope.() -> Unit = {
                                 Row(
-                                    modifier = Modifier.fillMaxWidth().height(84.dp).padding(horizontal = 18.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(if (isCompactPlayer) 76.dp else 84.dp)
+                                        .padding(horizontal = 18.dp),
                                     horizontalArrangement = Arrangement.SpaceEvenly,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
@@ -1167,8 +1179,8 @@ fun FullPlayerView(
                                             onTogglePlay()
                                         },
                                         modifier = Modifier
-                                            .width(116.dp)
-                                            .height(62.dp)
+                                            .width(if (isCompactPlayer) 104.dp else 116.dp)
+                                            .height(if (isCompactPlayer) 56.dp else 62.dp)
                                             .scale(if (state.performanceMode) 1f else playScale)
                                             .semantics { contentDescription = if (state.isPlaying) pauseCd else playCd },
                                         shape = RoundedCornerShape(24.dp),
@@ -1201,7 +1213,10 @@ fun FullPlayerView(
                                 }
                                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.30f))
                                 Row(
-                                    modifier = Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 8.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(if (isCompactPlayer) 52.dp else 56.dp)
+                                        .padding(horizontal = 8.dp),
                                     horizontalArrangement = Arrangement.SpaceEvenly,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
@@ -1276,7 +1291,7 @@ fun FullPlayerView(
                                 }
                             }
 
-                            Spacer(Modifier.height(14.dp))
+                            Spacer(Modifier.height(if (isCompactPlayer) 10.dp else 14.dp))
                         }
                     }
                 }
