@@ -1159,11 +1159,11 @@ fun FullPlayerView(
                                         onTogglePlay()
                                     },
                                     modifier = Modifier
-                                        .width(if (isCompactPlayer) 78.dp else 88.dp)
+                                        .width(if (isCompactPlayer) 72.dp else 80.dp)
                                         .height(if (isCompactPlayer) 64.dp else 72.dp)
                                         .scale(if (state.performanceMode) 1f else playScale)
                                         .semantics { contentDescription = if (state.isPlaying) pauseCd else playCd },
-                                    shape = PebbleExpressiveShape,
+                                    shape = RoundedCornerShape(24.dp),
                                     colors = ButtonDefaults.buttonColors(dynamicColors.primary, playOnColor),
                                     contentPadding = PaddingValues(0.dp)
                                 ) {
@@ -1353,20 +1353,24 @@ private fun SegmentToggle(
         Box(contentAlignment = Alignment.Center) {
             Icon(if (checked) checkedIcon else uncheckedIcon, contentDescription = contentDescription, modifier = Modifier.size(22.dp))
             badgeCount?.let { count ->
+                val badgeText = if (count > 99) "99+" else count.toString()
                 Surface(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .offset(x = 2.dp, y = 2.dp)
-                        .heightIn(min = 16.dp),
-                    shape = CircleShape,
+                        .padding(top = 3.dp, end = 2.dp)
+                        .heightIn(min = 16.dp)
+                        .widthIn(min = if (count > 99) 23.dp else 16.dp),
+                    shape = RoundedCornerShape(8.dp),
                     color = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary
                 ) {
                     Text(
-                        text = if (count > 99) "99+" else count.toString(),
-                        style = MaterialTheme.typography.labelSmall,
+                        text = badgeText,
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        modifier = Modifier.padding(horizontal = 3.dp, vertical = 1.dp)
                     )
                 }
             }

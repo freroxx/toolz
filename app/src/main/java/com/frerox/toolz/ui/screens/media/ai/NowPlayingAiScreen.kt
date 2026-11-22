@@ -82,9 +82,17 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.frerox.toolz.data.ai.AiSettingsHelper
 import com.frerox.toolz.ui.components.AlbumArtImage
+import com.frerox.toolz.ui.components.LargeExpressiveShape
+import com.frerox.toolz.ui.components.SmallExpressiveShape
+import com.frerox.toolz.ui.components.ToolzExpressiveButton
+import com.frerox.toolz.ui.components.ToolzExpressiveIconButton
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.components.KaraokeMicIcon
+import com.frerox.toolz.ui.liquidglass.GlassCard
+import com.frerox.toolz.ui.liquidglass.LocalLiquidGlassBackdrop
+import com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled
+import com.frerox.toolz.ui.liquidglass.liquidGlassEffect
 import com.frerox.toolz.ui.screens.media.BreathingDotsIndicator
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.util.VibrationManager
@@ -105,6 +113,7 @@ fun NowPlayingAiBottomSheet(
     onSetMutedByAi: (Boolean) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val liquidGlassEnabled = LocalLiquidGlassEnabled.current
     
     // Connect the volume callback
     LaunchedEffect(Unit) {
@@ -116,7 +125,9 @@ fun NowPlayingAiBottomSheet(
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false),
         containerColor = Color.Transparent,
         dragHandle = null,
-        scrimColor = Color.Black.copy(alpha = 0.65f)
+        // The glass sheet already carries depth; a lighter scrim keeps the
+        // now-playing artwork present instead of turning the backdrop into mud.
+        scrimColor = Color.Black.copy(alpha = if (liquidGlassEnabled) 0.42f else 0.65f)
     ) {
         NowPlayingAiContent(
             uiState = uiState,
@@ -147,6 +158,9 @@ fun NowPlayingAiContent(
     onSetMutedByAi: (Boolean) -> Unit = {}
 ) {
     val performanceMode = LocalPerformanceMode.current
+    val liquidGlassEnabled = LocalLiquidGlassEnabled.current
+    val glassBackdrop = LocalLiquidGlassBackdrop.current
+    val sheetShape = RoundedCornerShape(topStart = 44.dp, topEnd = 44.dp)
 
     LaunchedEffect(uiState.isAiEnabled) {
         if (!uiState.isAiEnabled && uiState.selectedTab != AiTab.Lyrics) {
@@ -160,7 +174,18 @@ fun NowPlayingAiContent(
         modifier = Modifier
             .fillMaxHeight(0.9f)
             .fillMaxWidth()
-            .clip(RoundedCornerShape(topStart = 44.dp, topEnd = 44.dp))
+            .clip(sheetShape)
+            .then(
+                if (liquidGlassEnabled && glassBackdrop != null) {
+                    Modifier.liquidGlassEffect(
+                        backdrop = glassBackdrop,
+                        shape = sheetShape,
+                        tint = MaterialTheme.colorScheme.surface.copy(alpha = 0.10f),
+                        refractionFactor = 0.72f,
+                        shadowRadius = 20.dp
+                    )
+                } else Modifier
+            )
     ) {
         var showLyricsArchSheet by remember { mutableStateOf(false) }
 
@@ -231,6 +256,8 @@ fun AiHeader(
     onToggleKaraoke: () -> Unit = {}
 ) {
     val performanceMode = LocalPerformanceMode.current
+    val liquidGlassEnabled = LocalLiquidGlassEnabled.current
+    val glassBackdrop = LocalLiquidGlassBackdrop.current
     Column(modifier = Modifier.padding(top = 14.dp)) {
         Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
             Box(
@@ -267,10 +294,9 @@ fun AiHeader(
                 Spacer(Modifier.width(12.dp))
                 Column {
                     Text(
-                        stringResource(R.string.st_NowPlayingAiScreen_tm1),
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Black,
-                        letterSpacing = 2.sp,
+                        "Now playing AI",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     AnimatedContent(targetState = uiState.isReconnecting, label = "micStatus") { reconnecting ->
@@ -294,21 +320,21 @@ fun AiHeader(
             }
 
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                // Expressive Lyrics Architecture Info button
-                Surface(
+                ToolzExpressiveIconButton(
                     onClick = onOpenLyricsInfo,
-                    modifier = Modifier.size(36.dp).bouncyClick {},
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+                    modifier = Modifier.size(40.dp),
+                    shape = SmallExpressiveShape,
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            Icons.Rounded.Info,
-                            contentDescription = "Lyrics Architecture Info",
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
+                    Icon(
+                        Icons.Rounded.Info,
+                        contentDescription = "Lyrics information",
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
 
                 if (uiState.isAiEnabled && (uiState.lyricsState.syncedLyrics.isNotEmpty() || uiState.instrumentalMatch != null)) {
@@ -322,47 +348,44 @@ fun AiHeader(
                     )
                 }
 
-                Surface(
+                ToolzExpressiveIconButton(
                     onClick = onRefresh,
-                    modifier = Modifier.height(36.dp).wrapContentWidth().bouncyClick {},
-                    shape = RoundedCornerShape(18.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    modifier = Modifier.size(40.dp),
+                    shape = SmallExpressiveShape,
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        contentColor = MaterialTheme.colorScheme.primary
+                    )
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp)
-                    ) {
-                        Icon(Icons.Rounded.Refresh, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
-                        Text(stringResource(R.string.st_NowPlayingAiScreen_r4), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
-                    }
+                    Icon(
+                        Icons.Rounded.Refresh,
+                        contentDescription = stringResource(R.string.st_NowPlayingAiScreen_r4),
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(19.dp)
+                    )
                 }
-                Surface(
+                ToolzExpressiveIconButton(
                     onClick = onDismiss,
-                    modifier = Modifier.size(36.dp),
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    modifier = Modifier.size(40.dp),
+                    shape = SmallExpressiveShape,
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Rounded.Close, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+                    Icon(Icons.Rounded.Close, contentDescription = "Close", modifier = Modifier.size(19.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
 
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            val tabs = remember(uiState.isAiEnabled) {
-                if (uiState.isAiEnabled) {
-                    listOf(AiTab.Lyrics, AiTab.MoreInfo, AiTab.MusicTaste)
-                } else {
-                    listOf(AiTab.Lyrics)
-                }
+        val tabs = remember(uiState.isAiEnabled) {
+            if (uiState.isAiEnabled) {
+                listOf(AiTab.Lyrics, AiTab.MoreInfo, AiTab.MusicTaste)
+            } else {
+                listOf(AiTab.Lyrics)
             }
+        }
+        val tabRail: @Composable RowScope.() -> Unit = {
             tabs.forEach { tab ->
                 val isSelected = uiState.selectedTab == tab
                 val weight by animateFloatAsState(
@@ -374,11 +397,10 @@ fun AiHeader(
                     onClick = { onTabSelected(tab) },
                     modifier = Modifier
                         .weight(weight)
-                        .height(44.dp)
-                        .bouncyClick {},
-                    shape = CircleShape,
+                        .height(44.dp),
+                    shape = SmallExpressiveShape,
                     color = if (isSelected) MaterialTheme.colorScheme.primaryContainer
-                    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                    else Color.Transparent
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -409,6 +431,40 @@ fun AiHeader(
                         }
                     }
                 }
+            }
+        }
+        if (liquidGlassEnabled && glassBackdrop != null) {
+            GlassCard(
+                backdrop = glassBackdrop,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .height(52.dp),
+                shape = LargeExpressiveShape,
+                tint = MaterialTheme.colorScheme.surface.copy(alpha = 0.10f)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    content = tabRail
+                )
+            }
+        } else {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .height(52.dp),
+                shape = LargeExpressiveShape,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.82f)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    content = tabRail
+                )
             }
         }
 
@@ -600,7 +656,7 @@ fun LyricsTab(
                 spring(Spring.DampingRatioMediumBouncy),
                 label = "fabScale"
             )
-            Surface(
+            ToolzExpressiveButton(
                 onClick = {
                     vibrationManager.vibrateClick()
                     viewModel.toggleAutoScroll()
@@ -609,38 +665,27 @@ fun LyricsTab(
                     .align(Alignment.BottomEnd)
                     .padding(end = 22.dp, bottom = 22.dp)
                     .height(56.dp)
-                    .scale(fabScale)
-                    .shadow(
-                        elevation = if (state.isAutoScrollEnabled) 10.dp else 6.dp,
-                        shape = RoundedCornerShape(28.dp),
-                        spotColor = if (state.isAutoScrollEnabled) MaterialTheme.colorScheme.primary else Color.Black
-                    )
-                    .bouncyClick {},
-                shape = RoundedCornerShape(28.dp),
-                color = if (state.isAutoScrollEnabled) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = if (state.isAutoScrollEnabled) MaterialTheme.colorScheme.onPrimary
-                else MaterialTheme.colorScheme.onSurfaceVariant
+                    .scale(fabScale),
+                shape = LargeExpressiveShape,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (state.isAutoScrollEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,
+                    contentColor = if (state.isAutoScrollEnabled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                ),
+                contentPadding = PaddingValues(horizontal = 20.dp)
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 20.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Crossfade(state.isAutoScrollEnabled, animationSpec = tween(220), label = "syncIcon") { active ->
-                        Icon(
-                            if (active) Icons.Rounded.Sync else Icons.Rounded.SyncDisabled,
-                            null,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                    Text(
-                        if (state.isAutoScrollEnabled) stringResource(R.string.st_NowPlayingAiScreen_s7) else stringResource(R.string.st_NowPlayingAiScreen_m8),
-                        fontWeight = FontWeight.Black,
-                        style = MaterialTheme.typography.labelMedium,
-                        letterSpacing = 1.sp
+                Crossfade(state.isAutoScrollEnabled, animationSpec = tween(220), label = "syncIcon") { active ->
+                    Icon(
+                        if (active) Icons.Rounded.Sync else Icons.Rounded.SyncDisabled,
+                        null,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    if (state.isAutoScrollEnabled) stringResource(R.string.st_NowPlayingAiScreen_s7) else stringResource(R.string.st_NowPlayingAiScreen_m8),
+                    fontWeight = FontWeight.SemiBold,
+                    style = MaterialTheme.typography.labelMedium
+                )
             }
         }
     }
