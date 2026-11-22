@@ -66,6 +66,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import java.io.File
+import java.util.Locale
 
 // P1-02: MusicUiState/QueueEntry/SortOrder extracted to MusicUiState.kt
 
@@ -679,14 +680,48 @@ class MusicPlayerViewModel @Inject constructor(
                 var visible = if (!isOnline) deduped.filter { it.path != null } else deduped
                 if (downloadedOnly) visible = visible.filter { it.path != null || it.album == "Toolz Downloads" }
 
+                // Keep each sort literal. A former presentation-oriented second
+                // sort (artwork/artist availability) silently overrode the
+                // user's chosen order, making "recent" and "artist" feel
+                // unreliable in real libraries.
                 val sorted = when (sortOrder) {
-                    SortOrder.TITLE -> visible.sortedBy { it.title }
-                    SortOrder.ARTIST -> visible.sortedBy { it.artist ?: "Unknown" }
-                    SortOrder.RECENT -> visible.reversed()
-                }.sortedWith(
-                    compareByDescending<MusicTrack> { it.thumbnailUri != null }
-                        .thenByDescending { it.artist != null && it.artist != "Unknown Artist" && it.artist != "<unknown>" }
-                )
+                    SortOrder.TITLE -> visible.sortedWith(
+                        compareBy<MusicTrack> { it.title.lowercase(Locale.ROOT) }
+                            .thenBy { it.artist.orEmpty().lowercase(Locale.ROOT) }
+                    )
+                    SortOrder.ARTIST -> visible.sortedWith(
+                        compareBy<MusicTrack> { it.artist.orEmpty().lowercase(Locale.ROOT) }
+                            .thenBy { it.title.lowercase(Locale.ROOT) }
+                    )
+                    SortOrder.ALBUM -> visible.sortedWith(
+                        compareBy<MusicTrack> { it.album.orEmpty().lowercase(Locale.ROOT) }
+                            .thenBy { it.title.lowercase(Locale.ROOT) }
+                    )
+                    SortOrder.RECENT -> visible.sortedWith(
+                        compareByDescending<MusicTrack> { it.lastPlayed }
+                            .thenByDescending { it.dateAdded }
+                    )
+                    SortOrder.DATE_ADDED -> visible.sortedWith(
+                        compareByDescending<MusicTrack> { it.dateAdded }
+                            .thenBy { it.title.lowercase(Locale.ROOT) }
+                    )
+                    SortOrder.MOST_PLAYED -> visible.sortedWith(
+                        compareByDescending<MusicTrack> { it.playCount }
+                            .thenByDescending { it.lastPlayed }
+                    )
+                    SortOrder.LISTENING_TIME -> visible.sortedWith(
+                        compareByDescending<MusicTrack> { it.totalListenMs }
+                            .thenByDescending { it.playCount }
+                    )
+                    SortOrder.LONGEST -> visible.sortedWith(
+                        compareByDescending<MusicTrack> { it.duration }
+                            .thenBy { it.title.lowercase(Locale.ROOT) }
+                    )
+                    SortOrder.SHORTEST -> visible.sortedWith(
+                        compareBy<MusicTrack> { it.duration }
+                            .thenBy { it.title.lowercase(Locale.ROOT) }
+                    )
+                }
 
                 if (data.tracks.isNotEmpty() && !persistedKnownLibrary) {
                     persistedKnownLibrary = true
