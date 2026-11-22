@@ -25,7 +25,17 @@ import com.frerox.toolz.data.music.Playlist
 // P1-02 fix: extracted from MusicPlayerViewModel.kt to reduce god-viewmodel size.
 // Now slices and sections can import without pulling the entire VM.
 
-enum class SortOrder { TITLE, ARTIST, RECENT }
+enum class SortOrder {
+    TITLE,
+    ARTIST,
+    ALBUM,
+    RECENT,
+    DATE_ADDED,
+    MOST_PLAYED,
+    LISTENING_TIME,
+    LONGEST,
+    SHORTEST,
+}
 
 data class MusicUiState(
     val tracks                  : List<MusicTrack>          = emptyList(),
