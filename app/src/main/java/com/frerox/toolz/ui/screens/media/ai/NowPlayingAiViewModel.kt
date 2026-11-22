@@ -304,7 +304,7 @@ class NowPlayingAiViewModel @Inject constructor(
         }
         viewModelScope.launch {
             settingsRepository.musicLyricsFont.collect { fontStr ->
-                val font = runCatching { LyricsFont.valueOf(fontStr) }.getOrDefault(LyricsFont.SANS_SERIF)
+                val font = LyricsFont.fromStored(fontStr)
                 _uiState.update { it.copy(lyricsState = it.lyricsState.copy(fontFamily = font)) }
             }
         }

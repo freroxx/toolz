@@ -647,6 +647,12 @@ class MusicPlayerViewModel @Inject constructor(
                 _uiState.update { it.copy(downloadedOnlyFilter = enabled) }
             }
         }
+        viewModelScope.launch {
+            settingsRepository.musicSortOrder.collect { stored ->
+                SortOrder.entries.firstOrNull { it.name == stored }
+                    ?.let { order -> _uiState.update { it.copy(sortOrder = order) } }
+            }
+        }
     }
 
     private fun observeLibrary() {
@@ -1202,7 +1208,10 @@ class MusicPlayerViewModel @Inject constructor(
     /** Loop the current item (used by note attachments so one song repeats). */
     fun setRepeatMode(mode: Int) = playbackTransport.setRepeatMode(mode)
 
-    fun setSortOrder(order: SortOrder) = playbackTransport.setSortOrder(order)
+    fun setSortOrder(order: SortOrder) {
+        playbackTransport.setSortOrder(order)
+        viewModelScope.launch { settingsRepository.setMusicSortOrder(order.name) }
+    }
     fun toggleDownloadedOnlyFilter() {
         viewModelScope.launch { settingsRepository.setMusicDownloadedOnlyFilter(!_uiState.value.downloadedOnlyFilter); hapticClick() }
     }
