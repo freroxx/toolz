@@ -655,6 +655,17 @@ object DatabaseModule {
         return db
     }
 
+    internal val WHISPER_MIGRATION_1_2 = object : Migration(1, 2) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            // Additive only: existing story rows keep their descriptor and
+            // lifecycle state and read as "everyone" until the next sync
+            // refreshes the real audience kind.
+            db.execSQL(
+                "ALTER TABLE whisper_story_local ADD COLUMN audienceKind TEXT NOT NULL DEFAULT 'everyone'",
+            )
+        }
+    }
+
     /**
      * Dedicated encrypted Whisper store. Depends on [AppDatabase] so the v69
      * migration has already run before [WhisperLegacyImporter] reads the legacy
@@ -682,6 +693,7 @@ object DatabaseModule {
             dbName,
         )
             .openHelperFactory(factory)
+            .addMigrations(WHISPER_MIGRATION_1_2)
             .fallbackToDestructiveMigrationOnDowngrade()
             // Privacy: a messenger deletes messages, tombstones, expired stories
             // and soon-expired self-read copies. secure_delete makes SQLite
