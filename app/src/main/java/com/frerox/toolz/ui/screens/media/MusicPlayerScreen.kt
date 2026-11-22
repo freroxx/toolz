@@ -1557,14 +1557,7 @@ fun LyricCustomizationSheet(
                 ) {
                     LyricsFont.entries.forEach { font ->
                         val selected = state.fontFamily == font
-                        val fontFamily = when(font) {
-                            LyricsFont.SANS_SERIF -> androidx.compose.ui.text.font.FontFamily.Default
-                            LyricsFont.SERIF -> androidx.compose.ui.text.font.FontFamily.Serif
-                            LyricsFont.MONOSPACE -> androidx.compose.ui.text.font.FontFamily.Monospace
-                            LyricsFont.CURSIVE -> androidx.compose.ui.text.font.FontFamily.Cursive
-                            LyricsFont.DISPLAY -> androidx.compose.ui.text.font.FontFamily.Default
-                            LyricsFont.HANDWRITING -> androidx.compose.ui.text.font.FontFamily.Cursive
-                        }
+                        val fontFamily = font.toFontFamily()
 
                         Surface(
                             onClick = { onSetFont(font) },
@@ -1575,7 +1568,7 @@ fun LyricCustomizationSheet(
                         ) {
                             Box(modifier = Modifier.padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
                                 Text(
-                                    font.name.lowercase().replace("_", " ").split(" ").joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } },
+                                    font.label,
                                     fontWeight = FontWeight.Bold,
                                     style = MaterialTheme.typography.labelMedium,
                                     fontFamily = fontFamily
