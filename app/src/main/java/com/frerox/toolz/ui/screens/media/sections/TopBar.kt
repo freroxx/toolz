@@ -52,12 +52,17 @@ import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.automirrored.rounded.Sort
 import androidx.compose.material.icons.automirrored.rounded.ViewList
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Album
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.GridView
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
+import androidx.compose.material.icons.rounded.NewReleases
 import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material.icons.rounded.Title
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -107,6 +112,18 @@ private data class MusicHeader(
     val key: String,
 )
 
+private fun SortOrder.displayName(): String = when (this) {
+    SortOrder.TITLE -> "title"
+    SortOrder.ARTIST -> "artist"
+    SortOrder.ALBUM -> "album"
+    SortOrder.RECENT -> "recently played"
+    SortOrder.DATE_ADDED -> "date added"
+    SortOrder.MOST_PLAYED -> "most played"
+    SortOrder.LISTENING_TIME -> "listening time"
+    SortOrder.LONGEST -> "longest"
+    SortOrder.SHORTEST -> "shortest"
+}
+
 @Composable
 private fun rememberMusicHeader(
     state: MusicUiState,
@@ -135,7 +152,7 @@ private fun rememberMusicHeader(
         )
         else -> MusicHeader(
             title = "Your music",
-            subtitle = "All songs on this device",
+            subtitle = "${state.tracks.size} tracks, sorted by ${state.sortOrder.displayName()}",
             key = "tracks",
         )
     }
@@ -401,20 +418,42 @@ fun ScreenTopBar(
                                     shape = RoundedCornerShape(24.dp),
                                     containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                                 ) {
-                                    SortDropdownItem("By title", Icons.Rounded.Title) {
+                                    SortDropdownItem("Title", Icons.Rounded.Title, state.sortOrder == SortOrder.TITLE) {
                                         onSort(SortOrder.TITLE); onShowSortMenu(false)
                                     }
                                     SortDropdownItem(
-                                        stringResource(R.string.st_MusicPlayerScreen_ba7),
+                                        "Artist",
                                         Icons.Rounded.Person,
+                                        state.sortOrder == SortOrder.ARTIST,
                                     ) {
                                         onSort(SortOrder.ARTIST); onShowSortMenu(false)
                                     }
                                     SortDropdownItem(
-                                        stringResource(R.string.st_MusicPlayerScreen_br8),
-                                        Icons.Rounded.Schedule,
+                                        "Album",
+                                        Icons.Rounded.Album,
+                                        state.sortOrder == SortOrder.ALBUM,
                                     ) {
+                                        onSort(SortOrder.ALBUM); onShowSortMenu(false)
+                                    }
+                                    HorizontalDivider()
+                                    SortDropdownItem("Recently played", Icons.Rounded.History, state.sortOrder == SortOrder.RECENT) {
                                         onSort(SortOrder.RECENT); onShowSortMenu(false)
+                                    }
+                                    SortDropdownItem("Date added", Icons.Rounded.NewReleases, state.sortOrder == SortOrder.DATE_ADDED) {
+                                        onSort(SortOrder.DATE_ADDED); onShowSortMenu(false)
+                                    }
+                                    SortDropdownItem("Most played", Icons.Rounded.PlayCircle, state.sortOrder == SortOrder.MOST_PLAYED) {
+                                        onSort(SortOrder.MOST_PLAYED); onShowSortMenu(false)
+                                    }
+                                    SortDropdownItem("Listening time", Icons.Rounded.Timer, state.sortOrder == SortOrder.LISTENING_TIME) {
+                                        onSort(SortOrder.LISTENING_TIME); onShowSortMenu(false)
+                                    }
+                                    HorizontalDivider()
+                                    SortDropdownItem("Longest first", Icons.Rounded.KeyboardArrowUp, state.sortOrder == SortOrder.LONGEST) {
+                                        onSort(SortOrder.LONGEST); onShowSortMenu(false)
+                                    }
+                                    SortDropdownItem("Shortest first", Icons.Rounded.KeyboardArrowDown, state.sortOrder == SortOrder.SHORTEST) {
+                                        onSort(SortOrder.SHORTEST); onShowSortMenu(false)
                                     }
                                 }
                             }
@@ -497,11 +536,14 @@ private fun topBarActionColors() = IconButtonDefaults.filledIconButtonColors(
 )
 
 @Composable
-private fun SortDropdownItem(label: String, icon: ImageVector, onClick: () -> Unit) {
+private fun SortDropdownItem(label: String, icon: ImageVector, selected: Boolean, onClick: () -> Unit) {
     DropdownMenuItem(
         text = { Text(label, fontWeight = FontWeight.Medium) },
         onClick = onClick,
         leadingIcon = { Icon(icon, null, tint = MaterialTheme.colorScheme.primary) },
+        trailingIcon = {
+            if (selected) Icon(Icons.Rounded.Check, contentDescription = "Selected", tint = MaterialTheme.colorScheme.primary)
+        },
     )
 }
 
