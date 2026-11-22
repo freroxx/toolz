@@ -113,6 +113,9 @@ class WhisperRepository @Inject constructor(
     internal val mutePrefs: WhisperMutePreferences,
     // Daily Ups local seen set: cleared with the rest of the account's local data.
     private val storySeenStore: WhisperStorySeenStore,
+    // Device-local Daily Ups audience preferences (close friends + receipts /
+    // save-to-device defaults). Never uploaded; cleared with local data.
+    internal val dailyUpsPrefs: WhisperDailyUpsPreferences,
     // Phase-2 groups local UI state (ships in v1.1.8, but must still be
     // wiped on account deletion so a following account never inherits it).
     // internal: the groups lane purges these per group on authoritative removal.
@@ -3874,6 +3877,7 @@ class WhisperRepository @Inject constructor(
         hiddenChatsStore.clearAll()
         mutePrefs.clearAll()
         storySeenStore.clearAll()
+        dailyUpsPrefs.clearAll()
         // Hidden groups parity: read watermarks, notification toggles and the undo
         // buffer are local-only account state; deletion must not leave them behind.
         groupReadStore.clearAll()

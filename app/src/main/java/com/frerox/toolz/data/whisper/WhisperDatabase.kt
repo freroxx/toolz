@@ -51,7 +51,7 @@ import androidx.room.RoomDatabase
         WhisperStoryLocalEntity::class,
         WhisperSelfReadEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = true,
 )
 abstract class WhisperDatabase : RoomDatabase() {

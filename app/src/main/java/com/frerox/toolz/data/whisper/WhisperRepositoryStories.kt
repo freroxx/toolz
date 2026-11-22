@@ -187,6 +187,7 @@ private data class StoryServerRow(
     @SerialName("poster_id") val posterId: String,
     val state: String,
     @SerialName("receipts_enabled") val receiptsEnabled: Boolean = false,
+    @SerialName("audience_kind") val audienceKind: String = "everyone",
     @SerialName("expires_at") val expiresAt: String,
 )
 
@@ -225,7 +226,11 @@ fun WhisperRepository.observeMyDailyUps(nowMs: Long = System.currentTimeMillis()
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
- * Publishes one story to every CURRENT friend minus [excludedFriendIds].
+ * Publishes one story to the explicit [audienceIds] snapshot with [audienceKind]
+ * as its label (everyone / close friends / custom). The caller computes the
+ * snapshot from the device-local close-friends list and/or a hand-picked set;
+ * the server still validates that every recipient is a current, unblocked
+ * friend, so a stale local list can only shrink the audience, never widen it.
  *
  * Fail-closed ordering: preprocess → seal → upload → seal audience legs →
  * ONE publish RPC (atomic server side: story + recipients + quota) → local
@@ -237,18 +242,19 @@ suspend fun WhisperRepository.publishDailyUp(
     photoBytes: ByteArray,
     mimeType: String,
     receiptsEnabled: Boolean,
-    excludedFriendIds: Set<String>,
+    audienceIds: Set<String>,
+    audienceKind: WhisperStoryAudience,
 ): Result<WhisperStoryDescriptor> = runCatching {
     requireDailyUpsEnabled()
     val me = requireStoryMe()
     storyIo(WhisperDailyUpsConfig.PUBLISH_TIMEOUT_MS) {
-        // Audience FIRST: a too-large audience (or no friends to send to) must
-        // fail closed BEFORE the expensive preprocess + upload. Otherwise a
-        // rejected publish left an orphaned hosted blob with no story row.
-        val friends = getFriends().getOrThrow()
-        val audience = friends.map { it.id }
-            .filter { it != me && it !in excludedFriendIds }
+        // Audience FIRST: an empty or too-large audience must fail closed
+        // BEFORE the expensive preprocess + upload. Otherwise a rejected
+        // publish left an orphaned hosted blob with no story row.
+        val audience = audienceIds
+            .filter { it != me }
             .distinct()
+        check(audience.isNotEmpty()) { "no audience" }
         check(audience.size <= WhisperDailyUpsConfig.MAX_RECIPIENTS) {
             "audience too large (${audience.size})"
         }
@@ -299,6 +305,7 @@ suspend fun WhisperRepository.publishDailyUp(
             put("p_host_url", hostUrl)
             put("p_host_object_id", attachmentId)
             put("p_receipts_enabled", receiptsEnabled)
+            put("p_audience_kind", audienceKind.wire)
             put("p_recipients", buildJsonArray {
                 legs.forEach { (rid, sealed) ->
                     add(buildJsonObject {
@@ -337,6 +344,7 @@ suspend fun WhisperRepository.publishDailyUp(
                     receiptsEnabled = receiptsEnabled,
                     state = STORY_STATE_OWN,
                     updatedAtMs = System.currentTimeMillis(),
+                    audienceKind = audienceKind.wire,
                 ),
             )
         }.onFailure { e ->
@@ -419,7 +427,7 @@ suspend fun WhisperRepository.syncDailyUps(): Result<Unit> = runCatching {
         val maxRows = (WhisperDailyUpsConfig.SYNC_PAGE * WhisperDailyUpsConfig.SYNC_MAX_PAGES).toLong()
         while (offset < maxRows) {
             val page = db.from("whisper_story_recipients").select(
-                Columns.raw("story_id,sealed_descriptor,story:whisper_stories!inner(poster_id,state,receipts_enabled,expires_at)"),
+                Columns.raw("story_id,sealed_descriptor,story:whisper_stories!inner(poster_id,state,receipts_enabled,audience_kind,expires_at)"),
             ) {
                 filter { eq("recipient_id", me) }
                 order("created_at", Order.DESCENDING)
@@ -440,6 +448,7 @@ suspend fun WhisperRepository.syncDailyUps(): Result<Unit> = runCatching {
                         receiptsEnabled = story.receiptsEnabled,
                         state = STORY_STATE_ACTIVE,
                         updatedAtMs = nowMs,
+                        audienceKind = WhisperStoryAudience.fromWire(story.audienceKind).wire,
                     ),
                 )
                 freshIds += row.storyId
@@ -457,9 +466,14 @@ suspend fun WhisperRepository.syncDailyUps(): Result<Unit> = runCatching {
             val serverExpiry = runCatching { Instant.parse(row.expiresAt).toEpochMilli() }
                 .getOrElse { continue }
             val local = storyLocalDao.byId(row.id) ?: continue // reinstalled → keyless; skip
-            if (local.expiresAtMs != serverExpiry) {
+            val audienceKind = WhisperStoryAudience.fromWire(row.audienceKind).wire
+            if (local.expiresAtMs != serverExpiry || local.audienceKind != audienceKind) {
                 storyLocalDao.upsert(
-                    local.copy(expiresAtMs = serverExpiry, updatedAtMs = nowMs),
+                    local.copy(
+                        expiresAtMs = serverExpiry,
+                        audienceKind = audienceKind,
+                        updatedAtMs = nowMs,
+                    ),
                 )
             }
         }
