@@ -381,14 +381,7 @@ fun MiniPlayer(
 
     // Font mapping for lyrics
     val fontFamily = remember(lyricsState?.fontFamily) {
-        when(lyricsState?.fontFamily) {
-            LyricsFont.SERIF -> androidx.compose.ui.text.font.FontFamily.Serif
-            LyricsFont.MONOSPACE -> androidx.compose.ui.text.font.FontFamily.Monospace
-            LyricsFont.CURSIVE -> androidx.compose.ui.text.font.FontFamily.Cursive
-            LyricsFont.DISPLAY -> androidx.compose.ui.text.font.FontFamily.SansSerif
-            LyricsFont.HANDWRITING -> androidx.compose.ui.text.font.FontFamily.Cursive
-            else -> androidx.compose.ui.text.font.FontFamily.Default
-        }
+        lyricsState?.fontFamily?.toFontFamily() ?: androidx.compose.ui.text.font.FontFamily.SansSerif
     }
 
     // NOTE: this outer wrapper used to be a Surface(color = Color.Transparent).
