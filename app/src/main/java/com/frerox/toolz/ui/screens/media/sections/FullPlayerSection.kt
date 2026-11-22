@@ -158,7 +158,6 @@ import com.frerox.toolz.ui.components.KaraokeMicIcon
 import com.frerox.toolz.ui.liquidglass.GlassCard
 import com.frerox.toolz.ui.liquidglass.LocalLiquidGlassBackdrop
 import com.frerox.toolz.ui.liquidglass.LocalLiquidGlassEnabled
-import com.frerox.toolz.ui.liquidglass.liquidGlassEffect
 import com.frerox.toolz.ui.screens.media.*
 import com.frerox.toolz.ui.screens.media.ai.*
 import com.frerox.toolz.ui.screens.media.catalog.*
@@ -526,16 +525,8 @@ fun FullPlayerView(
                                     onClick = requestClose,
                                     modifier = Modifier
                                         .size(44.dp)
-                                        .align(Alignment.CenterStart)
-                                        .then(
-                                            if (isLiquidGlass && glassBackdrop != null) {
-                                                Modifier.liquidGlassEffect(
-                                                    shape = CircleShape,
-                                                    tint = MaterialTheme.colorScheme.surface.copy(alpha = 0.12f)
-                                                )
-                                            } else Modifier
-                                        ),
-                                    shape = CircleShape,
+                                        .align(Alignment.CenterStart),
+                                    shape = SmallExpressiveShape,
                                     colors = IconButtonDefaults.filledIconButtonColors(
                                         containerColor = if (isLiquidGlass && glassBackdrop != null) Color.Transparent else MaterialTheme.colorScheme.surfaceContainerHigh,
                                         contentColor = MaterialTheme.colorScheme.onSurface
@@ -593,16 +584,8 @@ fun FullPlayerView(
                                         ToolzExpressiveIconButton(
                                             onClick = { showOverflowMenu = true },
                                             modifier = Modifier
-                                                .size(44.dp)
-                                                .then(
-                                                    if (isLiquidGlass && glassBackdrop != null) {
-                                                        Modifier.liquidGlassEffect(
-                                                            shape = CircleShape,
-                                                            tint = MaterialTheme.colorScheme.surface.copy(alpha = 0.12f)
-                                                        )
-                                                    } else Modifier
-                                                ),
-                                            shape = CircleShape,
+                                                .size(44.dp),
+                                            shape = SmallExpressiveShape,
                                             colors = IconButtonDefaults.filledIconButtonColors(
                                                 containerColor = if (isLiquidGlass && glassBackdrop != null) Color.Transparent else MaterialTheme.colorScheme.surfaceContainerHigh,
                                                 contentColor = MaterialTheme.colorScheme.onSurface
@@ -939,7 +922,7 @@ fun FullPlayerView(
                                         ),
                                     shape = artShape,
                                     color = MaterialTheme.colorScheme.surfaceVariant,
-                                    border = BorderStroke(1.dp, dynamicColors.primary.copy(alpha = 0.10f))
+                                    border = BorderStroke(1.dp, if (isLiquidGlass) Color.White.copy(alpha = 0.28f) else dynamicColors.primary.copy(alpha = 0.10f))
                                 ) {
                                     AlbumArtImage(
                                         url = track.thumbnailUri,
@@ -1080,7 +1063,7 @@ fun FullPlayerView(
                                         onToggleFavorite(track)
                                     },
                                     modifier = Modifier.size(44.dp),
-                                    shape = CircleShape,
+                                    shape = SmallExpressiveShape,
                                     colors = IconButtonDefaults.filledIconButtonColors(
                                         containerColor = if (track.isFavorite) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
                                         contentColor = if (track.isFavorite) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurfaceVariant
@@ -1139,87 +1122,80 @@ fun FullPlayerView(
                                 }
                             }
 
-                            // The deck is deliberately one surface: transport
-                            // is the primary action, with playback modes in a
-                            // quieter second row. This removes the "row of
-                            // unrelated pills" look without hiding features.
+                            // Transport and modes deliberately live on separate
+                            // levels. The controls are individually tactile, while
+                            // the mode rail stays a quiet secondary surface.
                             Spacer(Modifier.height(if (isCompactPlayer) 12.dp else 20.dp))
-                            val controlDeckShape = RoundedCornerShape(32.dp)
-                            val controlDeck: @Composable ColumnScope.() -> Unit = {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(if (isCompactPlayer) 76.dp else 84.dp)
-                                        .padding(horizontal = 18.dp),
-                                    horizontalArrangement = Arrangement.SpaceEvenly,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    ToolzExpressiveIconButton(
-                                        onClick = {
-                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                            animatedSkip(false)
-                                        },
-                                        modifier = Modifier.size(56.dp),
-                                        shape = CircleShape,
-                                        colors = IconButtonDefaults.filledIconButtonColors(
-                                            containerColor = Color.Transparent,
-                                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    ) { Icon(Icons.Rounded.SkipPrevious, stringResource(R.string.st_MusicPlayerScreen_pt67), Modifier.size(34.dp)) }
-
-                                    val playScale by animateFloatAsState(
-                                        if (state.isPlaying) 1f else 1.04f,
-                                        spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMediumLow),
-                                        label = "playScale"
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(if (isCompactPlayer) 72.dp else 80.dp)
+                                    .padding(horizontal = 14.dp),
+                                horizontalArrangement = Arrangement.SpaceEvenly,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                ToolzExpressiveIconButton(
+                                    onClick = {
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        animatedSkip(false)
+                                    },
+                                    modifier = Modifier.size(if (isCompactPlayer) 54.dp else 58.dp),
+                                    shape = SmallExpressiveShape,
+                                    colors = IconButtonDefaults.filledIconButtonColors(
+                                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.88f),
+                                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
-                                    val playOnColor = if (dynamicColors.primary.luminance() > 0.5f) Color(0xFF1A1A1A) else Color.White
-                                    ToolzExpressiveButton(
-                                        onClick = {
-                                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                            onTogglePlay()
-                                        },
-                                        modifier = Modifier
-                                            .width(if (isCompactPlayer) 104.dp else 116.dp)
-                                            .height(if (isCompactPlayer) 56.dp else 62.dp)
-                                            .scale(if (state.performanceMode) 1f else playScale)
-                                            .semantics { contentDescription = if (state.isPlaying) pauseCd else playCd },
-                                        shape = RoundedCornerShape(24.dp),
-                                        colors = ButtonDefaults.buttonColors(dynamicColors.primary, playOnColor)
-                                    ) {
-                                        AnimatedContent(
-                                            targetState = state.isPlaying,
-                                            transitionSpec = {
-                                                (scaleIn(initialScale = 0.70f, animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMedium)) + fadeIn(tween(120)))
-                                                    .togetherWith(scaleOut(targetScale = 0.70f, animationSpec = spring(Spring.DampingRatioNoBouncy, Spring.StiffnessHigh)) + fadeOut(tween(90)))
-                                            },
-                                            label = "playPauseMorph"
-                                        ) { playing ->
-                                            Icon(if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, null, Modifier.size(34.dp))
-                                        }
-                                    }
+                                ) { Icon(Icons.Rounded.SkipPrevious, stringResource(R.string.st_MusicPlayerScreen_pt67), Modifier.size(30.dp)) }
 
-                                    ToolzExpressiveIconButton(
-                                        onClick = {
-                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                            animatedSkip(true)
-                                        },
-                                        modifier = Modifier.size(56.dp),
-                                        shape = CircleShape,
-                                        colors = IconButtonDefaults.filledIconButtonColors(
-                                            containerColor = Color.Transparent,
-                                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    ) { Icon(Icons.Rounded.SkipNext, stringResource(R.string.st_MusicPlayerScreen_nt70), Modifier.size(34.dp)) }
-                                }
-                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.30f))
-                                Row(
+                                val playScale by animateFloatAsState(
+                                    if (state.isPlaying) 1f else 1.06f,
+                                    spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMediumLow),
+                                    label = "playScale"
+                                )
+                                val playOnColor = if (dynamicColors.primary.luminance() > 0.5f) Color(0xFF1A1A1A) else Color.White
+                                ToolzExpressiveButton(
+                                    onClick = {
+                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        onTogglePlay()
+                                    },
                                     modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(if (isCompactPlayer) 52.dp else 56.dp)
-                                        .padding(horizontal = 8.dp),
-                                    horizontalArrangement = Arrangement.SpaceEvenly,
-                                    verticalAlignment = Alignment.CenterVertically
+                                        .width(if (isCompactPlayer) 78.dp else 88.dp)
+                                        .height(if (isCompactPlayer) 64.dp else 72.dp)
+                                        .scale(if (state.performanceMode) 1f else playScale)
+                                        .semantics { contentDescription = if (state.isPlaying) pauseCd else playCd },
+                                    shape = PebbleExpressiveShape,
+                                    colors = ButtonDefaults.buttonColors(dynamicColors.primary, playOnColor),
+                                    contentPadding = PaddingValues(0.dp)
                                 ) {
+                                    AnimatedContent(
+                                        targetState = state.isPlaying,
+                                        transitionSpec = {
+                                            (scaleIn(initialScale = 0.70f, animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMedium)) + fadeIn(tween(120)))
+                                                .togetherWith(scaleOut(targetScale = 0.70f, animationSpec = spring(Spring.DampingRatioNoBouncy, Spring.StiffnessHigh)) + fadeOut(tween(90)))
+                                        },
+                                        label = "playPauseMorph"
+                                    ) { playing ->
+                                        Icon(if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, null, Modifier.size(34.dp))
+                                    }
+                                }
+
+                                ToolzExpressiveIconButton(
+                                    onClick = {
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        animatedSkip(true)
+                                    },
+                                    modifier = Modifier.size(if (isCompactPlayer) 54.dp else 58.dp),
+                                    shape = SmallExpressiveShape,
+                                    colors = IconButtonDefaults.filledIconButtonColors(
+                                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.88f),
+                                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                ) { Icon(Icons.Rounded.SkipNext, stringResource(R.string.st_MusicPlayerScreen_nt70), Modifier.size(30.dp)) }
+                            }
+
+                            Spacer(Modifier.height(if (isCompactPlayer) 6.dp else 10.dp))
+                            val modeRailShape = LargeExpressiveShape
+                            val modeRail: @Composable RowScope.() -> Unit = {
                                     SegmentToggle(
                                         checked = state.isShuffleOn,
                                         onClick = onToggleShuffle,
@@ -1269,25 +1245,38 @@ fun FullPlayerView(
                                             contentDescription = stringResource(R.string.st_MusicPlayerScreen_ail73)
                                         )
                                     }
-                                }
                             }
 
                             if (isLiquidGlass && glassBackdrop != null) {
                                 GlassCard(
                                     backdrop = glassBackdrop,
-                                    modifier = Modifier.fillMaxWidth(),
-                                    shape = controlDeckShape,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(if (isCompactPlayer) 52.dp else 56.dp),
+                                    shape = modeRailShape,
                                     tint = dynamicColors.primary.copy(alpha = 0.12f)
                                 ) {
-                                    controlDeck()
+                                    Row(
+                                        modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
+                                        horizontalArrangement = Arrangement.SpaceEvenly,
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        content = modeRail
+                                    )
                                 }
                             } else {
                                 Surface(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    shape = controlDeckShape,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(if (isCompactPlayer) 52.dp else 56.dp),
+                                    shape = modeRailShape,
                                     color = MaterialTheme.colorScheme.surfaceContainerHigh
                                 ) {
-                                    controlDeck()
+                                    Row(
+                                        modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
+                                        horizontalArrangement = Arrangement.SpaceEvenly,
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        content = modeRail
+                                    )
                                 }
                             }
 
@@ -1347,10 +1336,17 @@ private fun SegmentToggle(
         animationSpec = spring(Spring.DampingRatioNoBouncy, Spring.StiffnessMedium),
         label = "segmentContent"
     )
+    val emphasis by animateFloatAsState(
+        targetValue = if (checked) 1f else 0.92f,
+        animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMediumLow),
+        label = "segmentEmphasis"
+    )
     Surface(
         onClick = onClick,
-        modifier = Modifier.size(46.dp),
-        shape = CircleShape,
+        modifier = Modifier
+            .size(46.dp)
+            .graphicsLayer { scaleX = emphasis; scaleY = emphasis },
+        shape = SmallExpressiveShape,
         color = containerColor,
         contentColor = contentColor
     ) {
