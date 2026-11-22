@@ -55,6 +55,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.graphics.Color
 import com.frerox.toolz.R
@@ -104,6 +106,9 @@ fun WhisperGroupInfoScreen(
     LaunchedEffect(state.left) {
         if (state.left) onNavigateBack()
     }
+
+    // Returning from the permissions editor must reflect the saved policy.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refreshOnResume() }
 
     val membership = state.membership
     val me = state.myId

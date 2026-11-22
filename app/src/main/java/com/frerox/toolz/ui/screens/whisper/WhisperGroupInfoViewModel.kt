@@ -124,6 +124,9 @@ class WhisperGroupInfoViewModel @Inject constructor(
 
     private var requestWatch: kotlinx.coroutines.Job? = null
 
+    /** [android.os.SystemClock.elapsedRealtime] of the last [load] start. */
+    private var lastLoadStartedAtMs = 0L
+
     /**
      * Resident decrypted gallery thumbs, true (access-order) LRU bounded two ways.
      *
@@ -151,6 +154,7 @@ class WhisperGroupInfoViewModel @Inject constructor(
     }
 
     fun load() {
+        lastLoadStartedAtMs = android.os.SystemClock.elapsedRealtime()
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
             val me = repository.myId
@@ -205,6 +209,19 @@ class WhisperGroupInfoViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    /**
+     * Reloads the verified membership when the screen resumes — returning from
+     * the permissions editor (or a system round-trip) must show the saved
+     * policy, not the snapshot taken when the info screen first opened.
+     * Debounced so the initial ON_RESUME right after [init] does not double-fetch.
+     */
+    fun refreshOnResume() {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastLoadStartedAtMs < 1_000L) return
+        if (_uiState.value.isWorking) return
+        load()
     }
 
     /** True when the group is gone (I was removed, or it was disbanded). */

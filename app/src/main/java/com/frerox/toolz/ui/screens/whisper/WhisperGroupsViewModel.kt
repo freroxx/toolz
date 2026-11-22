@@ -135,6 +135,8 @@ class WhisperGroupsViewModel @Inject constructor(
         val me: WhisperProfile? = null,
         /** ≥1 of my daily ups is still live → the own ring lights up. */
         val mineLive: Boolean = false,
+        /** At least one live own up was shared with close friends (green ring). */
+        val mineCloseFriends: Boolean = false,
         /** Live own-ups count (reserved for the ring's semantics). */
         val myCount: Int = 0,
         /** Soonest own expiry, or null when nothing of mine is live. */
@@ -176,6 +178,7 @@ class WhisperGroupsViewModel @Inject constructor(
         DailyUpsStripState(
             me = me,
             mineLive = mineGroup != null,
+            mineCloseFriends = mineGroup?.isCloseFriends == true,
             myCount = mineGroup?.stories?.size ?: 0,
             mySoonestExpiryMs = mineGroup?.soonestExpiryMs,
             friendPosters = groups.filterNot { it.isMine }.map { poster ->
@@ -186,6 +189,7 @@ class WhisperGroupsViewModel @Inject constructor(
                     storyCount = poster.stories.size,
                     unseenCount = poster.unseenCount,
                     soonestExpiryMs = poster.soonestExpiryMs,
+                    isCloseFriends = poster.isCloseFriends,
                 )
             },
             friendsById = friendsById,
