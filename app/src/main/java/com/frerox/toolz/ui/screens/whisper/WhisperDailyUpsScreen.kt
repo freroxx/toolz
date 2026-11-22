@@ -153,9 +153,9 @@ import kotlin.math.roundToLong
 @Composable
 fun WhisperDailyUpsScreen(
     onNavigateBack: () -> Unit,
-    onNavigateToCompose: () -> Unit,
     ownerArg: String? = null,
     viewModel: WhisperDailyUpsViewModel = hiltViewModel(),
+    composerViewModel: WhisperDailyUpsComposeViewModel = hiltViewModel(),
 ) {
     if (!WhisperDailyUpsConfig.ENABLED) {
         LaunchedEffect(Unit) { onNavigateBack() }
@@ -173,6 +173,14 @@ fun WhisperDailyUpsScreen(
     // expressive indicator keeps the pull visual identical to the repo's other
     // refreshed lists (e.g. DeviceInfo).
     val pullState = rememberPullToRefreshState()
+    // The composer is an in-place overlay: the hub's reconcile, quota and
+    // viewer state survive the round trip, and there is only one Daily Ups
+    // surface to learn.
+    var showComposer by rememberSaveable { mutableStateOf(false) }
+    val openComposer: () -> Unit = {
+        composerViewModel.begin()
+        showComposer = true
+    }
 
     // Viewer-scoped failures only. The hub's sync failure renders inline in the
     // body: routing it here would clear it into a snackbar and then let the
@@ -253,7 +261,7 @@ fun WhisperDailyUpsScreen(
                     }
                     FilledTonalIconButton(
                         onClick = {
-                            if (viewModel.acceptNavigation()) onNavigateToCompose()
+                            if (viewModel.acceptNavigation()) openComposer()
                         },
                         enabled = quotaLeft > 0,
                     ) {
@@ -348,6 +356,9 @@ fun WhisperDailyUpsScreen(
                                 profile = state.profiles[state.myId],
                                 ownCount = ownCount,
                                 quotaLeft = quotaLeft,
+                                ownCloseFriends = state.posterGroups
+                                    .firstOrNull { it.isMine }
+                                    ?.isCloseFriends == true,
                                 onView = viewModel::openMyViewer,
                                 onAdd = {
                                     if (viewModel.acceptNavigation()) onNavigateToCompose()
@@ -467,6 +478,7 @@ private fun YourDayCard(
     profile: WhisperProfile?,
     ownCount: Int,
     quotaLeft: Int,
+    ownCloseFriends: Boolean,
     onView: () -> Unit,
     onAdd: () -> Unit,
 ) {
@@ -498,10 +510,10 @@ private fun YourDayCard(
                     modifier = Modifier.size(68.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    val ringColor = if (isLive) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.outlineVariant
+                    val ringColor = when {
+                        isLive && ownCloseFriends -> closeFriendsRingColor()
+                        isLive -> MaterialTheme.colorScheme.primary
+                        else -> MaterialTheme.colorScheme.outlineVariant
                     }
                     Box(
                         modifier = Modifier
@@ -564,11 +576,17 @@ private fun YourDayCard(
                 }
                 Spacer(Modifier.width(16.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = stringResource(R.string.st_Whisper_DailyUp_YourDay),
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.st_Whisper_DailyUp_YourDay),
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        if (isLive && ownCloseFriends) CloseFriendsChip()
+                    }
                     Spacer(Modifier.height(4.dp))
                     Text(
                         text = if (isLive) {
@@ -682,10 +700,10 @@ private fun FriendStoryCard(
     val isUnseen = unseenCount > 0
 
     val haptic = rememberToolzHapticFeedback()
-    val ringColor = if (isUnseen) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.outlineVariant
+    val ringColor = when {
+        poster.isCloseFriends -> closeFriendsRingColor()
+        isUnseen -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.outlineVariant
     }
 
     ExpressiveCard(
@@ -711,7 +729,7 @@ private fun FriendStoryCard(
                     modifier = Modifier
                         .size(52.dp)
                         .border(
-                            width = if (isUnseen) 2.5.dp else 1.5.dp,
+                            width = if (isUnseen || poster.isCloseFriends) 2.5.dp else 1.5.dp,
                             color = ringColor,
                             shape = CircleShape,
                         ),
@@ -752,13 +770,21 @@ private fun FriendStoryCard(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(3.dp),
             ) {
-                Text(
-                    text = name,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = if (isUnseen) FontWeight.Bold else FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        text = name,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = if (isUnseen) FontWeight.Bold else FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (poster.isCloseFriends) CloseFriendsChip()
+                }
                 val subtitleText = when {
                     isUnseen -> stringResource(R.string.st_Whisper_DailyUp_UnseenPill, unseenCount)
                     storyCount == 1 -> stringResource(R.string.st_Whisper_DailyUp_StoriesCountOne)

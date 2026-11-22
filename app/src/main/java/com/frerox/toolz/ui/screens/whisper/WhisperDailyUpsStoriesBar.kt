@@ -138,10 +138,10 @@ internal fun DailyUpsStoriesBar(
                     ownerId = myId,
                     name = ownName,
                     profile = strip.me,
-                    ringColor = if (strip.mineLive) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.outlineVariant
+                    ringColor = when {
+                        strip.mineCloseFriends -> closeFriendsRingColor()
+                        strip.mineLive -> MaterialTheme.colorScheme.primary
+                        else -> MaterialTheme.colorScheme.outlineVariant
                     },
                     ringWidth = if (strip.mineLive) 3.dp else 2.dp,
                     plusBadge = true,
@@ -197,10 +197,10 @@ internal fun DailyUpsStoriesBar(
                     ownerId = poster.ownerId,
                     name = name,
                     profile = strip.friendsById[poster.ownerId],
-                    ringColor = if (poster.unseenCount > 0) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.outlineVariant
+                    ringColor = when {
+                        poster.isCloseFriends -> closeFriendsRingColor()
+                        poster.unseenCount > 0 -> MaterialTheme.colorScheme.primary
+                        else -> MaterialTheme.colorScheme.outlineVariant
                     },
                     plusBadge = false,
                     badgeCount = poster.unseenCount,

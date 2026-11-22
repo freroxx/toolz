@@ -12,15 +12,19 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.WhisperDailyUpsConfig
+import com.frerox.toolz.data.whisper.WhisperDailyUpsPreferences
 import com.frerox.toolz.data.whisper.WhisperProfile
 import com.frerox.toolz.data.whisper.WhisperRepository
+import com.frerox.toolz.data.whisper.WhisperStoryAudience
 import com.frerox.toolz.data.whisper.applyWhisperImageExifOrientation
 import com.frerox.toolz.data.whisper.dailyUpErrorText
 import com.frerox.toolz.data.whisper.dailyUpsPostedTodayOrNull
-import com.frerox.toolz.data.whisper.quotaAfterRead
 import com.frerox.toolz.data.whisper.getFriends
 import com.frerox.toolz.data.whisper.publishDailyUp
+import com.frerox.toolz.data.whisper.quotaAfterRead
+import com.frerox.toolz.data.whisper.saveDailyUpToGallery
 import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,7 +33,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import javax.inject.Inject
 
 /**
  * Why the pinned Share button cannot fire. Priority is deliberate and pinned
@@ -65,16 +68,21 @@ internal fun dailyUpShareBlock(
 }
 
 /**
- * State for composing ONE Daily Up: photo draft → audience trim → share.
+ * State for composing ONE Daily Up: photo draft → audience → share.
  *
  * The photo draft lives ONLY in memory; nothing touches disk until the
  * repository pipeline (which strips metadata before sealing). Quota reads are
  * refreshed right before publish so a stale "3 left" can never double-post —
  * the server is the ceiling regardless.
+ *
+ * Audience is expressed as an explicit recipient snapshot, so "everyone",
+ * "close friends" and a hand-picked "custom" list all publish through the same
+ * fail-closed path. The close-friends list itself never leaves the device.
  */
 @HiltViewModel
 class WhisperDailyUpsComposeViewModel @Inject constructor(
     private val repository: WhisperRepository,
+    private val preferences: WhisperDailyUpsPreferences,
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) : ViewModel() {
 
@@ -91,17 +99,51 @@ class WhisperDailyUpsComposeViewModel @Inject constructor(
         /** Distinguishes "no friends yet" from "the load failed" (retry row). */
         val friendsFailed: Boolean = false,
         val photo: PhotoDraft? = null,
-        val receiptsOn: Boolean = false,
-        /** Friend ids explicitly trimmed OUT of the all-friends audience. */
+        val audienceKind: WhisperStoryAudience = WhisperStoryAudience.EVERYONE,
+        /** Friend ids explicitly trimmed OUT of the everyone audience. */
         val excluded: Set<String> = emptySet(),
+        /** Hand-picked ids for [WhisperStoryAudience.CUSTOM]. */
+        val customSelected: Set<String> = emptySet(),
+        /** Device-local close-friends list (ids may outlive a friendship). */
+        val closeFriends: Set<String> = emptySet(),
+        val receiptsOn: Boolean = true,
+        val saveToDevice: Boolean = false,
         val quotaUsed: Int = 0,
         val publishing: Boolean = false,
-        /** One-shot success marker; the screen navigates back on it. */
+        /** One-shot success marker; the screen dismisses on it. */
         val published: Boolean = false,
         val error: String? = null,
     ) {
         val remaining: Int get() = (WhisperDailyUpsConfig.DAILY_LIMIT - quotaUsed).coerceAtLeast(0)
-        val audienceSize: Int get() = maxOf(friends.size - excluded.size, 0)
+
+        /** Ids that will actually receive this up (friends ∩ chosen kind). */
+        val audienceIds: Set<String>
+            get() = when (audienceKind) {
+                WhisperStoryAudience.EVERYONE ->
+                    friends.asSequence()
+                        .map { it.id }
+                        .filterNot { it in excluded }
+                        .take(WhisperDailyUpsConfig.MAX_RECIPIENTS)
+                        .toSet()
+
+                WhisperStoryAudience.CLOSE_FRIENDS ->
+                    friends.asSequence()
+                        .map { it.id }
+                        .filter { it in closeFriends }
+                        .take(WhisperDailyUpsConfig.MAX_RECIPIENTS)
+                        .toSet()
+
+                WhisperStoryAudience.CUSTOM ->
+                    friends.asSequence()
+                        .map { it.id }
+                        .filter { it in customSelected }
+                        .take(WhisperDailyUpsConfig.MAX_RECIPIENTS)
+                        .toSet()
+            }
+
+        val audienceSize: Int get() = audienceIds.size
+
+        val closeAudienceSize: Int get() = friends.count { it.id in closeFriends }
 
         /** True when the friend list is longer than one Daily Up may reach. */
         val audienceCapped: Boolean get() = friends.size > WhisperDailyUpsConfig.MAX_RECIPIENTS
@@ -123,11 +165,32 @@ class WhisperDailyUpsComposeViewModel @Inject constructor(
             )
     }
 
-    private val _state = MutableStateFlow(ComposeUiState())
+    private val _state = MutableStateFlow(
+        ComposeUiState(
+            receiptsOn = preferences.showViewers.value,
+            saveToDevice = preferences.saveToDevice.value,
+            closeFriends = preferences.closeFriends.value,
+        ),
+    )
     val state: StateFlow<ComposeUiState> = _state.asStateFlow()
 
     init {
         viewModelScope.launch { loadFriends() }
+        viewModelScope.launch {
+            preferences.closeFriends.collect { ids ->
+                _state.update { it.copy(closeFriends = ids) }
+            }
+        }
+        viewModelScope.launch {
+            preferences.showViewers.collect { on ->
+                _state.update { it.copy(receiptsOn = on) }
+            }
+        }
+        viewModelScope.launch {
+            preferences.saveToDevice.collect { on ->
+                _state.update { it.copy(saveToDevice = on) }
+            }
+        }
     }
 
     private suspend fun loadFriends() {
@@ -213,24 +276,59 @@ class WhisperDailyUpsComposeViewModel @Inject constructor(
         _state.update { it.copy(photo = null) }
     }
 
+    fun setAudienceKind(kind: WhisperStoryAudience) {
+        _state.update {
+            when (kind) {
+                // Entering custom with nothing picked starts from the close
+                // friends list when there is one; otherwise the picker opens
+                // empty and the Share button explains why.
+                WhisperStoryAudience.CUSTOM -> it.copy(
+                    audienceKind = kind,
+                    customSelected = if (it.customSelected.isEmpty()) {
+                        it.closeFriends.intersect(it.friends.map { f -> f.id }.toSet())
+                    } else {
+                        it.customSelected
+                    },
+                )
+
+                else -> it.copy(audienceKind = kind)
+            }
+        }
+    }
+
     fun setReceipts(on: Boolean) {
+        preferences.setShowViewers(on)
         _state.update { it.copy(receiptsOn = on) }
     }
 
+    fun setSaveToDevice(on: Boolean) {
+        preferences.setSaveToDevice(on)
+        _state.update { it.copy(saveToDevice = on) }
+    }
+
+    fun setCloseFriend(friendId: String, close: Boolean) {
+        preferences.setCloseFriend(friendId, close)
+    }
+
+    fun toggleCloseFriend(friendId: String) {
+        preferences.toggleCloseFriend(friendId)
+    }
+
+    /** Toggle one hand-picked recipient in the custom audience. */
     fun toggleAudience(friendId: String) {
         _state.update {
-            val included = friendId !in it.excluded
+            val included = friendId in it.customSelected
             when {
                 // Re-including: refuse past the server cap and say why.
-                !included && it.audienceSize >= WhisperDailyUpsConfig.MAX_RECIPIENTS ->
+                !included && it.customSelected.size >= WhisperDailyUpsConfig.MAX_RECIPIENTS ->
                     it.copy(
                         error = appContext.getString(
                             R.string.st_Whisper_DailyUp_AudienceLimitReached,
                             WhisperDailyUpsConfig.MAX_RECIPIENTS,
                         ),
                     )
-                included -> it.copy(excluded = it.excluded + friendId)
-                else -> it.copy(excluded = it.excluded - friendId)
+                included -> it.copy(customSelected = it.customSelected - friendId)
+                else -> it.copy(customSelected = it.customSelected + friendId)
             }
         }
     }
@@ -239,13 +337,7 @@ class WhisperDailyUpsComposeViewModel @Inject constructor(
     fun selectAllAudience() {
         _state.update {
             val cap = WhisperDailyUpsConfig.MAX_RECIPIENTS
-            val keep = it.friends.take(cap).mapTo(mutableSetOf()) { friend -> friend.id }
-            it.copy(
-                excluded = it.friends
-                    .map { friend -> friend.id }
-                    .filterNot { id -> id in keep }
-                    .toSet(),
-            )
+            it.copy(customSelected = it.friends.take(cap).map { friend -> friend.id }.toSet())
         }
     }
 
@@ -253,25 +345,61 @@ class WhisperDailyUpsComposeViewModel @Inject constructor(
         _state.update { it.copy(error = null) }
     }
 
+    /** Called when the composer opens: a previous publish must not re-fire. */
+    fun begin() {
+        _state.update { it.copy(published = false, error = null) }
+        refreshQuota()
+    }
+
+    /** Called after dismiss: drop the photo but keep audience/settings. */
+    fun resetDraft() {
+        photoDecodeJob?.cancel()
+        _state.update {
+            it.copy(
+                photo = null,
+                publishing = false,
+                published = false,
+                error = null,
+            )
+        }
+    }
+
     /**
      * Publishes through the repository fail-closed pipeline. On success the
-     * screen closes via [ComposeUiState.published]; on failure the draft stays
-     * (photo + toggle + exclusions all survive so nothing is retyped).
+     * composer closes via [ComposeUiState.published]; on failure the draft
+     * stays (photo + audience + settings all survive so nothing is retyped).
      */
     fun publish() {
         val current = _state.value
         val photo = current.photo ?: return
         if (current.publishing || current.published) return
         if (current.remaining <= 0 || current.audienceSize <= 0) return
+        val audience = current.audienceIds
+        val kind = current.audienceKind
         viewModelScope.launch {
             _state.update { it.copy(publishing = true, error = null) }
             repository.publishDailyUp(
                 photoBytes = photo.bytes,
                 mimeType = photo.mime,
                 receiptsEnabled = current.receiptsOn,
-                excludedFriendIds = current.excluded,
+                audienceIds = audience,
+                audienceKind = kind,
             )
                 .onSuccess {
+                    if (current.saveToDevice) {
+                        // Best effort: a gallery write must never turn a
+                        // successful publish into an error.
+                        withContext(Dispatchers.IO) {
+                            runCatching {
+                                saveDailyUpToGallery(appContext, photo.bytes, photo.mime)
+                            }.onFailure { e ->
+                                android.util.Log.w(
+                                    "WhisperDailyUps",
+                                    "could not save daily up to the gallery: ${e.message}",
+                                )
+                            }
+                        }
+                    }
                     _state.update { it.copy(publishing = false, published = true) }
                 }
                 .onFailure { e ->
