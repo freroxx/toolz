@@ -3421,6 +3421,10 @@ create table if not exists public.whisper_stories (
     host_url text not null check (char_length(host_url) between 1 and 4096),
     host_object_id text not null check (char_length(host_object_id) between 1 and 512),
     receipts_enabled boolean not null default false,
+    -- Who the poster labelled this snapshot as. The recipient rows remain the
+    -- actual audience; this is a display label (green close-friends ring).
+    audience_kind text not null default 'everyone'
+        check (audience_kind in ('everyone', 'close', 'custom')),
     state text not null default 'published'
         check (state in ('published', 'delete_pending', 'deleted', 'cleanup_failed')),
     created_at timestamptz not null default now(),
@@ -3431,9 +3435,14 @@ create table if not exists public.whisper_stories (
     check ((state = 'deleted') = (deleted_at is not null))
 );
 
+-- Existing deployments: additive audience label. Safe to replay; the publish
+-- RPC below always writes a validated value.
+alter table public.whisper_stories
+    add column if not exists audience_kind text not null default 'everyone'
+        check (audience_kind in ('everyone', 'close', 'custom'));
+
 create index if not exists whisper_stories_poster_created_idx
-    on public.whisper_stories (poster_id, created_at desc);
-create index if not exists whisper_stories_expiry_idx
+    on public.whisper_stories (poster_id, created_at desc);create index if not exists whisper_stories_expiry_idx
     on public.whisper_stories (expires_at)
     where state in ('published', 'delete_pending', 'cleanup_failed');
 
@@ -3919,13 +3928,20 @@ create policy "whisper_story_reactions_update_author"
 -- same transaction as the story + audience rows (a failed quota never strands
 -- rows, and a successful one always counts exactly once).
 
+-- Signature gained the audience label in the same release as the client
+-- close-friends audience. Drop the old 6-arg overload first: otherwise a
+-- 6-arg call would keep resolving to that stale copy and skip the audience
+-- validation. Older clients then land on this function's default ('everyone').
+drop function if exists public.whisper_story_publish(uuid, text, text, boolean, jsonb, int);
+
 create or replace function public.whisper_story_publish(
     p_client_id uuid,
     p_host_url text,
     p_host_object_id text,
     p_receipts_enabled boolean,
     p_recipients jsonb,
-    p_client_version_code int
+    p_client_version_code int,
+    p_audience_kind text default 'everyone'
 )
 returns public.whisper_stories
 language plpgsql
@@ -3961,6 +3977,10 @@ begin
        or jsonb_typeof(p_recipients) <> 'array'
        or jsonb_array_length(p_recipients) > 96 then
         raise exception 'invalid recipients payload' using errcode = '22023';
+    end if;
+    if p_audience_kind is null
+       or p_audience_kind not in ('everyone', 'close', 'custom') then
+        raise exception 'invalid audience kind' using errcode = '22023';
     end if;
 
     -- Idempotency probe: a retry with the same client_id returns the live story
@@ -4008,10 +4028,10 @@ begin
 
     insert into public.whisper_stories (
         poster_id, client_id, host_url, host_object_id,
-        receipts_enabled, state
+        receipts_enabled, audience_kind, state
     ) values (
         v_caller, p_client_id, p_host_url, p_host_object_id,
-        coalesce(p_receipts_enabled, false), 'published'
+        coalesce(p_receipts_enabled, false), p_audience_kind, 'published'
     )
     on conflict (poster_id, client_id) do nothing
     returning * into v_story;
@@ -4350,9 +4370,9 @@ end;
 $$;
 
 -- ── 4. Grants + realtime wiring ─────────────────────────────────────────────
-revoke all on function public.whisper_story_publish(uuid, text, text, boolean, jsonb, int)
+revoke all on function public.whisper_story_publish(uuid, text, text, boolean, jsonb, int, text)
     from public, anon;
-grant execute on function public.whisper_story_publish(uuid, text, text, boolean, jsonb, int)
+grant execute on function public.whisper_story_publish(uuid, text, text, boolean, jsonb, int, text)
     to authenticated;
 
 revoke all on function public.whisper_story_view(uuid, int) from public, anon;
