@@ -172,15 +172,21 @@ sealed class Screen(val route: String) {
     object WhisperGroupPermissions : Screen("whisper_group_permissions/{groupId}") {
         fun createRoute(groupId: String) = "whisper_group_permissions/$groupId"
     }
-    object WhisperDailyUps : Screen("whisper_daily_ups?ownerId={ownerId}") {
-        fun createRoute(ownerId: String? = null): String =
-            if (ownerId.isNullOrBlank()) {
+    object WhisperDailyUps : Screen("whisper_daily_ups?ownerId={ownerId}&compose={compose}") {
+        fun createRoute(ownerId: String? = null, compose: Boolean = false): String {
+            val params = buildList {
+                if (!ownerId.isNullOrBlank()) {
+                    add("ownerId=" + java.net.URLEncoder.encode(ownerId, "UTF-8"))
+                }
+                if (compose) add("compose=true")
+            }
+            return if (params.isEmpty()) {
                 "whisper_daily_ups"
             } else {
-                "whisper_daily_ups?ownerId=${java.net.URLEncoder.encode(ownerId, "UTF-8")}"
+                "whisper_daily_ups?" + params.joinToString("&")
             }
+        }
     }
-    object WhisperDailyUpsCompose : Screen("whisper_daily_ups_compose")
     object WhisperUserProfile : Screen("whisper_profile/{userId}") {
         fun createRoute(userId: String) = "whisper_profile/$userId"
     }

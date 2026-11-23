@@ -2069,7 +2069,9 @@ fun ToolzNavHost(
                     },
                     onNavigateToDailyUpsCompose = {
                         if (com.frerox.toolz.data.whisper.WhisperDailyUpsConfig.ENABLED) {
-                            navController.navigate(Screen.WhisperDailyUpsCompose.route)
+                            navController.navigate(
+                                Screen.WhisperDailyUps.createRoute(compose = true),
+                            )
                         }
                     },
                     onLoggedOut = {
@@ -2118,11 +2120,16 @@ fun ToolzNavHost(
                     nullable = true
                     defaultValue = null
                 },
+                navArgument("compose") {
+                    type = NavType.BoolType
+                    defaultValue = false
+                },
             ),
         ) { backStackEntry ->
             com.frerox.toolz.ui.screens.whisper.WhisperDailyUpsScreen(
                 onNavigateBack = { toolOnBack() },
                 ownerArg = backStackEntry.arguments?.getString("ownerId"),
+                startCompose = backStackEntry.arguments?.getBoolean("compose") == true,
             )
         }
 
