@@ -4135,6 +4135,8 @@
     <string name="st_Whisper_DailyUp_StoriesCount">%1$d stories</string>
     <string name="st_Whisper_DailyUp_StoriesCountOne">1 story</string>
     <string name="st_Whisper_DailyUp_UnseenPill">%1$d new</string>
+    <string name="st_Whisper_DailyUp_AddToCloseFriends">Add to close friends</string>
+    <string name="st_Whisper_DailyUp_RemoveFromCloseFriends">Remove from close friends</string>
     <string name="st_Whisper_DailyUp_AddCloseFriends">Add close friends</string>
     <string name="st_Whisper_DailyUp_AllowCamera">Allow camera</string>
     <string name="st_Whisper_DailyUp_AudienceCustomDesc">Choose exactly who can see this Daily Up.</string>
