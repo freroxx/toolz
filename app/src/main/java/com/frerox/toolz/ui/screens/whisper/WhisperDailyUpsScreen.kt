@@ -154,6 +154,7 @@ import kotlin.math.roundToLong
 fun WhisperDailyUpsScreen(
     onNavigateBack: () -> Unit,
     ownerArg: String? = null,
+    startCompose: Boolean = false,
     viewModel: WhisperDailyUpsViewModel = hiltViewModel(),
     composerViewModel: WhisperDailyUpsComposeViewModel = hiltViewModel(),
 ) {
@@ -169,6 +170,8 @@ fun WhisperDailyUpsScreen(
     val failedImages by viewModel.failedImages.collectAsStateWithLifecycle()
     val receipts by viewModel.receipts.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    val postedLabel = stringResource(R.string.st_Whisper_DailyUp_Posted)
     // Gesture lane for the same thing the top-bar refresh icon does; the
     // expressive indicator keeps the pull visual identical to the repo's other
     // refreshed lists (e.g. DeviceInfo).
@@ -180,6 +183,17 @@ fun WhisperDailyUpsScreen(
     val openComposer: () -> Unit = {
         composerViewModel.begin()
         showComposer = true
+    }
+    // The Chats-tab "+" bubble routes here with compose=true. Consume it once so
+    // dismissing the composer cannot immediately reopen it on recomposition.
+    var startComposeConsumed by rememberSaveable(startCompose) {
+        mutableStateOf(!startCompose)
+    }
+    LaunchedEffect(startCompose) {
+        if (startCompose && !startComposeConsumed) {
+            startComposeConsumed = true
+            openComposer()
+        }
     }
 
     // Viewer-scoped failures only. The hub's sync failure renders inline in the
@@ -466,10 +480,15 @@ fun WhisperDailyUpsScreen(
     if (showComposer) {
         WhisperDailyUpsComposer(
             viewModel = composerViewModel,
-            onDismiss = { showComposer = false },
+            onDismiss = {
+                showComposer = false
+                composerViewModel.resetDraft()
+            },
             onPublished = {
                 showComposer = false
+                composerViewModel.resetDraft()
                 viewModel.refresh()
+                scope.launch { snackbar.showSnackbar(postedLabel) }
             },
         )
     }

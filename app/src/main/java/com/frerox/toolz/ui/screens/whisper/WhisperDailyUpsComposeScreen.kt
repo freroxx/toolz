@@ -183,6 +183,11 @@ fun WhisperDailyUpsComposer(
         if (state.published) onPublished()
     }
 
+    // A composer reopened after a publish starts clean: no photo means step 1.
+    LaunchedEffect(state.photo == null) {
+        if (state.photo == null) step = 0
+    }
+
     val requestExit: () -> Unit = {
         if (state.hasDraft) showDiscardDialog = true else onDismiss()
     }
@@ -478,7 +483,6 @@ private fun LiveCameraStep(
                 PackageManager.PERMISSION_GRANTED,
         )
     }
-    var permissionAsked by rememberSaveable { mutableStateOf(false) }
     var cameraFailed by remember { mutableStateOf(false) }
     var flashOn by rememberSaveable { mutableStateOf(false) }
     var lensFacing by rememberSaveable { mutableIntStateOf(CameraSelector.LENS_FACING_BACK) }
@@ -489,7 +493,6 @@ private fun LiveCameraStep(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
         permissionGranted = granted
-        permissionAsked = true
     }
 
     LaunchedEffect(Unit) {
