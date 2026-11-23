@@ -66,6 +66,7 @@ fun WhisperUserProfileScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val screenshotBypassEnabled by viewModel.screenshotBypassEnabled.collectAsStateWithLifecycle()
+    val isCloseFriend by viewModel.isCloseFriend.collectAsStateWithLifecycle()
     val haptic = rememberToolzHapticFeedback()
     val toastState = rememberWhisperToastState()
     val context = LocalContext.current
@@ -309,6 +310,10 @@ fun WhisperUserProfileScreen(
                                         )
                                     }
                                 }
+
+                                if (isCloseFriend) {
+                                    CloseFriendsChip()
+                                }
                             }
                         }
 
@@ -530,6 +535,30 @@ fun WhisperUserProfileScreen(
                                     }
                                 }
                                 else -> {}
+                            }
+
+                            if (status == FriendStatus.ACCEPTED) {
+                                ToolzTonalExpressiveButton(
+                                    onClick = { haptic.click(); viewModel.toggleCloseFriend() },
+                                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                                ) {
+                                    Icon(
+                                        if (isCloseFriend) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                                        null,
+                                        Modifier.size(18.dp),
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        stringResource(
+                                            if (isCloseFriend) {
+                                                R.string.st_Whisper_DailyUp_RemoveFromCloseFriends
+                                            } else {
+                                                R.string.st_Whisper_DailyUp_AddToCloseFriends
+                                            },
+                                        ),
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                }
                             }
                         }
                     }

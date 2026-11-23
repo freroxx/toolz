@@ -47,9 +47,19 @@ class WhisperUserProfileViewModel @Inject constructor(
     private val repository: WhisperRepository,
     private val authManager: WhisperAuthManager,
     private val settingsRepository: SettingsRepository,
+    private val dailyUpsPreferences: WhisperDailyUpsPreferences,
 ) : ViewModel() {
 
     val targetUserId: String = checkNotNull(savedStateHandle["userId"])
+
+    /** Close-friend badge/action: device-local list, never uploaded. */
+    val isCloseFriend: StateFlow<Boolean> = dailyUpsPreferences.closeFriends
+        .map { targetUserId in it }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    fun toggleCloseFriend() {
+        dailyUpsPreferences.toggleCloseFriend(targetUserId)
+    }
 
     val screenshotBypassEnabled: StateFlow<Boolean> = settingsRepository.whisperScreenshotBypass
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
