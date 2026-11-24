@@ -39,7 +39,10 @@ internal suspend fun saveDailyUpToGallery(
     mimeType: String,
 ): Result<Uri> = withContext(Dispatchers.IO) {
     runCatching {
-        val decoded = BitmapFactory.decodeByteArray(sourceBytes, 0, sourceBytes.size)
+        // Bound the decode: a 12 MiB / 12 MP source would otherwise allocate
+        // ~48 MB plus the watermark copy on top. The saved copy only needs to
+        // match what recipients see (the publish pipeline caps at 1920 px).
+        val decoded = decodeSavedCopy(sourceBytes)
             ?: error("photo decode failed")
         val oriented = applyWhisperImageExifOrientation(sourceBytes, decoded)
         val watermark = addWhisperWatermark(oriented)
@@ -76,6 +79,34 @@ internal suspend fun saveDailyUpToGallery(
         }
     }
 }
+
+/**
+ * Decodes at most [MAX_SAVED_EDGE_PX] on the long edge. Power-of-two
+ * `inSampleSize` keeps the decode bounded (≈12 MB at the cap) without the
+ * upscale cost of decoding full size and scaling afterwards.
+ */
+private fun decodeSavedCopy(sourceBytes: ByteArray): Bitmap? {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(sourceBytes, 0, sourceBytes.size, bounds)
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+    var sample = 1
+    while (bounds.outWidth / sample > MAX_SAVED_EDGE_PX ||
+        bounds.outHeight / sample > MAX_SAVED_EDGE_PX
+    ) {
+        sample *= 2
+    }
+    return BitmapFactory.decodeByteArray(
+        sourceBytes,
+        0,
+        sourceBytes.size,
+        BitmapFactory.Options().apply {
+            inSampleSize = sample
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        },
+    )
+}
+
+private const val MAX_SAVED_EDGE_PX = 2048
 
 /**
  * Bottom-left "Whisper" badge. Sized relative to the photo so a 720px preview

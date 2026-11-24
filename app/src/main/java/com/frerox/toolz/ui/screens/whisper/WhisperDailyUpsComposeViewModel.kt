@@ -415,10 +415,17 @@ class WhisperDailyUpsComposeViewModel @Inject constructor(
                 audienceKind = kind,
             )
                 .onSuccess {
-                    if (current.saveToDevice) {
+                    // Dismiss first: the composer must not wait on a
+                    // best-effort gallery write (and a slow decode must never
+                    // look like a stuck publish).
+                    val saveToDevice = current.saveToDevice
+                    _state.update { it.copy(publishing = false, published = true) }
+                    if (saveToDevice) {
                         // Best effort: a gallery write must never turn a
-                        // successful publish into an error.
-                        withContext(Dispatchers.IO) {
+                        // successful publish into an error. The composer view
+                        // model outlives the overlay, so this finishes even
+                        // after the hub is back on screen.
+                        viewModelScope.launch(Dispatchers.IO) {
                             runCatching {
                                 saveDailyUpToGallery(appContext, photo.bytes, photo.mime)
                             }.onFailure { e ->
@@ -429,7 +436,6 @@ class WhisperDailyUpsComposeViewModel @Inject constructor(
                             }
                         }
                     }
-                    _state.update { it.copy(publishing = false, published = true) }
                 }
                 .onFailure { e ->
                     // Server quota may have moved while composing — re-read it,
