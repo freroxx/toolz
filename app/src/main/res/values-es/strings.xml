@@ -4297,6 +4297,8 @@
     <string name="st_Whisper_DailyUp_CameraUnavailableDesc">Aún puedes elegir una foto de tu galería.</string>
     <string name="st_Whisper_DailyUp_CameraPermissionDesc">Permite el acceso a la cámara para tomar una foto ahora o elige una de tu galería.</string>
     <string name="st_Whisper_DailyUp_AllowCamera">Permitir cámara</string>
+    <string name="st_Whisper_DailyUp_CameraPermissionDeniedDesc">El acceso a la cámara está desactivado. Puedes activarlo en Ajustes o elegir una foto de tu galería.</string>
+    <string name="st_Whisper_DailyUp_OpenSettings">Abrir ajustes</string>
     <string name="st_Whisper_DailyUp_ChooseFromGallery">Elegir de la galería</string>
     <string name="st_Whisper_DailyUp_StepOf">%1$d de %2$d</string>
     <string name="st_Whisper_DailyUp_StepTwoSubtitle">¿Quién puede verlo?</string>

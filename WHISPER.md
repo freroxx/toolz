@@ -769,12 +769,13 @@ Local state is split across purpose-built stores, all read in full by the app
 
 | Store | Holds | Notably does NOT hold |
 |---|---|---|
-| Whisper Room (`toolz_whisper_db`, schema v1; split out of `toolz_db` in AppDatabase v69) | ciphertext-only messages (latest 500; conversation reads are served by the `(senderId, receiverId, sortEpoch)` index added in schema v68), delete-for-me tombstones, FIFO outbox (cap 100, 200-entry drop ledger), group/story caches and self-read copies | plaintext before render; no key material; the whole database is excluded from cloud backup and device transfer |
+| Whisper Room (`toolz_whisper_db`, schema v2; split out of `toolz_db` in AppDatabase v69) | ciphertext-only messages (latest 500; conversation reads are served by the `(senderId, receiverId, sortEpoch)` index added in schema v68), delete-for-me tombstones, FIFO outbox (cap 100, 200-entry drop ledger), group/story caches and self-read copies | plaintext before render; no key material; the whole database is excluded from cloud backup and device transfer |
 | `whisper_sessions/` | one wrapped session snapshot per peer under `<sha256(accountId)>/`, plus read-only superseded sessions under `<sha256(accountId)>/alt/` | anything that cannot be Keystore-wrapped |
 | Self-read store (`whisper_self_read`, Room v66) | the user's OWN sent plaintext, sealed with the Keystore AES key as `SR1\|messageId\|plaintext`, keyed by `(ownerId, messageId)`, with a SHA-256 hash of the wire ciphertext for previews; capped at 1,500 rows per owner | peer-facing ciphertext; incoming messages; anything readable by another account |
 | Key trust store | pinned/verified fingerprints + rotation counters | private halves |
 | Mute/hidden-chats/delete-for-me/undo/preferences stores | UX state with expiries (24h eviction for delete-for-me, 30s undo window, hidden chat auto-return) | — |
 | Daily Ups seen store (`whisper_story_seen`) | opaque `storyId → expiresAtMs` pairs for device-local ring state, capped at 512, expired entries filtered on load and pruned on refresh/write | who viewed what; account id; media or keys |
+| Daily Ups preferences (`whisper_daily_ups_prefs`) | account-keyed close-friends id set (device-local, never uploaded) + two toggles (show viewers, save to device); one key prefix per account so a sign-out cannot hand the list to the next user | names, avatars, descriptors, or any server-synced copy |
 | Access-file backup (`WhisperAubupManager`) | credential-only payload (username, auth type, credential, display name); public Downloads via MediaStore is replaced idempotently per display name (no `name (1).enc` accretion), superseded pre-existing duplicates are swept on save and daily, atomic scoped mirror | session/ratchet state, key material — never |
 | Sealed image disk caches | encrypted containers keyed by URL hash, generation-guarded | plaintext pixels |
 
@@ -1431,7 +1432,9 @@ Strictly fail-closed, rejecting rather than degrading:
 ### 12.3 The server plane
 
 Rows: `whisper_stories` (poster, per-poster-unique `client_id`, host URL, an
-opaque ledger key, receipts flag, state machine.published → delete_pending →
+opaque ledger key, receipts flag, an `audience_kind` label
+(`everyone`/`close`/`custom`) used only to render the green close-friends ring,
+state machine.published → delete_pending →
 deleted / cleanup_failed, a trigger rewriting `expires_at` on insert so the
 24-hour lifetime cannot be bent by any caller), `whisper_story_recipients`
 (story + recipient, opaque sealed descriptor), `whisper_story_views`,
@@ -1572,43 +1575,57 @@ navigation gate as the group cards.
 
 ### 12.5 Publishing
 
-The composer opens from the hub's Add / Your-day actions and the groups
-stories strip (the old Chats-tab entry row is gone). Its photo canvas mirrors
-the viewer's 9:16 Fit framing on `surfaceContainerHighest`, with a 24 dp radius
-and a 1 dp `outlineVariant` border — a letterboxed portrait is not cropped into
-a different promise. Tapping the canvas re-opens the picker, and the bottom-end
-"Tap to change" chip says so; the canvas is one merged accessibility node, so
-TalkBack announces the chip together with the tap action. The pick is read with
-a bounded 12-MiB stream (mirroring the pipeline), decoded into an in-memory
-oriented preview, and never written to disk before the publish pipeline.
-Receipts stay an explicit switch.
+The composer is an **in-place overlay owned by the hub** (the old separate
+`whisper_daily_ups_compose` destination is gone), so the hub's reconcile, quota
+and viewer state survive the round trip and there is only one Daily Ups surface
+to learn. It opens from the hub's Add / Your-day actions, the Chats stories
+strip and the Chats "+" bubble (a `compose=true` route arg that is consumed
+exactly once, so dismissing cannot immediately reopen it).
 
-Audience is **all current friends minus explicit exclusions**. A summary row
-always shows the final count and opens a searchable modal sheet with avatar,
-checkbox rows, Select all and Done; sheet edits write straight to the
-ViewModel. Loading is a small inline spinner, a failed load is an honest retry
-row, and zero friends is distinct from either. At 200% font scale friend names
-wrap to two lines and the list takes only the sheet's remaining height, so
-Select all and Done stay reachable. The primary action is pinned in the
-Scaffold bottom bar with the quota label; it keeps a 52dp minimum height and
-grows with the text instead of clipping. Its own label never changes
-(`Share`), publishing swaps in a spinner + `Sharing…`, and a short reason line
-appears only for the first blocker in Busy → NoPhoto → NoAudience → NoQuota
-order (missing photo, an all-excluded audience, or exhausted quota — each
-stated exactly once). The content scrolls above it, so the action cannot be
-pushed off-screen.
+**Step 1 — photo.** A live in-app camera (CameraX preview, shutter, back/front
+flip, flash, gallery shortcut) fills a 9:16 canvas that mirrors the viewer's
+Fit framing; there is no crop promise the viewer does not keep. Capture writes
+a real JPEG into the app cache and is read back (never an `ImageProxy` plane),
+so EXIF orientation survives into the same EXIF-aware preview and publish
+pipeline. Camera permission is re-checked on `ON_RESUME`, a permanently denied
+grant sends the CTA to the app's settings screen instead of re-prompting into
+nothing, and a failed/unavailable camera always keeps "Choose from gallery".
+The gallery pick is read with a bounded 12-MiB stream (mirroring the pipeline),
+decoded into an in-memory oriented preview, and never written to disk before
+the publish pipeline; a failed decode cancels the previous decode so the last
+pick always wins. A small "1 of 2" pill makes the step explicit; Back returns
+to step 1 instead of closing.
+
+**Step 2 — audience and settings.** Three cards express the audience as an
+explicit recipient snapshot: **Everyone** (all current friends, minus an
+explicit exclusion set and capped at the server's 96 with an honest note),
+**Close friends** (device-local ids intersected with the live friend list), and
+**Custom** (a searchable, checkbox picker with Select all). The close-friends
+list is editable in place and also from the friend's profile (badge + toggle);
+it is never uploaded, and the server only ever sees the resulting recipient
+rows. A settings sheet (also reachable from the top bar) owns the two
+composer-wide toggles: **Show who viewed** (ON by default) and **Save Daily Ups
+to my device** (OFF by default). The save toggle burns a small bottom-left
+"Whisper" badge into a copy written to `Pictures/Whisper` after a successful
+publish — strictly best effort, so a gallery failure never turns a successful
+publish into an error.
+
+Loading is a small inline indicator, a failed load is an honest retry row, and
+zero friends is distinct from either; a background refresh keeps the list the
+user can already see. At 200% font scale friend names wrap and the sheets keep
+Done reachable. The primary action stays pinned with the quota label, keeps a
+52dp minimum height and grows with the text; its label is `Share`, publishing
+swaps in a spinner + `Sharing…`, and a short reason line appears only for the
+first blocker in Busy → NoPhoto → NoAudience → NoQuota order.
 
 Back (system or top bar) on a picked draft opens Discard / Keep editing instead
 of silently dropping it; a successful publish clears the guard and hands off
-through `onPublished`, which lands on the hub with a confirmation. Upload
-chain: preprocess → seal → host → one sealed leg per friend → publish RPC →
+through `onPublished`, which closes the overlay, refreshes the hub and shows an
+in-app confirmation (no raw Toast). Upload chain: preprocess → seal → host →
+one sealed leg per friend → publish RPC (carrying the audience label) →
 self-sealed own row → opportunistic sweep kick. Any failure up-chain maps to a
 fixed vocabulary of errors; a failure *before* the publish RPC leaves zero
-server truth (nothing partial ever exists). Retries keep the draft. A
-friends-list load that fails in the audience step shows an honest retry state
-instead of reading as "no friends yet", and a failed photo decode cancels the
-previous decode so the last pick always wins (two quick picks could otherwise
-land the slower, older image into the draft).
+server truth (nothing partial ever exists). Retries keep the draft.
 
 ### 12.6 Cleanup and honest notes
 

@@ -74,6 +74,7 @@ class WhisperUserProfileViewModel @Inject constructor(
     val uiState: StateFlow<WhisperUserProfileUiState> = _uiState.asStateFlow()
 
     init {
+        dailyUpsPreferences.bindCurrentAccount()
         loadData()
         // V6-R2 (review): consume the repository's key-change signal for THIS profile so
         // an auto-accepted rotation refreshes the trust card live (the flow previously

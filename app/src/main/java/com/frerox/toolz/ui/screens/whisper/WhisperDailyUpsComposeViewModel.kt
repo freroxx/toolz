@@ -49,6 +49,9 @@ internal enum class ShareBlock {
     Busy,
 }
 
+/** How long a friend sync stays fresh while the composer stays alive. */
+private const val FRIENDS_REFRESH_MS = 60_000L
+
 internal fun dailyUpShareBlock(
     hasPhoto: Boolean,
     remaining: Int,
@@ -175,6 +178,9 @@ class WhisperDailyUpsComposeViewModel @Inject constructor(
     val state: StateFlow<ComposeUiState> = _state.asStateFlow()
 
     init {
+        // These preferences are keyed per account; bind before the collectors
+        // below emit, so an account switch never shows the previous list.
+        preferences.bindCurrentAccount()
         viewModelScope.launch { loadFriends() }
         viewModelScope.launch {
             preferences.closeFriends.collect { ids ->
@@ -193,7 +199,8 @@ class WhisperDailyUpsComposeViewModel @Inject constructor(
         }
     }
 
-    private suspend fun loadFriends() {
+    private suspend fun loadFriends(silent: Boolean = false) {
+        if (!silent) _state.update { it.copy(friendsLoading = it.friends.isEmpty()) }
         repository.getFriends()
             .onSuccess { loaded ->
                 // Stable order so the capped default audience is deterministic
@@ -213,6 +220,7 @@ class WhisperDailyUpsComposeViewModel @Inject constructor(
                     emptySet()
                 }
                 val usedToday = repository.dailyUpsPostedTodayOrNull()
+                friendsLoadedAtMs = System.currentTimeMillis()
                 _state.update {
                     it.copy(
                         friends = friends,
@@ -225,12 +233,18 @@ class WhisperDailyUpsComposeViewModel @Inject constructor(
                 }
             }
             .onFailure { e ->
+                // A background refresh that fails must not replace a usable
+                // list (or the audience the user already picked) with an error.
                 _state.update {
-                    it.copy(
-                        friendsLoading = false,
-                        friendsFailed = true,
-                        error = dailyUpErrorText(appContext, e),
-                    )
+                    if (it.friends.isNotEmpty()) {
+                        it.copy(friendsLoading = false)
+                    } else {
+                        it.copy(
+                            friendsLoading = false,
+                            friendsFailed = true,
+                            error = dailyUpErrorText(appContext, e),
+                        )
+                    }
                 }
             }
     }
@@ -252,6 +266,9 @@ class WhisperDailyUpsComposeViewModel @Inject constructor(
     }
 
     private var photoDecodeJob: Job? = null
+
+    /** Epoch ms of the last successful friend sync; 0 = never. */
+    private var friendsLoadedAtMs = 0L
 
     /** Reads the picker's photo into an in-memory draft + downsampled preview. */
     fun setPhoto(bytes: ByteArray, mime: String) {
@@ -347,8 +364,20 @@ class WhisperDailyUpsComposeViewModel @Inject constructor(
 
     /** Called when the composer opens: a previous publish must not re-fire. */
     fun begin() {
+        // Re-bind here as well: a cold start can open the composer before the
+        // session restore finishes, and the id must not stay "anonymous".
+        preferences.bindCurrentAccount()
         _state.update { it.copy(published = false, error = null) }
         refreshQuota()
+        // The composer view model outlives a single opening (it is scoped to
+        // the hub entry), so a friend added or removed since the last open
+        // would otherwise stay invisible until process death.
+        val current = _state.value
+        if (current.friendsFailed ||
+            System.currentTimeMillis() - friendsLoadedAtMs > FRIENDS_REFRESH_MS
+        ) {
+            viewModelScope.launch { loadFriends(silent = current.friends.isNotEmpty()) }
+        }
     }
 
     /** Called after dismiss: drop the photo but keep audience/settings. */

@@ -6,9 +6,12 @@
 package com.frerox.toolz.ui.screens.whisper
 
 import android.Manifest
+import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -16,7 +19,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
-import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
@@ -71,7 +73,6 @@ import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalIconButton
@@ -112,7 +113,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.R
@@ -123,8 +127,9 @@ import com.frerox.toolz.ui.components.ExpressiveSwitch
 import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.components.ToolzExpressiveTextButton
+import com.frerox.toolz.ui.components.ToolzLoadingIndicator
 import java.io.ByteArrayOutputStream
-import java.nio.ByteBuffer
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -483,33 +488,103 @@ private fun LiveCameraStep(
                 PackageManager.PERMISSION_GRANTED,
         )
     }
+    // Set once the system dialog was answered with "deny". Distinguishes a
+    // first ask from a permanent denial, where re-launching does nothing and
+    // the only path forward is the app's settings screen.
+    var permissionDenied by remember { mutableStateOf(false) }
     var cameraFailed by remember { mutableStateOf(false) }
     var flashOn by rememberSaveable { mutableStateOf(false) }
     var lensFacing by rememberSaveable { mutableIntStateOf(CameraSelector.LENS_FACING_BACK) }
     var capturing by remember { mutableStateOf(false) }
     var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
+    var hasFlashUnit by remember { mutableStateOf(false) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
         permissionGranted = granted
+        permissionDenied = !granted
+        if (granted) cameraFailed = false
+    }
+
+    // Returning from the settings screen must pick up a grant without forcing
+    // a composer reopen (and without prompting again).
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+            PackageManager.PERMISSION_GRANTED
+        if (granted != permissionGranted) {
+            permissionGranted = granted
+            if (granted) {
+                permissionDenied = false
+                cameraFailed = false
+            }
+        }
     }
 
     LaunchedEffect(Unit) {
         if (!permissionGranted) permissionLauncher.launch(Manifest.permission.CAMERA)
     }
 
+    // Flash is a property of the bound ImageCapture, not of the UI state: the
+    // toggle must reach the active session immediately (before this it only
+    // took effect after a lens flip rebuilt the use case).
+    LaunchedEffect(imageCapture, flashOn) {
+        val capture = imageCapture ?: return@LaunchedEffect
+        // Flashless devices (front camera on many phones) reject the mode.
+        runCatching {
+            capture.flashMode = if (flashOn) {
+                ImageCapture.FLASH_MODE_ON
+            } else {
+                ImageCapture.FLASH_MODE_OFF
+            }
+        }
+    }
+
+    // True only once the system refuses to show the dialog again: the CTA then
+    // has to point at Settings instead of re-requesting.
+    val permanentlyDenied = !permissionGranted && permissionDenied &&
+        context.dailyUpActivity()?.let { activity ->
+            !ActivityCompat.shouldShowRequestPermissionRationale(
+                activity,
+                Manifest.permission.CAMERA,
+            )
+        } == true
+
+    val requestCamera: () -> Unit = {
+        if (cameraFailed && permissionGranted) {
+            cameraFailed = false
+        } else {
+            val activity = context.dailyUpActivity()
+            val canAsk = !permissionDenied || activity == null ||
+                ActivityCompat.shouldShowRequestPermissionRationale(
+                    activity,
+                    Manifest.permission.CAMERA,
+                )
+            if (canAsk) {
+                permissionLauncher.launch(Manifest.permission.CAMERA)
+            } else {
+                // Permanently denied: the dialog can no longer appear, so send
+                // the user to the only screen that can flip the grant.
+                runCatching {
+                    context.startActivity(
+                        Intent(
+                            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            Uri.fromParts("package", context.packageName, null),
+                        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                }
+            }
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         if (permissionGranted && !cameraFailed) {
             CameraPreview(
                 lensFacing = lensFacing,
-                onReady = { capture ->
+                onReady = { capture, hasFlash ->
                     imageCapture = capture
-                    capture.flashMode = if (flashOn) {
-                        ImageCapture.FLASH_MODE_ON
-                    } else {
-                        ImageCapture.FLASH_MODE_OFF
-                    }
+                    // A front camera without a flash must not advertise one.
+                    hasFlashUnit = hasFlash
                 },
                 onFailed = { cameraFailed = true },
                 modifier = Modifier.fillMaxSize(),
@@ -517,10 +592,9 @@ private fun LiveCameraStep(
         } else {
             CameraUnavailable(
                 permissionGranted = permissionGranted,
-                onRequestPermission = {
-                    permissionLauncher.launch(Manifest.permission.CAMERA)
-                },
+                onRequestPermission = requestCamera,
                 onPick = onPick,
+                permanentlyDenied = permanentlyDenied,
                 modifier = Modifier.fillMaxSize(),
             )
         }
@@ -566,21 +640,26 @@ private fun LiveCameraStep(
             Spacer(Modifier.weight(1f))
             StepPill(step = 1)
             Spacer(Modifier.weight(1f))
-            IconButton(
-                onClick = { flashOn = !flashOn },
-                enabled = permissionGranted && !cameraFailed,
-            ) {
-                Icon(
-                    if (flashOn) Icons.Rounded.FlashOn else Icons.Rounded.FlashOff,
-                    contentDescription = stringResource(
-                        if (flashOn) {
-                            R.string.st_Whisper_DailyUp_FlashOffCd
-                        } else {
-                            R.string.st_Whisper_DailyUp_FlashOnCd
-                        },
-                    ),
-                    tint = Color.White,
-                )
+            if (hasFlashUnit) {
+                IconButton(
+                    onClick = { flashOn = !flashOn },
+                    enabled = permissionGranted && !cameraFailed,
+                ) {
+                    Icon(
+                        if (flashOn) Icons.Rounded.FlashOn else Icons.Rounded.FlashOff,
+                        contentDescription = stringResource(
+                            if (flashOn) {
+                                R.string.st_Whisper_DailyUp_FlashOffCd
+                            } else {
+                                R.string.st_Whisper_DailyUp_FlashOnCd
+                            },
+                        ),
+                        tint = Color.White,
+                    )
+                }
+            } else {
+                // Keep the step pill optically centred on flashless cameras.
+                Spacer(Modifier.size(48.dp))
             }
         }
 
@@ -611,35 +690,60 @@ private fun LiveCameraStep(
                 Spacer(Modifier.weight(1f))
                 ShutterButton(
                     capturing = capturing,
-                    enabled = permissionGranted && !cameraFailed,
+                    enabled = permissionGranted && !cameraFailed && imageCapture != null,
                     onClick = {
                         val capture = imageCapture ?: return@ShutterButton
+                        if (capturing) return@ShutterButton
                         capturing = true
+                        // Capture into a cache file instead of reading an
+                        // ImageProxy plane: the saved JPEG is complete, carries
+                        // its EXIF orientation, and avoids any plane-padding
+                        // surprises from the direct buffer.
+                        val target = runCatching {
+                            File.createTempFile("dailyup_", ".jpg", context.cacheDir)
+                        }.getOrNull()
+                        if (target == null) {
+                            capturing = false
+                            scope.launch {
+                                snackbar.showSnackbar(
+                                    context.getString(R.string.st_Whisper_DailyUp_CaptureFailed),
+                                )
+                            }
+                            return@ShutterButton
+                        }
                         capture.takePicture(
+                            ImageCapture.OutputFileOptions.Builder(target).build(),
                             ContextCompat.getMainExecutor(context),
-                            object : ImageCapture.OnImageCapturedCallback() {
-                                override fun onCaptureSuccess(image: ImageProxy) {
-                                    val bytes = image.planes.firstOrNull()
-                                        ?.buffer
-                                        ?.toByteArray()
-                                    image.close()
-                                    capturing = false
-                                    if (bytes == null || bytes.isEmpty()) {
-                                        scope.launch {
-                                            snackbar.showSnackbar(
-                                                context.getString(R.string.st_Whisper_DailyUp_CaptureFailed),
-                                            )
+                            object : ImageCapture.OnImageSavedCallback {
+                                override fun onImageSaved(
+                                    outputFileResults: ImageCapture.OutputFileResults,
+                                ) {
+                                    scope.launch {
+                                        val bytes = withContext(Dispatchers.IO) {
+                                            runCatching { target.readBytes() }.getOrNull()
                                         }
-                                    } else {
-                                        onCaptured(bytes, "image/jpeg")
+                                        target.delete()
+                                        capturing = false
+                                        if (bytes == null || bytes.isEmpty()) {
+                                            snackbar.showSnackbar(
+                                                context.getString(
+                                                    R.string.st_Whisper_DailyUp_CaptureFailed,
+                                                ),
+                                            )
+                                        } else {
+                                            onCaptured(bytes, "image/jpeg")
+                                        }
                                     }
                                 }
 
                                 override fun onError(exception: ImageCaptureException) {
+                                    target.delete()
                                     capturing = false
                                     scope.launch {
                                         snackbar.showSnackbar(
-                                            context.getString(R.string.st_Whisper_DailyUp_CaptureFailed),
+                                            context.getString(
+                                                R.string.st_Whisper_DailyUp_CaptureFailed,
+                                            ),
                                         )
                                     }
                                 }
@@ -679,7 +783,7 @@ private fun LiveCameraStep(
                 modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.28f)),
                 contentAlignment = Alignment.Center,
             ) {
-                CircularProgressIndicator(color = Color.White)
+                ToolzLoadingIndicator(color = Color.White)
             }
         }
         GroupSnackbarHost(
@@ -696,6 +800,7 @@ private fun CameraUnavailable(
     permissionGranted: Boolean,
     onRequestPermission: () -> Unit,
     onPick: () -> Unit,
+    permanentlyDenied: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -734,10 +839,10 @@ private fun CameraUnavailable(
         Spacer(Modifier.height(8.dp))
         Text(
             text = stringResource(
-                if (permissionGranted) {
-                    R.string.st_Whisper_DailyUp_CameraUnavailableDesc
-                } else {
-                    R.string.st_Whisper_DailyUp_CameraPermissionDesc
+                when {
+                    permissionGranted -> R.string.st_Whisper_DailyUp_CameraUnavailableDesc
+                    permanentlyDenied -> R.string.st_Whisper_DailyUp_CameraPermissionDeniedDesc
+                    else -> R.string.st_Whisper_DailyUp_CameraPermissionDesc
                 },
             ),
             style = MaterialTheme.typography.bodyMedium,
@@ -747,7 +852,15 @@ private fun CameraUnavailable(
         Spacer(Modifier.height(20.dp))
         if (!permissionGranted) {
             ToolzExpressiveButton(onClick = onRequestPermission) {
-                Text(stringResource(R.string.st_Whisper_DailyUp_AllowCamera))
+                Text(
+                    stringResource(
+                        if (permanentlyDenied) {
+                            R.string.st_Whisper_DailyUp_OpenSettings
+                        } else {
+                            R.string.st_Whisper_DailyUp_AllowCamera
+                        },
+                    ),
+                )
             }
             Spacer(Modifier.height(8.dp))
         }
@@ -768,7 +881,7 @@ private fun CameraUnavailable(
 @Composable
 private fun CameraPreview(
     lensFacing: Int,
-    onReady: (ImageCapture) -> Unit,
+    onReady: (ImageCapture?, Boolean) -> Unit,
     onFailed: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -805,8 +918,8 @@ private fun CameraPreview(
                         .requireLensFacing(lensFacing)
                         .build()
                     provider?.unbindAll()
-                    provider?.bindToLifecycle(lifecycleOwner, selector, preview, capture)
-                    currentOnReady(capture)
+                    val camera = provider?.bindToLifecycle(lifecycleOwner, selector, preview, capture)
+                    currentOnReady(capture, camera?.cameraInfo?.hasFlashUnit() == true)
                 }.onFailure {
                     currentOnFailed()
                 }
@@ -816,6 +929,9 @@ private fun CameraPreview(
 
         onDispose {
             disposed = true
+            // The shutter must not fire against an unbound use case while the
+            // next lens is being bound.
+            currentOnReady(null, false)
             runCatching { provider?.unbindAll() }
         }
     }
@@ -1276,9 +1392,8 @@ private fun ComposerShareBar(
                             .widthIn(min = 132.dp),
                     ) {
                         if (state.publishing) {
-                            CircularProgressIndicator(
+                            ToolzLoadingIndicator(
                                 modifier = Modifier.size(18.dp),
-                                strokeWidth = 2.dp,
                                 color = LocalContentColor.current,
                             )
                             Spacer(Modifier.size(10.dp))
@@ -1468,7 +1583,7 @@ private fun CustomAudienceSheet(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
                     horizontalArrangement = Arrangement.Center,
                 ) {
-                    CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                    ToolzLoadingIndicator(modifier = Modifier.size(24.dp))
                 }
 
                 state.friendsFailed && state.friends.isEmpty() -> Row(
@@ -1639,7 +1754,7 @@ private fun CloseFriendsSheet(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
                     horizontalArrangement = Arrangement.Center,
                 ) {
-                    CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                    ToolzLoadingIndicator(modifier = Modifier.size(24.dp))
                 }
 
                 state.friendsFailed && state.friends.isEmpty() -> Row(
@@ -1771,9 +1886,8 @@ private suspend fun readDailyUpSource(context: Context, uri: Uri): DailyUpSource
         }.getOrDefault(DailyUpSource.Unreadable)
     }
 
-private fun ByteBuffer.toByteArray(): ByteArray {
-    val copy = duplicate()
-    val bytes = ByteArray(copy.remaining())
-    copy.get(bytes)
-    return bytes
-}
+/** Unwraps the activity behind a (possibly themed) context. */
+private fun Context.dailyUpActivity(): Activity? =
+    generateSequence(this) { (it as? android.content.ContextWrapper)?.baseContext }
+        .filterIsInstance<Activity>()
+        .firstOrNull()

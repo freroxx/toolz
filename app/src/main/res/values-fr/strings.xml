@@ -4298,6 +4298,8 @@ La plupart des optimisations nécessitent Shizuku pour un accès shell privilég
     <string name="st_Whisper_DailyUp_CameraUnavailableDesc">Tu peux toujours choisir une photo dans ta galerie.</string>
     <string name="st_Whisper_DailyUp_CameraPermissionDesc">Autorise l\'accès à la caméra pour prendre une photo, ou choisis-en une dans ta galerie.</string>
     <string name="st_Whisper_DailyUp_AllowCamera">Autoriser la caméra</string>
+    <string name="st_Whisper_DailyUp_CameraPermissionDeniedDesc">L\'accès à la caméra est désactivé. Active-le dans les Réglages, ou choisis une photo dans ta galerie.</string>
+    <string name="st_Whisper_DailyUp_OpenSettings">Ouvrir les réglages</string>
     <string name="st_Whisper_DailyUp_ChooseFromGallery">Choisir dans la galerie</string>
     <string name="st_Whisper_DailyUp_StepOf">%1$d sur %2$d</string>
     <string name="st_Whisper_DailyUp_StepTwoSubtitle">Qui peut voir ceci ?</string>
