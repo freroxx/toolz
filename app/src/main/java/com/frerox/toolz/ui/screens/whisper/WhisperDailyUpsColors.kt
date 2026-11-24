@@ -5,7 +5,6 @@
 
 package com.frerox.toolz.ui.screens.whisper
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
@@ -24,6 +23,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.frerox.toolz.R
+import com.frerox.toolz.ui.theme.LocalIsDarkTheme
 
 /**
  * The one semantic accent Daily Ups needs beyond the M3 palette: close-friend
