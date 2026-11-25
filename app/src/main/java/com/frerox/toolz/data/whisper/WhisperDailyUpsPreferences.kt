@@ -109,10 +109,13 @@ class WhisperDailyUpsPreferences @Inject constructor(
         // valid, and a never-bound instance must not delete the wrong keys.
         bindCurrentAccount()
         val editor = prefs.edit()
-        val prefix = scopePrefix()
-        prefs.all.keys
-            .filter { it.startsWith(prefix) }
-            .forEach(editor::remove)
+        // Bound account → only its keys. No account at all (session already
+        // gone during deletion) → drop every key; there is no other identity
+        // on this device we can safely attribute the leftovers to.
+        val keys = accountId?.let { id ->
+            prefs.all.keys.filter { it.startsWith("$id|") }
+        } ?: prefs.all.keys.toList()
+        keys.forEach(editor::remove)
         editor.apply()
         _closeFriends.value = emptySet()
         _showViewers.value = true
