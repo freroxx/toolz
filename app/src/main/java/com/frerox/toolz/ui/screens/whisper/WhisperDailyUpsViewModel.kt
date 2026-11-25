@@ -15,6 +15,7 @@ import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.WhisperDailyUpsConfig
 import com.frerox.toolz.data.whisper.WhisperProfile
 import com.frerox.toolz.data.whisper.WhisperRepository
+import com.frerox.toolz.data.whisper.WhisperStoryAudience
 import com.frerox.toolz.data.whisper.WhisperStorySeenStore
 import com.frerox.toolz.data.whisper.dailyUpErrorText
 import com.frerox.toolz.data.whisper.dailyUpsPostedTodayOrNull
@@ -86,6 +87,8 @@ class WhisperDailyUpsViewModel @Inject constructor(
         val ownerName: String,
         val isMine: Boolean,
         val receiptsEnabled: Boolean,
+        /** Poster's audience label; drives the viewer's green close-friends chip. */
+        val isCloseFriends: Boolean,
         /** Absolute server-reconciled expiry; the only safe seen-clock anchor. */
         val expiresAtMs: Long,
         /** Time still on the story clock at snapshot time (for the progress UI). */
@@ -397,6 +400,8 @@ class WhisperDailyUpsViewModel @Inject constructor(
                 ownerName = if (row.ownerId == myId) "" else ownerName.orEmpty(),
                 isMine = isMine,
                 receiptsEnabled = row.receiptsEnabled,
+                isCloseFriends = WhisperStoryAudience.fromWire(row.audienceKind) ==
+                    WhisperStoryAudience.CLOSE_FRIENDS,
                 expiresAtMs = row.expiresAtMs,
                 remainingMs = (row.expiresAtMs - nowMs).coerceAtLeast(0L),
             )

@@ -33,7 +33,7 @@ import com.frerox.toolz.ui.theme.LocalIsDarkTheme
  */
 @Composable
 internal fun closeFriendsRingColor() =
-    if (isSystemInDarkTheme()) androidx.compose.ui.graphics.Color(0xFF6FDC8C)
+    if (LocalIsDarkTheme.current) androidx.compose.ui.graphics.Color(0xFF6FDC8C)
     else androidx.compose.ui.graphics.Color(0xFF1B7A45)
 
 /** Softer fill used behind the "Close friends" label chip. */

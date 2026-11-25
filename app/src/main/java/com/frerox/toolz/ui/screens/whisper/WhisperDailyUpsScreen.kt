@@ -1248,6 +1248,10 @@ private fun StoryViewerOverlay(
                             color = Color.White.copy(alpha = 0.7f),
                             style = MaterialTheme.typography.labelSmall,
                         )
+                        if (current?.isCloseFriends == true) {
+                            Spacer(Modifier.height(3.dp))
+                            CloseFriendsChip()
+                        }
                     }
                     IconButton(
                         onClick = closeWithHaptic,
