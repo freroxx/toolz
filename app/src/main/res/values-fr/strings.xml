@@ -152,6 +152,27 @@
     <string name="st_Whisper_Aubup_PasswordAccount">Nom d\'utilisateur et mot de passe</string>
     <string name="st_Whisper_Aubup_GotIt">Compris</string>
     <string name="st_Whisper_Aubup_CreateBackup">Créer un fichier d\'accès</string>
+    <string name="st_Whisper_Aubup_SecretModePin">Code à 6 chiffres</string>
+    <string name="st_Whisper_Aubup_SecretModePassword">Mot de passe</string>
+    <string name="st_Whisper_Aubup_PasswordLabel">Mot de passe du fichier d’accès</string>
+    <string name="st_Whisper_Aubup_ConfirmPasswordLabel">Confirmer le mot de passe</string>
+    <string name="st_Whisper_Aubup_PinWeakWarning">Un code à 6 chiffres peut être forcé hors ligne. Un mot de passe est plus sûr.</string>
+    <string name="st_Whisper_Aubup_PasswordShortHint">Utilisez au moins 8 caractères.</string>
+    <string name="st_Whisper_Aubup_PasswordShortError">Utilisez au moins 8 caractères pour le mot de passe.</string>
+    <string name="st_Whisper_Devices_Section">Appareils</string>
+    <string name="st_Whisper_Devices_Title">Appareils connectés</string>
+    <string name="st_Whisper_Devices_Desc">Tous les appareils connectés à ce compte. Déconnectez celui que vous n’utilisez plus ; les autres restent connectés.</string>
+    <string name="st_Whisper_Devices_Refresh">Actualiser les appareils</string>
+    <string name="st_Whisper_Devices_ThisDevice">Cet appareil</string>
+    <string name="st_Whisper_Devices_LastSeen">Dernière activité %1$s</string>
+    <string name="st_Whisper_Devices_Revoked">Déconnecté</string>
+    <string name="st_Whisper_Devices_Empty">Aucun appareil enregistré pour l’instant.</string>
+    <string name="st_Whisper_Devices_Unavailable">La liste des appareils est indisponible pour le moment.</string>
+    <string name="st_Whisper_Devices_Disconnect">Déconnecter</string>
+    <string name="st_Whisper_Devices_DisconnectTitle">Déconnecter l’appareil ?</string>
+    <string name="st_Whisper_Devices_DisconnectDesc">Cela déconnecte %1$s de Whisper. Saisissez votre mot de passe pour confirmer.</string>
+    <string name="st_Whisper_Devices_PasswordLabel">Mot de passe du compte</string>
+    <string name="st_Whisper_Devices_Disconnected">%1$s déconnecté</string>
     <string name="cd_Whisper_Aubup_Rescan">Réanalyser</string>
     <string name="st_Whisper_Aubup_AccessFileLocation">Enregistré dans Téléchargements/Toolz</string>
     <!-- V3-FIX (multi-account): recovery scan section headers carry counts. -->
@@ -1803,6 +1824,7 @@
     <string name="st_Backup_Item_Clipboard">Historique presse-papiers</string>
     <string name="st_Backup_Item_WhisperAccess">Fichiers d\'accès Whisper (.enc)</string>
     <string name="st_Backup_Item_WhisperState">État local Whisper (muets, confiance, historique)</string>
+    <string name="st_Backup_Item_WhisperHistory">Historique Whisper</string>
     <string name="st_Backup_Item_Settings">Préférences de l\'appli</string>
     <string name="st_Backup_Item_Steps">Données du podomètre</string>
     <string name="st_Backup_Item_MathHistory">Calculs mathématiques</string>
@@ -1817,6 +1839,29 @@
 
     <!-- Backup Progress -->
     <string name="st_Backup_Progress_Preparing">Préparation de la sauvegarde…</string>
+    <string name="st_Backup_Progress_Encrypting">Chiffrement de la sauvegarde…</string>
+    <string name="st_Backup_Progress_WhisperHistory">Historique des messages Whisper…</string>
+    <string name="st_Backup_History_RequiresPassword">L’historique Whisper ne peut être exporté qu’avec une protection par mot de passe.</string>
+    <string name="st_Backup_History_RequiresPasswordHint">L’historique Whisper contient des messages lisibles ; un PIN ou un mot de passe est requis.</string>
+    <string name="st_Backup_Protect_Title">Protéger cette sauvegarde ?</string>
+    <string name="st_Backup_Protect_Desc">La protection par mot de passe chiffre toute l’archive, y compris le Coffre de mots de passe et la clé de la base de données.</string>
+    <string name="st_Backup_Protect_Pin">PIN à 6 chiffres</string>
+    <string name="st_Backup_Protect_Password">Mot de passe</string>
+    <string name="st_Backup_Protect_PinLabel">PIN à 6 chiffres</string>
+    <string name="st_Backup_Protect_PasswordLabel">Mot de passe</string>
+    <string name="st_Backup_Protect_ConfirmLabel">Confirmer</string>
+    <string name="st_Backup_Protect_Mismatch">Les deux saisies ne correspondent pas.</string>
+    <string name="st_Backup_Protect_WeakPin">Un PIN à 6 chiffres ne compte qu’un million de combinaisons et peut être forcé hors ligne. Utilisez un mot de passe pour les sauvegardes sensibles.</string>
+    <string name="st_Backup_Protect_ShortPassword">Un mot de passe plus long est nettement plus solide.</string>
+    <string name="st_Backup_Protect_PlainWarning">Sans mot de passe, toute personne possédant ce fichier peut lire votre coffre et la clé de la base de données.</string>
+    <string name="st_Backup_Protect_Create">Créer la sauvegarde</string>
+    <string name="st_Backup_Protect_NoPassword">Sans mot de passe</string>
+    <string name="st_Backup_Unlock_Title">Déverrouiller la sauvegarde</string>
+    <string name="st_Backup_Unlock_Desc">Cette sauvegarde est protégée. Saisissez le mot de passe ou le PIN utilisé lors de sa création.</string>
+    <string name="st_Backup_Unlock_Label">Mot de passe ou PIN</string>
+    <string name="st_Backup_Unlock_Action">Déverrouiller</string>
+    <string name="st_Backup_Unlock_Wrong">Mot de passe incorrect. La sauvegarde n’a pas été restaurée.</string>
+    <string name="st_Backup_Unlock_Required">Cette sauvegarde est protégée par mot de passe.</string>
     <string name="st_Backup_Progress_Notes">Sauvegarde des notes…</string>
     <string name="st_Backup_Progress_Tasks">Sauvegarde des tâches…</string>
     <string name="st_Backup_Progress_AiHistory">Sauvegarde de l\'historique IA…</string>

@@ -153,6 +153,27 @@
     <string name="st_Whisper_Aubup_PasswordAccount">Username &amp; Password</string>
     <string name="st_Whisper_Aubup_GotIt">Got It</string>
     <string name="st_Whisper_Aubup_CreateBackup">Create Access File</string>
+    <string name="st_Whisper_Aubup_SecretModePin">6-digit code</string>
+    <string name="st_Whisper_Aubup_SecretModePassword">Password</string>
+    <string name="st_Whisper_Aubup_PasswordLabel">Access File password</string>
+    <string name="st_Whisper_Aubup_ConfirmPasswordLabel">Confirm password</string>
+    <string name="st_Whisper_Aubup_PinWeakWarning">A 6-digit code can be brute-forced offline. A password is safer.</string>
+    <string name="st_Whisper_Aubup_PasswordShortHint">Use at least 8 characters.</string>
+    <string name="st_Whisper_Aubup_PasswordShortError">Use at least 8 characters for the password.</string>
+    <string name="st_Whisper_Devices_Section">Devices</string>
+    <string name="st_Whisper_Devices_Title">Connected devices</string>
+    <string name="st_Whisper_Devices_Desc">Every device signed in to this account. Disconnect one you no longer use; the others stay signed in.</string>
+    <string name="st_Whisper_Devices_Refresh">Refresh devices</string>
+    <string name="st_Whisper_Devices_ThisDevice">This device</string>
+    <string name="st_Whisper_Devices_LastSeen">Last active %1$s</string>
+    <string name="st_Whisper_Devices_Revoked">Disconnected</string>
+    <string name="st_Whisper_Devices_Empty">No devices registered yet.</string>
+    <string name="st_Whisper_Devices_Unavailable">Device list is unavailable right now.</string>
+    <string name="st_Whisper_Devices_Disconnect">Disconnect</string>
+    <string name="st_Whisper_Devices_DisconnectTitle">Disconnect device?</string>
+    <string name="st_Whisper_Devices_DisconnectDesc">This signs %1$s out of Whisper. Enter your account password to confirm.</string>
+    <string name="st_Whisper_Devices_PasswordLabel">Account password</string>
+    <string name="st_Whisper_Devices_Disconnected">%1$s disconnected</string>
     <string name="cd_Whisper_Aubup_Rescan">Rescan</string>
     <string name="st_Whisper_Aubup_AccessFileLocation">Saved in Downloads/Toolz</string>
     <!-- V3-FIX (multi-account): recovery scan section headers carry counts. -->
@@ -1864,6 +1885,7 @@
     <string name="st_Backup_Item_Clipboard">Clipboard History</string>
     <string name="st_Backup_Item_WhisperAccess">Whisper Access Files (.enc)</string>
     <string name="st_Backup_Item_WhisperState">Whisper Local State (mutes, trust, history)</string>
+    <string name="st_Backup_Item_WhisperHistory">Whisper History</string>
     <string name="st_Backup_Item_Settings">App Preferences</string>
     <string name="st_Backup_Item_Steps">Step Counter Data</string>
     <string name="st_Backup_Item_MathHistory">Math &amp; Calculations</string>
@@ -1878,6 +1900,29 @@
 
     <!-- Backup Progress -->
     <string name="st_Backup_Progress_Preparing">Preparing backup...</string>
+    <string name="st_Backup_Progress_Encrypting">Encrypting backup...</string>
+    <string name="st_Backup_Progress_WhisperHistory">Whisper message history…</string>
+    <string name="st_Backup_History_RequiresPassword">Whisper history can only be exported with password protection.</string>
+    <string name="st_Backup_History_RequiresPasswordHint">Whisper history contains readable messages, so a PIN or password is required.</string>
+    <string name="st_Backup_Protect_Title">Protect this backup?</string>
+    <string name="st_Backup_Protect_Desc">Password protection encrypts the whole archive, including the Password Vault and database key it contains.</string>
+    <string name="st_Backup_Protect_Pin">6-digit PIN</string>
+    <string name="st_Backup_Protect_Password">Password</string>
+    <string name="st_Backup_Protect_PinLabel">6-digit PIN</string>
+    <string name="st_Backup_Protect_PasswordLabel">Password</string>
+    <string name="st_Backup_Protect_ConfirmLabel">Confirm</string>
+    <string name="st_Backup_Protect_Mismatch">The two entries do not match.</string>
+    <string name="st_Backup_Protect_WeakPin">A 6-digit PIN has only one million combinations and can be brute-forced offline. Use a password for sensitive backups.</string>
+    <string name="st_Backup_Protect_ShortPassword">A longer password is materially stronger.</string>
+    <string name="st_Backup_Protect_PlainWarning">Without a password, anyone with this file can read your vault and database key.</string>
+    <string name="st_Backup_Protect_Create">Create backup</string>
+    <string name="st_Backup_Protect_NoPassword">No password</string>
+    <string name="st_Backup_Unlock_Title">Unlock backup</string>
+    <string name="st_Backup_Unlock_Desc">This backup is protected. Enter the password or PIN used when it was created.</string>
+    <string name="st_Backup_Unlock_Label">Password or PIN</string>
+    <string name="st_Backup_Unlock_Action">Unlock</string>
+    <string name="st_Backup_Unlock_Wrong">Incorrect password. The backup was not restored.</string>
+    <string name="st_Backup_Unlock_Required">This backup is password protected.</string>
     <string name="st_Backup_Progress_Notes">Backing up Notes...</string>
     <string name="st_Backup_Progress_Tasks">Backing up Tasks...</string>
     <string name="st_Backup_Progress_AiHistory">Backing up AI History...</string>

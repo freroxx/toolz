@@ -152,6 +152,27 @@
     <string name="st_Whisper_Aubup_PasswordAccount">Nombre de usuario y contraseña</string>
     <string name="st_Whisper_Aubup_GotIt">Entendido</string>
     <string name="st_Whisper_Aubup_CreateBackup">Crear archivo de acceso</string>
+    <string name="st_Whisper_Aubup_SecretModePin">Código de 6 dígitos</string>
+    <string name="st_Whisper_Aubup_SecretModePassword">Contraseña</string>
+    <string name="st_Whisper_Aubup_PasswordLabel">Contraseña del archivo de acceso</string>
+    <string name="st_Whisper_Aubup_ConfirmPasswordLabel">Confirmar contraseña</string>
+    <string name="st_Whisper_Aubup_PinWeakWarning">Un código de 6 dígitos se puede forzar sin conexión. Una contraseña es más segura.</string>
+    <string name="st_Whisper_Aubup_PasswordShortHint">Usa al menos 8 caracteres.</string>
+    <string name="st_Whisper_Aubup_PasswordShortError">Usa al menos 8 caracteres para la contraseña.</string>
+    <string name="st_Whisper_Devices_Section">Dispositivos</string>
+    <string name="st_Whisper_Devices_Title">Dispositivos conectados</string>
+    <string name="st_Whisper_Devices_Desc">Todos los dispositivos con sesión en esta cuenta. Desconecta el que ya no uses; los demás siguen conectados.</string>
+    <string name="st_Whisper_Devices_Refresh">Actualizar dispositivos</string>
+    <string name="st_Whisper_Devices_ThisDevice">Este dispositivo</string>
+    <string name="st_Whisper_Devices_LastSeen">Última actividad %1$s</string>
+    <string name="st_Whisper_Devices_Revoked">Desconectado</string>
+    <string name="st_Whisper_Devices_Empty">Aún no hay dispositivos registrados.</string>
+    <string name="st_Whisper_Devices_Unavailable">La lista de dispositivos no está disponible ahora.</string>
+    <string name="st_Whisper_Devices_Disconnect">Desconectar</string>
+    <string name="st_Whisper_Devices_DisconnectTitle">¿Desconectar dispositivo?</string>
+    <string name="st_Whisper_Devices_DisconnectDesc">Esto cerrará la sesión de %1$s en Whisper. Introduce tu contraseña para confirmar.</string>
+    <string name="st_Whisper_Devices_PasswordLabel">Contraseña de la cuenta</string>
+    <string name="st_Whisper_Devices_Disconnected">%1$s desconectado</string>
     <string name="cd_Whisper_Aubup_Rescan">Volver a escanear</string>
     <string name="st_Whisper_Aubup_AccessFileLocation">Guardado en Descargas/Toolz</string>
     <!-- V3-FIX (multi-account): recovery scan section headers carry counts. -->
@@ -1722,6 +1743,7 @@
     <string name="st_Backup_Item_Clipboard">Historial portapapeles</string>
     <string name="st_Backup_Item_WhisperAccess">Archivos de acceso de Whisper (.enc)</string>
     <string name="st_Backup_Item_WhisperState">Estado local de Whisper (silencios, confianza, historial)</string>
+    <string name="st_Backup_Item_WhisperHistory">Historial de Whisper</string>
     <string name="st_Backup_Item_Settings">Preferencias de la app</string>
     <string name="st_Backup_Item_Steps">Datos del podómetro</string>
     <string name="st_Backup_Item_MathHistory">Cálculos matemáticos</string>
@@ -1736,6 +1758,29 @@
 
     <!-- Backup Progress -->
     <string name="st_Backup_Progress_Preparing">Preparando copia de seguridad…</string>
+    <string name="st_Backup_Progress_Encrypting">Cifrando copia de seguridad…</string>
+    <string name="st_Backup_Progress_WhisperHistory">Historial de mensajes de Whisper…</string>
+    <string name="st_Backup_History_RequiresPassword">El historial de Whisper solo se puede exportar con protección por contraseña.</string>
+    <string name="st_Backup_History_RequiresPasswordHint">El historial de Whisper contiene mensajes legibles, así que se requiere un PIN o contraseña.</string>
+    <string name="st_Backup_Protect_Title">¿Proteger esta copia?</string>
+    <string name="st_Backup_Protect_Desc">La protección con contraseña cifra todo el archivo, incluida la Bóveda de contraseñas y la clave de la base de datos.</string>
+    <string name="st_Backup_Protect_Pin">PIN de 6 dígitos</string>
+    <string name="st_Backup_Protect_Password">Contraseña</string>
+    <string name="st_Backup_Protect_PinLabel">PIN de 6 dígitos</string>
+    <string name="st_Backup_Protect_PasswordLabel">Contraseña</string>
+    <string name="st_Backup_Protect_ConfirmLabel">Confirmar</string>
+    <string name="st_Backup_Protect_Mismatch">Las dos entradas no coinciden.</string>
+    <string name="st_Backup_Protect_WeakPin">Un PIN de 6 dígitos solo tiene un millón de combinaciones y puede ser descifrado sin conexión. Usa una contraseña para copias sensibles.</string>
+    <string name="st_Backup_Protect_ShortPassword">Una contraseña más larga es mucho más segura.</string>
+    <string name="st_Backup_Protect_PlainWarning">Sin contraseña, cualquiera que tenga este archivo puede leer tu bóveda y la clave de la base de datos.</string>
+    <string name="st_Backup_Protect_Create">Crear copia</string>
+    <string name="st_Backup_Protect_NoPassword">Sin contraseña</string>
+    <string name="st_Backup_Unlock_Title">Desbloquear copia</string>
+    <string name="st_Backup_Unlock_Desc">Esta copia está protegida. Introduce la contraseña o PIN usado al crearla.</string>
+    <string name="st_Backup_Unlock_Label">Contraseña o PIN</string>
+    <string name="st_Backup_Unlock_Action">Desbloquear</string>
+    <string name="st_Backup_Unlock_Wrong">Contraseña incorrecta. La copia no se restauró.</string>
+    <string name="st_Backup_Unlock_Required">Esta copia está protegida con contraseña.</string>
     <string name="st_Backup_Progress_Notes">Copiando notas…</string>
     <string name="st_Backup_Progress_Tasks">Copiando tareas…</string>
     <string name="st_Backup_Progress_AiHistory">Copiando historial de IA…</string>
