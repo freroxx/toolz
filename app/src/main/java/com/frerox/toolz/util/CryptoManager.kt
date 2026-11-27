@@ -50,6 +50,12 @@ object CryptoManager {
     // users hold stored ciphertext derived with it; raising the constant in place would
     // permanently break decryption of that data.
     private const val PBKDF2_ITERATIONS_HARDENED = 310000
+    /** New containers default to the 2023 OWASP PBKDF2-HMAC-SHA256 recommendation. */
+    const val PBKDF2_ITERATIONS_CONTAINER = 600000
+    /** Refuse to derive below this even for a legacy/self-described container. */
+    const val MIN_PASSPHRASE_ITERATIONS = 100000
+    /** Upper bound: a hostile file cannot force unbounded CPU on decrypt. */
+    const val MAX_PASSPHRASE_ITERATIONS = 2000000
     // First byte of hardened-format payloads ('V'). Legacy payloads start with random
     // salt bytes, so a collision is handled by the legacy fallback in decryptWithPassphrase.
     private const val HARDENED_FORMAT_MARKER: Byte = 0x56
@@ -172,12 +178,31 @@ object CryptoManager {
      * PBKDF2-HMAC-SHA256 at 310000 iterations.
      * Output: marker byte 'V' + salt(16) + iv(12) + ciphertext+tag, Base64(NO_WRAP).
      */
-    fun encryptWithPassphrase(plaintext: String, passphrase: CharArray): Pair<String, Boolean> {
+    fun encryptWithPassphrase(plaintext: String, passphrase: CharArray): Pair<String, Boolean> =
+        encryptWithPassphraseAtIterations(plaintext, passphrase, PBKDF2_ITERATIONS_HARDENED)
+
+    /**
+     * Same wire format as [encryptWithPassphrase] but with an explicit KDF work
+     * factor. New self-describing containers record the iteration count so a
+     * future format can raise it without breaking files written today.
+     *
+     * The count is clamped to a sane range: a malicious container must not be
+     * able to pin a device for minutes on a decrypt attempt, and a caller must
+     * not silently ship a weak factor.
+     */
+    fun encryptWithPassphraseAtIterations(
+        plaintext: String,
+        passphrase: CharArray,
+        iterations: Int,
+    ): Pair<String, Boolean> {
+        require(iterations in MIN_PASSPHRASE_ITERATIONS..MAX_PASSPHRASE_ITERATIONS) {
+            "Unsupported KDF work factor"
+        }
         return try {
             val salt = ByteArray(SALT_SIZE).apply { SecureRandom().nextBytes(this) }
             val iv = ByteArray(IV_SIZE).apply { SecureRandom().nextBytes(this) }
 
-            val key = deriveKey(passphrase, salt, AES_KEY_SIZE, PBKDF2_ITERATIONS_HARDENED)
+            val key = deriveKey(passphrase, salt, AES_KEY_SIZE, iterations)
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(TAG_SIZE, iv))
 
@@ -224,6 +249,39 @@ object CryptoManager {
             if (hardened.second) return hardened
         }
         return decodeSaltedLayout(combined, passphrase, PBKDF2_ITERATIONS)
+    }
+
+    /**
+     * Explicit-work-factor decrypt for self-describing containers. Unlike
+     * [decryptWithPassphrase] it never falls back to a different iteration
+     * count, so a file claiming 600k iterations cannot be downgraded to 65k by
+     * an attacker flipping a byte in the envelope.
+     */
+    fun decryptWithPassphraseAtIterations(
+        combinedBase64: String,
+        passphrase: CharArray,
+        iterations: Int,
+    ): Pair<String, Boolean> {
+        if (iterations !in MIN_PASSPHRASE_ITERATIONS..MAX_PASSPHRASE_ITERATIONS) {
+            return Pair("Unsupported KDF work factor", false)
+        }
+        val cleaned = combinedBase64.trim().replace(Regex("\\s"), "")
+        if (cleaned.isEmpty()) return Pair("Malformed encrypted data", false)
+        val combined = try {
+            try {
+                Base64.decode(cleaned, Base64.DEFAULT)
+            } catch (_: Exception) {
+                Base64.decode(cleaned, Base64.NO_WRAP)
+            }
+        } catch (_: Exception) {
+            return Pair("Malformed encrypted data", false)
+        }
+        val payload = if (combined.isNotEmpty() && combined[0] == HARDENED_FORMAT_MARKER) {
+            combined.copyOfRange(1, combined.size)
+        } else {
+            combined
+        }
+        return decodeSaltedLayout(payload, passphrase, iterations)
     }
 
     /**

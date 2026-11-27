@@ -667,6 +667,33 @@ object DatabaseModule {
     }
 
     /**
+     * Additive plaintext vault (see [com.frerox.toolz.data.whisper.WhisperPlaintextVault]).
+     * No existing table is touched, so a failed/partial upgrade cannot lose
+     * message ciphertext or self-read copies.
+     */
+    internal val WHISPER_MIGRATION_2_3 = object : Migration(2, 3) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `whisper_plaintext_vault` (" +
+                    "`messageId` TEXT NOT NULL, " +
+                    "`ownerId` TEXT NOT NULL, " +
+                    "`contentHash` TEXT NOT NULL, " +
+                    "`sealed` TEXT NOT NULL, " +
+                    "`createdAtMs` INTEGER NOT NULL, " +
+                    "PRIMARY KEY(`messageId`))",
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_whisper_plaintext_vault_ownerId_contentHash` " +
+                    "ON `whisper_plaintext_vault` (`ownerId`, `contentHash`)",
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_whisper_plaintext_vault_ownerId_createdAtMs` " +
+                    "ON `whisper_plaintext_vault` (`ownerId`, `createdAtMs`)",
+            )
+        }
+    }
+
+    /**
      * Dedicated encrypted Whisper store. Depends on [AppDatabase] so the v69
      * migration has already run before [WhisperLegacyImporter] reads the legacy
      * tables; the import itself is idempotent and safe to retry.
@@ -693,7 +720,7 @@ object DatabaseModule {
             dbName,
         )
             .openHelperFactory(factory)
-            .addMigrations(WHISPER_MIGRATION_1_2)
+            .addMigrations(WHISPER_MIGRATION_1_2, WHISPER_MIGRATION_2_3)
             .fallbackToDestructiveMigrationOnDowngrade()
             // Privacy: a messenger deletes messages, tombstones, expired stories
             // and soon-expired self-read copies. secure_delete makes SQLite
@@ -800,6 +827,14 @@ object DatabaseModule {
     @Provides
     fun provideWhisperSelfReadDao(database: WhisperDatabase): com.frerox.toolz.data.whisper.WhisperSelfReadDao {
         return database.whisperSelfReadDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideWhisperPlaintextVaultDao(
+        database: WhisperDatabase,
+    ): com.frerox.toolz.data.whisper.WhisperPlaintextVaultDao {
+        return database.whisperPlaintextVaultDao()
     }
 
     @Provides

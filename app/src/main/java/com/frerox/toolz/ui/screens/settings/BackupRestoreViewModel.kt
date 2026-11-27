@@ -25,8 +25,12 @@ import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.R
 import com.frerox.toolz.data.backup.BackupCategory
 import com.frerox.toolz.data.backup.BackupExportResult
+import com.frerox.toolz.data.backup.BackupHistoryRequiresPasswordException
 import com.frerox.toolz.data.backup.BackupImportResult
 import com.frerox.toolz.data.backup.BackupItem
+import com.frerox.toolz.data.backup.BackupPasswordRequiredException
+import com.frerox.toolz.data.backup.BackupProtection
+import com.frerox.toolz.data.backup.BackupWrongPasswordException
 import com.frerox.toolz.data.backup.LocalBackupManager
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.util.NotificationHelper
@@ -51,7 +55,11 @@ data class BackupRestoreUiState(
     val backupFrequency: String = "Never",
     val customAutoBackupDays: Int = 1,
     val backupNotifications: Boolean = true,
-    val selectedItems: Set<BackupItem> = BackupItem.entries.toSet()
+    val selectedItems: Set<BackupItem> = BackupItem.entries.toSet(),
+    /** Set when a picked archive is encrypted and the UI must ask for its password. */
+    val pendingEncryptedRestore: Uri? = null,
+    /** True when the last completed export used password protection. */
+    val lastExportEncrypted: Boolean = false,
 )
 
 @HiltViewModel
@@ -127,7 +135,7 @@ class BackupRestoreViewModel @Inject constructor(
         repository.setBackupNotifications(enabled)
     }
 
-    fun createBackup() = viewModelScope.launch {
+    fun createBackup(protection: BackupProtection = BackupProtection.None) = viewModelScope.launch {
         if (_uiState.value.selectedItems.isEmpty()) {
             withContext(Dispatchers.Main) {
                 Toast.makeText(context, context.getString(R.string.st_Backup_Select_AtLeastOne), Toast.LENGTH_SHORT).show()
@@ -139,9 +147,14 @@ class BackupRestoreViewModel @Inject constructor(
         try {
             val result = localBackupManager.exportReusableBackup(
                 reason = "manual",
-                items = _uiState.value.selectedItems
+                items = _uiState.value.selectedItems,
+                protection = protection,
             )
-            _uiState.value = _uiState.value.copy(isExporting = false, exportResult = result)
+            _uiState.value = _uiState.value.copy(
+                isExporting = false,
+                exportResult = result,
+                lastExportEncrypted = result.encrypted,
+            )
             vibrationManager.vibrateSuccess()
             NotificationHelper.showBackupSuccess(context, result.fileName)
             withContext(Dispatchers.Main) {
@@ -149,13 +162,36 @@ class BackupRestoreViewModel @Inject constructor(
             }
         } catch (e: Exception) {
             e.printStackTrace()
-            _uiState.value = _uiState.value.copy(isExporting = false, error = e.localizedMessage)
+            val message = when (e) {
+                is BackupHistoryRequiresPasswordException ->
+                    context.getString(R.string.st_Backup_History_RequiresPassword)
+                else -> e.localizedMessage
+            }
+            _uiState.value = _uiState.value.copy(isExporting = false, error = message)
             vibrationManager.vibrateError()
-            NotificationHelper.showBackupFailure(context, e.localizedMessage)
+            NotificationHelper.showBackupFailure(context, message)
         }
     }
 
-    fun restoreBackup(uri: Uri) = viewModelScope.launch {
+    /**
+     * Called as soon as the user picks a file. Encrypted archives are parked in
+     * [BackupRestoreUiState.pendingEncryptedRestore] so the screen can ask for
+     * the password; plain archives restore immediately.
+     */
+    fun prepareRestore(uri: Uri) = viewModelScope.launch {
+        val encrypted = runCatching { localBackupManager.isEncryptedBackup(uri) }.getOrDefault(false)
+        if (encrypted) {
+            _uiState.value = _uiState.value.copy(pendingEncryptedRestore = uri, error = null)
+        } else {
+            restoreBackup(uri, secret = null)
+        }
+    }
+
+    fun cancelPendingRestore() {
+        _uiState.value = _uiState.value.copy(pendingEncryptedRestore = null)
+    }
+
+    fun restoreBackup(uri: Uri, secret: String? = null) = viewModelScope.launch {
         if (_uiState.value.selectedItems.isEmpty()) {
             withContext(Dispatchers.Main) {
                 Toast.makeText(context, context.getString(R.string.st_Backup_Restore_AtLeastOne), Toast.LENGTH_SHORT).show()
@@ -163,11 +199,17 @@ class BackupRestoreViewModel @Inject constructor(
             return@launch
         }
 
-        _uiState.value = _uiState.value.copy(isImporting = true, error = null, importResult = null)
+        _uiState.value = _uiState.value.copy(
+            isImporting = true,
+            error = null,
+            importResult = null,
+            pendingEncryptedRestore = null,
+        )
         try {
             val result = localBackupManager.importReusableBackup(
                 uri = uri,
-                itemsToRestore = _uiState.value.selectedItems
+                itemsToRestore = _uiState.value.selectedItems,
+                secret = secret,
             )
             _uiState.value = _uiState.value.copy(isImporting = false, importResult = result)
             vibrationManager.vibrateSuccess()
@@ -177,9 +219,14 @@ class BackupRestoreViewModel @Inject constructor(
             }
         } catch (e: Exception) {
             e.printStackTrace()
-            _uiState.value = _uiState.value.copy(isImporting = false, error = e.localizedMessage)
+            val message = when (e) {
+                is BackupWrongPasswordException -> context.getString(R.string.st_Backup_Unlock_Wrong)
+                is BackupPasswordRequiredException -> context.getString(R.string.st_Backup_Unlock_Required)
+                else -> e.localizedMessage
+            }
+            _uiState.value = _uiState.value.copy(isImporting = false, error = message)
             vibrationManager.vibrateError()
-            NotificationHelper.showRestoreFailure(context, e.localizedMessage)
+            NotificationHelper.showRestoreFailure(context, message)
         }
     }
 }

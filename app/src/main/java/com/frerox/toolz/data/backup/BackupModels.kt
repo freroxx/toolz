@@ -18,6 +18,7 @@
 package com.frerox.toolz.data.backup
 
 import android.net.Uri
+import com.frerox.toolz.util.secure.SecureContainer
 import com.squareup.moshi.JsonClass
 
 @JsonClass(generateAdapter = true)
@@ -58,6 +59,7 @@ enum class BackupItem(val displayName: String, val category: BackupCategory) {
     
     WHISPER_ACCESS("Whisper Access Files", BackupCategory.WHISPER),
     WHISPER_STATE("Whisper Local State", BackupCategory.WHISPER),
+    WHISPER_HISTORY("Whisper Message History", BackupCategory.WHISPER),
     
     SETTINGS("App Preferences", BackupCategory.SYSTEM),
     STEPS("Step Counter Data", BackupCategory.SYSTEM),
@@ -67,12 +69,45 @@ enum class BackupItem(val displayName: String, val category: BackupCategory) {
     OTHERS("Miscellaneous Data", BackupCategory.SYSTEM)
 }
 
+/**
+ * How the outer backup archive is protected.
+ *
+ * [None] keeps the historical plain `.tzbk` zip (the UI warns that it contains
+ * plaintext secrets). [Secret] wraps the whole zip in an authenticated
+ * [com.frerox.toolz.util.secure.SecureContainer] so the archive is unreadable
+ * without the user's PIN/password.
+ */
+sealed interface BackupProtection {
+    data object None : BackupProtection
+    data class Secret(
+        val value: String,
+        val mode: SecureContainer.SecretMode,
+    ) : BackupProtection
+}
+
+/** The picked archive is encrypted and the caller did not supply a secret. */
+class BackupPasswordRequiredException :
+    IllegalArgumentException("This backup is password protected.")
+
+/** The supplied secret did not open the encrypted archive. */
+class BackupWrongPasswordException :
+    IllegalArgumentException("Incorrect backup password.")
+
+/**
+ * Whisper history contains readable message text, so it is only exported inside
+ * a password-protected container. Plain `.tzbk` archives keep their historical
+ * behaviour and simply omit it.
+ */
+class BackupHistoryRequiresPasswordException :
+    IllegalArgumentException("Whisper history requires a backup password.")
+
 data class BackupExportResult(
     val uri: Uri,
     val fileName: String,
     val sha256: String,
     val byteCount: Long,
-    val entryCount: Int
+    val entryCount: Int,
+    val encrypted: Boolean = false,
 )
 
 data class BackupImportResult(
@@ -82,7 +117,9 @@ data class BackupImportResult(
     // CAL-P3 (additive): future calendar alarms re-scheduled after CALENDAR restore.
     val rescheduledCalendarAlarms: Int = 0,
     // T-P0-03 (additive): future task alarms re-scheduled after TASKS restore.
-    val rescheduledTaskAlarms: Int = 0
+    val rescheduledTaskAlarms: Int = 0,
+    // True when the archive was opened from a password-protected container.
+    val wasEncrypted: Boolean = false,
 )
 
 // ── Clipboard backup v2 ─────────────────────────────────────────────────────

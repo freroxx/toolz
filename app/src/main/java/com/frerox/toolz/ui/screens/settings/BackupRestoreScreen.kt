@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -41,6 +42,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -50,7 +53,9 @@ import androidx.core.net.toUri
 import com.frerox.toolz.R
 import com.frerox.toolz.data.backup.BackupCategory
 import com.frerox.toolz.data.backup.BackupItem
+import com.frerox.toolz.data.backup.BackupProtection
 import com.frerox.toolz.ui.components.*
+import com.frerox.toolz.util.secure.SecureContainer
 
 /**
  * Custom contract to support initial directory hint.
@@ -91,13 +96,14 @@ fun BackupRestoreScreen(
     LaunchedEffect(initialRestoreUri) {
         if (!initialRestoreUri.isNullOrEmpty()) {
             try {
-                viewModel.restoreBackup(android.net.Uri.parse(initialRestoreUri))
+                viewModel.prepareRestore(android.net.Uri.parse(initialRestoreUri))
             } catch (e: Exception) {
                 e.printStackTrace()
             }
         }
     }
     var showCustomIntervalDialog by remember { mutableStateOf(false) }
+    var showProtectionDialog by remember { mutableStateOf(false) }
 
     // Directory hint: points the picker at Documents/Toolz_Backups.
     val initialUri = remember {
@@ -107,7 +113,7 @@ fun BackupRestoreScreen(
     val backupPicker = rememberLauncherForActivityResult(
         contract = OpenDocumentWithInitial(initialUri)
     ) { uri: Uri? ->
-        uri?.let { viewModel.restoreBackup(it) }
+        uri?.let { viewModel.prepareRestore(it) }
     }
 
     Scaffold(
@@ -149,7 +155,7 @@ fun BackupRestoreScreen(
                     isExporting = uiState.isExporting,
                     isImporting = uiState.isImporting,
                     progress = uiState.progress,
-                    onCreateBackup = { viewModel.createBackup() },
+                    onCreateBackup = { showProtectionDialog = true },
                     onRestoreFile = {
                         backupPicker.launch(arrayOf("application/octet-stream", "*/*"))
                     }
@@ -201,6 +207,232 @@ fun BackupRestoreScreen(
             }
         )
     }
+
+    if (showProtectionDialog) {
+        BackupProtectionDialog(
+            historySelected = uiState.selectedItems.contains(BackupItem.WHISPER_HISTORY),
+            onDismiss = { showProtectionDialog = false },
+            onConfirm = { protection ->
+                showProtectionDialog = false
+                viewModel.createBackup(protection)
+            },
+        )
+    }
+
+    uiState.pendingEncryptedRestore?.let { uri ->
+        BackupUnlockDialog(
+            onDismiss = { viewModel.cancelPendingRestore() },
+            onConfirm = { secret -> viewModel.restoreBackup(uri, secret) },
+        )
+    }
+}
+
+/**
+ * Chooses whether the archive is plain or wrapped in an authenticated
+ * container. The PIN option stays for parity with Whisper access files but
+ * warns about its small search space; a password is the recommended choice.
+ */
+private enum class ProtectionChoice { NONE, PIN, PASSWORD }
+
+@Composable
+private fun BackupProtectionDialog(
+    historySelected: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: (BackupProtection) -> Unit,
+) {
+    var choice by remember { mutableStateOf(ProtectionChoice.PASSWORD) }
+    var secret by remember { mutableStateOf("") }
+    var confirm by remember { mutableStateOf("") }
+    val mode = if (choice == ProtectionChoice.PIN) {
+        SecureContainer.SecretMode.PIN
+    } else {
+        SecureContainer.SecretMode.PASSWORD
+    }
+    val assessment = SecureContainer.assessSecret(secret, mode)
+    val mismatch = confirm.isNotEmpty() && secret != confirm
+    val needsSecret = choice != ProtectionChoice.NONE
+    val canSubmit = !needsSecret || (assessment.valid && secret == confirm)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(28.dp),
+        icon = { Icon(Icons.Rounded.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+        title = { Text(stringResource(R.string.st_Backup_Protect_Title), fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    stringResource(R.string.st_Backup_Protect_Desc),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (!historySelected) {
+                        FilterChip(
+                            selected = choice == ProtectionChoice.NONE,
+                            onClick = { choice = ProtectionChoice.NONE; secret = ""; confirm = "" },
+                            label = { Text(stringResource(R.string.st_Backup_Protect_NoPassword)) },
+                        )
+                    }
+                    FilterChip(
+                        selected = choice == ProtectionChoice.PIN,
+                        onClick = { choice = ProtectionChoice.PIN; secret = ""; confirm = "" },
+                        label = { Text(stringResource(R.string.st_Backup_Protect_Pin)) },
+                    )
+                    FilterChip(
+                        selected = choice == ProtectionChoice.PASSWORD,
+                        onClick = { choice = ProtectionChoice.PASSWORD; secret = ""; confirm = "" },
+                        label = { Text(stringResource(R.string.st_Backup_Protect_Password)) },
+                    )
+                }
+                if (historySelected) {
+                    Text(
+                        stringResource(R.string.st_Backup_History_RequiresPasswordHint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (needsSecret) {
+                    OutlinedTextField(
+                        value = secret,
+                        onValueChange = {
+                            secret = if (choice == ProtectionChoice.PASSWORD) {
+                                it.take(256)
+                            } else {
+                                it.filter(Char::isDigit).take(6)
+                            }
+                        },
+                        label = {
+                            Text(
+                                stringResource(
+                                    if (choice == ProtectionChoice.PASSWORD) {
+                                        R.string.st_Backup_Protect_PasswordLabel
+                                    } else {
+                                        R.string.st_Backup_Protect_PinLabel
+                                    }
+                                )
+                            )
+                        },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = if (choice == ProtectionChoice.PASSWORD) {
+                                KeyboardType.Password
+                            } else {
+                                KeyboardType.NumberPassword
+                            },
+                        ),
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = confirm,
+                        onValueChange = {
+                            confirm = if (choice == ProtectionChoice.PASSWORD) {
+                                it.take(256)
+                            } else {
+                                it.filter(Char::isDigit).take(6)
+                            }
+                        },
+                        label = { Text(stringResource(R.string.st_Backup_Protect_ConfirmLabel)) },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = if (choice == ProtectionChoice.PASSWORD) {
+                                KeyboardType.Password
+                            } else {
+                                KeyboardType.NumberPassword
+                            },
+                        ),
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                when {
+                    needsSecret && mismatch -> Text(
+                        stringResource(R.string.st_Backup_Protect_Mismatch),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    needsSecret && assessment.warning == SecureContainer.SecretWarning.WEAK_PIN -> Text(
+                        stringResource(R.string.st_Backup_Protect_WeakPin),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    needsSecret && assessment.warning == SecureContainer.SecretWarning.SHORT_PASSWORD -> Text(
+                        stringResource(R.string.st_Backup_Protect_ShortPassword),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    !needsSecret -> Text(
+                        stringResource(R.string.st_Backup_Protect_PlainWarning),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            ToolzExpressiveButton(
+                onClick = {
+                    onConfirm(
+                        if (needsSecret) {
+                            BackupProtection.Secret(value = secret, mode = mode)
+                        } else {
+                            BackupProtection.None
+                        }
+                    )
+                },
+                enabled = canSubmit,
+            ) { Text(stringResource(R.string.st_Backup_Protect_Create), fontWeight = FontWeight.Bold) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.st_Common_Cancel))
+            }
+        },
+    )
+}
+
+@Composable
+private fun BackupUnlockDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var secret by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(28.dp),
+        icon = { Icon(Icons.Rounded.Key, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+        title = { Text(stringResource(R.string.st_Backup_Unlock_Title), fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    stringResource(R.string.st_Backup_Unlock_Desc),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = secret,
+                    onValueChange = { secret = it.take(256) },
+                    label = { Text(stringResource(R.string.st_Backup_Unlock_Label)) },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            ToolzExpressiveButton(
+                onClick = { onConfirm(secret) },
+                enabled = secret.isNotBlank(),
+            ) { Text(stringResource(R.string.st_Backup_Unlock_Action), fontWeight = FontWeight.Bold) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.st_Common_Cancel)) }
+        },
+    )
 }
 
 @Composable
@@ -323,6 +555,7 @@ private fun CategorySelectionCard(
                         BackupItem.CLIPBOARD -> R.string.st_Backup_Item_Clipboard
                         BackupItem.WHISPER_ACCESS -> R.string.st_Backup_Item_WhisperAccess
                         BackupItem.WHISPER_STATE -> R.string.st_Backup_Item_WhisperState
+                        BackupItem.WHISPER_HISTORY -> R.string.st_Backup_Item_WhisperHistory
                         BackupItem.SETTINGS -> R.string.st_Backup_Item_Settings
                         BackupItem.STEPS -> R.string.st_Backup_Item_Steps
                         BackupItem.MATH_HISTORY -> R.string.st_Backup_Item_MathHistory

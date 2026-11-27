@@ -57,6 +57,8 @@ import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.data.steps.StepEntry
 import com.frerox.toolz.data.todo.TaskEntry
 import com.frerox.toolz.util.security.KeyManager
+import com.frerox.toolz.util.secure.AppBinding
+import com.frerox.toolz.util.secure.SecureContainer
 import com.squareup.moshi.JsonAdapter
 import com.frerox.toolz.R
 import com.squareup.moshi.Moshi
@@ -91,7 +93,10 @@ class LocalBackupManager @Inject constructor(
     // Restore honors the user's configured per-item quota.
     private val settingsRepository: SettingsRepository,
     // T-P0-03 (additive): TASKS restore must reschedule (alarms don't survive export).
-    private val taskScheduler: com.frerox.toolz.util.TaskAlarmScheduler
+    private val taskScheduler: com.frerox.toolz.util.TaskAlarmScheduler,
+    // Whisper history transfer: plaintext this device already opened, written
+    // inside the password-protected container and re-sealed on restore.
+    private val whisperHistoryArchive: com.frerox.toolz.data.whisper.WhisperHistoryArchive,
 ) {
     private val manifestAdapter = moshi.adapter(ToolzBackupManifest::class.java)
     private val clipboardV2Adapter = moshi.adapter(ClipboardBackupV2::class.java)
@@ -107,7 +112,8 @@ class LocalBackupManager @Inject constructor(
 
     suspend fun exportReusableBackup(
         reason: String = "manual",
-        items: Set<BackupItem> = BackupItem.entries.toSet()
+        items: Set<BackupItem> = BackupItem.entries.toSet(),
+        protection: BackupProtection = BackupProtection.None,
     ): BackupExportResult = withContext(Dispatchers.IO) {
         _progress.value = context.getString(R.string.st_Backup_Progress_Preparing)
         checkpointDatabase()
@@ -186,6 +192,26 @@ class LocalBackupManager @Inject constructor(
                 }
             }
 
+            // 4b. Whisper message history (cross-device plaintext transfer).
+            // Only inside a password-protected container: the archive carries
+            // readable message text, so an unprotected zip must never hold it.
+            if (items.contains(BackupItem.WHISPER_HISTORY)) {
+                if (protection !is BackupProtection.Secret) {
+                    throw BackupHistoryRequiresPasswordException()
+                }
+                _progress.value = context.getString(R.string.st_Backup_Progress_WhisperHistory)
+                val historyFile = File(stagingDir, "$fileName.history.jsonl").apply {
+                    if (exists()) delete()
+                }
+                val count = FileOutputStream(historyFile).use { output ->
+                    whisperHistoryArchive.exportTo(output)
+                }
+                if (count > 0) {
+                    addFileEntry(zip, historyFile, com.frerox.toolz.data.whisper.WhisperHistoryArchive.ENTRY_PATH, entryHashes)
+                }
+                historyFile.delete()
+            }
+
             // 5. Files & Settings (Selective)
             if (items.contains(BackupItem.SETTINGS)) {
                 addDirectory(
@@ -228,20 +254,54 @@ class LocalBackupManager @Inject constructor(
                 databaseSchemaVersion = AppDatabase::class.java.getAnnotation(androidx.room.Database::class.java)?.version ?: -1,
                 entryHashes = entryHashes,
                 includedItems = items,
-                notes = listOf(
-                    "reason=$reason",
-                    "Selective backup enabled.",
-                    "EncryptedSharedPreferences are exported as portable decrypted sections when needed.",
-                    "WARNING: this archive contains plaintext secrets (passwords + SQLCipher passphrase when database items are included). Store it securely."
-                )
+                notes = buildList {
+                    add("reason=$reason")
+                    add("Selective backup enabled.")
+                    add("EncryptedSharedPreferences are exported as portable decrypted sections when needed.")
+                    if (protection is BackupProtection.Secret) {
+                        add("This archive is protected with AES-256-GCM. The password is not recoverable by Toolz.")
+                    } else {
+                        add("WARNING: this archive contains plaintext secrets (passwords + SQLCipher passphrase when database items are included). Store it securely.")
+                    }
+                    if (items.contains(BackupItem.WHISPER_HISTORY)) {
+                        add("Whisper message history is included inside this archive and re-encrypted on restore.")
+                    }
+                }
             )
             addTextEntry(zip, "manifest.json", manifestAdapter.toJson(manifest), entryHashes = null)
         }
 
         verifyZip(tempZip)
-        val payloadHash = sha256(tempZip)
-        val destination = publishToDocuments(tempZip, fileName)
-        tempZip.delete()
+
+        // Password protection wraps the already-verified zip as a streaming
+        // AES-GCM container. Nothing plaintext leaves the staging directory.
+        val encrypted = protection is BackupProtection.Secret
+        val payloadFile = if (protection is BackupProtection.Secret) {
+            val assessment = SecureContainer.assessSecret(protection.value, protection.mode)
+            require(assessment.valid) { "Choose a valid backup password." }
+            _progress.value = context.getString(R.string.st_Backup_Progress_Encrypting)
+            val encryptedFile = File(stagingDir, "$fileName.enc.partial").apply {
+                if (exists()) delete()
+            }
+            FileInputStream(tempZip).use { input ->
+                FileOutputStream(encryptedFile).use { output ->
+                    SecureContainer.sealStream(
+                        input = input,
+                        output = output,
+                        secret = protection.value,
+                        binding = AppBinding.of(context),
+                    )
+                }
+            }
+            tempZip.delete()
+            encryptedFile
+        } else {
+            tempZip
+        }
+
+        val payloadHash = sha256(payloadFile)
+        val destination = publishToDocuments(payloadFile, fileName)
+        payloadFile.delete()
 
         val pfd = context.contentResolver.openFileDescriptor(destination, "r")
         val size = pfd?.use { it.statSize } ?: 0L
@@ -251,7 +311,8 @@ class LocalBackupManager @Inject constructor(
             fileName = fileName,
             sha256 = payloadHash,
             byteCount = size,
-            entryCount = entryHashes.size
+            entryCount = entryHashes.size,
+            encrypted = encrypted,
         )
     }
 
@@ -420,7 +481,8 @@ class LocalBackupManager @Inject constructor(
 
     suspend fun importReusableBackup(
         uri: Uri,
-        itemsToRestore: Set<BackupItem> = BackupItem.entries.toSet()
+        itemsToRestore: Set<BackupItem> = BackupItem.entries.toSet(),
+        secret: String? = null,
     ): BackupImportResult = withContext(Dispatchers.IO) {
         _progress.value = context.getString(R.string.st_Backup_Progress_Opening)
         val stagingFile = File(context.cacheDir, "toolz_restore_${System.currentTimeMillis()}.tzbk")
@@ -428,6 +490,71 @@ class LocalBackupManager @Inject constructor(
             FileOutputStream(stagingFile).use { output -> input.copyTo(output) }
         } ?: throw IllegalArgumentException("Unable to open backup: $uri")
 
+        // Detect the encrypted outer container before touching the zip. A plain
+        // legacy archive starts with "PK"; an encrypted one starts with the
+        // SecureContainer magic.
+        val encrypted = runCatching {
+            java.io.BufferedInputStream(FileInputStream(stagingFile)).use {
+                SecureContainer.isBinaryContainer(it)
+            }
+        }.getOrDefault(false)
+
+        val zipFileToRead = if (encrypted) {
+            if (secret.isNullOrBlank()) {
+                stagingFile.delete()
+                throw BackupPasswordRequiredException()
+            }
+            val decrypted = File(context.cacheDir, "toolz_restore_plain_${System.currentTimeMillis()}.tzbk")
+            try {
+                FileInputStream(stagingFile).use { input ->
+                    FileOutputStream(decrypted).use { output ->
+                        SecureContainer.openStream(
+                            input = input,
+                            output = output,
+                            secret = secret,
+                            binding = AppBinding.of(context),
+                        )
+                    }
+                }
+            } catch (e: SecureContainer.WrongSecretException) {
+                decrypted.delete()
+                stagingFile.delete()
+                throw BackupWrongPasswordException()
+            } catch (e: SecureContainer.MalformedContainerException) {
+                decrypted.delete()
+                stagingFile.delete()
+                throw IllegalArgumentException("This backup file is corrupted.")
+            }
+            stagingFile.delete()
+            decrypted
+        } else {
+            stagingFile
+        }
+
+        try {
+            return@withContext restoreFromZip(zipFileToRead, itemsToRestore, encrypted)
+        } finally {
+            zipFileToRead.delete()
+        }
+    }
+
+    /**
+     * Returns true when [uri] points at an encrypted Toolz backup. The UI uses
+     * this to ask for the password before starting a restore.
+     */
+    suspend fun isEncryptedBackup(uri: Uri): Boolean = withContext(Dispatchers.IO) {
+        runCatching {
+            context.contentResolver.openInputStream(uri)?.use { raw ->
+                java.io.BufferedInputStream(raw).use { SecureContainer.isBinaryContainer(it) }
+            } ?: false
+        }.getOrDefault(false)
+    }
+
+    private suspend fun restoreFromZip(
+        stagingFile: File,
+        itemsToRestore: Set<BackupItem>,
+        wasEncrypted: Boolean,
+    ): BackupImportResult {
         val manifest = readAndVerifyManifest(stagingFile)
         require(manifest.appPackageName == context.packageName) {
             "Backup package ${manifest.appPackageName} does not match ${context.packageName}"
@@ -493,6 +620,13 @@ class LocalBackupManager @Inject constructor(
                         restoreEntry(zipFile, entry.name, File(context.dataDir, "shared_prefs"), "whisper/prefs")
                         restoredEntries++
                     }
+                    entry.name == com.frerox.toolz.data.whisper.WhisperHistoryArchive.ENTRY_PATH &&
+                        itemsToRestore.contains(BackupItem.WHISPER_HISTORY) -> {
+                        val imported = zipFile.getInputStream(entry).use { input ->
+                            whisperHistoryArchive.importFrom(input)
+                        }
+                        if (imported > 0) restoredEntries++
+                    }
                     entry.name.startsWith("files/") && itemsToRestore.contains(BackupItem.OTHERS) -> {
                         restoreEntry(zipFile, entry.name, context.filesDir, "files")
                         restoredEntries++
@@ -512,11 +646,12 @@ class LocalBackupManager @Inject constructor(
         }
 
         stagingFile.delete()
-        BackupImportResult(
+        return BackupImportResult(
             manifest = manifest,
             restoredEntries = restoredEntries,
             rescheduledCalendarAlarms = rescheduledCalendarAlarms,
-            rescheduledTaskAlarms = rescheduledTaskAlarms
+            rescheduledTaskAlarms = rescheduledTaskAlarms,
+            wasEncrypted = wasEncrypted,
         )
     }
 
