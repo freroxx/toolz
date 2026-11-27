@@ -741,7 +741,14 @@ internal fun ProfileTab(
             }
         }
 
-        // ═══ 5. DANGER ZONE — logout (common) first, deletion last ═══
+        // ═══ 5. DEVICES ═══
+        DevicesSection(
+            uiState = uiState,
+            viewModel = viewModel,
+            toastState = toastState,
+        )
+
+        // ═══ 6. DANGER ZONE — logout (common) first, deletion last ═══
         SectionHeader(stringResource(R.string.st_Whisper_Section_DangerZone))
 
         // Logout — plain tap opens the confirmation dialog; the old hidden "hold 3s"
@@ -807,13 +814,20 @@ internal fun ProfileTab(
 
     // AUBUP Create Access File Dialog
     if (showCreateAccessFileDialog) {
+        var usePassword by remember { mutableStateOf(false) }
         var whisperCode by remember { mutableStateOf("") }
         var confirmWhisperCode by remember { mutableStateOf("") }
         var codeError by remember { mutableStateOf<String?>(null) }
         var isCreating by remember { mutableStateOf(false) }
 
+        val secretMode = if (usePassword) {
+            com.frerox.toolz.util.secure.SecureContainer.SecretMode.PASSWORD
+        } else {
+            com.frerox.toolz.util.secure.SecureContainer.SecretMode.PIN
+        }
+        val assessment = com.frerox.toolz.util.secure.SecureContainer.assessSecret(whisperCode, secretMode)
         val codeMismatchMsg = stringResource(R.string.st_Whisper_Aubup_CodeMismatch)
-        val codeLengthMsg = stringResource(R.string.st_Whisper_Aubup_CodeLengthError)
+        val canSubmit = assessment.valid && whisperCode == confirmWhisperCode && !isCreating
 
         AlertDialog(
             onDismissRequest = { if (!isCreating) showCreateAccessFileDialog = false },
@@ -841,16 +855,37 @@ internal fun ProfileTab(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = !usePassword,
+                            onClick = { usePassword = false; whisperCode = ""; confirmWhisperCode = ""; codeError = null },
+                            label = { Text(stringResource(R.string.st_Whisper_Aubup_SecretModePin)) },
+                        )
+                        FilterChip(
+                            selected = usePassword,
+                            onClick = { usePassword = true; whisperCode = ""; confirmWhisperCode = ""; codeError = null },
+                            label = { Text(stringResource(R.string.st_Whisper_Aubup_SecretModePassword)) },
+                        )
+                    }
+
                     OutlinedTextField(
                         value = whisperCode,
                         onValueChange = {
-                            if (it.length <= 6 && it.all { c -> c.isDigit() }) {
-                                whisperCode = it
-                                codeError = null
-                            }
+                            val next = if (usePassword) it.take(256) else it.filter(Char::isDigit).take(6)
+                            whisperCode = next
+                            codeError = null
                         },
-                        label = { Text(stringResource(R.string.st_Whisper_Aubup_WhisperCodeLabel)) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                        label = {
+                            Text(
+                                stringResource(
+                                    if (usePassword) R.string.st_Whisper_Aubup_PasswordLabel
+                                    else R.string.st_Whisper_Aubup_WhisperCodeLabel
+                                )
+                            )
+                        },
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = if (usePassword) KeyboardType.Password else KeyboardType.NumberPassword
+                        ),
                         visualTransformation = PasswordVisualTransformation(),
                         singleLine = true,
                         shape = MediumExpressiveShape,
@@ -860,25 +895,49 @@ internal fun ProfileTab(
                     OutlinedTextField(
                         value = confirmWhisperCode,
                         onValueChange = {
-                            if (it.length <= 6 && it.all { c -> c.isDigit() }) {
-                                confirmWhisperCode = it
-                                codeError = null
-                            }
+                            val next = if (usePassword) it.take(256) else it.filter(Char::isDigit).take(6)
+                            confirmWhisperCode = next
+                            codeError = null
                         },
-                        label = { Text(stringResource(R.string.st_Whisper_Aubup_ConfirmCodeLabel)) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                        label = {
+                            Text(
+                                stringResource(
+                                    if (usePassword) R.string.st_Whisper_Aubup_ConfirmPasswordLabel
+                                    else R.string.st_Whisper_Aubup_ConfirmCodeLabel
+                                )
+                            )
+                        },
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = if (usePassword) KeyboardType.Password else KeyboardType.NumberPassword
+                        ),
                         visualTransformation = PasswordVisualTransformation(),
                         singleLine = true,
                         shape = MediumExpressiveShape,
                         modifier = Modifier.fillMaxWidth()
                     )
 
-                    if (codeError != null) {
-                        Text(
+                    when {
+                        codeError != null -> Text(
                             text = codeError!!,
                             color = MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.SemiBold
+                        )
+                        confirmWhisperCode.isNotEmpty() && whisperCode != confirmWhisperCode -> Text(
+                            text = codeMismatchMsg,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        !usePassword -> Text(
+                            text = stringResource(R.string.st_Whisper_Aubup_PinWeakWarning),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        assessment.warning == com.frerox.toolz.util.secure.SecureContainer.SecretWarning.SHORT_PASSWORD -> Text(
+                            text = stringResource(R.string.st_Whisper_Aubup_PasswordShortHint),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall
                         )
                     }
                 }
@@ -886,8 +945,12 @@ internal fun ProfileTab(
             confirmButton = {
                 ToolzExpressiveButton(
                     onClick = {
-                        if (whisperCode.length != 6) {
-                            codeError = codeLengthMsg
+                        if (!assessment.valid) {
+                            codeError = if (usePassword) {
+                                context.getString(R.string.st_Whisper_Aubup_PasswordShortError)
+                            } else {
+                                context.getString(R.string.st_Whisper_Aubup_CodeLengthError)
+                            }
                             return@ToolzExpressiveButton
                         }
                         if (whisperCode != confirmWhisperCode) {
@@ -897,6 +960,7 @@ internal fun ProfileTab(
                         isCreating = true
                         viewModel.createAccessFile(
                             whisperCode = whisperCode,
+                            secretMode = secretMode,
                             onSuccess = { file ->
                                 isCreating = false
                                 showCreateAccessFileDialog = false
@@ -918,7 +982,7 @@ internal fun ProfileTab(
                             }
                         )
                     },
-                    enabled = whisperCode.length == 6 && confirmWhisperCode.length == 6 && !isCreating
+                    enabled = canSubmit
                 ) {
                     if (isCreating) {
                         CircularProgressIndicator(modifier = Modifier.size(16.dp), color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 2.dp)
@@ -1195,4 +1259,292 @@ internal fun ProfileTab(
             }
         )
     }
+}
+
+/**
+ * Connected installs for this account.
+ *
+ * The registry is owner-only server state; this section is pure inventory plus
+ * a disconnect action that requires re-proving the account secret. A missing
+ * backend (older deploy) degrades to a quiet "unavailable" line instead of
+ * blocking the rest of the profile.
+ */
+@Composable
+private fun DevicesSection(
+    uiState: WhisperUiState,
+    viewModel: WhisperViewModel,
+    toastState: WhisperToastState,
+) {
+    val haptic = rememberToolzHapticFeedback()
+    val context = LocalContext.current
+    var pendingDisconnect by remember { mutableStateOf<WhisperDevice?>(null) }
+
+    LaunchedEffect(Unit) { viewModel.refreshDevices() }
+
+    SectionHeader(stringResource(R.string.st_Whisper_Devices_Section))
+    ExpressiveCard(
+        onClick = {},
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(
+                    Icons.Rounded.Devices,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp),
+                )
+                Text(
+                    stringResource(R.string.st_Whisper_Devices_Title),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f),
+                )
+                ToolzExpressiveIconButton(onClick = {
+                    haptic.click()
+                    viewModel.refreshDevices()
+                }) {
+                    Icon(
+                        Icons.Rounded.Refresh,
+                        contentDescription = stringResource(R.string.st_Whisper_Devices_Refresh),
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                    )
+                }
+            }
+            Text(
+                stringResource(R.string.st_Whisper_Devices_Desc),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            when {
+                uiState.isLoadingDevices && uiState.devices.isEmpty() -> {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        contentAlignment = Alignment.Center,
+                    ) { ToolzLoadingIndicator() }
+                }
+                uiState.devices.isEmpty() -> Text(
+                    stringResource(
+                        if (uiState.devicesError != null) R.string.st_Whisper_Devices_Unavailable
+                        else R.string.st_Whisper_Devices_Empty
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                else -> {
+                    uiState.devices.forEach { device ->
+                        DeviceRow(
+                            device = device,
+                            onDisconnect = { pendingDisconnect = device },
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    pendingDisconnect?.let { device ->
+        DisconnectDeviceDialog(
+            device = device,
+            onDismiss = { pendingDisconnect = null },
+            onConfirm = { secret, done ->
+                viewModel.disconnectDevice(device.id, secret) { ok, error ->
+                    done(ok, error)
+                    if (ok) {
+                        pendingDisconnect = null
+                        haptic.success()
+                        toastState.show(
+                            context.getString(R.string.st_Whisper_Devices_Disconnected, device.name),
+                            WhisperToastType.SUCCESS,
+                        )
+                    }
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun DeviceRow(
+    device: WhisperDevice,
+    onDisconnect: () -> Unit,
+) {
+    val lastSeen = remember(device.lastSeenAtMs) {
+        if (device.lastSeenAtMs <= 0L) {
+            ""
+        } else {
+            android.text.format.DateUtils.getRelativeTimeSpanString(
+                device.lastSeenAtMs,
+                System.currentTimeMillis(),
+                android.text.format.DateUtils.MINUTE_IN_MILLIS,
+            ).toString()
+        }
+    }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(
+                    if (device.revoked) MaterialTheme.colorScheme.surfaceContainerHighest
+                    else MaterialTheme.colorScheme.primaryContainer
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                if (device.platform == "web" || device.platform == "desktop") Icons.Rounded.Computer
+                else Icons.Rounded.Smartphone,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = if (device.revoked) MaterialTheme.colorScheme.onSurfaceVariant
+                else MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    device.name,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (device.isCurrent) {
+                    Text(
+                        stringResource(R.string.st_Whisper_Devices_ThisDevice),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+            val status = when {
+                device.revoked -> stringResource(R.string.st_Whisper_Devices_Revoked)
+                lastSeen.isBlank() -> device.platform.replaceFirstChar { it.uppercase() }
+                else -> stringResource(R.string.st_Whisper_Devices_LastSeen, lastSeen)
+            }
+            Text(
+                status,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (!device.isCurrent && !device.revoked) {
+            TextButton(onClick = onDisconnect) {
+                Text(
+                    stringResource(R.string.st_Whisper_Devices_Disconnect),
+                    color = MaterialTheme.colorScheme.error,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DisconnectDeviceDialog(
+    device: WhisperDevice,
+    onDismiss: () -> Unit,
+    onConfirm: (secret: String, done: (Boolean, String?) -> Unit) -> Unit,
+) {
+    var secret by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        shape = RoundedCornerShape(28.dp),
+        icon = {
+            Icon(
+                Icons.Rounded.DevicesOther,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(32.dp),
+            )
+        },
+        title = {
+            Text(
+                stringResource(R.string.st_Whisper_Devices_DisconnectTitle),
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.titleLarge,
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    stringResource(R.string.st_Whisper_Devices_DisconnectDesc, device.name),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = secret,
+                    onValueChange = { secret = it.take(256); error = null },
+                    label = { Text(stringResource(R.string.st_Whisper_Devices_PasswordLabel)) },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    shape = MediumExpressiveShape,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                error?.let {
+                    Text(
+                        it,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            ToolzExpressiveButton(
+                onClick = {
+                    busy = true
+                    error = null
+                    onConfirm(secret) { ok, message ->
+                        busy = false
+                        if (!ok) error = message
+                    }
+                },
+                enabled = secret.isNotBlank() && !busy,
+            ) {
+                if (busy) {
+                    ToolzLoadingIndicator(
+                        modifier = Modifier.size(16.dp),
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                } else {
+                    Text(
+                        stringResource(R.string.st_Whisper_Devices_Disconnect),
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+        },
+        dismissButton = {
+            ToolzOutlinedExpressiveButton(
+                onClick = onDismiss,
+                enabled = !busy,
+            ) {
+                Text(stringResource(R.string.st_Whisper_Friends_Cancel), fontWeight = FontWeight.SemiBold)
+            }
+        },
+    )
 }

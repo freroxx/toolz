@@ -101,6 +101,10 @@ class WhisperRepository @Inject constructor(
     // plaintext. Without it, sent v3 ratchet frames render locked forever after a
     // process restart (see WhisperSelfReadStore's class doc).
     private val selfReadStore: WhisperSelfReadStore,
+    // Incoming-history vault: Keystore-sealed plaintext of messages this device
+    // already opened. Re-serves history after a session reset/sign-in cycle
+    // instead of rendering a permanent lock. See WhisperPlaintextVault.
+    private val plaintextVault: WhisperPlaintextVault,
     // Daily Ups descriptors are opaque at rest but still account-scoped state: a
     // sign-out or account deletion must never leave them available to the next user.
     // Phase-3 Daily Ups parity slice: widened private→internal (same precedent as
@@ -1271,12 +1275,32 @@ class WhisperRepository @Inject constructor(
                 extraFreshPeerKey = extraFresh ?: peerKey,
             )
         }.getOrNull()
-        if (decrypted == null) {
-            // V6-R6: throttled — see envelope.locked note above.
-            ProtocolDiagnostics.increment("decrypt.locked")
-            ProtocolDiagnostics.logThrottled("decryptLocked", "decrypt.locked", event = "decrypt locked (cached row)")
+        if (decrypted != null) {
+            // Durable history: opening a frame destroys its ratchet key, so keep
+            // a device-sealed copy before the session can ever be lost.
+            if (senderId != myId) rememberIncomingAsync(id, decrypted, content)
+            return copy(content = decrypted)
         }
-        return copy(content = decrypted ?: oldKeyPlaceholder())
+        // Session lost/rotated: re-serve plaintext this device already opened
+        // rather than painting a permanent lock over recoverable history.
+        val vaultHit = runCatchingCE { plaintextVault.recall(myId, id) }.getOrNull()
+        if (vaultHit != null) {
+            ProtocolDiagnostics.increment("vault.hit")
+            return copy(content = vaultHit)
+        }
+        // V6-R6: throttled — see envelope.locked note above.
+        ProtocolDiagnostics.increment("decrypt.locked")
+        ProtocolDiagnostics.logThrottled("decryptLocked", "decrypt.locked", event = "decrypt locked (cached row)")
+        return copy(content = oldKeyPlaceholder())
+    }
+
+    /** Fire-and-forget so a bulk history render never pays a DB write per row. */
+    private fun rememberIncomingAsync(messageId: String, plaintext: String, ciphertext: String) {
+        val owner = myId
+        if (owner.isBlank() || messageId.isBlank() || plaintext.isBlank()) return
+        appScope.launch {
+            runCatching { plaintextVault.remember(owner, messageId, plaintext, ciphertext) }
+        }
     }
 
     /**
@@ -1560,10 +1584,11 @@ class WhisperRepository @Inject constructor(
         return runCatchingCE { selfReadStore.recallAll(ownerId, missing) }.getOrDefault(emptyMap())
     }
 
-    /** Drops the memo + sealed self copy for a message the user deleted. */
+    /** Drops the memo + sealed copies for a message the user deleted. */
     private suspend fun forgetSelfRead(messageId: String) {
         synchronized(sentV3PlaintextMemo) { sentV3PlaintextMemo.remove(messageId) }
         runCatchingCE { selfReadStore.forget(messageId) }
+        runCatchingCE { plaintextVault.forget(messageId) }
     }
 
     /**
@@ -2521,7 +2546,10 @@ class WhisperRepository @Inject constructor(
             msgReceiverId = msg.receiverId,
             createdAtEpochMs = createdAtEpochMs,
         )
-        if (direct != null) return direct
+        if (direct != null) {
+            if (msg.senderId != myId) rememberIncomingAsync(msg.id, direct, msg.content)
+            return direct
+        }
 
         val fresh = getProfile(peerId, forceRefresh = true).getOrNull()?.publicKey
         if (fresh != null && fresh != trusted) {
@@ -2558,6 +2586,7 @@ class WhisperRepository @Inject constructor(
                     ProtocolDiagnostics.log("key.adoptBlocked: trial opened but no cert/verified for ${peerId.take(6)}…")
                     if (receiveKeyNotified.add("$peerId|$fresh")) _receiveKeyChanged.tryEmit(peerId)
                 }
+                if (msg.senderId != myId) rememberIncomingAsync(msg.id, retried, msg.content)
                 return retried
             }
         }
@@ -2566,6 +2595,13 @@ class WhisperRepository @Inject constructor(
         // step. (The current message may stay locked; that ciphertext predates the fix.)
         runCatching {
             if (msg.senderId != myId) republishLocalKeyIfStale()
+        }
+        // History vault: this device opened the frame before, so serve that copy
+        // instead of a permanent lock (e.g. after a session reset or re-install).
+        val vaultHit = runCatchingCE { plaintextVault.recall(myId, msg.id) }.getOrNull()
+        if (vaultHit != null) {
+            ProtocolDiagnostics.increment("vault.hit")
+            return vaultHit
         }
         return oldKeyPlaceholder()
     }
@@ -3072,6 +3108,7 @@ class WhisperRepository @Inject constructor(
             runCatchingCE { syncDeletedTombstonesRemote(toDeleteIds) }
             toDeleteIds.forEach { messageDao.deleteMessage(it) }
             runCatchingCE { selfReadStore.forgetMany(toDeleteIds) }
+            runCatchingCE { plaintextVault.forgetMany(toDeleteIds) }
         }
         invalidateConversationsCache()
         allToDelete
@@ -3253,7 +3290,11 @@ class WhisperRepository @Inject constructor(
                         }.getOrNull()
                     } else {
                         null
-                    } ?: WhisperTombstone.LOCKED_PLACEHOLDER
+                    } ?: runCatchingCE {
+                        // Vault: a message this device already opened can preview
+                        // correctly even after its session was lost.
+                        plaintextVault.recallByCiphertext(myId, row.lastContent)
+                    }.getOrNull() ?: WhisperTombstone.LOCKED_PLACEHOLDER
                 } else WhisperTombstone.LEGACY_ENCRYPTED
 
                 // V2-FIX (reviewwhisper.md) L-24: renamed — "fake" implied mock/test data.
@@ -3332,7 +3373,9 @@ class WhisperRepository @Inject constructor(
                         }.getOrNull()
                     } else {
                         null
-                    } ?: WhisperTombstone.LOCKED_PLACEHOLDER
+                    } ?: runCatchingCE {
+                        plaintextVault.recallByCiphertext(myId, lastMsg.content)
+                    }.getOrNull() ?: WhisperTombstone.LOCKED_PLACEHOLDER
                 } else WhisperTombstone.LEGACY_ENCRYPTED
 
                 val unread = visibleMsgs.count { it.receiverId == myId && !it.isRead }
@@ -3868,6 +3911,7 @@ class WhisperRepository @Inject constructor(
         groupDao.clearAllEvents()
         groupDao.clearAllGroups()
         selfReadStore.clearAll()
+        plaintextVault.clearAll()
         deletedStore.clearAll()
         // V6 (planwhisper.md §3.1): ratchet sessions die with the account — a later
         // sign-in must never inherit another identity's chains.

@@ -50,8 +50,9 @@ import androidx.room.RoomDatabase
         WhisperGroupEventEntity::class,
         WhisperStoryLocalEntity::class,
         WhisperSelfReadEntity::class,
+        WhisperPlaintextVaultEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 abstract class WhisperDatabase : RoomDatabase() {
@@ -61,6 +62,7 @@ abstract class WhisperDatabase : RoomDatabase() {
     abstract fun whisperGroupDao(): WhisperGroupDao
     abstract fun whisperStoryLocalDao(): WhisperStoryLocalDao
     abstract fun whisperSelfReadDao(): WhisperSelfReadDao
+    abstract fun whisperPlaintextVaultDao(): WhisperPlaintextVaultDao
 
     companion object {
         /**

@@ -57,6 +57,8 @@ class WhisperViewModel @Inject constructor(
     private val offlineManager: com.frerox.toolz.util.OfflineManager,
     private val pushTokenStore: com.frerox.toolz.push.WhisperPushTargetStore,
     private val pushRegistrar: com.frerox.toolz.push.WhisperPushRegistrar,
+    // Multi-device registry (owner-only server table + RPCs).
+    private val deviceManager: com.frerox.toolz.data.whisper.WhisperDeviceManager,
     // DEV-SPOOF: gates auto-auth + full local fixture mode for Whisper.
     private val gate: com.frerox.toolz.data.developer.SpoofGate,
 ) : ViewModel() {
@@ -209,6 +211,13 @@ class WhisperViewModel @Inject constructor(
                     subscribeToMessages()
                     subscribeToFriends()
                     startHeartbeat()
+                    // Register this install and load the account's device list.
+                    // Best-effort: an undeployed/older backend must not block chat.
+                    viewModelScope.launch {
+                        runCatching { deviceManager.register() }
+                            .onFailure { WhisperErrorMapper.log(it, "deviceRegister") }
+                        refreshDevices()
+                    }
                     observeProcessLifecycleForPresence() // V6-R6: instant presence
                     // Fix: asymmetric push — a target parked before login was only
                     // uploaded on next cold start (MainActivity). If userA signed in
@@ -320,6 +329,11 @@ class WhisperViewModel @Inject constructor(
                 try {
                     if (ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
                         repository.updateLastSeen()
+                        // Keep the device registry fresh. A false result means the
+                        // row was removed/revoked, so re-register once.
+                        deviceManager.heartbeat()
+                            .onSuccess { alive -> if (!alive) deviceManager.register() }
+                            .onFailure { WhisperErrorMapper.log(it, "deviceHeartbeat") }
                         // V6-R6: automatic 30-day identity rotation REMOVED here — the
                         // identity keypair is the history-decryption key; rotating it
                         // bricked all prior messages and forced the rotate+verify dance.
@@ -807,6 +821,8 @@ class WhisperViewModel @Inject constructor(
         whisperCode: String,
         onSuccess: (java.io.File) -> Unit,
         onError: (String) -> Unit,
+        secretMode: com.frerox.toolz.util.secure.SecureContainer.SecretMode =
+            com.frerox.toolz.util.secure.SecureContainer.SecretMode.PIN,
     ) {
         val current = _uiState.value.currentProfile ?: run {
             // V6-R2 (review): was hardcoded English "Profile not loaded".
@@ -821,6 +837,7 @@ class WhisperViewModel @Inject constructor(
                 // V2-FIX B4: the exported profile is always the live session's user, so
                 // pass an explicit token flag instead of relying on vault-name guessing.
                 isToken = authManager.isAnonymousTokenUser,
+                secretMode = secretMode,
             ).onSuccess { file ->
                 onSuccess(file)
             }.onFailure { err ->
@@ -828,6 +845,64 @@ class WhisperViewModel @Inject constructor(
                 onError(WhisperErrorMapper.map(err).asString(appContext))
             }
         }
+    }
+
+    fun refreshDevices() {
+        if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.WHISPER)) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingDevices = true, devicesError = null) }
+            deviceManager.list()
+                .onSuccess { devices ->
+                    _uiState.update {
+                        it.copy(devices = devices, isLoadingDevices = false, devicesError = null)
+                    }
+                }
+                .onFailure { err ->
+                    // An undeployed backend must degrade to "unavailable", not an
+                    // alarming error banner over the whole profile tab.
+                    _uiState.update {
+                        it.copy(
+                            isLoadingDevices = false,
+                            devicesError = WhisperErrorMapper.map(err),
+                        )
+                    }
+                }
+        }
+    }
+
+    /**
+     * Disconnects another install. The account secret is re-proved first; on a
+     * wrong secret nothing is revoked and the callback gets a mapped error.
+     */
+    fun disconnectDevice(
+        deviceId: String,
+        secret: String,
+        onComplete: (Boolean, String?) -> Unit,
+    ) {
+        if (gate.sandboxed(com.frerox.toolz.data.developer.DevToolId.WHISPER)) {
+            onComplete(false, null)
+            return
+        }
+        viewModelScope.launch {
+            deviceManager.reauthenticate(secret)
+                .onFailure { err ->
+                    onComplete(false, WhisperErrorMapper.map(err).asString(appContext))
+                }
+                .onSuccess {
+                    deviceManager.revoke(deviceId)
+                        .onSuccess {
+                            refreshDevices()
+                            onComplete(true, null)
+                        }
+                        .onFailure { err ->
+                            onComplete(false, WhisperErrorMapper.map(err).asString(appContext))
+                        }
+                }
+        }
+    }
+
+    fun clearDevicesError() {
+        _uiState.update { it.copy(devicesError = null) }
     }
 
     fun rotateEncryptionKey(onComplete: (Boolean) -> Unit) {

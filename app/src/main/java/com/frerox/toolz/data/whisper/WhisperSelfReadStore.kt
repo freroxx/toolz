@@ -88,6 +88,13 @@ interface WhisperSelfReadDao {
     @Query("DELETE FROM whisper_self_read WHERE messageId IN (:messageIds)")
     suspend fun deleteMany(messageIds: List<String>)
 
+    /** Export window for the password-protected backup archive. */
+    @Query(
+        "SELECT * FROM whisper_self_read WHERE ownerId = :ownerId " +
+            "ORDER BY createdAtMs DESC LIMIT :limit",
+    )
+    suspend fun getRecent(ownerId: String, limit: Int): List<WhisperSelfReadEntity>
+
     /**
      * Bounded growth: keep only the newest [keep] copies for this owner. The
      * oldest entries are pruned after every write, so the table can never grow
@@ -213,6 +220,51 @@ class WhisperSelfReadStore @Inject constructor(
     suspend fun clearAll() {
         withContext(Dispatchers.IO) {
             runCatching { dao.clearAll() }
+        }
+    }
+
+    /** Plaintext snapshot for the password-protected backup archive. */
+    suspend fun exportEntries(ownerId: String): List<WhisperHistoryEntry> {
+        if (ownerId.isBlank()) return emptyList()
+        return withContext(Dispatchers.IO) {
+            val rows = runCatching { dao.getRecent(ownerId, MAX_PER_OWNER) }.getOrDefault(emptyList())
+            rows.mapNotNull { row ->
+                val plain = open(row, ownerId) ?: return@mapNotNull null
+                WhisperHistoryEntry(
+                    messageId = row.messageId,
+                    contentHash = row.contentHash,
+                    plaintext = plain,
+                    direction = "out",
+                )
+            }
+        }
+    }
+
+    /** Re-seals an archived own message with THIS install's Keystore key. */
+    suspend fun importEntry(
+        ownerId: String,
+        messageId: String,
+        contentHash: String,
+        plaintext: String,
+    ) {
+        if (ownerId.isBlank() || messageId.isBlank() || plaintext.isBlank()) return
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val sealed = sealer.seal(payload(messageId, plaintext).toByteArray())
+                    ?: return@runCatching
+                dao.upsert(
+                    WhisperSelfReadEntity(
+                        messageId = messageId,
+                        ownerId = ownerId,
+                        contentHash = contentHash,
+                        sealed = sealed,
+                        createdAtMs = System.currentTimeMillis(),
+                    ),
+                )
+                dao.prune(ownerId, MAX_PER_OWNER)
+            }.onFailure {
+                Log.w(TAG, "self-read import skipped (${it.javaClass.simpleName})")
+            }
         }
     }
 

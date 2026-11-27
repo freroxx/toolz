@@ -498,6 +498,10 @@ data class WhisperUiState(
     // V2-FIX L-?: dedicated success/info channel so non-error notices (e.g. key-rotation
     // success) never masquerade as errors. Displayed/cleared via WhisperViewModel.clearInfo().
     val infoMessage: UiText? = null,
+    // Connected installs for this account (owner-only server registry).
+    val devices: List<WhisperDevice> = emptyList(),
+    val isLoadingDevices: Boolean = false,
+    val devicesError: UiText? = null,
 ) {
     val totalUnreadCount: Int get() = conversations.sumOf { it.unreadCount }
 }

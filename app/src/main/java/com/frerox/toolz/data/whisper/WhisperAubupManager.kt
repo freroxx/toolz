@@ -14,6 +14,8 @@ import com.frerox.toolz.data.password.PasswordDao
 import com.frerox.toolz.data.password.PasswordEntity
 import com.frerox.toolz.util.CryptoManager
 import com.frerox.toolz.util.password.PasswordGenerator
+import com.frerox.toolz.util.secure.AppBinding
+import com.frerox.toolz.util.secure.SecureContainer
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -35,6 +37,11 @@ data class WhisperAccessPayload(
     val credential: String, // Raw token or password
     @SerialName("display_name") val displayName: String? = null,
     @SerialName("created_at") val createdAt: Long = System.currentTimeMillis(),
+    /**
+     * v2: which secret policy protected the file ("PIN" or "PASSWORD").
+     * Null on legacy v1 files, which always used the six-digit code.
+     */
+    @SerialName("secret_kind") val secretKind: String? = null,
 )
 
 /**
@@ -120,6 +127,69 @@ class WhisperAubupManager @Inject constructor(
             .flatMap { group -> group.sortedByDescending { it.id }.drop(1).map { it.id } }
 
         private data class AccessFileKey(val relativePath: String, val stem: String)
+
+        private val payloadJson = Json { ignoreUnknownKeys = true }
+
+        /**
+         * Decodes an access-file payload from either physical format:
+         *
+         *  - v2: `TOOLZ-AUBUP/2` text envelope (PIN or password, app-bound).
+         *  - legacy v1: raw Base64, six-digit code, hardened/legacy KDF fallback.
+         *
+         * [binding] is injected so the instrumented tests can pin a stable
+         * namespace instead of depending on the host app's signing certificate.
+         */
+        internal fun decodeAccessPayload(
+            cipherText: String,
+            secret: String,
+            binding: String,
+        ): WhisperAccessPayload {
+            val trimmed = cipherText.trim()
+            if (trimmed.isEmpty()) error("Could not read the selected file")
+
+            val decryptedJson = if (SecureContainer.isTextContainer(trimmed)) {
+                // v2: header + self-describing envelope. The AEAD tag is checked
+                // before any JSON is parsed, and the KDF work factor is validated
+                // so a tampered envelope cannot force an unbounded derivation.
+                try {
+                    SecureContainer.openText(
+                        text = trimmed,
+                        secret = secret,
+                        binding = binding,
+                        expectedKind = SecureContainer.KIND_AUBUP,
+                    )
+                } catch (e: SecureContainer.WrongSecretException) {
+                    error("Incorrect Whisper Code or corrupted access file.")
+                } catch (e: SecureContainer.MalformedContainerException) {
+                    error("Malformed encrypted data")
+                }
+            } else {
+                // Legacy v1: raw Base64, six-digit code, hardened 310000-iteration
+                // format first with the 65536 fallback. Whitespace/line wrapping
+                // from e-mail or cloud transfer is tolerated.
+                require(isValidWhisperCode(secret)) { "Whisper Code must be exactly 6 digits." }
+                val cleaned = trimmed.replace(Regex("\\s"), "")
+                if (cleaned.isEmpty()) error("Could not read the selected file")
+                val (jsonText, success) = CryptoManager.decryptWithPassphrase(
+                    combinedBase64 = cleaned,
+                    passphrase = secret.toCharArray(),
+                )
+                if (!success) {
+                    // Preserve the specific malformed signal so the mapper can show
+                    // AubupInvalidFile instead of the generic Incorrect Code.
+                    if (jsonText.contains("Malformed", ignoreCase = true)) {
+                        error("Malformed encrypted data")
+                    }
+                    error("Incorrect Whisper Code or corrupted access file.")
+                }
+                jsonText
+            }
+
+            if (decryptedJson.isBlank()) error("Incorrect Whisper Code or corrupted access file.")
+            val payload = payloadJson.decodeFromString<WhisperAccessPayload>(decryptedJson)
+            require(payload.app == "toolz_whisper") { "This file is not a valid Whisper Access File." }
+            return payload
+        }
 
         /**
          * V6-R7 (#auto-detect): the Downloads scan reads PUBLIC storage via the File
@@ -471,31 +541,43 @@ class WhisperAubupManager @Inject constructor(
         tokenOrPassword: String,
         displayName: String?,
         whisperCode: String,
+        secretMode: SecureContainer.SecretMode = SecureContainer.SecretMode.PIN,
     ): Result<File> = withContext(Dispatchers.IO) {
         runCatching {
-            require(isValidWhisperCode(whisperCode)) { "Whisper Code must be exactly 6 digits." }
+            // v2 keeps the familiar six-digit PIN working but allows a real
+            // password, which removes the 1,000,000-guess offline ceiling.
+            val secret = if (secretMode == SecureContainer.SecretMode.PIN) {
+                whisperCode.trim()
+            } else {
+                whisperCode
+            }
+            val assessment = SecureContainer.assessSecret(secret, secretMode)
+            require(assessment.valid) {
+                when (secretMode) {
+                    SecureContainer.SecretMode.PIN -> "Whisper Code must be exactly 6 digits."
+                    SecureContainer.SecretMode.PASSWORD ->
+                        "Use at least ${8} characters for the backup password."
+                }
+            }
             val payload = WhisperAccessPayload(
+                version = 2,
                 username = username.trim().lowercase(),
                 authType = authType,
                 credential = tokenOrPassword.trim(),
                 displayName = displayName?.trim(),
+                secretKind = secretMode.name,
             )
             val jsonString = json.encodeToString(payload)
 
-            // P0-2 NOTE: 6-digit code = 1M entropy. CryptoManager now hardens this file
-            // with PBKDF2 310000 iterations + random 16-byte salt (V2-FIX B1; legacy
-            // .enc files at 65536 still decrypt via the fallback path).
-            // Offline brute-force remains trivial if .enc is exfiltrated; mitigation is user
-            // choosing long random password OR future 8+ alphanum requirement. For 1.0 we
-            // keep 6-digit for compat but document KDF params and add rate-limit on decrypt
-            // (decryptAccessFile is throttled at UI 300ms + caller delay).
-            val (encryptedText, success) = CryptoManager.encryptWithPassphrase(
+            // v2 self-describing container: header + JSON envelope, PBKDF2 at
+            // the recorded work factor, AES-256-GCM, and an app-binding mix.
+            // Legacy v1 .enc files stay readable through decryptCiphertext().
+            val encryptedText = SecureContainer.sealText(
+                kind = SecureContainer.KIND_AUBUP,
                 plaintext = jsonString,
-                passphrase = whisperCode.toCharArray(),
+                secret = secret,
+                binding = AppBinding.of(context),
             )
-            if (!success || encryptedText.isBlank()) {
-                error("Encryption failed with the provided Whisper Code.")
-            }
 
             val fileName = "${ACCESS_FILE_PREFIX}${accessFileStem(displayName, username)}.enc"
             val encryptedBytes = encryptedText.toByteArray(Charsets.UTF_8)
@@ -528,6 +610,7 @@ class WhisperAubupManager @Inject constructor(
         // V2-FIX B4: explicit token classification from the caller when known (e.g. the
         // live session). null keeps the backward-compatible vault-name heuristic.
         isToken: Boolean? = null,
+        secretMode: SecureContainer.SecretMode = SecureContainer.SecretMode.PIN,
     ): Result<File> = withContext(Dispatchers.IO) {
         val cleanUser = username.trim().lowercase()
         // V2-FIX B5: loads the whole vault; a DAO-scoped query would be preferable, but
@@ -560,6 +643,7 @@ class WhisperAubupManager @Inject constructor(
             tokenOrPassword = credential,
             displayName = displayName,
             whisperCode = whisperCode,
+            secretMode = secretMode,
         )
     }
 
@@ -661,7 +745,8 @@ class WhisperAubupManager @Inject constructor(
 
     suspend fun decryptAccessFile(file: File, whisperCode: String): Result<WhisperAccessPayload> = withContext(Dispatchers.IO) {
         runCatching {
-            require(isValidWhisperCode(whisperCode)) { "Whisper Code must be exactly 6 digits." }
+            // v2 files may be protected by a full password, so the six-digit
+            // check moved into the legacy branch of decryptCiphertext().
             // On Q+ the File API may report !exists even though MediaStore has the file (no MANAGE_EXTERNAL_STORAGE).
             // Try File API first, then MediaStore fallback.
             var cipherText: String? = null
@@ -712,7 +797,8 @@ class WhisperAubupManager @Inject constructor(
 
     suspend fun decryptAccessBytes(bytes: ByteArray, whisperCode: String): Result<WhisperAccessPayload> = withContext(Dispatchers.IO) {
         runCatching {
-            require(isValidWhisperCode(whisperCode)) { "Whisper Code must be exactly 6 digits." }
+            // See decryptAccessFile(): v2 password files are validated by the
+            // container, while legacy files still require the six-digit code.
             if (bytes.isEmpty()) error("Could not read the selected file")
             if (bytes.size > 1_200_000) error("Access file exceeds the 1 MB limit")
             val cipherText = String(bytes, Charsets.UTF_8).trim()
@@ -721,25 +807,6 @@ class WhisperAubupManager @Inject constructor(
         }
     }
 
-    private fun decryptCiphertext(cipherText: String, whisperCode: String): WhisperAccessPayload {
-        // V2-FIX B1: hardened 310000-iteration format first, legacy 65536 fallback so
-        // pre-B1 .enc access files keep decrypting. Also tolerate whitespace/line-wrapped Base64 from email/cloud.
-        val cleaned = cipherText.trim().replace(Regex("\\s"), "")
-        if (cleaned.isEmpty()) error("Could not read the selected file")
-        val (decryptedJson, success) = CryptoManager.decryptWithPassphrase(
-            combinedBase64 = cleaned,
-            passphrase = whisperCode.toCharArray(),
-        )
-        if (!success) {
-            // Preserve specific malformed signal so mapper can show AubupInvalidFile instead of generic Incorrect Code
-            if (decryptedJson.contains("Malformed", ignoreCase = true)) {
-                error("Malformed encrypted data")
-            }
-            error("Incorrect Whisper Code or corrupted access file.")
-        }
-        if (decryptedJson.isBlank()) error("Incorrect Whisper Code or corrupted access file.")
-        val payload = json.decodeFromString<WhisperAccessPayload>(decryptedJson)
-        require(payload.app == "toolz_whisper") { "This file is not a valid Whisper Access File." }
-        return payload
-    }
+    private fun decryptCiphertext(cipherText: String, whisperCode: String): WhisperAccessPayload =
+        decodeAccessPayload(cipherText, whisperCode, AppBinding.of(context))
 }
