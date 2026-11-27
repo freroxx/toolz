@@ -3402,6 +3402,223 @@ create index if not exists whisper_push_targets_endpoint_idx
 
 -- Legacy FCM token registry — no client or function references it anymore.
 drop table if exists public.whisper_fcm_tokens;
+
+-- ═══════════════ 20261126_whisper_devices.sql ═════════════════
+-- Multi-device registry. One row per (account, install). The client generates
+-- a stable UUID and registers on sign-in; a heartbeat keeps last_seen_at fresh.
+--
+-- SECURITY MODEL
+--   * RLS is owner-only for every verb. A user can see/disconnect only their
+--     own installs, and the RPCs derive user_id from auth.uid() rather than a
+--     caller-supplied parameter.
+--   * A device is never authenticated by this table. The session JWT remains
+--     the only authentication; this table is inventory/UX plus a revocation
+--     marker that push and future per-device features can consult.
+--   * `public_key` is the protocol identity public key (already published in
+--     the profile). It is display-only continuity metadata, never a secret.
+--   * Revocation is soft (revoked_at) so a just-removed device can still be
+--     shown to the other installs for a while; the list RPC orders active
+--     devices first.
+--
+-- Idempotent: safe to run from the Supabase SQL Editor or replay in place.
+
+create table if not exists public.whisper_devices (
+    user_id      uuid not null references auth.users(id) on delete cascade,
+    device_id    uuid not null,
+    name         text not null check (char_length(name) between 1 and 80),
+    platform     text not null default 'android'
+                 check (platform in ('android', 'ios', 'web', 'desktop')),
+    app_version  text check (app_version is null or char_length(app_version) <= 40),
+    public_key   text check (public_key is null or char_length(public_key) <= 512),
+    created_at   timestamptz not null default now(),
+    last_seen_at timestamptz not null default now(),
+    revoked_at   timestamptz,
+    primary key (user_id, device_id)
+);
+
+create index if not exists whisper_devices_user_seen_idx
+    on public.whisper_devices(user_id, last_seen_at desc);
+
+alter table public.whisper_devices enable row level security;
+
+drop policy if exists "whisper_devices_select_own" on public.whisper_devices;
+create policy "whisper_devices_select_own"
+    on public.whisper_devices
+    for select
+    using (user_id = auth.uid());
+
+drop policy if exists "whisper_devices_insert_own" on public.whisper_devices;
+create policy "whisper_devices_insert_own"
+    on public.whisper_devices
+    for insert
+    with check (user_id = auth.uid());
+
+drop policy if exists "whisper_devices_update_own" on public.whisper_devices;
+create policy "whisper_devices_update_own"
+    on public.whisper_devices
+    for update
+    using (user_id = auth.uid())
+    with check (user_id = auth.uid());
+
+drop policy if exists "whisper_devices_delete_own" on public.whisper_devices;
+create policy "whisper_devices_delete_own"
+    on public.whisper_devices
+    for delete
+    using (user_id = auth.uid());
+
+-- Register (or refresh) this install. Name/platform/version are normalized and
+-- bounded here so a direct client call cannot store unbounded text.
+create or replace function public.whisper_device_register(
+    p_device_id uuid,
+    p_name text,
+    p_platform text default 'android',
+    p_app_version text default null,
+    p_public_key text default null
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+    v_uid uuid := auth.uid();
+    v_name text;
+    v_platform text;
+begin
+    if v_uid is null then
+        raise exception 'Not authenticated' using errcode = '28000';
+    end if;
+    if p_device_id is null then
+        raise exception 'device_id is required' using errcode = '22023';
+    end if;
+
+    v_name := left(coalesce(nullif(btrim(p_name), ''), 'Android device'), 80);
+    v_platform := case
+        when p_platform in ('android', 'ios', 'web', 'desktop') then p_platform
+        else 'android'
+    end;
+
+    insert into public.whisper_devices as d (
+        user_id, device_id, name, platform, app_version, public_key, last_seen_at, revoked_at
+    ) values (
+        v_uid,
+        p_device_id,
+        v_name,
+        v_platform,
+        nullif(left(coalesce(p_app_version, ''), 40), ''),
+        nullif(left(coalesce(p_public_key, ''), 512), ''),
+        now(),
+        null
+    )
+    on conflict (user_id, device_id) do update
+    set name = excluded.name,
+        platform = excluded.platform,
+        app_version = excluded.app_version,
+        -- Never erase a previously published key with a null refresh.
+        public_key = coalesce(excluded.public_key, d.public_key),
+        last_seen_at = now(),
+        revoked_at = null;
+end;
+$$;
+
+-- Heartbeat. Returns false when the row is gone/revoked (the client then
+-- re-registers on the next foreground instead of writing forever).
+create or replace function public.whisper_device_heartbeat(p_device_id uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+    v_uid uuid := auth.uid();
+    v_updated integer;
+begin
+    if v_uid is null then
+        raise exception 'Not authenticated' using errcode = '28000';
+    end if;
+    if p_device_id is null then
+        return false;
+    end if;
+
+    update public.whisper_devices
+    set last_seen_at = now()
+    where user_id = v_uid and device_id = p_device_id and revoked_at is null;
+
+    get diagnostics v_updated = row_count;
+    return v_updated = 1;
+end;
+$$;
+
+-- Disconnect (soft-revoke) another install. The caller must have re-proved the
+-- account secret in the client before invoking this; the server still scopes
+-- the update to the caller's own rows.
+create or replace function public.whisper_device_revoke(p_device_id uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+    v_uid uuid := auth.uid();
+    v_updated integer;
+begin
+    if v_uid is null then
+        raise exception 'Not authenticated' using errcode = '28000';
+    end if;
+    if p_device_id is null then
+        return false;
+    end if;
+
+    update public.whisper_devices
+    set revoked_at = coalesce(revoked_at, now())
+    where user_id = v_uid and device_id = p_device_id and revoked_at is null;
+
+    get diagnostics v_updated = row_count;
+    return v_updated = 1;
+end;
+$$;
+
+-- Explicit projection so the client never depends on column order and the
+-- function cannot leak another user's rows even if RLS is later relaxed.
+create or replace function public.whisper_device_list()
+returns table (
+    device_id uuid,
+    name text,
+    platform text,
+    app_version text,
+    public_key text,
+    created_at timestamptz,
+    last_seen_at timestamptz,
+    revoked_at timestamptz
+)
+language sql
+security definer
+set search_path = public
+as $$
+    select d.device_id, d.name, d.platform, d.app_version, d.public_key,
+           d.created_at, d.last_seen_at, d.revoked_at
+    from public.whisper_devices d
+    where d.user_id = auth.uid()
+    order by (d.revoked_at is not null), d.last_seen_at desc, d.created_at desc;
+$$;
+
+revoke all on function public.whisper_device_register(uuid, text, text, text, text) from public;
+revoke all on function public.whisper_device_heartbeat(uuid) from public;
+revoke all on function public.whisper_device_revoke(uuid) from public;
+revoke all on function public.whisper_device_list() from public;
+
+revoke all on function public.whisper_device_register(uuid, text, text, text, text) from anon;
+revoke all on function public.whisper_device_heartbeat(uuid) from anon;
+revoke all on function public.whisper_device_revoke(uuid) from anon;
+revoke all on function public.whisper_device_list() from anon;
+
+grant execute on function public.whisper_device_register(uuid, text, text, text, text) to authenticated;
+grant execute on function public.whisper_device_heartbeat(uuid) to authenticated;
+grant execute on function public.whisper_device_revoke(uuid) to authenticated;
+grant execute on function public.whisper_device_list() to authenticated;
+
+comment on table public.whisper_devices is
+    'Per-account install registry. Owner-only; revoked_at is a soft disconnect marker.';
 -- ═══════════════ 20261018_whisper_stories_lifecycle.sql ═
 -- Daily Ups are photo-only, short-lived private posts.  These tables deliberately
 -- contain only hosting metadata, audience identity, lifecycle state, and an opaque
