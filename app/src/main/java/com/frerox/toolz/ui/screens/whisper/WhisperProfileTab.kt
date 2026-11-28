@@ -746,6 +746,7 @@ internal fun ProfileTab(
             uiState = uiState,
             viewModel = viewModel,
             toastState = toastState,
+            isTokenUser = viewModel.isAnonymousTokenUser,
         )
 
         // ═══ 6. DANGER ZONE — logout (common) first, deletion last ═══
@@ -1274,6 +1275,7 @@ private fun DevicesSection(
     uiState: WhisperUiState,
     viewModel: WhisperViewModel,
     toastState: WhisperToastState,
+    isTokenUser: Boolean,
 ) {
     val haptic = rememberToolzHapticFeedback()
     val context = LocalContext.current
@@ -1354,6 +1356,7 @@ private fun DevicesSection(
     pendingDisconnect?.let { device ->
         DisconnectDeviceDialog(
             device = device,
+            isTokenUser = isTokenUser,
             onDismiss = { pendingDisconnect = null },
             onConfirm = { secret, done ->
                 viewModel.disconnectDevice(device.id, secret) { ok, error ->
@@ -1461,6 +1464,7 @@ private fun DeviceRow(
 @Composable
 private fun DisconnectDeviceDialog(
     device: WhisperDevice,
+    isTokenUser: Boolean,
     onDismiss: () -> Unit,
     onConfirm: (secret: String, done: (Boolean, String?) -> Unit) -> Unit,
 ) {
@@ -1489,14 +1493,25 @@ private fun DisconnectDeviceDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    stringResource(R.string.st_Whisper_Devices_DisconnectDesc, device.name),
+                    stringResource(
+                        if (isTokenUser) R.string.st_Whisper_Devices_DisconnectDescToken
+                        else R.string.st_Whisper_Devices_DisconnectDesc,
+                        device.name,
+                    ),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 OutlinedTextField(
                     value = secret,
                     onValueChange = { secret = it.take(256); error = null },
-                    label = { Text(stringResource(R.string.st_Whisper_Devices_PasswordLabel)) },
+                    label = {
+                        Text(
+                            stringResource(
+                                if (isTokenUser) R.string.st_Whisper_Devices_TokenLabel
+                                else R.string.st_Whisper_Devices_PasswordLabel
+                            )
+                        )
+                    },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
