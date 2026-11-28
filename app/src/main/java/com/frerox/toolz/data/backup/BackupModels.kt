@@ -120,6 +120,8 @@ data class BackupImportResult(
     val rescheduledTaskAlarms: Int = 0,
     // True when the archive was opened from a password-protected container.
     val wasEncrypted: Boolean = false,
+    // Whisper history was staged for replay after the next sign-in.
+    val historyImportDeferred: Boolean = false,
 )
 
 // ── Clipboard backup v2 ─────────────────────────────────────────────────────

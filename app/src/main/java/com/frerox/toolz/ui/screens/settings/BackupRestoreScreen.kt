@@ -155,6 +155,7 @@ fun BackupRestoreScreen(
                     isExporting = uiState.isExporting,
                     isImporting = uiState.isImporting,
                     progress = uiState.progress,
+                    historyDeferred = uiState.importResult?.historyImportDeferred == true,
                     onCreateBackup = { showProtectionDialog = true },
                     onRestoreFile = {
                         backupPicker.launch(arrayOf("application/octet-stream", "*/*"))
@@ -272,12 +273,12 @@ private fun BackupProtectionDialog(
                             onClick = { choice = ProtectionChoice.NONE; secret = ""; confirm = "" },
                             label = { Text(stringResource(R.string.st_Backup_Protect_NoPassword)) },
                         )
+                        FilterChip(
+                            selected = choice == ProtectionChoice.PIN,
+                            onClick = { choice = ProtectionChoice.PIN; secret = ""; confirm = "" },
+                            label = { Text(stringResource(R.string.st_Backup_Protect_Pin)) },
+                        )
                     }
-                    FilterChip(
-                        selected = choice == ProtectionChoice.PIN,
-                        onClick = { choice = ProtectionChoice.PIN; secret = ""; confirm = "" },
-                        label = { Text(stringResource(R.string.st_Backup_Protect_Pin)) },
-                    )
                     FilterChip(
                         selected = choice == ProtectionChoice.PASSWORD,
                         onClick = { choice = ProtectionChoice.PASSWORD; secret = ""; confirm = "" },
@@ -579,6 +580,7 @@ private fun ActionSection(
     isExporting: Boolean,
     isImporting: Boolean,
     progress: String?,
+    historyDeferred: Boolean,
     onCreateBackup: () -> Unit,
     onRestoreFile: () -> Unit
 ) {
@@ -592,8 +594,11 @@ private fun ActionSection(
     var wasBusy by remember { mutableStateOf(false) }
     LaunchedEffect(isBusy) {
         if (wasBusy && !isBusy) {
-            justCompleted = if (isExporting) context.getString(R.string.st_Backup_Section_Action_Completed_Export) 
-                            else context.getString(R.string.st_Backup_Section_Action_Completed_Import)
+            justCompleted = when {
+                isExporting -> context.getString(R.string.st_Backup_Section_Action_Completed_Export)
+                historyDeferred -> context.getString(R.string.st_Backup_Section_Action_Completed_ImportDeferred)
+                else -> context.getString(R.string.st_Backup_Section_Action_Completed_Import)
+            }
         }
         wasBusy = isBusy
     }
