@@ -59,6 +59,8 @@ class WhisperViewModel @Inject constructor(
     private val pushRegistrar: com.frerox.toolz.push.WhisperPushRegistrar,
     // Multi-device registry (owner-only server table + RPCs).
     private val deviceManager: com.frerox.toolz.data.whisper.WhisperDeviceManager,
+    // Cross-device history transfer (replays archives restored while signed out).
+    private val historyArchive: com.frerox.toolz.data.whisper.WhisperHistoryArchive,
     // DEV-SPOOF: gates auto-auth + full local fixture mode for Whisper.
     private val gate: com.frerox.toolz.data.developer.SpoofGate,
 ) : ViewModel() {
@@ -217,6 +219,16 @@ class WhisperViewModel @Inject constructor(
                         runCatching { deviceManager.register() }
                             .onFailure { WhisperErrorMapper.log(it, "deviceRegister") }
                         refreshDevices()
+                    }
+                    // Device-switch recovery: replay a history archive that was
+                    // restored while signed out. Runs after the session exists so
+                    // entries are re-sealed for THIS install and account.
+                    viewModelScope.launch {
+                        runCatching { historyArchive.importPending() }
+                            .onSuccess { count ->
+                                if (count > 0) loadAll(isRefresh = true)
+                            }
+                            .onFailure { WhisperErrorMapper.log(it, "historyImportPending") }
                     }
                     observeProcessLifecycleForPresence() // V6-R6: instant presence
                     // Fix: asymmetric push — a target parked before login was only

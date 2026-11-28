@@ -146,6 +146,14 @@ class WhisperSelfReadStore @Inject constructor(
         private const val PREFIX = "SR1|"
     }
 
+    /** Strictly increasing write stamps keep "newest N" pruning deterministic. */
+    private val lastStamp = java.util.concurrent.atomic.AtomicLong(0L)
+
+    private fun nextStamp(): Long {
+        val now = System.currentTimeMillis()
+        return lastStamp.updateAndGet { previous -> if (now > previous) now else previous + 1 }
+    }
+
     /**
      * Persists a self-read copy for [messageId]. Best-effort by contract: a
      * Keystore failure must never block sending (the message still reaches the
@@ -171,7 +179,7 @@ class WhisperSelfReadStore @Inject constructor(
                         ownerId = ownerId,
                         contentHash = contentHash(ciphertext),
                         sealed = sealed,
-                        createdAtMs = System.currentTimeMillis(),
+                        createdAtMs = nextStamp(),
                     ),
                 )
                 dao.prune(ownerId, MAX_PER_OWNER)
@@ -258,7 +266,7 @@ class WhisperSelfReadStore @Inject constructor(
                         ownerId = ownerId,
                         contentHash = contentHash,
                         sealed = sealed,
-                        createdAtMs = System.currentTimeMillis(),
+                        createdAtMs = nextStamp(),
                     ),
                 )
                 dao.prune(ownerId, MAX_PER_OWNER)

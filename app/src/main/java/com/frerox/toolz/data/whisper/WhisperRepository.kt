@@ -105,6 +105,9 @@ class WhisperRepository @Inject constructor(
     // already opened. Re-serves history after a session reset/sign-in cycle
     // instead of rendering a permanent lock. See WhisperPlaintextVault.
     private val plaintextVault: WhisperPlaintextVault,
+    // Cross-device history archive: only used here to drop a staged restore on
+    // account deletion so no sealed plaintext outlives the account.
+    private val historyArchive: WhisperHistoryArchive,
     // Daily Ups descriptors are opaque at rest but still account-scoped state: a
     // sign-out or account deletion must never leave them available to the next user.
     // Phase-3 Daily Ups parity slice: widened private→internal (same precedent as
@@ -3912,6 +3915,7 @@ class WhisperRepository @Inject constructor(
         groupDao.clearAllGroups()
         selfReadStore.clearAll()
         plaintextVault.clearAll()
+        historyArchive.clearPending()
         deletedStore.clearAll()
         // V6 (planwhisper.md §3.1): ratchet sessions die with the account — a later
         // sign-in must never inherit another identity's chains.
