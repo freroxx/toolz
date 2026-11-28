@@ -63,6 +63,11 @@ class WhisperSelfReadStoreTest {
             messageIds.forEach { rows.remove(it) }
         }
 
+        override suspend fun getRecent(ownerId: String, limit: Int): List<WhisperSelfReadEntity> =
+            rows.values.filter { it.ownerId == ownerId }
+                .sortedByDescending { it.createdAtMs }
+                .take(limit)
+
         override suspend fun prune(ownerId: String, keep: Int) {
             rows.values
                 .filter { it.ownerId == ownerId }
