@@ -173,6 +173,8 @@
     <string name="st_Whisper_Devices_DisconnectDesc">Isso desconecta %1$s do Whisper. Informe sua senha para confirmar.</string>
     <string name="st_Whisper_Devices_PasswordLabel">Senha da conta</string>
     <string name="st_Whisper_Devices_Disconnected">%1$s desconectado</string>
+    <string name="st_Whisper_Devices_DisconnectDescToken">Isso desconecta %1$s do Whisper. Informe o token da sua conta para confirmar.</string>
+    <string name="st_Whisper_Devices_TokenLabel">Token da conta</string>
     <string name="cd_Whisper_Aubup_Rescan">Verificar novamente</string>
     <string name="st_Whisper_Aubup_AccessFileLocation">Salvo em Downloads/Toolz</string>
     <!-- V3-FIX (multi-account): recovery scan section headers carry counts. -->
@@ -1790,6 +1792,7 @@
     <string name="st_Backup_Section_Action_Restore">Restaurar</string>
     <string name="st_Backup_Section_Action_Completed_Export">Backup criado agora mesmo</string>
     <string name="st_Backup_Section_Action_Completed_Import">Restauração concluída agora mesmo</string>
+    <string name="st_Backup_Section_Action_Completed_ImportDeferred">Restauração concluída. O histórico do Whisper aparecerá quando você entrar.</string>
     <string name="st_Backup_Section_Action_DefaultPath">Salvo em Documents/Toolz_Backups</string>
 
     <string name="st_Backup_Section_Include_Title">O que incluir</string>
@@ -1852,7 +1855,7 @@
     <string name="st_Backup_Progress_Encrypting">Criptografando backup…</string>
     <string name="st_Backup_Progress_WhisperHistory">Histórico de mensagens do Whisper…</string>
     <string name="st_Backup_History_RequiresPassword">O histórico do Whisper só pode ser exportado com proteção por senha.</string>
-    <string name="st_Backup_History_RequiresPasswordHint">O histórico do Whisper contém mensagens legíveis, então é necessário um PIN ou senha.</string>
+    <string name="st_Backup_History_RequiresPasswordHint">O histórico do Whisper contém mensagens legíveis, então é necessária uma senha.</string>
     <string name="st_Backup_Protect_Title">Proteger este backup?</string>
     <string name="st_Backup_Protect_Desc">A proteção por senha criptografa todo o arquivo, incluindo o Cofre de senhas e a chave do banco de dados.</string>
     <string name="st_Backup_Protect_Pin">PIN de 6 dígitos</string>

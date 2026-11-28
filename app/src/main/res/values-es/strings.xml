@@ -173,6 +173,8 @@
     <string name="st_Whisper_Devices_DisconnectDesc">Esto cerrará la sesión de %1$s en Whisper. Introduce tu contraseña para confirmar.</string>
     <string name="st_Whisper_Devices_PasswordLabel">Contraseña de la cuenta</string>
     <string name="st_Whisper_Devices_Disconnected">%1$s desconectado</string>
+    <string name="st_Whisper_Devices_DisconnectDescToken">Esto cerrará la sesión de %1$s en Whisper. Introduce el token de tu cuenta para confirmar.</string>
+    <string name="st_Whisper_Devices_TokenLabel">Token de la cuenta</string>
     <string name="cd_Whisper_Aubup_Rescan">Volver a escanear</string>
     <string name="st_Whisper_Aubup_AccessFileLocation">Guardado en Descargas/Toolz</string>
     <!-- V3-FIX (multi-account): recovery scan section headers carry counts. -->
@@ -1699,6 +1701,7 @@
     <string name="st_Backup_Section_Action_Restore">Restaurar</string>
     <string name="st_Backup_Section_Action_Completed_Export">Copia creada justo ahora</string>
     <string name="st_Backup_Section_Action_Completed_Import">Restauración completada justo ahora</string>
+    <string name="st_Backup_Section_Action_Completed_ImportDeferred">Restauración completa. El historial de Whisper aparecerá cuando inicies sesión.</string>
     <string name="st_Backup_Section_Action_DefaultPath">Guardado en Documents/Toolz_Backups</string>
 
     <string name="st_Backup_Section_Include_Title">Qué incluir</string>
@@ -1761,7 +1764,7 @@
     <string name="st_Backup_Progress_Encrypting">Cifrando copia de seguridad…</string>
     <string name="st_Backup_Progress_WhisperHistory">Historial de mensajes de Whisper…</string>
     <string name="st_Backup_History_RequiresPassword">El historial de Whisper solo se puede exportar con protección por contraseña.</string>
-    <string name="st_Backup_History_RequiresPasswordHint">El historial de Whisper contiene mensajes legibles, así que se requiere un PIN o contraseña.</string>
+    <string name="st_Backup_History_RequiresPasswordHint">El historial de Whisper contiene mensajes legibles, así que se requiere una contraseña.</string>
     <string name="st_Backup_Protect_Title">¿Proteger esta copia?</string>
     <string name="st_Backup_Protect_Desc">La protección con contraseña cifra todo el archivo, incluida la Bóveda de contraseñas y la clave de la base de datos.</string>
     <string name="st_Backup_Protect_Pin">PIN de 6 dígitos</string>

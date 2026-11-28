@@ -174,6 +174,8 @@
     <string name="st_Whisper_Devices_DisconnectDesc">This signs %1$s out of Whisper. Enter your account password to confirm.</string>
     <string name="st_Whisper_Devices_PasswordLabel">Account password</string>
     <string name="st_Whisper_Devices_Disconnected">%1$s disconnected</string>
+    <string name="st_Whisper_Devices_DisconnectDescToken">This signs %1$s out of Whisper. Enter your account token to confirm.</string>
+    <string name="st_Whisper_Devices_TokenLabel">Account token</string>
     <string name="cd_Whisper_Aubup_Rescan">Rescan</string>
     <string name="st_Whisper_Aubup_AccessFileLocation">Saved in Downloads/Toolz</string>
     <!-- V3-FIX (multi-account): recovery scan section headers carry counts. -->
@@ -1841,6 +1843,7 @@
     <string name="st_Backup_Section_Action_Restore">Restore</string>
     <string name="st_Backup_Section_Action_Completed_Export">Backup created just now</string>
     <string name="st_Backup_Section_Action_Completed_Import">Restore completed just now</string>
+    <string name="st_Backup_Section_Action_Completed_ImportDeferred">Restore complete. Whisper history will appear after you sign in.</string>
     <string name="st_Backup_Section_Action_DefaultPath">Saved to Documents/Toolz_Backups</string>
 
     <string name="st_Backup_Section_Include_Title">What to include</string>
@@ -1903,7 +1906,7 @@
     <string name="st_Backup_Progress_Encrypting">Encrypting backup...</string>
     <string name="st_Backup_Progress_WhisperHistory">Whisper message history…</string>
     <string name="st_Backup_History_RequiresPassword">Whisper history can only be exported with password protection.</string>
-    <string name="st_Backup_History_RequiresPasswordHint">Whisper history contains readable messages, so a PIN or password is required.</string>
+    <string name="st_Backup_History_RequiresPasswordHint">Whisper history contains readable messages, so a password is required.</string>
     <string name="st_Backup_Protect_Title">Protect this backup?</string>
     <string name="st_Backup_Protect_Desc">Password protection encrypts the whole archive, including the Password Vault and database key it contains.</string>
     <string name="st_Backup_Protect_Pin">6-digit PIN</string>

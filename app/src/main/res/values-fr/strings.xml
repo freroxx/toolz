@@ -173,6 +173,8 @@
     <string name="st_Whisper_Devices_DisconnectDesc">Cela déconnecte %1$s de Whisper. Saisissez votre mot de passe pour confirmer.</string>
     <string name="st_Whisper_Devices_PasswordLabel">Mot de passe du compte</string>
     <string name="st_Whisper_Devices_Disconnected">%1$s déconnecté</string>
+    <string name="st_Whisper_Devices_DisconnectDescToken">Cela déconnecte %1$s de Whisper. Saisissez le jeton de votre compte pour confirmer.</string>
+    <string name="st_Whisper_Devices_TokenLabel">Jeton du compte</string>
     <string name="cd_Whisper_Aubup_Rescan">Réanalyser</string>
     <string name="st_Whisper_Aubup_AccessFileLocation">Enregistré dans Téléchargements/Toolz</string>
     <!-- V3-FIX (multi-account): recovery scan section headers carry counts. -->
@@ -1780,6 +1782,7 @@
     <string name="st_Backup_Section_Action_Restore">Restaurer</string>
     <string name="st_Backup_Section_Action_Completed_Export">Sauvegarde créée à l\'instant</string>
     <string name="st_Backup_Section_Action_Completed_Import">Restauration terminée à l\'instant</string>
+    <string name="st_Backup_Section_Action_Completed_ImportDeferred">Restauration terminée. L’historique Whisper apparaîtra après votre connexion.</string>
     <string name="st_Backup_Section_Action_DefaultPath">Enregistré dans Documents/Toolz_Backups</string>
 
     <string name="st_Backup_Section_Include_Title">Éléments à inclure</string>
@@ -1842,7 +1845,7 @@
     <string name="st_Backup_Progress_Encrypting">Chiffrement de la sauvegarde…</string>
     <string name="st_Backup_Progress_WhisperHistory">Historique des messages Whisper…</string>
     <string name="st_Backup_History_RequiresPassword">L’historique Whisper ne peut être exporté qu’avec une protection par mot de passe.</string>
-    <string name="st_Backup_History_RequiresPasswordHint">L’historique Whisper contient des messages lisibles ; un PIN ou un mot de passe est requis.</string>
+    <string name="st_Backup_History_RequiresPasswordHint">L’historique Whisper contient des messages lisibles ; un mot de passe est requis.</string>
     <string name="st_Backup_Protect_Title">Protéger cette sauvegarde ?</string>
     <string name="st_Backup_Protect_Desc">La protection par mot de passe chiffre toute l’archive, y compris le Coffre de mots de passe et la clé de la base de données.</string>
     <string name="st_Backup_Protect_Pin">PIN à 6 chiffres</string>
