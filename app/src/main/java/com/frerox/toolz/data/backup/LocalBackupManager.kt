@@ -115,6 +115,15 @@ class LocalBackupManager @Inject constructor(
         items: Set<BackupItem> = BackupItem.entries.toSet(),
         protection: BackupProtection = BackupProtection.None,
     ): BackupExportResult = withContext(Dispatchers.IO) {
+        // Validate before writing anything: history carries readable message
+        // text, and a 6-digit PIN has only 1,000,000 guesses offline. Failing
+        // here also avoids leaving a half-written plaintext staging zip behind.
+        if (items.contains(BackupItem.WHISPER_HISTORY) &&
+            (protection !is BackupProtection.Secret ||
+                protection.mode != SecureContainer.SecretMode.PASSWORD)
+        ) {
+            throw BackupHistoryRequiresPasswordException()
+        }
         _progress.value = context.getString(R.string.st_Backup_Progress_Preparing)
         checkpointDatabase()
 
@@ -196,9 +205,6 @@ class LocalBackupManager @Inject constructor(
             // Only inside a password-protected container: the archive carries
             // readable message text, so an unprotected zip must never hold it.
             if (items.contains(BackupItem.WHISPER_HISTORY)) {
-                if (protection !is BackupProtection.Secret) {
-                    throw BackupHistoryRequiresPasswordException()
-                }
                 _progress.value = context.getString(R.string.st_Backup_Progress_WhisperHistory)
                 val historyFile = File(stagingDir, "$fileName.history.jsonl").apply {
                     if (exists()) delete()
@@ -564,6 +570,8 @@ class LocalBackupManager @Inject constructor(
         }
 
         var restoredEntries = 0
+        // Set when Whisper history was sealed for replay after sign-in.
+        var historyImportDeferred = false
         // CAL-P3: count of future calendar alarms re-scheduled after restore.
         var rescheduledCalendarAlarms = 0
         // T-P0-03: count of future task alarms re-scheduled after restore.
@@ -625,7 +633,10 @@ class LocalBackupManager @Inject constructor(
                         val imported = zipFile.getInputStream(entry).use { input ->
                             whisperHistoryArchive.importFrom(input)
                         }
-                        if (imported > 0) restoredEntries++
+                        // -1 means the archive was sealed for replay after sign-in
+                        // (the normal device-switch order), not a failure.
+                        if (imported == -1) historyImportDeferred = true
+                        if (imported != 0) restoredEntries++
                     }
                     entry.name.startsWith("files/") && itemsToRestore.contains(BackupItem.OTHERS) -> {
                         restoreEntry(zipFile, entry.name, context.filesDir, "files")
@@ -652,6 +663,7 @@ class LocalBackupManager @Inject constructor(
             rescheduledCalendarAlarms = rescheduledCalendarAlarms,
             rescheduledTaskAlarms = rescheduledTaskAlarms,
             wasEncrypted = wasEncrypted,
+            historyImportDeferred = historyImportDeferred,
         )
     }
 

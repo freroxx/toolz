@@ -136,6 +136,18 @@ class WhisperPlaintextVault @Inject constructor(
         private const val PREFIX = "PV1|"
     }
 
+    /**
+     * Writes in the same millisecond would otherwise share a timestamp, making
+     * "newest N" pruning non-deterministic (it could drop a just-arrived message
+     * and keep an older one). Keep stamps strictly increasing per process.
+     */
+    private val lastStamp = java.util.concurrent.atomic.AtomicLong(0L)
+
+    private fun nextStamp(): Long {
+        val now = System.currentTimeMillis()
+        return lastStamp.updateAndGet { previous -> if (now > previous) now else previous + 1 }
+    }
+
     /** Best-effort by contract: a Keystore failure must never break rendering. */
     suspend fun remember(
         ownerId: String,
@@ -154,7 +166,7 @@ class WhisperPlaintextVault @Inject constructor(
                         ownerId = ownerId,
                         contentHash = contentHash(ciphertext),
                         sealed = sealed,
-                        createdAtMs = System.currentTimeMillis(),
+                        createdAtMs = nextStamp(),
                     ),
                 )
                 dao.prune(ownerId, MAX_PER_OWNER)
@@ -239,7 +251,7 @@ class WhisperPlaintextVault @Inject constructor(
                         ownerId = ownerId,
                         contentHash = contentHash,
                         sealed = sealed,
-                        createdAtMs = System.currentTimeMillis(),
+                        createdAtMs = nextStamp(),
                     ),
                 )
                 dao.prune(ownerId, MAX_PER_OWNER)

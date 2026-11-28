@@ -166,6 +166,12 @@ class WhisperHistoryArchive @Inject constructor(
         return imported
     }
 
+    /** Drops a staged archive (account deletion / local wipe). */
+    suspend fun clearPending() = withContext(Dispatchers.IO) {
+        runCatching { pendingFile().delete() }
+        Unit
+    }
+
     /**
      * Seals the archive into app-private storage with the Keystore key so it is
      * never plaintext at rest while the user completes sign-in.
