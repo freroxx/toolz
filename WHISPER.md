@@ -769,14 +769,15 @@ Local state is split across purpose-built stores, all read in full by the app
 
 | Store | Holds | Notably does NOT hold |
 |---|---|---|
-| Whisper Room (`toolz_whisper_db`, schema v2; split out of `toolz_db` in AppDatabase v69) | ciphertext-only messages (latest 500; conversation reads are served by the `(senderId, receiverId, sortEpoch)` index added in schema v68), delete-for-me tombstones, FIFO outbox (cap 100, 200-entry drop ledger), group/story caches and self-read copies | plaintext before render; no key material; the whole database is excluded from cloud backup and device transfer |
+| Whisper Room (`toolz_whisper_db`, schema v3; split out of `toolz_db` in AppDatabase v69) | ciphertext-only messages (latest 500; conversation reads are served by the `(senderId, receiverId, sortEpoch)` index added in schema v68), delete-for-me tombstones, FIFO outbox (cap 100, 200-entry drop ledger), group/story caches, self-read copies and the incoming plaintext vault | plaintext before render; no key material; the whole database is excluded from cloud backup and device transfer |
 | `whisper_sessions/` | one wrapped session snapshot per peer under `<sha256(accountId)>/`, plus read-only superseded sessions under `<sha256(accountId)>/alt/` | anything that cannot be Keystore-wrapped |
-| Self-read store (`whisper_self_read`, Room v66) | the user's OWN sent plaintext, sealed with the Keystore AES key as `SR1\|messageId\|plaintext`, keyed by `(ownerId, messageId)`, with a SHA-256 hash of the wire ciphertext for previews; capped at 1,500 rows per owner | peer-facing ciphertext; incoming messages; anything readable by another account |
+| Self-read store (`whisper_self_read`, Room v3) | the user's OWN sent plaintext, sealed with the Keystore AES key as `SR1\|messageId\|plaintext`, keyed by `(ownerId, messageId)`, with a SHA-256 hash of the wire ciphertext for previews; capped at 1,500 rows per owner | peer-facing ciphertext; incoming messages; anything readable by another account |
+| Incoming plaintext vault (`whisper_plaintext_vault`, Room v3) | plaintext of messages this device has already opened, sealed with the same Keystore AES key as `PV1\|messageId\|plaintext`, keyed by `(ownerId, messageId)`, with a SHA-256 ciphertext hash for previews; capped at 20,000 rows per owner | ciphertext it never opened; peer-facing ciphertext; anything readable by another account |
 | Key trust store | pinned/verified fingerprints + rotation counters | private halves |
 | Mute/hidden-chats/delete-for-me/undo/preferences stores | UX state with expiries (24h eviction for delete-for-me, 30s undo window, hidden chat auto-return) | — |
 | Daily Ups seen store (`whisper_story_seen`) | opaque `storyId → expiresAtMs` pairs for device-local ring state, capped at 512, expired entries filtered on load and pruned on refresh/write | who viewed what; account id; media or keys |
 | Daily Ups preferences (`whisper_daily_ups_prefs`) | account-keyed close-friends id set (device-local, never uploaded) + two toggles (show viewers, save to device); one key prefix per account so a sign-out cannot hand the list to the next user | names, avatars, descriptors, or any server-synced copy |
-| Access-file backup (`WhisperAubupManager`) | credential-only payload (username, auth type, credential, display name); public Downloads via MediaStore is replaced idempotently per display name (no `name (1).enc` accretion), superseded pre-existing duplicates are swept on save and daily, atomic scoped mirror | session/ratchet state, key material — never |
+| Access-file backup (`WhisperAubupManager`) | credential-only payload (username, auth type, credential, display name). New files are a versioned `TOOLZ-AUBUP/2` envelope (PBKDF2-HMAC-SHA256 + AES-256-GCM, app-bound); legacy raw-Base64 files remain readable. Public Downloads via MediaStore is replaced idempotently per display name (no `name (1).enc` accretion), superseded pre-existing duplicates are swept on save and daily, atomic scoped mirror | session/ratchet state, key material — never |
 | Sealed image disk caches | encrypted containers keyed by URL hash, generation-guarded | plaintext pixels |
 
 **Backup boundary.** Android Auto Backup is file-level, so Whisper tables were
@@ -816,7 +817,71 @@ exhausted attempts into the drop ledger, and WorkManager-side 15-second
 exponential backoff. The network-constrained immediate scheduler covers the
 common "send while online" path in one step.
 
-### 6.3 Realtime connectivity
+### 6.3 Access files, protected backups, and cross-device history
+
+**Access files (`TOOLZ-AUBUP/2`).** The credential-only access file is now a
+versioned, self-describing envelope rather than raw Base64. The text format is
+`TOOLZ-AUBUP/2` + base64url(nonce) + base64url(ciphertext), and the payload is
+encrypted with AES-256-GCM under a PBKDF2-HMAC-SHA256 key. The work factor is
+recorded per file, starts at **600,000 iterations**, is bounded to
+100,000–2,000,000, and is never silently downgraded on re-save. The KDF also
+mixes an app-namespace binding (package name + signing-certificate SHA-256 +
+fixed pepper); that binding is ownership/namespace scoping, **not** a secret.
+Users may protect a file with a 6-digit Whisper code or a real password; the
+create dialog warns when a PIN is weak. Old files remain fully compatible: the
+legacy raw-Base64 path (hardened marker `V` at 310,000 iterations, or the
+original 65,536) still decrypts through `decodeAccessPayload`, and a v2 file
+never falls back to the weaker path. `SecureContainer` uses explicit
+AES-GCM `update`/`doFinal` so a wrong code or a tampered tag produces one
+deterministic failure, and it clears the `PBEKeySpec` password buffer.
+
+**Toolz backups (`.tzbk`).** A backup can be unprotected, PIN-protected, or
+password-protected. Protection wraps the whole verified zip in the streaming
+`TOOLZ-BACKUP/2` container (PBKDF2-HMAC-SHA256 + AES-256-GCM, same bounds and
+work factor as access files). Encrypted archives are detected by their magic
+prefix **before** `ZipFile` is opened, so a password-protected backup can never
+be partially parsed as plaintext. A wrong password and a tampered tag map to
+distinct, honest errors; the password is never stored or recoverable.
+
+**Cross-device history.** Forward secrecy means a new install cannot re-open
+frames addressed to the old device, so history transfer is deliberately not a
+protocol change. The incoming plaintext vault and the self-read store can
+export the plaintext this account **already opened** as
+`whisper/history.jsonl` inside a Toolz backup. Two rules keep that safe:
+
+1. The history entry is written only inside a **password**-protected backup;
+   a PIN (1,000,000 offline guesses) is refused with
+   `BackupHistoryRequiresPasswordException`, and an unprotected zip never
+   contains readable message text.
+2. Restore re-seals every line with the **new** install's Keystore key and
+   imports only into the signed-in account. If the user restores before
+   signing in — the normal device-switch order — the archive is sealed with
+   the Keystore into `noBackupFilesDir/whisper_pending_history.sealed` and
+   replayed by `WhisperHistoryArchive.importPending()` right after the next
+   successful sign-in. The staged file is deleted after replay and on account
+   deletion.
+
+This recovers messages the old device had already decrypted; it cannot
+recover messages that were never opened there, and it creates no server-side
+plaintext copy. The vault only captures messages opened after this build, so
+history that was already locked before the upgrade remains unrecoverable —
+the honest limit of forward secrecy.
+
+**Connected devices.** Each install generates a stable UUID and registers it
+through owner-scoped RPCs into `whisper_devices`
+(`register`/`heartbeat`/`revoke`/`list`). The table is inventory and a soft
+revocation marker, never an authentication factor: the session JWT remains the
+only authentication, and every RPC derives `user_id` from `auth.uid()` rather
+than a caller parameter. The profile tab lists every install with a
+"This device" badge and last-seen time. Disconnecting another device requires
+re-proving the account secret first (password sign-in, or the token for token
+accounts); the current device cannot be disconnected from this list (sign out
+instead). Revocation is soft (`revoked_at`) so other installs can show what
+happened, and a later sign-in from that device re-registers it as active.
+Heartbeats keep `last_seen_at` fresh; a failed heartbeat makes the client
+re-register instead of writing forever.
+
+### 6.4 Realtime connectivity
 
 Postgres-changes lanes are per chat (`chatpg_<sortedPair>`), plus an inbox
 broadcast lane per user, a per-pair broadcast lane, typing and presence lanes.
@@ -874,17 +939,19 @@ notifications and any pending clipboard clear.
 
 **Sign-out is not a wipe, and that difference matters.** Deleting an account
 runs `clearAllLocalData()` — everything above, including the ratchet session
-store, the self-read copies and the key trust store. A plain sign-out runs
+store, the self-read copies, the incoming plaintext vault, any staged history
+archive and the key trust store. A plain sign-out runs
 `clearSessionScopedCaches()`: it drops in-memory state only (profile / peer-key
 / block caches, the decrypt memo, the sent-plaintext memo, live ratchet
 sessions, avatars, realtime channels) and deliberately leaves Room,
-`whisper_sessions/`, the self-read store, the key trust store and the outbox on
-disk, because they are classed as account data rather than session data. That
-is safe because the durable state that could poison another account is scoped:
-session files and live ratchets are namespaced by account id, and self-read
-copies are keyed by owner id, so a second account on the same device cannot
-read or overwrite the first account's chains (§3.9). The key trust store stays
-install-wide by design — peer identity keys are not account state.
+`whisper_sessions/`, the self-read store, the incoming vault, the key trust
+store and the outbox on disk, because they are classed as account data rather
+than session data. That is safe because the durable state that could poison
+another account is scoped: session files and live ratchets are namespaced by
+account id, and self-read/vault rows are keyed by owner id, so a second account
+on the same device cannot read or overwrite the first account's chains (§3.9).
+The key trust store stays install-wide by design — peer identity keys are not
+account state.
 
 ---
 
@@ -903,6 +970,7 @@ it). The shape:
 | Keying | `whisper_prekeys` (signed SPK + OPKs), rotation cert columns, identity archive triggers |
 | Presence/signals | `whisper_typing_signals` (8-second freshness), presence stamps on profiles (opt-out switches deliberately removed — these features are unconditional and uniform) |
 | Push | `whisper_push_targets` (endpoint + provider + Web Push binding keys) |
+| Devices | `whisper_devices` (owner-only per-install registry; soft `revoked_at`; register/heartbeat/revoke/list RPCs derive the owner from `auth.uid()`) |
 | Abuse control | upload / discover / bypass / destructive / username-check / signup (5/day/IP) quotas |
 | Lifecycle | delete tombstones, image ownership ledger (unique delete URL per upload), account-purge RPC, legacy-sunset registry |
 | Groups | §11.6 |
@@ -914,6 +982,17 @@ accepted friends, where applicable) is the only identity the policy admits;
 the service role bypasses RLS only for the sweeper/migration/webhook edges.
 Realtime publication exists for exactly the tables the app subscribes to,
 with full replica identity so deletes carry their old rows.
+
+Group membership is the one place where a naive policy would recurse: a
+policy on `whisper_group_members` that subqueries `whisper_group_members`
+makes PostgreSQL reject every add/leave/remove with `42P17 infinite recursion
+detected in policy`. The baseline therefore authorizes those policies through
+`SECURITY DEFINER` helpers (`is_group_member`, `is_group_admin`) that read the
+table with RLS bypassed, and the final replay drops the earlier subquery
+versions. Group disband verifies affected row counts and repairs stale member
+rows before deleting exactly one group row; Daily Ups authorize reads through
+`whisper_story_can_read` and treat the recipient snapshot as the audience, not
+the display label.
 
 Two server-side behaviors deserve explicit notice:
 
@@ -1793,6 +1872,19 @@ Whisper's cryptography is pinned with a deliberately paranoid test stack:
   covered by the compile plus the Whisper suites; the file-attribution rules
   that caused the account-switch regression are now tested directly instead of
   passing by omission.
+- **Container, vault, and recovery cover.** `SecureContainerTest` pins the
+  binary/text envelope: round-trip, wrong secret, wrong app binding, tamper
+  detection, version/work-factor bounds, and truncation. The Android-only
+  `SecureContainerInstrumentedTest` adds the `TOOLZ-AUBUP/2` text path,
+  legacy decrypt compatibility, wrong-code/non-six-digit rejection, and the
+  recorded-work-factor rules. `WhisperPlaintextVaultTest` pins the incoming
+  vault: an opened message survives a lost session, rows are account-isolated,
+  previews resolve by wire-ciphertext hash, a sealed blob moved onto another
+  id is rejected and pruned, retention keeps the newest `MAX_PER_OWNER`, and
+  export/import re-seals entries for a new install under the new owner id.
+  Room migration 2→3 (adding `whisper_plaintext_vault`) is covered by the
+  generated schema `3.json` and the instrumented migration suite; it still
+  needs a device to execute, like the other Room instrumentation.
 
 ---
 
